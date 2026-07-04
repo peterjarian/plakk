@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "workos": {
+      "source": "workos/skills",
+      "sourceType": "github",
+      "skillPath": "plugins/workos/skills/workos/SKILL.md",
+      "computedHash": "4a36ead629f68e44d29b2fd4027ab9726f279a02904684095299e697ec05a238"
+    }
+  }
+}

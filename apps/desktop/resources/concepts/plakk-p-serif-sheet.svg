@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="780" height="780" viewBox="0 0 780 780">
+<rect width="780" height="780" fill="#0f0f10"/>
+<image href="plakk-p-newsreader-preview.png" x="48" y="44" width="320" height="320"/>
+<text x="208" y="418" text-anchor="middle" fill="#c8c8c8" font-family="ui-sans-serif, system-ui, -apple-system" font-size="24" font-weight="650">Newsreader</text>
+<image href="plakk-p-new-york-black-preview.png" x="408" y="44" width="320" height="320"/>
+<text x="568" y="418" text-anchor="middle" fill="#c8c8c8" font-family="ui-sans-serif, system-ui, -apple-system" font-size="24" font-weight="650">New York Black</text>
+<image href="plakk-p-charter-preview.png" x="228" y="424" width="320" height="320"/>
+<text x="388" y="798" text-anchor="middle" fill="#c8c8c8" font-family="ui-sans-serif, system-ui, -apple-system" font-size="24" font-weight="650">Charter Black</text>
+</svg>

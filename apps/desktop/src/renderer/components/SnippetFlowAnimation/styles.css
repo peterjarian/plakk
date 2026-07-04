@@ -1,0 +1,82 @@
+@keyframes plakk-travel {
+  0%,
+  10% {
+    transform: translate(0, 0) scale(0.92);
+    opacity: 0;
+  }
+
+  16%,
+  30% {
+    opacity: 1;
+  }
+
+  44% {
+    transform: translate(8rem, -1rem) scale(0.78);
+    opacity: 1;
+  }
+
+  64% {
+    transform: translate(16rem, 0.1rem) scale(0.9);
+    opacity: 1;
+  }
+
+  78%,
+  100% {
+    transform: translate(16rem, 0.65rem) scale(0.72);
+    opacity: 0;
+  }
+}
+
+@keyframes plakk-pulse {
+  0%,
+  35%,
+  58%,
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--foreground), transparent 88%);
+  }
+
+  46% {
+    transform: scale(1.08);
+    box-shadow: 0 0 0 14px transparent;
+  }
+}
+
+@keyframes plakk-receive {
+  0%,
+  60% {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  70%,
+  94% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+}
+
+.plakk-flow-animation__cloud {
+  animation: plakk-pulse 3.8s ease-in-out infinite;
+}
+
+.plakk-flow-animation__received {
+  animation: plakk-receive 3.8s ease-in-out infinite;
+}
+
+.plakk-flow-animation__moving {
+  animation: plakk-travel 3.8s ease-in-out infinite;
+}
+
+.plakk-flow-animation__delay-1 {
+  animation-delay: 0.75s;
+}
+
+.plakk-flow-animation__delay-2 {
+  animation-delay: 1.5s;
+}

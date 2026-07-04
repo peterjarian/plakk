@@ -4,11 +4,17 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "ready": "vp check && vp run -r test && vp run -r build",
-    "dev": "vp run website#dev",
-    "prepare": "vp config"
+    "effect-solutions": "node ./node_modules/effect-solutions/bin.js",
+    "typecheck": "vp run --filter './packages/*' typecheck",
+    "prepare": "vp config && effect-tsgo patch"
   },
   "devDependencies": {
+    "@effect/language-service": "catalog:",
+    "@effect/tsgo": "catalog:",
+    "@typescript/native-preview": "catalog:",
+    "effect-solutions": "^0.5.3",
+    "oxlint-tailwindcss": "^1.3.4",
+    "typescript": "catalog:",
     "vite-plus": "catalog:"
   },
   "engines": {

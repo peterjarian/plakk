@@ -1,15 +1,16 @@
 packages:
   - apps/*
   - packages/*
-  - tools/*
-
-catalogMode: prefer
 
 catalog:
-  "@types/node": ^24
-  typescript: ^5
+  "@effect/language-service": 0.86.2
+  "@effect/tsgo": 0.15.0
+  "@types/node": 24.13.2
+  "@typescript/native-preview": 7.0.0-dev.20260701.1
+  effect: 4.0.0-beta.92
+  typescript: 6.0.3
   vite: npm:@voidzero-dev/vite-plus-core@latest
-  vitest: npm:@voidzero-dev/vite-plus-test@latest
+  vitest: 4.1.9
   vite-plus: latest
 overrides:
   vite: "catalog:"
@@ -21,3 +22,8 @@ peerDependencyRules:
   allowedVersions:
     vite: "*"
     vitest: "*"
+minimumReleaseAge: 0
+allowBuilds:
+  electron: true
+  esbuild: true
+  msgpackr-extract: true

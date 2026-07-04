@@ -1,0 +1,23 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "include": ["electron.vite.config.ts", "src/**/*.ts", "src/**/*.tsx"],
+  "compilerOptions": {
+    "types": ["node", "electron-vite/node", "vite/client"],
+    "jsx": "react-jsx",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "skipLibCheck": true,
+    "plugins": [
+      {
+        "name": "@effect/language-service",
+        "diagnosticSeverity": {
+          "nodeBuiltinImport": "off",
+          "globalDate": "off"
+        }
+      }
+    ],
+    "paths": {
+      "@/*": ["./src/renderer/src/*"]
+    }
+  }
+}
