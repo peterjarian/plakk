@@ -20,10 +20,10 @@ const PgClientLive = Layer.unwrap(
   ),
 );
 
-const makeDatabase = PgDrizzle.makeWithDefaults();
+const makeDatabase = () => PgDrizzle.makeWithDefaults();
 
 type DatabaseClient =
-  typeof makeDatabase extends Effect.Effect<infer A, never, infer _R> ? A : never;
+  ReturnType<typeof makeDatabase> extends Effect.Effect<infer A, never, infer _R> ? A : never;
 
 export class Database extends Context.Service<
   Database,
@@ -34,7 +34,7 @@ export class Database extends Context.Service<
   static readonly Live = Layer.effect(
     Database,
     Effect.gen(function* () {
-      const db = yield* makeDatabase;
+      const db = yield* makeDatabase();
       return Database.of({ db });
     }),
   ).pipe(Layer.provide(PgClientLive));
