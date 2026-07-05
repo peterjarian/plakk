@@ -10,21 +10,26 @@
     "preview": "electron-vite preview"
   },
   "dependencies": {
+    "@effect/sql-pg": "4.0.0-beta.92",
     "@plakk/shared": "workspace:*",
     "@plakk/ui": "workspace:*",
     "@workos-inc/node": "^10.7.0",
     "dotenv": "^17.4.2",
+    "drizzle-orm": "1.0.0-rc.4",
     "effect": "catalog:",
     "electron-store": "^11.0.2",
     "lucide-react": "^1.23.0",
+    "pg": "^8.22.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.2",
     "@types/node": "catalog:",
+    "@types/pg": "^8.20.0",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
+    "drizzle-kit": "1.0.0-rc.4",
     "electron": "^43.0.0",
     "electron-vite": "^5.0.0",
     "typescript": "catalog:",
