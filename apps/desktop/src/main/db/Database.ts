@@ -3,8 +3,9 @@ import * as PgDrizzle from "drizzle-orm/effect-postgres";
 import { Config, Context, Effect, Layer } from "effect";
 import { types } from "pg";
 
-const dateTimeTypeIds = new Set([1082, 1114, 1115, 1182, 1184, 1185, 1186, 1187, 1231]);
-const parseDateTime = (value: string) => value;
+const rawDateTimeTypeIds = new Set([1082, 1114, 1115, 1182, 1184, 1185, 1186, 1187, 1231]);
+// Drizzle handles these PG date/time values; keep pg from eagerly parsing them.
+const preserveRawPgValue = (value: string) => value;
 
 const PgClientLive = Layer.unwrap(
   Config.redacted("DATABASE_URL").pipe(
@@ -13,7 +14,9 @@ const PgClientLive = Layer.unwrap(
         url,
         types: {
           getTypeParser: (typeId, format) =>
-            dateTimeTypeIds.has(typeId) ? parseDateTime : types.getTypeParser(typeId, format),
+            rawDateTimeTypeIds.has(typeId)
+              ? preserveRawPgValue
+              : types.getTypeParser(typeId, format),
         },
       }),
     ),
@@ -23,7 +26,7 @@ const PgClientLive = Layer.unwrap(
 const makeDatabase = () => PgDrizzle.makeWithDefaults();
 
 type DatabaseClient =
-  ReturnType<typeof makeDatabase> extends Effect.Effect<infer A, never, infer _R> ? A : never;
+  ReturnType<typeof makeDatabase> extends Effect.Effect<infer A, infer _E, infer _R> ? A : never;
 
 export class Database extends Context.Service<
   Database,
