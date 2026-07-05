@@ -24,8 +24,8 @@ import {
   SettingsSectionTitle,
 } from "@plakk/ui/components/settings";
 import { getInitials } from "@plakk/ui/lib/getInitials";
-import { useAuth } from "../hooks/useAuth.js";
-import { navigate } from "../lib/navigate.js";
+import { useAuth } from "../hooks/useAuth.ts";
+import { navigate } from "../lib/navigate.ts";
 
 export function Settings() {
   const auth = useAuth();

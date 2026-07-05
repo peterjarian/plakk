@@ -42,6 +42,9 @@ importers:
       '@effect/tsgo':
         specifier: 'catalog:'
         version: 0.15.0
+      '@oxlint/plugins':
+        specifier: 1.68.0
+        version: 1.68.0
       '@typescript/native-preview':
         specifier: 'catalog:'
         version: 7.0.0-dev.20260701.1

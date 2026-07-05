@@ -1,16 +1,16 @@
 import type { ReactNode } from "react";
 import type { User } from "@plakk/shared";
 import { SettingsIcon } from "lucide-react";
-import { Avatar, AvatarFallback } from "./primitives/avatar.js";
+import { Avatar, AvatarFallback } from "./primitives/avatar.tsx";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "./primitives/dropdown-menu.js";
-import { getInitials } from "../lib/getInitials.js";
-import { cn } from "../lib/utils.js";
+} from "./primitives/dropdown-menu.tsx";
+import { getInitials } from "../lib/getInitials.ts";
+import { cn } from "../lib/utils.ts";
 
 export function AppHeader(props: {
   user: User;

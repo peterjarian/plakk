@@ -1,9 +1,9 @@
 import { ArrowRight } from "lucide-react";
 import { Button } from "@plakk/ui/components/primitives/button";
 import { useEffect } from "react";
-import { SnippetFlowAnimation } from "../components/SnippetFlowAnimation/index.js";
-import { useAuth } from "../hooks/useAuth.js";
-import { navigate } from "../lib/navigate.js";
+import { SnippetFlowAnimation } from "../components/SnippetFlowAnimation/index.tsx";
+import { useAuth } from "../hooks/useAuth.ts";
+import { navigate } from "../lib/navigate.ts";
 
 export function Welcome() {
   const auth = useAuth();

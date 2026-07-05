@@ -25,7 +25,11 @@ export default defineConfig({
       "pnpm-lock.yaml",
       "*.tsbuildinfo",
     ],
-    jsPlugins: [{ name: "vite-plus", specifier: "vite-plus/oxlint-plugin" }, "oxlint-tailwindcss"],
+    jsPlugins: [
+      { name: "vite-plus", specifier: "vite-plus/oxlint-plugin" },
+      { name: "plakk", specifier: "./scripts/oxlint-plugin.ts" },
+      "oxlint-tailwindcss",
+    ],
     settings: {
       tailwindcss: {
         entryPoint: "packages/ui/src/styles/globals.css",
@@ -34,6 +38,7 @@ export default defineConfig({
     rules: {
       "tailwindcss/enforce-canonical": "warn",
       "vite-plus/prefer-vite-plus-imports": "error",
+      "plakk/no-relative-js-imports": "error",
     },
     options: { typeAware: true, typeCheck: true },
   },

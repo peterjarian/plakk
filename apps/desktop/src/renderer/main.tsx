@@ -2,14 +2,14 @@ import { LoaderCircle } from "lucide-react";
 import { useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { TooltipProvider } from "@plakk/ui/components/primitives/tooltip";
-import { Home } from "./views/Home.js";
-import { Settings } from "./views/Settings.js";
-import { Tray } from "./views/Tray.js";
-import { Welcome } from "./views/Welcome.js";
+import { Home } from "./views/Home.tsx";
+import { Settings } from "./views/Settings.tsx";
+import { Tray } from "./views/Tray.tsx";
+import { Welcome } from "./views/Welcome.tsx";
 import type { ComponentType } from "react";
-import type { ViewType } from "./lib/navigate.js";
-import { AuthProvider, useAuth } from "./hooks/useAuth.js";
-import { navigate } from "./lib/navigate.js";
+import type { ViewType } from "./lib/navigate.ts";
+import { AuthProvider, useAuth } from "./hooks/useAuth.ts";
+import { navigate } from "./lib/navigate.ts";
 
 import "@plakk/ui/globals.css";
 

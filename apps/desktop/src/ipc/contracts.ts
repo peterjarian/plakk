@@ -1,7 +1,7 @@
 import { Schema } from "effect";
-import { AuthErrorSchema, AuthStatusSchema } from "../auth.js";
-import { ClipboardContentSchema } from "../clipboardContent.js";
-import { UserConfigPatchSchema, UserConfigSchema } from "../userConfig.js";
+import { AuthErrorSchema, AuthStatusSchema } from "../auth.ts";
+import { ClipboardContentSchema } from "../clipboardContent.ts";
+import { UserConfigPatchSchema, UserConfigSchema } from "../userConfig.ts";
 
 export type IpcSchema = Schema.ConstraintCodec<unknown, unknown, never, never>;
 

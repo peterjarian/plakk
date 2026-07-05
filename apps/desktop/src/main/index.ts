@@ -4,14 +4,14 @@ import { join, resolve } from "node:path";
 import { isHttpUrl } from "@plakk/shared";
 import { app, BrowserWindow, Menu, shell } from "electron";
 import { Config, Effect, Result } from "effect";
-import type { AuthStatus } from "../auth.js";
-import { handle, send } from "../ipc/main.js";
-import { ipcEvents, ipcMethods } from "../ipc/contracts.js";
-import type { UserConfigPatch } from "../userConfig.js";
-import { AuthService } from "./auth/AuthService.js";
-import { readClipboard } from "./clipboard.js";
-import { UserConfigStore } from "./UserConfigStore.js";
-import { runEffect } from "./runtime.js";
+import type { AuthStatus } from "../auth.ts";
+import { handle, send } from "../ipc/main.ts";
+import { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
+import type { UserConfigPatch } from "../userConfig.ts";
+import { AuthService } from "./auth/AuthService.ts";
+import { readClipboard } from "./clipboard.ts";
+import { UserConfigStore } from "./UserConfigStore.ts";
+import { runEffect } from "./runtime.ts";
 
 handle(ipcMethods.openExternal, (url) => {
   if (!isHttpUrl(url)) return;

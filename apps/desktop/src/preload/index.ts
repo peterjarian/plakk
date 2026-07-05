@@ -1,9 +1,9 @@
 import { contextBridge } from "electron";
-import type { AuthError, AuthStatus } from "../auth.js";
-import type { ClipboardContent } from "../clipboardContent.js";
-import { ipcEvents, ipcMethods } from "../ipc/contracts.js";
-import { invoke, on } from "../ipc/preload.js";
-import type { UserConfigPatch } from "../userConfig.js";
+import type { AuthError, AuthStatus } from "../auth.ts";
+import type { ClipboardContent } from "../clipboardContent.ts";
+import { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
+import { invoke, on } from "../ipc/preload.ts";
+import type { UserConfigPatch } from "../userConfig.ts";
 
 contextBridge.exposeInMainWorld("ipc", {
   auth: {

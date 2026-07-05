@@ -7,7 +7,7 @@ import type {
   IpcPayload,
   IpcResult,
   IpcSchema,
-} from "./contracts.js";
+} from "./contracts.ts";
 
 export async function invoke<T extends IpcMethod<IpcSchema, IpcSchema>>(
   method: T,

@@ -2,7 +2,7 @@ import { WorkOS, type User as WorkOSUser } from "@workos-inc/node";
 import type { User } from "@plakk/shared";
 import { app } from "electron";
 import { Clock, Config, Context, Effect, Layer, Schema } from "effect";
-import { AuthStore } from "./AuthStore.js";
+import { AuthStore } from "./AuthStore.ts";
 
 const AUTH_REQUEST_TTL_MS = 10 * 60 * 1000;
 const ACCESS_TOKEN_REFRESH_WINDOW_MS = 60 * 1000;
