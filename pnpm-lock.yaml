@@ -42,9 +42,6 @@ importers:
       '@effect/tsgo':
         specifier: 'catalog:'
         version: 0.15.0
-      '@oxlint/plugins':
-        specifier: 1.68.0
-        version: 1.68.0
       '@typescript/native-preview':
         specifier: 'catalog:'
         version: 7.0.0-dev.20260701.1
@@ -115,6 +112,16 @@ importers:
       vite:
         specifier: npm:@voidzero-dev/vite-plus-core@latest
         version: '@voidzero-dev/vite-plus-core@0.2.2(@types/node@24.13.2)(jiti@2.7.0)(typescript@6.0.3)(yaml@2.9.0)'
+
+  oxlint-plugin-plakk:
+    dependencies:
+      '@oxlint/plugins':
+        specifier: 1.68.0
+        version: 1.68.0
+    devDependencies:
+      vite-plus:
+        specifier: 'catalog:'
+        version: 0.2.2(@types/node@25.9.4)(jiti@2.7.0)(typescript@6.0.3)(vite@8.1.0(@types/node@25.9.4)(jiti@2.7.0)(yaml@2.9.0))(yaml@2.9.0)
 
   packages/db:
     dependencies:
