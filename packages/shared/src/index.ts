@@ -1,5 +1,8 @@
 import * as Schema from "effect/Schema";
 
+export * from "./PlakkApi.js";
+export * from "./RpcError.js";
+
 export const STORAGE_PROVIDERS = ["googleDrive", "oneDrive", "dropbox"] as const;
 
 export const StorageProviderLiteral = Schema.Literals(STORAGE_PROVIDERS);

@@ -6,6 +6,14 @@
     ".": {
       "import": "./src/index.ts",
       "types": "./src/index.ts"
+    },
+    "./PlakkApi": {
+      "import": "./src/PlakkApi.ts",
+      "types": "./src/PlakkApi.ts"
+    },
+    "./RpcError": {
+      "import": "./src/RpcError.ts",
+      "types": "./src/RpcError.ts"
     }
   },
   "scripts": {
