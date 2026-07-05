@@ -60,9 +60,6 @@ importers:
 
   apps/desktop:
     dependencies:
-      '@effect/sql-pg':
-        specifier: 4.0.0-beta.92
-        version: 4.0.0-beta.92(effect@4.0.0-beta.92)
       '@plakk/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -75,9 +72,6 @@ importers:
       dotenv:
         specifier: ^17.4.2
         version: 17.4.2
-      drizzle-orm:
-        specifier: 1.0.0-rc.4
-        version: 1.0.0-rc.4(@effect/sql-pg@4.0.0-beta.92(effect@4.0.0-beta.92))(@types/pg@8.20.0)(effect@4.0.0-beta.92)(pg@8.22.0)(zod@3.25.76)
       effect:
         specifier: 'catalog:'
         version: 4.0.0-beta.92
@@ -87,9 +81,6 @@ importers:
       lucide-react:
         specifier: ^1.23.0
         version: 1.23.0(react@19.2.7)
-      pg:
-        specifier: ^8.22.0
-        version: 8.22.0
       react:
         specifier: ^19.2.7
         version: 19.2.7
@@ -103,18 +94,12 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.13.2
-      '@types/pg':
-        specifier: ^8.20.0
-        version: 8.20.0
       '@types/react':
         specifier: ^19.2.17
         version: 19.2.17
       '@types/react-dom':
         specifier: ^19.2.3
         version: 19.2.3(@types/react@19.2.17)
-      drizzle-kit:
-        specifier: 1.0.0-rc.4
-        version: 1.0.0-rc.4
       electron:
         specifier: ^43.0.0
         version: 43.0.0
@@ -127,6 +112,34 @@ importers:
       vite:
         specifier: npm:@voidzero-dev/vite-plus-core@latest
         version: '@voidzero-dev/vite-plus-core@0.2.2(@types/node@24.13.2)(jiti@2.7.0)(typescript@6.0.3)(yaml@2.9.0)'
+
+  packages/db:
+    dependencies:
+      '@effect/sql-pg':
+        specifier: 4.0.0-beta.92
+        version: 4.0.0-beta.92(effect@4.0.0-beta.92)
+      drizzle-orm:
+        specifier: 1.0.0-rc.4
+        version: 1.0.0-rc.4(@effect/sql-pg@4.0.0-beta.92(effect@4.0.0-beta.92))(@types/pg@8.20.0)(effect@4.0.0-beta.92)(pg@8.22.0)(zod@3.25.76)
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.0-beta.92
+      pg:
+        specifier: ^8.22.0
+        version: 8.22.0
+    devDependencies:
+      '@types/pg':
+        specifier: ^8.20.0
+        version: 8.20.0
+      dotenv:
+        specifier: ^17.4.2
+        version: 17.4.2
+      drizzle-kit:
+        specifier: 1.0.0-rc.4
+        version: 1.0.0-rc.4
+      vite-plus:
+        specifier: 'catalog:'
+        version: 0.2.2(@types/node@25.9.4)(jiti@2.7.0)(typescript@6.0.3)(vite@8.1.0(@types/node@25.9.4)(jiti@2.7.0)(yaml@2.9.0))(yaml@2.9.0)
 
   packages/shared:
     dependencies:

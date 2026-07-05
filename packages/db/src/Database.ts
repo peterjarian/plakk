@@ -33,7 +33,7 @@ export class Database extends Context.Service<
   {
     readonly db: DatabaseClient;
   }
->()("plakk/main/db/Database") {
+>()("@plakk/db/Database") {
   static readonly Live = Layer.effect(
     Database,
     Effect.gen(function* () {

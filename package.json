@@ -4,6 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "db:generate": "pnpm --filter @plakk/db run db:generate",
+    "db:migrate": "pnpm --filter @plakk/db run db:migrate",
+    "db:push": "pnpm --filter @plakk/db run db:push",
+    "db:studio": "pnpm --filter @plakk/db run db:studio",
     "effect-solutions": "node ./node_modules/effect-solutions/bin.js",
     "typecheck": "vp run --filter './packages/*' typecheck",
     "prepare": "vp config && effect-tsgo patch"
