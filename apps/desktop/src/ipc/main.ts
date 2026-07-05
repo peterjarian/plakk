@@ -7,7 +7,7 @@ import type {
   IpcPayload,
   IpcResult,
   IpcSchema,
-} from "./contracts.js";
+} from "./contracts.ts";
 
 export function handle<T extends IpcMethod<IpcSchema, IpcSchema>>(
   method: T,

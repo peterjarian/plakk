@@ -5,7 +5,7 @@ import {
   UserConfigSchema,
   type UserConfig,
   type UserConfigPatch,
-} from "../userConfig.js";
+} from "../userConfig.ts";
 
 export class UserConfigStoreError extends Data.TaggedError("UserConfigStoreError")<{
   readonly cause: unknown;

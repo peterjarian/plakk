@@ -10,7 +10,7 @@ import {
   Type,
   X,
 } from "lucide-react";
-import { Button } from "./primitives/button.js";
+import { Button } from "./primitives/button.tsx";
 
 const kindMeta: Record<SnippetKind, { Icon: typeof Type }> = {
   TEXT: { Icon: Type },

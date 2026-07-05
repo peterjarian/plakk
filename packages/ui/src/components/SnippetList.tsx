@@ -6,7 +6,7 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from "./primitives/empty.js";
+} from "./primitives/empty.tsx";
 
 export function SnippetList(props: { empty: boolean; children: ReactNode }) {
   const { empty, children } = props;

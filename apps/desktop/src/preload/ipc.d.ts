@@ -1,6 +1,6 @@
-import type { AuthError, AuthStatus } from "../auth.js";
-import type { ClipboardContent } from "../clipboardContent.js";
-import type { UserConfig, UserConfigPatch } from "../userConfig.js";
+import type { AuthError, AuthStatus } from "../auth.ts";
+import type { ClipboardContent } from "../clipboardContent.ts";
+import type { UserConfig, UserConfigPatch } from "../userConfig.ts";
 
 export {};
 

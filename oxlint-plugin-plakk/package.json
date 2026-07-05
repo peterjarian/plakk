@@ -1,0 +1,15 @@
+{
+  "name": "@plakk/oxlint-plugin-plakk",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsgo --noEmit",
+    "test": "vp test run"
+  },
+  "dependencies": {
+    "@oxlint/plugins": "1.68.0"
+  },
+  "devDependencies": {
+    "vite-plus": "catalog:"
+  }
+}

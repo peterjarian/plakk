@@ -14,10 +14,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@plakk/ui/components/primitives/dialog";
-import { SnippetComposer } from "../components/SnippetComposer.js";
-import { initialSnippets } from "../data/initialSnippets.js";
-import { useAuth } from "../hooks/useAuth.js";
-import { navigate } from "../lib/navigate.js";
+import { SnippetComposer } from "../components/SnippetComposer.tsx";
+import { initialSnippets } from "../data/initialSnippets.ts";
+import { useAuth } from "../hooks/useAuth.ts";
+import { navigate } from "../lib/navigate.ts";
 
 const accountSetupUrl = "https://app.plakk.io/account/setup";
 
