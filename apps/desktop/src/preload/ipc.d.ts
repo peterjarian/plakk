@@ -1,15 +1,23 @@
-import type { ClipboardContent, UserConfig, UserConfigPatch } from "../ipc/contracts.js";
+import type { AuthError, AuthStatus } from "../auth.js";
+import type { ClipboardContent } from "../clipboardContent.js";
+import type { UserConfig, UserConfigPatch } from "../userConfig.js";
 
 export {};
 
 declare global {
   interface Window {
     ipc: {
+      auth: {
+        getAuth: () => Promise<AuthStatus>;
+        onError: (callback: (error: AuthError) => void) => () => void;
+        onStatusChanged: (callback: (status: AuthStatus) => void) => () => void;
+        signIn: () => Promise<void>;
+        signOut: () => Promise<void>;
+      };
       clipboard: {
         onPaste: (callback: (content: ClipboardContent) => void) => () => void;
       };
       openExternal: (url: string) => Promise<void>;
-      openSettings: () => Promise<void>;
       userConfig: {
         get: () => Promise<UserConfig>;
         reset: () => Promise<UserConfig>;

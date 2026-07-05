@@ -1,50 +1,21 @@
 import * as Schema from "effect/Schema";
 
-export const UserSchema = Schema.Struct({
-  id: Schema.String,
-  firstName: Schema.String,
-  lastName: Schema.String,
-  email: Schema.String,
-  createdAt: Schema.Date,
-  updatedAt: Schema.Date,
-});
-
-export type User = typeof UserSchema.Type;
-
-export type DeepPartial<T> =
-  T extends ReadonlyArray<infer Item>
-    ? ReadonlyArray<DeepPartial<Item>>
-    : T extends object
-      ? { readonly [Key in keyof T]?: DeepPartial<T[Key]> }
-      : T;
-
-const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" &&
-  value !== null &&
-  !Array.isArray(value) &&
-  Object.getPrototypeOf(value) === Object.prototype;
-
-export const deepMerge = <T>(current: T, patch: DeepPartial<T>): T => {
-  if (!isPlainRecord(current) || !isPlainRecord(patch)) return patch as T;
-
-  const next: Record<string, unknown> = { ...current };
-
-  for (const [key, value] of Object.entries(patch)) {
-    if (value === undefined) continue;
-
-    const existing = next[key];
-    next[key] =
-      isPlainRecord(existing) && isPlainRecord(value) ? deepMerge(existing, value) : value;
-  }
-
-  return next as T;
-};
-
 export const STORAGE_PROVIDERS = ["googleDrive", "oneDrive", "dropbox"] as const;
 
 export const StorageProviderLiteral = Schema.Literals(STORAGE_PROVIDERS);
 
 export type StorageProvider = typeof StorageProviderLiteral.Type;
+
+export const UserSchema = Schema.Struct({
+  id: Schema.String,
+  firstName: Schema.NullOr(Schema.String),
+  lastName: Schema.NullOr(Schema.String),
+  email: Schema.String,
+  createdAt: Schema.String,
+  updatedAt: Schema.String,
+});
+
+export type User = typeof UserSchema.Type;
 
 export const SNIPPET_KINDS = ["TEXT", "LINK", "FILE", "IMAGE"] as const;
 

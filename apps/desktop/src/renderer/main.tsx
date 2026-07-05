@@ -1,3 +1,5 @@
+import { LoaderCircle } from "lucide-react";
+import { useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { TooltipProvider } from "@plakk/ui/components/primitives/tooltip";
 import { Home } from "./views/Home.js";
@@ -6,6 +8,8 @@ import { Tray } from "./views/Tray.js";
 import { Welcome } from "./views/Welcome.js";
 import type { ComponentType } from "react";
 import type { ViewType } from "./lib/navigate.js";
+import { AuthProvider, useAuth } from "./hooks/useAuth.js";
+import { navigate } from "./lib/navigate.js";
 
 import "@plakk/ui/globals.css";
 
@@ -16,11 +20,41 @@ const views: Record<ViewType, ComponentType> = {
   welcome: Welcome,
 };
 
-const view = new URLSearchParams(window.location.search).get("view") ?? "welcome";
-const View: ComponentType = views[view as keyof typeof views] ?? Home;
+function Loading() {
+  return (
+    <main className="grid h-screen place-items-center bg-background text-muted-foreground">
+      <LoaderCircle className="size-5 animate-spin" aria-label="Loading" />
+    </main>
+  );
+}
+
+function Bootstrap() {
+  const auth = useAuth();
+
+  useEffect(() => {
+    if (!auth.isLoading) navigate(auth.user === null ? "welcome" : "home");
+  }, [auth.isLoading, auth.user]);
+
+  return <Loading />;
+}
+
+function ProtectedView({ View }: { View: ComponentType }) {
+  const auth = useAuth();
+
+  useEffect(() => {
+    if (!auth.isLoading && auth.user === null) navigate("welcome");
+  }, [auth.isLoading, auth.user]);
+
+  if (auth.user === null) return auth.isLoading ? <Loading /> : null;
+  return <View />;
+}
+
+const view = new URLSearchParams(window.location.search).get("view");
+const View: ComponentType = view === null ? Bootstrap : (views[view as keyof typeof views] ?? Home);
+const isProtectedView = view !== null && view !== "welcome" && view !== "tray";
 
 createRoot(document.querySelector<HTMLDivElement>("#app")!).render(
   <TooltipProvider>
-    <View />
+    <AuthProvider>{isProtectedView ? <ProtectedView View={View} /> : <View />}</AuthProvider>
   </TooltipProvider>,
 );

@@ -8,6 +8,10 @@
 
 Plakk is an early desktop-first app. Keep changes close to the current desktop loop; extract shared layers only when the duplication is real.
 
+## Collaboration
+
+Well functioning collaboration between the agent (you) and the developer (me) is really important for getting good results. Before starting always read `docs/agent-collaboration.md` which described expected behaviour. Also don't stop at making the change the developer requests. When reviewing or fixing code, don't treat the current call site as proof that a concept should exist: if existing state already expresses the same fact, prefer deleting the extra read/type/helper over adding API surface to satisfy it. When done with a big feature always spin up a background agent that does a code review that makes sure you **have not made the mistake of optimizing for local correctness**. Code review and fix until nothing can be fixed anymore. Last but not least: treat dirty worktree as work-in-progress so you can override it, change it and delete it. Don't be scared to change those files.
+
 ## Package Roles
 
 - `apps/desktop`: Electron desktop app. Owns native shell integration, preload/main process code, and desktop-specific runtime behavior.
@@ -21,7 +25,7 @@ This project vendors external repositories under `.repos/` as read-only referenc
 - Do not edit files under `.repos/` unless explicitly asked.
 - Do not import from `.repos/`; application code must continue importing from normal package dependencies.
 - Keep `.repos/` excluded from fmt, lint, typecheck, and test scans unless explicitly validating the vendored repo itself.
-- When writing Effect code, run `vpx effect-solutions list`, read the relevant `vpx effect-solutions show <topic>` output, then inspect `.repos/effect-smol/LLMS.md` and `.repos/effect-smol/` for idiomatic usage.
+- When writing Effect code, run `vp run effect-solutions list`, read the relevant `vp run effect-solutions show <topic>` output, then inspect `.repos/effect-smol/LLMS.md` and `.repos/effect-smol/` for idiomatic usage.
 - When comparing desktop/runtime patterns, inspect `.repos/t3code/` as a reference, but do not copy architecture wholesale.
 
 # Using Vite+, the Unified Toolchain for the Web

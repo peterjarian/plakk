@@ -1,6 +1,12 @@
 import type { KeyboardEvent, ReactNode } from "react";
 import { Paperclip } from "lucide-react";
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "./primitives/empty";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "./primitives/empty.js";
 
 export function SnippetList(props: { empty: boolean; children: ReactNode }) {
   const { empty, children } = props;

@@ -66,6 +66,12 @@ importers:
       '@plakk/ui':
         specifier: workspace:*
         version: link:../../packages/ui
+      '@workos-inc/node':
+        specifier: ^10.7.0
+        version: 10.7.0
+      dotenv:
+        specifier: ^17.4.2
+        version: 17.4.2
       effect:
         specifier: 'catalog:'
         version: 4.0.0-beta.92
@@ -1398,6 +1404,10 @@ packages:
     engines: {node: '>=20.0.0'}
     cpu: [x64]
     os: [win32]
+
+  '@workos-inc/node@10.7.0':
+    resolution: {integrity: sha512-rffa9znZuIv4yo+9JRxGOLTTSxh0XhOT6jlsktgqEi9MuB9V0VFHRzLd3bTpkq+J9sgrPZNGpvX4aWNfMqt5cQ==}
+    engines: {node: '>=22.11.0'}
 
   accepts@2.0.0:
     resolution: {integrity: sha512-5cvg6CtKwfgdmVqY1WIiXKc3Q1bkRqGLi+2W/6ao+6Y7gu/RCwRuAhGEzh5B4KlszSuTLgZYuqFqo5bImjNKng==}
@@ -3998,6 +4008,8 @@ snapshots:
 
   '@voidzero-dev/vite-plus-win32-x64-msvc@0.2.2':
     optional: true
+
+  '@workos-inc/node@10.7.0': {}
 
   accepts@2.0.0:
     dependencies:

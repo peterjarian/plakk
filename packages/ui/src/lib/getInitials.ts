@@ -1,2 +1,11 @@
-export const getInitials = (attrs: { firstName: string; lastName: string }) =>
-  `${attrs.firstName.trim().at(0) ?? ""}${attrs.lastName.trim().at(0) ?? ""}`.toUpperCase();
+export const getInitials = (name: string, fallback: string) => {
+  const initials = name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part.at(0) ?? "")
+    .join("")
+    .toUpperCase();
+
+  return initials || fallback.trim().at(0)?.toUpperCase() || "?";
+};

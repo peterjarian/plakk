@@ -4,7 +4,7 @@ import { basename, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { clipboard, nativeImage } from "electron";
 import { Data, Effect } from "effect";
-import type { ClipboardContent } from "../ipc/contracts.js";
+import type { ClipboardContent } from "../clipboardContent.js";
 
 export class ReadClipboardError extends Data.TaggedError("ReadClipboardError")<{
   readonly cause: unknown;
@@ -39,7 +39,6 @@ function fileContentFromPath(path: string): ClipboardContent | undefined {
 
   const content: ClipboardContent = {
     type: "file",
-    path,
     name: basename(path),
     extension: extname(path).slice(1).toUpperCase(),
   };

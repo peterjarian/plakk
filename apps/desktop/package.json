@@ -12,6 +12,8 @@
   "dependencies": {
     "@plakk/shared": "workspace:*",
     "@plakk/ui": "workspace:*",
+    "@workos-inc/node": "^10.7.0",
+    "dotenv": "^17.4.2",
     "effect": "catalog:",
     "electron-store": "^11.0.2",
     "lucide-react": "^1.23.0",

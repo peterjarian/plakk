@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 
 const appName = "Plakk (Dev)";
 const bundleId = "app.plakk.dev";
+const deeplinkProtocol = "plakk-dev";
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const desktopDir = resolve(scriptDir, "..");
 const runtimeDir = join(desktopDir, ".electron-runtime");
@@ -39,6 +40,15 @@ function patchPlist(plistPath, name, id) {
   setPlistString(plistPath, "CFBundleIdentifier", id);
 }
 
+function setPlistUrlScheme(plistPath, scheme) {
+  const json = JSON.stringify([{ CFBundleURLName: bundleId, CFBundleURLSchemes: [scheme] }]);
+  const replace = spawnSync("plutil", ["-replace", "CFBundleURLTypes", "-json", json, plistPath], {
+    encoding: "utf8",
+  });
+  if (replace.status === 0) return;
+  run("plutil", ["-insert", "CFBundleURLTypes", "-json", json, plistPath]);
+}
+
 function resolveElectronExecPath() {
   if (process.platform !== "darwin") return undefined;
 
@@ -53,6 +63,7 @@ function resolveElectronExecPath() {
     iconMtimeMs: existsSync(iconPath) ? statSync(iconPath).mtimeMs : null,
     appName,
     bundleId,
+    deeplinkProtocol,
   });
 
   mkdirSync(runtimeDir, { recursive: true });
@@ -64,6 +75,7 @@ function resolveElectronExecPath() {
     rmSync(targetBundle, { recursive: true, force: true });
     cpSync(sourceBundle, targetBundle, { recursive: true, verbatimSymlinks: true });
     patchPlist(join(targetBundle, "Contents", "Info.plist"), appName, bundleId);
+    setPlistUrlScheme(join(targetBundle, "Contents", "Info.plist"), deeplinkProtocol);
     if (existsSync(iconPath)) {
       cpSync(iconPath, join(targetBundle, "Contents", "Resources", "icon.icns"));
       setPlistString(join(targetBundle, "Contents", "Info.plist"), "CFBundleIconFile", "icon");

@@ -1,4 +1,7 @@
 import { Schema } from "effect";
+import { AuthErrorSchema, AuthStatusSchema } from "../auth.js";
+import { ClipboardContentSchema } from "../clipboardContent.js";
+import { UserConfigPatchSchema, UserConfigSchema } from "../userConfig.js";
 
 export type IpcSchema = Schema.ConstraintCodec<unknown, unknown, never, never>;
 
@@ -23,62 +26,25 @@ export type IpcPayload<T extends IpcMethod<IpcSchema, IpcSchema>> = T["payload"]
 export type IpcResult<T extends IpcMethod<IpcSchema, IpcSchema>> = T["result"]["Type"];
 export type IpcEventPayload<T extends IpcEvent<IpcSchema>> = T["payload"]["Type"];
 
-export const UserConfigSchema = Schema.Struct({
-  showExternalLinkWarning: Schema.Boolean,
-  window: Schema.Struct({
-    width: Schema.Number,
-    height: Schema.Number,
-  }),
-});
-
-export type UserConfig = typeof UserConfigSchema.Type;
-
-export const UserConfigPatchSchema = Schema.Struct({
-  showExternalLinkWarning: Schema.optionalKey(Schema.Boolean),
-  window: Schema.optionalKey(
-    Schema.Struct({
-      width: Schema.optionalKey(Schema.Number),
-      height: Schema.optionalKey(Schema.Number),
-    }),
-  ),
-});
-
-export type UserConfigPatch = typeof UserConfigPatchSchema.Type;
-
-const ClipboardContentSchema = Schema.Union([
-  Schema.Struct({
-    type: Schema.Literal("text"),
-    text: Schema.String,
-  }),
-  Schema.Struct({
-    type: Schema.Literal("image"),
-    dataUrl: Schema.String,
-    width: Schema.Number,
-    height: Schema.Number,
-  }),
-  Schema.Struct({
-    type: Schema.Literal("file"),
-    path: Schema.String,
-    name: Schema.String,
-    extension: Schema.String,
-    size: Schema.optionalKey(Schema.Number),
-  }),
-  Schema.Struct({
-    type: Schema.Literal("empty"),
-  }),
-]);
-
-export type ClipboardContent = typeof ClipboardContentSchema.Type;
-
 export const ipcMethods = {
+  authGet: method({
+    channel: "auth:get",
+    payload: Schema.Void,
+    result: AuthStatusSchema,
+  }),
+  authSignIn: method({
+    channel: "auth:sign-in",
+    payload: Schema.Void,
+    result: Schema.Void,
+  }),
+  authSignOut: method({
+    channel: "auth:sign-out",
+    payload: Schema.Void,
+    result: Schema.Void,
+  }),
   openExternal: method({
     channel: "open-external",
     payload: Schema.String,
-    result: Schema.Void,
-  }),
-  openSettings: method({
-    channel: "settings:open",
-    payload: Schema.Void,
     result: Schema.Void,
   }),
   userConfigGet: method({
@@ -99,6 +65,14 @@ export const ipcMethods = {
 } as const;
 
 export const ipcEvents = {
+  authStatusChanged: event({
+    channel: "auth:status-changed",
+    payload: AuthStatusSchema,
+  }),
+  authError: event({
+    channel: "auth:error",
+    payload: AuthErrorSchema,
+  }),
   clipboardPaste: event({
     channel: "clipboard:paste",
     payload: ClipboardContentSchema,

@@ -1,9 +1,17 @@
 import { ArrowRight } from "lucide-react";
 import { Button } from "@plakk/ui/components/primitives/button";
+import { useEffect } from "react";
 import { SnippetFlowAnimation } from "../components/SnippetFlowAnimation/index.js";
+import { useAuth } from "../hooks/useAuth.js";
 import { navigate } from "../lib/navigate.js";
 
 export function Welcome() {
+  const auth = useAuth();
+
+  useEffect(() => {
+    if (auth.user !== null) navigate("home");
+  }, [auth.user]);
+
   return (
     <main className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
       <div className="drag-region grid min-h-0 flex-1 place-items-center p-6">
@@ -17,8 +25,17 @@ export function Welcome() {
 
           <SnippetFlowAnimation />
 
-          <Button type="button" className="h-10 w-full" onClick={() => navigate("home")}>
-            Sign in
+          {auth.issue && (
+            <p className="text-center text-xs text-muted-foreground">{auth.issue.message}</p>
+          )}
+
+          <Button
+            type="button"
+            className="h-10 w-full"
+            disabled={auth.isLoading}
+            onClick={() => void auth.signIn()}
+          >
+            {auth.isLoading ? "Checking session..." : "Sign in"}
             <ArrowRight />
           </Button>
         </section>

@@ -16,11 +16,13 @@ import {
 } from "@plakk/ui/components/primitives/dialog";
 import { SnippetComposer } from "../components/SnippetComposer.js";
 import { initialSnippets } from "../data/initialSnippets.js";
-import { currentUser } from "../data/currentUser.ts";
+import { useAuth } from "../hooks/useAuth.js";
+import { navigate } from "../lib/navigate.js";
 
 const accountSetupUrl = "https://app.plakk.io/account/setup";
 
 export function Home() {
+  const auth = useAuth();
   const [isDragging, setIsDragging] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [pendingExternalUrl, setPendingExternalUrl] = useState<string | null>(null);
@@ -30,6 +32,7 @@ export function Home() {
   const copiedTimerRef = useRef<number | undefined>(undefined);
 
   const accountBlocked = true;
+  const user = auth.user;
   const hasUploads = snippets.some((snippet) => snippet.uploadProgress !== undefined);
 
   useEffect(() => {
@@ -198,6 +201,8 @@ export function Home() {
 
   const pendingExternalHost = pendingExternalUrl ? new URL(pendingExternalUrl).host : "";
 
+  if (user === null) return null;
+
   return (
     <main
       className="flex h-screen flex-col overflow-hidden bg-background text-foreground"
@@ -223,8 +228,9 @@ export function Home() {
       <div className="drag-region h-12" aria-hidden="true" />
 
       <AppHeader
-        user={currentUser}
-        onSettingsClick={() => window.ipc.openSettings()}
+        user={user}
+        onSettingsClick={() => navigate("settings")}
+        onSignOutClick={() => void auth.signOut().then(() => navigate("welcome"))}
         storageAction={
           accountBlocked ? null : (
             <Button

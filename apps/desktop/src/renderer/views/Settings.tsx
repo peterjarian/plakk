@@ -1,5 +1,6 @@
 import { useState } from "react";
 import {
+  ArrowLeft,
   ArrowUpRight,
   CloudOff,
   CreditCard,
@@ -23,21 +24,36 @@ import {
   SettingsSectionTitle,
 } from "@plakk/ui/components/settings";
 import { getInitials } from "@plakk/ui/lib/getInitials";
-import { currentUser } from "../data/currentUser.js";
+import { useAuth } from "../hooks/useAuth.js";
+import { navigate } from "../lib/navigate.js";
 
 export function Settings() {
+  const auth = useAuth();
   const [autoUpdate, setAutoUpdate] = useState(true);
   const [globalHotkey, setGlobalHotkey] = useState(true);
   const [toolbarWidget, setToolbarWidget] = useState(true);
   const [updateStatus, setUpdateStatus] = useState("Up to date");
+  const user = auth.user;
+
+  if (user === null) return null;
+
+  const name = [user.firstName, user.lastName].filter(Boolean).join(" ") || user.email;
 
   return (
     <main className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
-      <div className="drag-region flex h-11 shrink-0 items-center justify-center border-b">
-        <h1 className="text-sm font-semibold">Settings</h1>
-      </div>
+      <div className="drag-region h-12 shrink-0" aria-hidden="true" />
 
-      <div className="scrollbar-hidden min-h-0 flex-1 overflow-y-auto px-5 py-4">
+      <div className="scrollbar-hidden min-h-0 flex-1 overflow-y-auto px-6 pb-4">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="-ml-2 mb-4"
+          onClick={() => navigate("home")}
+        >
+          <ArrowLeft />
+          Back
+        </Button>
         <div className="grid gap-6">
           <SettingsSection>
             <SettingsSectionTitle>Account</SettingsSectionTitle>
@@ -46,12 +62,12 @@ export function Settings() {
                 <SettingsRowMain>
                   <Avatar className="size-10">
                     <AvatarFallback className="text-sm font-medium">
-                      {getInitials(currentUser)}
+                      {getInitials(name, user.email)}
                     </AvatarFallback>
                   </Avatar>
                   <SettingsRowText
-                    title={`${currentUser.firstName} ${currentUser.lastName}`}
-                    description={currentUser.email}
+                    title={name}
+                    description={name === user.email ? undefined : user.email}
                   />
                 </SettingsRowMain>
                 <span className="rounded-full bg-muted px-2 py-1 text-[11px] leading-none font-medium text-muted-foreground">

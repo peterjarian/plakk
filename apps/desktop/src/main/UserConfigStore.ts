@@ -1,15 +1,11 @@
-import { deepMerge, type DeepPartial } from "@plakk/shared";
 import ElectronStore from "electron-store";
 import { Context, Data, Effect, Layer, Schema } from "effect";
-import { UserConfigSchema, type UserConfig } from "../ipc/contracts.js";
-
-export const defaultUserConfig: UserConfig = {
-  showExternalLinkWarning: true,
-  window: {
-    width: 680,
-    height: 620,
-  },
-};
+import {
+  defaultUserConfig,
+  UserConfigSchema,
+  type UserConfig,
+  type UserConfigPatch,
+} from "../userConfig.js";
 
 export class UserConfigStoreError extends Data.TaggedError("UserConfigStoreError")<{
   readonly cause: unknown;
@@ -22,7 +18,7 @@ const decodeUserConfig = (input: unknown) =>
 
 const readUserConfig = (store: ElectronStore<UserConfig>) =>
   Effect.try({
-    try: () => deepMerge(defaultUserConfig, store.store),
+    try: () => ({ ...defaultUserConfig, ...store.store }),
     catch: (cause) => new UserConfigStoreError({ cause }),
   }).pipe(Effect.flatMap(decodeUserConfig));
 
@@ -30,7 +26,7 @@ export class UserConfigStore extends Context.Service<
   UserConfigStore,
   {
     readonly get: Effect.Effect<UserConfig, UserConfigStoreError>;
-    set(patch: DeepPartial<UserConfig>): Effect.Effect<UserConfig, UserConfigStoreError>;
+    set(patch: UserConfigPatch): Effect.Effect<UserConfig, UserConfigStoreError>;
     readonly reset: Effect.Effect<UserConfig, UserConfigStoreError>;
   }
 >()("plakk/main/UserConfigStore") {
@@ -45,8 +41,8 @@ export class UserConfigStore extends Context.Service<
 
         const get = readUserConfig(store);
 
-        const set = Effect.fn("UserConfigStore.set")(function* (patch: DeepPartial<UserConfig>) {
-          const config = yield* decodeUserConfig(deepMerge(yield* get, patch));
+        const set = Effect.fn("UserConfigStore.set")(function* (patch: UserConfigPatch) {
+          const config = yield* decodeUserConfig({ ...(yield* get), ...patch });
 
           yield* Effect.try({
             try: () => {
