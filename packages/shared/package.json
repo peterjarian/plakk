@@ -8,12 +8,12 @@
       "types": "./src/index.ts"
     },
     "./PlakkApi": {
-      "import": "./src/PlakkApi.ts",
-      "types": "./src/PlakkApi.ts"
+      "import": "./src/api/PlakkApi.ts",
+      "types": "./src/api/PlakkApi.ts"
     },
     "./RpcError": {
-      "import": "./src/RpcError.ts",
-      "types": "./src/RpcError.ts"
+      "import": "./src/api/RpcError.ts",
+      "types": "./src/api/RpcError.ts"
     }
   },
   "scripts": {

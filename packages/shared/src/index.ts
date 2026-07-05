@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema";
 
-export * from "./PlakkApi.js";
-export * from "./RpcError.js";
+export * from "./api/PlakkApi.js";
+export * from "./api/RpcError.js";
 
 export const STORAGE_PROVIDERS = ["googleDrive", "oneDrive", "dropbox"] as const;
 
