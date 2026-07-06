@@ -46,11 +46,23 @@ export function createTrayWindowController({
     tray.on("click", (_event, bounds) => {
       toggleWindow(bounds);
     });
-    tray.on("drag-enter", () => onDragEnter?.({ bounds: getTrayBounds() }));
+    tray.on("drag-enter", () => {
+      const bounds = getTrayBounds();
+      showWindow(bounds, false);
+      onDragEnter?.({ bounds });
+    });
     tray.on("drag-leave", () => onDragLeave?.({ bounds: getTrayBounds() }));
     tray.on("drag-end", () => onDragEnd?.({ bounds: getTrayBounds() }));
-    tray.on("drop-files", (_event, files) => onDropFiles?.({ bounds: getTrayBounds(), files }));
-    tray.on("drop-text", (_event, text) => onDropText?.({ bounds: getTrayBounds(), text }));
+    tray.on("drop-files", (_event, files) => {
+      const bounds = getTrayBounds();
+      showWindow(bounds, false);
+      onDropFiles?.({ bounds, files });
+    });
+    tray.on("drop-text", (_event, text) => {
+      const bounds = getTrayBounds();
+      showWindow(bounds, false);
+      onDropText?.({ bounds, text });
+    });
   }
 
   function createWindow() {
@@ -96,11 +108,24 @@ export function createTrayWindowController({
       return;
     }
 
+    showWindow(activationBounds);
+  }
+
+  function showWindow(activationBounds?: Rectangle, focus = true) {
+    if (window === undefined || window.isDestroyed()) createWindow();
+    if (window === undefined) return;
+
     const bounds = getTrayBounds(activationBounds);
     const display = screen.getDisplayMatching(bounds);
     window.setBounds(getAnchoredWindowBounds(trayWindowSize, bounds, display.workArea));
-    window.show();
-    window.focus();
+
+    if (focus) {
+      window.show();
+      window.focus();
+      return;
+    }
+
+    window.showInactive();
   }
 
   function getTrayBounds(activationBounds?: Rectangle): Rectangle {
@@ -118,6 +143,7 @@ export function createTrayWindowController({
   }
 
   return {
+    show: showWindow,
     setup() {
       if (tray !== undefined) return;
       createTrayIcon();

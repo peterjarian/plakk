@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { AuthErrorSchema, AuthStatusSchema } from "../auth.ts";
 import { ClipboardContentSchema } from "../clipboardContent.ts";
+import { TrayDroppedItemSchema } from "../trayDrop.ts";
 import { UserConfigPatchSchema, UserConfigSchema } from "../userConfig.ts";
 
 export type IpcSchema = Schema.ConstraintCodec<unknown, unknown, never, never>;
@@ -76,5 +77,9 @@ export const ipcEvents = {
   clipboardPaste: event({
     channel: "clipboard:paste",
     payload: ClipboardContentSchema,
+  }),
+  trayDroppedItem: event({
+    channel: "tray:dropped-item",
+    payload: TrayDroppedItemSchema,
   }),
 } as const;

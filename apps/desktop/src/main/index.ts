@@ -13,6 +13,7 @@ import { readClipboard } from "./clipboard.ts";
 import { createTrayWindowController } from "./trayWindow.ts";
 import { UserConfigStore } from "./UserConfigStore.ts";
 import { runEffect } from "./runtime.ts";
+import type { TrayDroppedItem } from "../trayDrop.ts";
 
 handle(ipcMethods.openExternal, (url) => {
   if (!isHttpUrl(url)) return;
@@ -237,6 +238,14 @@ function broadcastAuthError(message: string): void {
   }
 }
 
+function broadcastTrayDroppedItem(item: TrayDroppedItem): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) {
+      send(window.webContents, ipcEvents.trayDroppedItem, item);
+    }
+  }
+}
+
 async function handleAuthUrls(values: readonly string[]): Promise<boolean> {
   for (const rawUrl of values) {
     pendingOpenUrls.add(rawUrl);
@@ -335,6 +344,12 @@ if (!hasSingleInstanceLock) {
     trayWindowController = createTrayWindowController({
       guardExternalWindows,
       loadTrayRenderer: (window) => loadRenderer(window, "tray"),
+      onDropFiles: ({ files }) => {
+        broadcastTrayDroppedItem({ type: "files", paths: files });
+      },
+      onDropText: ({ text }) => {
+        if (text.trim()) broadcastTrayDroppedItem({ type: "text", text });
+      },
       preloadPath: join(__dirname, "../preload/index.cjs"),
     });
     trayWindowController.setup();
