@@ -12,6 +12,8 @@ Plakk is an early desktop-first app. Keep changes close to the current desktop l
 
 Well functioning collaboration between the agent (you) and the developer (me) is really important for getting good results. Before starting always read `docs/agent-collaboration.md` which described expected behaviour. Also don't stop at making the change the developer requests. When reviewing or fixing code, don't treat the current call site as proof that a concept should exist: if existing state already expresses the same fact, prefer deleting the extra read/type/helper over adding API surface to satisfy it. When done with a big feature always spin up a background agent that does a code review that makes sure you **have not made the mistake of optimizing for local correctness**. Code review and fix until nothing can be fixed anymore. Last but not least: treat dirty worktree as work-in-progress so you can override it, change it and delete it. Don't be scared to change those files.
 
+When working inside a worktree, read `docs/worktree-collaboration.md`.
+
 ## Package Roles
 
 - `apps/desktop`: Electron desktop app. Owns native shell integration, preload/main process code, and desktop-specific runtime behavior.
