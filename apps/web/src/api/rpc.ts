@@ -41,21 +41,21 @@ const PlakkApiHandlers = PlakkApi.toLayer(
     CreateTextSnippet: () =>
       Effect.fail(
         new RpcError({
-          code: "ACCOUNT_NOT_READY",
+          code: "FORBIDDEN",
           message: "Finish billing and setup storage before adding snippets.",
         }),
       ),
     CreateStoredSnippet: () =>
       Effect.fail(
         new RpcError({
-          code: "ACCOUNT_NOT_READY",
+          code: "FORBIDDEN",
           message: "Finish billing and setup storage before adding snippets.",
         }),
       ),
     DeleteSnippet: () =>
       Effect.fail(
         new RpcError({
-          code: "ACCOUNT_NOT_READY",
+          code: "FORBIDDEN",
           message: "Finish billing and setup storage before deleting snippets.",
         }),
       ),

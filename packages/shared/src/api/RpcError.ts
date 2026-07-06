@@ -3,7 +3,7 @@ import * as Schema from "effect/Schema";
 
 export const RpcErrorCodeSchema = Schema.Literals([
   "UNAUTHENTICATED",
-  "ACCOUNT_NOT_READY",
+  "FORBIDDEN",
   "NOT_FOUND",
   "INTERNAL_SERVER_ERROR",
 ] as const);
