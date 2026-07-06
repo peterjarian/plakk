@@ -1,9 +1,13 @@
 import { Cloud, FileUp } from "lucide-react";
 
-export function TrayDropZone() {
+export function TrayDropZone({ isDragging }: { isDragging: boolean }) {
   return (
     <section className="px-4 pt-4">
-      <div className="grid h-28 place-items-center rounded-lg border border-dashed bg-card text-center">
+      <div
+        className={`grid h-28 place-items-center rounded-lg border border-dashed text-center ${
+          isDragging ? "border-primary bg-primary/5" : "bg-card"
+        }`}
+      >
         <div className="grid justify-items-center gap-2">
           <span className="flex size-9 items-center justify-center rounded-md bg-muted text-muted-foreground">
             <FileUp className="size-4" />

@@ -48,19 +48,19 @@ export function createTrayWindowController({
     });
     tray.on("drag-enter", () => {
       const bounds = getTrayBounds();
-      showWindow(bounds, false);
+      showWindow(bounds);
       onDragEnter?.({ bounds });
     });
     tray.on("drag-leave", () => onDragLeave?.({ bounds: getTrayBounds() }));
     tray.on("drag-end", () => onDragEnd?.({ bounds: getTrayBounds() }));
     tray.on("drop-files", (_event, files) => {
       const bounds = getTrayBounds();
-      showWindow(bounds, false);
+      showWindow(bounds);
       onDropFiles?.({ bounds, files });
     });
     tray.on("drop-text", (_event, text) => {
       const bounds = getTrayBounds();
-      showWindow(bounds, false);
+      showWindow(bounds);
       onDropText?.({ bounds, text });
     });
   }
@@ -84,10 +84,10 @@ export function createTrayWindowController({
         sandbox: true,
       },
     });
+    keepLayered(window);
 
     window.on("blur", () => {
-      lastBlurHideAt = Date.now();
-      window?.hide();
+      hideWindow();
     });
 
     window.once("closed", () => {
@@ -104,7 +104,7 @@ export function createTrayWindowController({
     if (window === undefined) return;
 
     if (window.isVisible()) {
-      window.hide();
+      hideWindow();
       return;
     }
 
@@ -119,6 +119,8 @@ export function createTrayWindowController({
     const display = screen.getDisplayMatching(bounds);
     window.setBounds(getAnchoredWindowBounds(trayWindowSize, bounds, display.workArea));
 
+    keepLayered(window);
+
     if (focus) {
       window.show();
       window.focus();
@@ -126,6 +128,21 @@ export function createTrayWindowController({
     }
 
     window.showInactive();
+  }
+
+  function hideWindow() {
+    lastBlurHideAt = Date.now();
+    window?.hide();
+  }
+
+  function keepLayered(target: BrowserWindow) {
+    target.setAlwaysOnTop(true, "pop-up-menu");
+    if (process.platform === "darwin") {
+      target.setVisibleOnAllWorkspaces(true, {
+        visibleOnFullScreen: true,
+        skipTransformProcessType: true,
+      });
+    }
   }
 
   function getTrayBounds(activationBounds?: Rectangle): Rectangle {

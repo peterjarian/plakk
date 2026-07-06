@@ -1,6 +1,7 @@
 import { ArrowRight } from "lucide-react";
+import { formatFileSize, isHttpUrl } from "@plakk/shared";
 import { Button } from "@plakk/ui/components/primitives/button";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type DragEvent } from "react";
 import { useAuth } from "../hooks/useAuth.ts";
 import { TrayActions } from "./tray/TrayActions.tsx";
 import { TrayDropZone } from "./tray/TrayDropZone.tsx";
@@ -10,15 +11,25 @@ import type { TrayDroppedItem } from "../../trayDrop.ts";
 
 export function Tray() {
   const auth = useAuth();
+  const [isDragging, setIsDragging] = useState(false);
   const [items, setItems] = useState<TrayQueueItem[]>(initialItems);
 
   useEffect(
     () =>
       window.ipc.tray.onDroppedItem((item) => {
-        setItems((current) => [...queueItemsForDrop(item), ...current].slice(0, 8));
+        prependItems(queueItemsForDrop(item));
       }),
     [],
   );
+
+  function prependItems(nextItems: TrayQueueItem[]) {
+    if (!nextItems.length) return;
+    setItems((current) => [...nextItems, ...current].slice(0, 8));
+  }
+
+  function addDropped(dataTransfer: DataTransfer) {
+    prependItems(queueItemsForDataTransfer(dataTransfer));
+  }
 
   if (auth.user === null) {
     return (
@@ -52,9 +63,27 @@ export function Tray() {
 
   return (
     <TrayShell>
-      <TrayDropZone />
-      <TrayQueue items={items} />
-      <TrayActions />
+      <div
+        className="flex min-h-0 flex-1 flex-col"
+        onDragEnter={() => setIsDragging(true)}
+        onDragOver={(event: DragEvent) => {
+          event.preventDefault();
+          setIsDragging(true);
+        }}
+        onDragLeave={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null))
+            setIsDragging(false);
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          setIsDragging(false);
+          addDropped(event.dataTransfer);
+        }}
+      >
+        <TrayDropZone isDragging={isDragging} />
+        <TrayQueue items={items} />
+        <TrayActions />
+      </div>
     </TrayShell>
   );
 }
@@ -96,6 +125,31 @@ function queueItemsForDrop(item: TrayDroppedItem): TrayQueueItem[] {
       detail: "Dropped just now",
     };
   });
+}
+
+function queueItemsForDataTransfer(dataTransfer: DataTransfer): TrayQueueItem[] {
+  if (dataTransfer.files.length) {
+    return Array.from(dataTransfer.files).map((file) => {
+      const kind = kindForName(file.name);
+      return {
+        kind,
+        title: file.name,
+        detail: `${kind === "image" ? "Image" : "File"} - ${formatFileSize(file.size)}`,
+      };
+    });
+  }
+
+  const text = dataTransfer.getData("text/plain").trim();
+  if (!text) return [];
+
+  const isLink = isHttpUrl(text);
+  return [
+    {
+      kind: isLink ? "link" : "text",
+      title: text,
+      detail: isLink ? "Link - just now" : `Text - ${text.length} chars`,
+    },
+  ];
 }
 
 function kindForName(name: string): TrayQueueItem["kind"] {
