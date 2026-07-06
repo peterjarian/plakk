@@ -1,7 +1,9 @@
-import { Database, Snippets, type DatabaseService, type DbSnippet } from "@plakk/db";
+import { and, desc, Drizzle, eq, isNull, type DrizzleService } from "@plakk/db";
+import { snippets } from "@plakk/db/schema";
 import type { AccountStatus, ApiSnippet } from "@plakk/shared/PlakkApi";
 import { RpcError } from "@plakk/shared/RpcError";
 import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
@@ -14,10 +16,7 @@ const accountStatus: AccountStatus = {
   blockedReasons: [],
 };
 
-const titleFromText = (text: string) =>
-  text.trim().split(/\s+/).slice(0, 8).join(" ") || "Untitled note";
-
-const toApiSnippet = (snippet: DbSnippet): ApiSnippet => ({
+const toApiSnippet = (snippet: typeof snippets.$inferSelect): ApiSnippet => ({
   id: snippet.id,
   kind: snippet.kind,
   title: snippet.title,
@@ -33,7 +32,7 @@ const toApiSnippet = (snippet: DbSnippet): ApiSnippet => ({
 const placeholderStorageObjectId = () => `pending-storage:${crypto.randomUUID()}`;
 
 const insertSnippet = Effect.fn("@plakk/web/api/PlakkApiLive.insertSnippet")(function* (
-  database: DatabaseService,
+  drizzle: DrizzleService,
   input: {
     readonly kind: "TEXT" | "FILE" | "IMAGE";
     readonly title: string;
@@ -42,12 +41,20 @@ const insertSnippet = Effect.fn("@plakk/web/api/PlakkApiLive.insertSnippet")(fun
     readonly contentType: string | null;
   },
 ) {
-  const snippet = yield* Snippets.insertSnippet({
-    ...input,
-    ownerWorkosUserId,
-    storageProvider,
-    storageObjectId: placeholderStorageObjectId(),
-  }).pipe(Effect.provideService(Database, database), Effect.mapError(toRpcError));
+  const [snippet] = yield* drizzle.db
+    .insert(snippets)
+    .values({
+      ...input,
+      ownerWorkosUserId,
+      storageProvider,
+      storageObjectId: placeholderStorageObjectId(),
+    })
+    .returning()
+    .pipe(Effect.mapError(toRpcError));
+
+  if (snippet === undefined) {
+    return yield* Effect.die(new Error("Snippet insert returned no row"));
+  }
 
   return toApiSnippet(snippet);
 });
@@ -79,7 +86,7 @@ export class PlakkApiLive extends Context.Service<
   static readonly Live = Layer.effect(
     PlakkApiLive,
     Effect.gen(function* () {
-      const database = yield* Database;
+      const drizzle = yield* Drizzle;
 
       return PlakkApiLive.of({
         getAccountStatus: Effect.gen(function* () {
@@ -88,21 +95,25 @@ export class PlakkApiLive extends Context.Service<
         }),
         listSnippets: Effect.fn("@plakk/web/api/PlakkApiLive.listSnippets")(function* (input) {
           yield* Effect.logInfo("Listing snippets", { limit: input.limit });
-          const rows = yield* Snippets.listSnippets({ ownerWorkosUserId, limit: input.limit }).pipe(
-            Effect.provideService(Database, database),
-            Effect.mapError(toRpcError),
-          );
+          const rows = yield* drizzle.db
+            .select()
+            .from(snippets)
+            .where(
+              and(eq(snippets.ownerWorkosUserId, ownerWorkosUserId), isNull(snippets.deletedAt)),
+            )
+            .orderBy(desc(snippets.createdAt))
+            .limit(input.limit)
+            .pipe(Effect.mapError(toRpcError));
 
           return { items: rows.map(toApiSnippet) };
         }),
         createTextSnippet: Effect.fn("@plakk/web/api/PlakkApiLive.createTextSnippet")(
           function* (text) {
-            const title = titleFromText(text);
             yield* Effect.logInfo("Creating text snippet", { byteSize: text.length });
-            return yield* insertSnippet(database, {
+            return yield* insertSnippet(drizzle, {
               kind: "TEXT",
-              title,
-              fileName: `${title}.txt`,
+              title: text,
+              fileName: "text.txt",
               byteSize: new TextEncoder().encode(text).byteLength,
               contentType: "text/plain",
             });
@@ -114,17 +125,19 @@ export class PlakkApiLive extends Context.Service<
               kind: input.kind,
               byteSize: input.byteSize,
             });
-            return yield* insertSnippet(database, input);
+            return yield* insertSnippet(drizzle, input);
           },
         ),
         deleteSnippet: Effect.fn("@plakk/web/api/PlakkApiLive.deleteSnippet")(function* (id) {
           yield* Effect.logInfo("Deleting snippet", { id });
-          yield* Snippets.deleteSnippet({ ownerWorkosUserId, id }).pipe(
-            Effect.provideService(Database, database),
-            Effect.mapError(toRpcError),
-          );
+          const now = DateTime.toDateUtc(yield* DateTime.now);
+          yield* drizzle.db
+            .update(snippets)
+            .set({ deletedAt: now, updatedAt: now })
+            .where(and(eq(snippets.id, id), eq(snippets.ownerWorkosUserId, ownerWorkosUserId)))
+            .pipe(Effect.mapError(toRpcError));
         }),
       });
     }),
-  ).pipe(Layer.provide(Database.Live));
+  ).pipe(Layer.provide(Drizzle.Live));
 }

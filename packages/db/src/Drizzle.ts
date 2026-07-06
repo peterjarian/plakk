@@ -26,22 +26,22 @@ const PgClientLive = Layer.unwrap(
 
 const makeDatabase = () => PgDrizzle.makeWithDefaults();
 
-type DatabaseClient =
+type DrizzleClient =
   ReturnType<typeof makeDatabase> extends Effect.Effect<infer A, infer _E, infer _R> ? A : never;
 
-export class Database extends Context.Service<
-  Database,
+export class Drizzle extends Context.Service<
+  Drizzle,
   {
-    readonly db: DatabaseClient;
+    readonly db: DrizzleClient;
   }
->()("@plakk/db/Database") {
+>()("@plakk/db/Drizzle") {
   static readonly Live = Layer.effect(
-    Database,
+    Drizzle,
     Effect.gen(function* () {
       const db = yield* makeDatabase();
-      return Database.of({ db });
+      return Drizzle.of({ db });
     }),
   ).pipe(Layer.provide(PgClientLive));
 }
 
-export type DatabaseService = EffectContext.Service.Shape<typeof Database>;
+export type DrizzleService = EffectContext.Service.Shape<typeof Drizzle>;

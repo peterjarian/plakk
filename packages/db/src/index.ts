@@ -1,3 +1,2 @@
-export { Database, type DatabaseService } from "./Database.ts";
-export type { DbSnippet } from "./Snippets.ts";
-export * as Snippets from "./Snippets.ts";
+export { Drizzle, type DrizzleService } from "./Drizzle.ts";
+export { and, desc, eq, isNull } from "drizzle-orm";
