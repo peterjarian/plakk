@@ -5,15 +5,29 @@ import type { Rectangle } from "electron";
 
 const trayWindowSize = { width: 360, height: 480 };
 
+type TrayNativeEvent = {
+  bounds: Rectangle;
+};
+
 type TrayWindowControllerOptions = {
   guardExternalWindows: (window: BrowserWindow) => void;
   loadTrayRenderer: (window: BrowserWindow) => void | Promise<void>;
+  onDragEnd?: (event: TrayNativeEvent) => void;
+  onDragEnter?: (event: TrayNativeEvent) => void;
+  onDragLeave?: (event: TrayNativeEvent) => void;
+  onDropFiles?: (event: TrayNativeEvent & { files: string[] }) => void;
+  onDropText?: (event: TrayNativeEvent & { text: string }) => void;
   preloadPath: string;
 };
 
 export function createTrayWindowController({
   guardExternalWindows,
   loadTrayRenderer,
+  onDragEnd,
+  onDragEnter,
+  onDragLeave,
+  onDropFiles,
+  onDropText,
   preloadPath,
 }: TrayWindowControllerOptions) {
   let tray: Tray | undefined;
@@ -29,7 +43,14 @@ export function createTrayWindowController({
 
     tray = new Tray(image);
     tray.setToolTip(app.name);
-    tray.on("click", (_event, bounds) => toggleWindow(bounds));
+    tray.on("click", (_event, bounds) => {
+      toggleWindow(bounds);
+    });
+    tray.on("drag-enter", () => onDragEnter?.({ bounds: getTrayBounds() }));
+    tray.on("drag-leave", () => onDragLeave?.({ bounds: getTrayBounds() }));
+    tray.on("drag-end", () => onDragEnd?.({ bounds: getTrayBounds() }));
+    tray.on("drop-files", (_event, files) => onDropFiles?.({ bounds: getTrayBounds(), files }));
+    tray.on("drop-text", (_event, text) => onDropText?.({ bounds: getTrayBounds(), text }));
   }
 
   function createWindow() {
