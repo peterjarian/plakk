@@ -10,6 +10,7 @@ import { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
 import type { UserConfigPatch } from "../userConfig.ts";
 import { AuthService } from "./auth/AuthService.ts";
 import { readClipboard } from "./clipboard.ts";
+import { createTrayWindowController } from "./trayWindow.ts";
 import { UserConfigStore } from "./UserConfigStore.ts";
 import { runEffect } from "./runtime.ts";
 
@@ -92,9 +93,10 @@ handle(ipcMethods.userConfigSet, (patch: UserConfigPatch) =>
 
 handle(ipcMethods.userConfigReset, () => runEffect(UserConfigStore.use((store) => store.reset)));
 
-type RendererView = "home" | "settings" | "welcome";
+type RendererView = "home" | "settings" | "tray" | "welcome";
 
 let mainWindow: BrowserWindow | undefined;
+let trayWindowController: ReturnType<typeof createTrayWindowController> | undefined;
 let isQuitting = false;
 
 app.setName(app.isPackaged ? "Plakk" : "Plakk (Dev)");
@@ -329,6 +331,13 @@ if (!hasSingleInstanceLock) {
         { role: "windowMenu" },
       ]),
     );
+
+    trayWindowController = createTrayWindowController({
+      guardExternalWindows,
+      loadTrayRenderer: (window) => loadRenderer(window, "tray"),
+      preloadPath: join(__dirname, "../preload/index.cjs"),
+    });
+    trayWindowController.setup();
 
     createWindow();
     void handleAuthUrls(process.argv);
