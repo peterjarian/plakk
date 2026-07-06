@@ -115,6 +115,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@plakk/db':
+        specifier: workspace:*
+        version: link:../../packages/db
       '@plakk/shared':
         specifier: workspace:*
         version: link:../../packages/shared

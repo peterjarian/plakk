@@ -1,6 +1,7 @@
 import { PgClient } from "@effect/sql-pg";
 import * as PgDrizzle from "drizzle-orm/effect-postgres";
 import { Config, Context, Effect, Layer } from "effect";
+import type * as EffectContext from "effect/Context";
 import { types } from "pg";
 
 const rawDateTimeTypeIds = new Set([1082, 1114, 1115, 1182, 1184, 1185, 1186, 1187, 1231]);
@@ -42,3 +43,5 @@ export class Database extends Context.Service<
     }),
   ).pipe(Layer.provide(PgClientLive));
 }
+
+export type DatabaseService = EffectContext.Service.Shape<typeof Database>;
