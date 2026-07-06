@@ -31,6 +31,34 @@ const InternalServerErrorLive = Layer.succeed(InternalServerErrorMiddleware)(
 const PlakkApiHandlers = PlakkApi.toLayer(
   PlakkApi.of({
     Ping: () => Effect.succeed({ ok: true }),
+    GetAccountStatus: () =>
+      Effect.succeed({
+        canSync: false,
+        storageProvider: null,
+        blockedReasons: ["billing", "storage"],
+      }),
+    ListSnippets: () => Effect.succeed({ items: [], nextCursor: null }),
+    CreateTextSnippet: () =>
+      Effect.fail(
+        new RpcError({
+          code: "ACCOUNT_NOT_READY",
+          message: "Finish billing and setup storage before adding snippets.",
+        }),
+      ),
+    CreateStoredSnippet: () =>
+      Effect.fail(
+        new RpcError({
+          code: "ACCOUNT_NOT_READY",
+          message: "Finish billing and setup storage before adding snippets.",
+        }),
+      ),
+    DeleteSnippet: () =>
+      Effect.fail(
+        new RpcError({
+          code: "ACCOUNT_NOT_READY",
+          message: "Finish billing and setup storage before deleting snippets.",
+        }),
+      ),
   }),
 );
 

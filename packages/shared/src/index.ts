@@ -1,8 +1,5 @@
 import * as Schema from "effect/Schema";
 
-export * from "./api/PlakkApi.ts";
-export * from "./api/RpcError.ts";
-
 export const STORAGE_PROVIDERS = ["googleDrive", "oneDrive", "dropbox"] as const;
 
 export const StorageProviderLiteral = Schema.Literals(STORAGE_PROVIDERS);
@@ -64,3 +61,6 @@ export const SnippetSchema = Schema.Struct({
 });
 
 export type Snippet = typeof SnippetSchema.Type;
+
+export * from "./api/PlakkApi.ts";
+export * from "./api/RpcError.ts";
