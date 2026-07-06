@@ -5,7 +5,7 @@ import * as Layer from "effect/Layer";
 import { HttpRouter } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 
-import { PlakkBackend } from "./PlakkBackend.ts";
+import { PlakkApiLive } from "./PlakkApiLive.ts";
 
 const InternalServerErrorLive = Layer.succeed(InternalServerErrorMiddleware)(
   InternalServerErrorMiddleware.of((effect) =>
@@ -38,32 +38,32 @@ const PlakkApiHandlers = PlakkApi.toLayer(
         Effect.withSpan("rpc.Ping"),
       ),
     GetAccountStatus: () =>
-      PlakkBackend.pipe(
-        Effect.flatMap((backend) => backend.getAccountStatus),
+      PlakkApiLive.pipe(
+        Effect.flatMap((api) => api.getAccountStatus),
         Effect.withSpan("rpc.GetAccountStatus"),
       ),
     ListSnippets: (input) =>
-      PlakkBackend.pipe(
-        Effect.flatMap((backend) => backend.listSnippets(input)),
+      PlakkApiLive.pipe(
+        Effect.flatMap((api) => api.listSnippets(input)),
         Effect.withSpan("rpc.ListSnippets", {
           attributes: { limit: input.limit },
         }),
       ),
     CreateTextSnippet: (input) =>
-      PlakkBackend.pipe(
-        Effect.flatMap((backend) => backend.createTextSnippet(input.text)),
+      PlakkApiLive.pipe(
+        Effect.flatMap((api) => api.createTextSnippet(input.text)),
         Effect.withSpan("rpc.CreateTextSnippet", { attributes: { byteSize: input.text.length } }),
       ),
     CreateStoredSnippet: (input) =>
-      PlakkBackend.pipe(
-        Effect.flatMap((backend) => backend.createStoredSnippet(input)),
+      PlakkApiLive.pipe(
+        Effect.flatMap((api) => api.createStoredSnippet(input)),
         Effect.withSpan("rpc.CreateStoredSnippet", {
           attributes: { kind: input.kind },
         }),
       ),
     DeleteSnippet: (input) =>
-      PlakkBackend.pipe(
-        Effect.flatMap((backend) => backend.deleteSnippet(input.id)),
+      PlakkApiLive.pipe(
+        Effect.flatMap((api) => api.deleteSnippet(input.id)),
         Effect.withSpan("rpc.DeleteSnippet", { attributes: { id: input.id } }),
       ),
   }),
@@ -76,7 +76,7 @@ const RpcRoutes = RpcServer.layerHttp({
   disableFatalDefects: true,
 }).pipe(
   Layer.provide(PlakkApiHandlers),
-  Layer.provide(PlakkBackend.Live),
+  Layer.provide(PlakkApiLive.Live),
   Layer.provide(InternalServerErrorLive),
   Layer.provide(RpcSerialization.layerNdjson),
 );

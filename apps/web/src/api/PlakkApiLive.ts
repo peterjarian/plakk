@@ -15,7 +15,7 @@ const mockAccountStatus: AccountStatus = {
 const titleFromText = (text: string) =>
   text.trim().split(/\s+/).slice(0, 8).join(" ") || "Untitled note";
 
-const mockSnippet = Effect.fn("@plakk/web/api/PlakkBackend.mockSnippet")(function* (input: {
+const mockSnippet = Effect.fn("@plakk/web/api/PlakkApiLive.mockSnippet")(function* (input: {
   readonly kind: "TEXT" | "FILE" | "IMAGE";
   readonly title: string;
   readonly fileName: string;
@@ -34,8 +34,8 @@ const mockSnippet = Effect.fn("@plakk/web/api/PlakkBackend.mockSnippet")(functio
   } satisfies ApiSnippet;
 });
 
-export class PlakkBackend extends Context.Service<
-  PlakkBackend,
+export class PlakkApiLive extends Context.Service<
+  PlakkApiLive,
   {
     readonly getAccountStatus: Effect.Effect<AccountStatus>;
     readonly listSnippets: (input: {
@@ -51,21 +51,21 @@ export class PlakkBackend extends Context.Service<
     }) => Effect.Effect<ApiSnippet>;
     readonly deleteSnippet: (id: string) => Effect.Effect<void>;
   }
->()("@plakk/web/api/PlakkBackend") {
+>()("@plakk/web/api/PlakkApiLive") {
   static readonly Live = Layer.succeed(
-    PlakkBackend,
-    PlakkBackend.of({
+    PlakkApiLive,
+    PlakkApiLive.of({
       getAccountStatus: Effect.gen(function* () {
         yield* Effect.logInfo("Returning mock account status", {
           storageProvider: mockStorageProvider,
         });
         return mockAccountStatus;
       }),
-      listSnippets: Effect.fn("@plakk/web/api/PlakkBackend.listSnippets")(function* (input) {
+      listSnippets: Effect.fn("@plakk/web/api/PlakkApiLive.listSnippets")(function* (input) {
         yield* Effect.logInfo("Listing mock snippets", { limit: input.limit });
         return { items: [] };
       }),
-      createTextSnippet: Effect.fn("@plakk/web/api/PlakkBackend.createTextSnippet")(
+      createTextSnippet: Effect.fn("@plakk/web/api/PlakkApiLive.createTextSnippet")(
         function* (text) {
           const title = titleFromText(text);
           yield* Effect.logInfo("Creating mock text snippet", { byteSize: text.length });
@@ -78,7 +78,7 @@ export class PlakkBackend extends Context.Service<
           });
         },
       ),
-      createStoredSnippet: Effect.fn("@plakk/web/api/PlakkBackend.createStoredSnippet")(
+      createStoredSnippet: Effect.fn("@plakk/web/api/PlakkApiLive.createStoredSnippet")(
         function* (input) {
           yield* Effect.logInfo("Creating mock stored snippet", {
             kind: input.kind,
@@ -87,7 +87,7 @@ export class PlakkBackend extends Context.Service<
           return yield* mockSnippet(input);
         },
       ),
-      deleteSnippet: Effect.fn("@plakk/web/api/PlakkBackend.deleteSnippet")(function* (id) {
+      deleteSnippet: Effect.fn("@plakk/web/api/PlakkApiLive.deleteSnippet")(function* (id) {
         yield* Effect.logInfo("Deleting mock snippet", { id });
       }),
     }),
