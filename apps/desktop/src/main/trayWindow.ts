@@ -29,7 +29,7 @@ export function createTrayWindowController({
 
     tray = new Tray(image);
     tray.setToolTip(app.name);
-    tray.on("click", toggleWindow);
+    tray.on("click", (_event, bounds) => toggleWindow(bounds));
   }
 
   function createWindow() {
@@ -65,7 +65,7 @@ export function createTrayWindowController({
     void loadTrayRenderer(window);
   }
 
-  function toggleWindow() {
+  function toggleWindow(activationBounds?: Rectangle) {
     if (Date.now() - lastBlurHideAt < 160) return;
     if (window === undefined || window.isDestroyed()) createWindow();
     if (window === undefined) return;
@@ -75,19 +75,25 @@ export function createTrayWindowController({
       return;
     }
 
-    const bounds = getTrayBounds();
+    const bounds = getTrayBounds(activationBounds);
     const display = screen.getDisplayMatching(bounds);
     window.setBounds(getAnchoredWindowBounds(trayWindowSize, bounds, display.workArea));
     window.show();
     window.focus();
   }
 
-  function getTrayBounds(): Rectangle {
+  function getTrayBounds(activationBounds?: Rectangle): Rectangle {
+    if (hasSize(activationBounds)) return activationBounds;
+
     const bounds = tray?.getBounds();
-    if (bounds !== undefined && bounds.width > 0 && bounds.height > 0) return bounds;
+    if (hasSize(bounds)) return bounds;
 
     const { workArea } = screen.getPrimaryDisplay();
     return { x: workArea.x + workArea.width, y: workArea.y, width: 0, height: 0 };
+  }
+
+  function hasSize(bounds: Rectangle | undefined): bounds is Rectangle {
+    return bounds !== undefined && bounds.width > 0 && bounds.height > 0;
   }
 
   return {
