@@ -9,12 +9,18 @@ const InternalServerErrorLive = Layer.succeed(InternalServerErrorMiddleware)(
   InternalServerErrorMiddleware.of((effect) =>
     effect.pipe(
       Effect.catchDefect(() =>
-        Effect.fail(
-          new RpcError({
+        Effect.gen(function* () {
+          const traceId = yield* Effect.currentSpan.pipe(
+            Effect.map((span) => span.traceId),
+            Effect.orElseSucceed(() => "untraced"),
+          );
+
+          return yield* new RpcError({
             code: "INTERNAL_SERVER_ERROR",
             message: "Something went wrong. Please try again.",
-          }),
-        ),
+            traceId,
+          });
+        }),
       ),
     ),
   ),
