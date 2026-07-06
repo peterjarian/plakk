@@ -49,11 +49,9 @@ export const PlakkApi = RpcGroup.make(
   Rpc.make("ListSnippets", {
     payload: {
       limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 })),
-      cursor: Schema.optionalKey(Schema.String),
     },
     success: Schema.Struct({
       items: Schema.Array(ApiSnippetSchema),
-      nextCursor: Schema.NullOr(Schema.String),
     }),
     error: RpcError,
   }),
@@ -66,8 +64,6 @@ export const PlakkApi = RpcGroup.make(
     payload: {
       kind: Schema.Literals(["FILE", "IMAGE"] as const),
       title: Schema.String,
-      storageProvider: StorageProviderLiteral,
-      storageObjectId: Schema.String,
       fileName: Schema.String,
       byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
       contentType: Schema.NullOr(Schema.String),

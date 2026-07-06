@@ -5,6 +5,8 @@ import * as Layer from "effect/Layer";
 import { HttpRouter } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 
+import { PlakkBackend } from "./PlakkBackend.ts";
+
 const InternalServerErrorLive = Layer.succeed(InternalServerErrorMiddleware)(
   InternalServerErrorMiddleware.of((effect) =>
     effect.pipe(
@@ -30,34 +32,39 @@ const InternalServerErrorLive = Layer.succeed(InternalServerErrorMiddleware)(
 
 const PlakkApiHandlers = PlakkApi.toLayer(
   PlakkApi.of({
-    Ping: () => Effect.succeed({ ok: true }),
+    Ping: () =>
+      Effect.succeed({ ok: true }).pipe(
+        Effect.tap(() => Effect.logInfo("Ping")),
+        Effect.withSpan("rpc.Ping"),
+      ),
     GetAccountStatus: () =>
-      Effect.succeed({
-        canSync: false,
-        storageProvider: null,
-        blockedReasons: ["billing", "storage"],
-      }),
-    ListSnippets: () => Effect.succeed({ items: [], nextCursor: null }),
-    CreateTextSnippet: () =>
-      Effect.fail(
-        new RpcError({
-          code: "FORBIDDEN",
-          message: "Finish billing and setup storage before adding snippets.",
+      PlakkBackend.pipe(
+        Effect.flatMap((backend) => backend.getAccountStatus),
+        Effect.withSpan("rpc.GetAccountStatus"),
+      ),
+    ListSnippets: (input) =>
+      PlakkBackend.pipe(
+        Effect.flatMap((backend) => backend.listSnippets(input)),
+        Effect.withSpan("rpc.ListSnippets", {
+          attributes: { limit: input.limit },
         }),
       ),
-    CreateStoredSnippet: () =>
-      Effect.fail(
-        new RpcError({
-          code: "FORBIDDEN",
-          message: "Finish billing and setup storage before adding snippets.",
+    CreateTextSnippet: (input) =>
+      PlakkBackend.pipe(
+        Effect.flatMap((backend) => backend.createTextSnippet(input.text)),
+        Effect.withSpan("rpc.CreateTextSnippet", { attributes: { byteSize: input.text.length } }),
+      ),
+    CreateStoredSnippet: (input) =>
+      PlakkBackend.pipe(
+        Effect.flatMap((backend) => backend.createStoredSnippet(input)),
+        Effect.withSpan("rpc.CreateStoredSnippet", {
+          attributes: { kind: input.kind },
         }),
       ),
-    DeleteSnippet: () =>
-      Effect.fail(
-        new RpcError({
-          code: "FORBIDDEN",
-          message: "Finish billing and setup storage before deleting snippets.",
-        }),
+    DeleteSnippet: (input) =>
+      PlakkBackend.pipe(
+        Effect.flatMap((backend) => backend.deleteSnippet(input.id)),
+        Effect.withSpan("rpc.DeleteSnippet", { attributes: { id: input.id } }),
       ),
   }),
 );
@@ -67,7 +74,12 @@ const RpcRoutes = RpcServer.layerHttp({
   path: "/api/rpc",
   protocol: "http",
   disableFatalDefects: true,
-}).pipe(Layer.provide([PlakkApiHandlers, InternalServerErrorLive, RpcSerialization.layerNdjson]));
+}).pipe(
+  Layer.provide(PlakkApiHandlers),
+  Layer.provide(PlakkBackend.Live),
+  Layer.provide(InternalServerErrorLive),
+  Layer.provide(RpcSerialization.layerNdjson),
+);
 
 export const { handler: handleRpcRequest } = HttpRouter.toWebHandler(RpcRoutes, {
   disableLogger: true,
