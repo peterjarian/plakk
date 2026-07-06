@@ -8,20 +8,30 @@ import {
 } from "@plakk/shared";
 import { Schema } from "effect";
 import { initialSnippets } from "../data/initialSnippets.ts";
+import {
+  mockCanAddSnippets,
+  mockDroppedSnippetSubtitle,
+  mockPastedImageTitle,
+  mockSnippetStorageKey,
+  mockSnippetUploadTickStorageKey,
+  mockSyncedSnippetTime,
+  mockUploadProgressStep,
+  mockUploadTickMs,
+} from "../data/mockSnippets.ts";
 import type { ClipboardContent } from "../../clipboardContent.ts";
 import type { TrayDroppedItem } from "../../ipc/contracts.ts";
 
-const storageKey = "plakk.snippets";
-const uploadTickKey = "plakk.snippets.uploadTickAt";
 const SnippetListSchema = Schema.Array(SnippetSchema);
 const listeners = new Set<() => void>();
 let cachedRaw: string | null | undefined;
 let cachedSnippets = initialSnippets;
 
-export const canAddSnippets = true;
+// Temporary renderer-only mock store. Effect atoms + SSE should replace this as the real
+// sync path; keep IPC for native facts such as tray drops and file paths.
+export const canAddSnippets = mockCanAddSnippets;
 
 function readSnippets(): Snippet[] {
-  const raw = window.localStorage.getItem(storageKey);
+  const raw = window.localStorage.getItem(mockSnippetStorageKey);
   if (raw === cachedRaw) return cachedSnippets;
 
   cachedRaw = raw;
@@ -42,7 +52,7 @@ function readSnippets(): Snippet[] {
 function writeSnippets(snippets: Snippet[]) {
   cachedSnippets = snippets;
   cachedRaw = JSON.stringify(snippets);
-  window.localStorage.setItem(storageKey, cachedRaw);
+  window.localStorage.setItem(mockSnippetStorageKey, cachedRaw);
   for (const listener of listeners) listener();
 }
 
@@ -55,7 +65,7 @@ export function useSnippets(): Snippet[] {
     (listener) => {
       listeners.add(listener);
       const onStorage = (event: StorageEvent) => {
-        if (event.key === storageKey) listener();
+        if (event.key === mockSnippetStorageKey) listener();
       };
       window.addEventListener("storage", onStorage);
 
@@ -73,7 +83,10 @@ export function addSnippet(snippet: Omit<Snippet, "id" | "time" | "synced">) {
   if (!canAddSnippets) return;
 
   updateSnippets((current) =>
-    [{ ...snippet, id: crypto.randomUUID(), time: "now", synced: true }, ...current].slice(0, 20),
+    [
+      { ...snippet, id: crypto.randomUUID(), time: mockSyncedSnippetTime, synced: true },
+      ...current,
+    ].slice(0, 20),
   );
 }
 
@@ -127,7 +140,7 @@ export function addTrayDroppedItem(item: TrayDroppedItem) {
     return {
       id: crypto.randomUUID(),
       title,
-      subtitle: "Dropped just now",
+      subtitle: mockDroppedSnippetSubtitle,
       kind: snippetKindForFileName(title),
       time: "",
       synced: false,
@@ -146,7 +159,7 @@ export function addClipboardContent(content: ClipboardContent) {
 
   if (content.type === "image") {
     addSnippet({
-      title: "Pasted image",
+      title: mockPastedImageTitle,
       subtitle: `${content.width} x ${content.height}`,
       kind: "IMAGE",
     });
@@ -167,19 +180,19 @@ export function addClipboardContent(content: ClipboardContent) {
 
 export function advanceUploads() {
   const now = Date.now();
-  const lastTickAt = Number(window.localStorage.getItem(uploadTickKey) ?? 0);
-  if (now - lastTickAt < 150) return;
-  window.localStorage.setItem(uploadTickKey, String(now));
+  const lastTickAt = Number(window.localStorage.getItem(mockSnippetUploadTickStorageKey) ?? 0);
+  if (now - lastTickAt < mockUploadTickMs) return;
+  window.localStorage.setItem(mockSnippetUploadTickStorageKey, String(now));
 
   updateSnippets((current) =>
     current.map((snippet) => {
       if (snippet.uploadProgress === undefined) return snippet;
 
-      const uploadProgress = Math.min(100, snippet.uploadProgress + 8);
+      const uploadProgress = Math.min(100, snippet.uploadProgress + mockUploadProgressStep);
       if (uploadProgress < 100) return { ...snippet, uploadProgress };
 
       const { uploadProgress: _uploadProgress, ...done } = snippet;
-      return { ...done, synced: true, time: "now" };
+      return { ...done, synced: true, time: mockSyncedSnippetTime };
     }),
   );
 }
