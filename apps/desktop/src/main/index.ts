@@ -5,6 +5,7 @@ import { isHttpUrl } from "@plakk/shared";
 import { app, BrowserWindow, Menu, shell } from "electron";
 import { Config, Effect, Result } from "effect";
 import type { AuthStatus } from "../auth.ts";
+import type { TrayDroppedItem } from "../ipc/contracts.ts";
 import { handle, send } from "../ipc/main.ts";
 import { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
 import type { UserConfigPatch } from "../userConfig.ts";
@@ -13,7 +14,6 @@ import { readClipboard } from "./clipboard.ts";
 import { createTrayWindowController } from "./trayWindow.ts";
 import { UserConfigStore } from "./UserConfigStore.ts";
 import { runEffect } from "./runtime.ts";
-import type { TrayDroppedItem } from "../trayDrop.ts";
 
 handle(ipcMethods.openExternal, (url) => {
   if (!isHttpUrl(url)) return;

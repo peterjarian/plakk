@@ -1,6 +1,6 @@
 import type { AuthError, AuthStatus } from "../auth.ts";
 import type { ClipboardContent } from "../clipboardContent.ts";
-import type { TrayDroppedItem } from "../trayDrop.ts";
+import type { TrayDroppedItem } from "../ipc/contracts.ts";
 import type { UserConfig, UserConfigPatch } from "../userConfig.ts";
 
 export {};

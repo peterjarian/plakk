@@ -95,7 +95,9 @@ export function createTrayWindowController({
     });
 
     guardExternalWindows(window);
-    void loadTrayRenderer(window);
+    void Promise.resolve(loadTrayRenderer(window)).catch((error: unknown) => {
+      console.error("Failed to load tray renderer", error);
+    });
   }
 
   function toggleWindow(activationBounds?: Rectangle) {

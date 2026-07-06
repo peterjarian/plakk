@@ -38,12 +38,18 @@ function Bootstrap() {
   return <Loading />;
 }
 
-function ProtectedView({ View }: { View: ComponentType }) {
+function ProtectedView({
+  View,
+  redirectOnSignOut = true,
+}: {
+  View: ComponentType;
+  redirectOnSignOut?: boolean;
+}) {
   const auth = useAuth();
 
   useEffect(() => {
-    if (!auth.isLoading && auth.user === null) navigate("welcome");
-  }, [auth.isLoading, auth.user]);
+    if (redirectOnSignOut && !auth.isLoading && auth.user === null) navigate("welcome");
+  }, [auth.isLoading, auth.user, redirectOnSignOut]);
 
   if (auth.user === null) return auth.isLoading ? <Loading /> : null;
   return <View />;
@@ -51,10 +57,16 @@ function ProtectedView({ View }: { View: ComponentType }) {
 
 const view = new URLSearchParams(window.location.search).get("view");
 const View: ComponentType = view === null ? Bootstrap : (views[view as keyof typeof views] ?? Home);
-const isProtectedView = view !== null && view !== "welcome" && view !== "tray";
+const isProtectedView = view !== null && view !== "welcome";
 
 createRoot(document.querySelector<HTMLDivElement>("#app")!).render(
   <TooltipProvider>
-    <AuthProvider>{isProtectedView ? <ProtectedView View={View} /> : <View />}</AuthProvider>
+    <AuthProvider>
+      {isProtectedView ? (
+        <ProtectedView View={View} redirectOnSignOut={view !== "tray"} />
+      ) : (
+        <View />
+      )}
+    </AuthProvider>
   </TooltipProvider>,
 );

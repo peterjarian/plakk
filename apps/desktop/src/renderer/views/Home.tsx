@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowUpRight, Plus, TriangleAlert } from "lucide-react";
-import { formatFileSize, isHttpUrl, snippetKindForFileName, type Snippet } from "@plakk/shared";
+import type { Snippet } from "@plakk/shared";
 import { AppHeader } from "@plakk/ui/components/AppHeader";
 import { SnippetList } from "@plakk/ui/components/SnippetList";
 import { SnippetRow } from "@plakk/ui/components/SnippetRow";
@@ -15,8 +15,17 @@ import {
   DialogTitle,
 } from "@plakk/ui/components/primitives/dialog";
 import { SnippetComposer } from "../components/SnippetComposer.tsx";
-import { initialSnippets } from "../data/initialSnippets.ts";
 import { useAuth } from "../hooks/useAuth.ts";
+import {
+  addClipboardContent,
+  addDroppedData,
+  addFiles,
+  addTextSnippet,
+  advanceUploads,
+  canAddSnippets,
+  deleteSnippet,
+  useSnippets,
+} from "../lib/snippets.ts";
 import { navigate } from "../lib/navigate.ts";
 
 const accountSetupUrl = "https://app.plakk.io/account/setup";
@@ -27,11 +36,11 @@ export function Home() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [pendingExternalUrl, setPendingExternalUrl] = useState<string | null>(null);
   const [skipExternalLinkWarning, setSkipExternalLinkWarning] = useState(false);
-  const [snippets, setSnippets] = useState(initialSnippets);
+  const snippets = useSnippets();
   const [showExternalLinkWarning, setShowExternalLinkWarning] = useState(true);
   const copiedTimerRef = useRef<number | undefined>(undefined);
 
-  const accountBlocked = true;
+  const accountBlocked = !canAddSnippets;
   const user = auth.user;
   const hasUploads = snippets.some((snippet) => snippet.uploadProgress !== undefined);
 
@@ -39,17 +48,7 @@ export function Home() {
     if (!hasUploads) return;
 
     const timer = window.setInterval(() => {
-      setSnippets((current) =>
-        current.map((snippet) => {
-          if (snippet.uploadProgress === undefined) return snippet;
-
-          const uploadProgress = Math.min(100, snippet.uploadProgress + 8);
-          if (uploadProgress < 100) return { ...snippet, uploadProgress };
-
-          const { uploadProgress: _uploadProgress, ...done } = snippet;
-          return { ...done, synced: true, time: "now" };
-        }),
-      );
+      advanceUploads();
     }, 160);
 
     return () => window.clearInterval(timer);
@@ -72,93 +71,23 @@ export function Home() {
     () =>
       window.ipc.clipboard.onPaste((content) => {
         if (accountBlocked) return;
-
-        if (content.type === "text") {
-          addText(content.text);
-          return;
-        }
-
-        if (content.type === "image") {
-          addSnippet({
-            title: "Pasted image",
-            subtitle: `${content.width} x ${content.height}`,
-            kind: "IMAGE",
-          });
-          return;
-        }
-
-        if (content.type === "file") {
-          addSnippet({
-            title: content.name,
-            subtitle:
-              content.size === undefined
-                ? content.extension || "FILE"
-                : `${content.extension || "FILE"} · ${formatFileSize(content.size)}`,
-            kind: snippetKindForFileName(content.name),
-          });
-        }
+        addClipboardContent(content);
       }),
     [accountBlocked],
   );
 
-  function addSnippet(snippet: Omit<Snippet, "id" | "time" | "synced">) {
-    if (accountBlocked) return;
-
-    setSnippets((current) =>
-      [{ ...snippet, id: crypto.randomUUID(), time: "now", synced: true }, ...current].slice(0, 20),
-    );
-  }
-
   function addText(value: string) {
-    addSnippet(
-      isHttpUrl(value)
-        ? { title: value, subtitle: "", kind: "LINK" }
-        : { title: value, subtitle: `${value.length} characters`, kind: "TEXT" },
-    );
+    if (accountBlocked) return;
+    addTextSnippet(value);
   }
 
-  function addFiles(files: FileList) {
+  function addHomeFiles(files: FileList) {
     if (accountBlocked) return;
-
-    const uploads = Array.from(files).map((file) => {
-      const kind = snippetKindForFileName(file.name);
-      return {
-        id: crypto.randomUUID(),
-        title: file.name,
-        subtitle: `${file.name.split(".").pop()?.toUpperCase() ?? "FILE"} · ${formatFileSize(file.size)}`,
-        kind,
-        time: "",
-        synced: false,
-        uploadProgress: 0,
-      };
-    });
-
-    setSnippets((current) => [...uploads, ...current].slice(0, 20));
-  }
-
-  function addDropped(dataTransfer: DataTransfer) {
-    if (accountBlocked) return;
-
-    if (dataTransfer.files.length) {
-      addFiles(dataTransfer.files);
-      return;
-    }
-
-    const dropped = dataTransfer.getData("text/plain").trim();
-    if (!dropped) return;
-    if (isHttpUrl(dropped)) {
-      addSnippet({ title: dropped, subtitle: "", kind: "LINK" });
-    } else {
-      addSnippet({ title: dropped, subtitle: `${dropped.length} characters`, kind: "TEXT" });
-    }
+    addFiles(files);
   }
 
   function stopUpload(id: string) {
-    setSnippets((current) => current.filter((snippet) => snippet.id !== id));
-  }
-
-  function deleteSnippet(id: string) {
-    setSnippets((current) => current.filter((snippet) => snippet.id !== id));
+    deleteSnippet(id);
   }
 
   function copy(snippet: Snippet) {
@@ -222,7 +151,7 @@ export function Home() {
         event.preventDefault();
         setIsDragging(false);
         if (accountBlocked) return;
-        addDropped(event.dataTransfer);
+        addDroppedData(event.dataTransfer);
       }}
     >
       <div className="drag-region h-12" aria-hidden="true" />
@@ -267,7 +196,7 @@ export function Home() {
               </Button>
             </div>
           )}
-          <SnippetComposer disabled={accountBlocked} onSubmit={addText} onFiles={addFiles} />
+          <SnippetComposer disabled={accountBlocked} onSubmit={addText} onFiles={addHomeFiles} />
         </div>
 
         <SnippetList empty={snippets.length === 0}>

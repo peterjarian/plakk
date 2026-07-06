@@ -1,9 +1,9 @@
 import { contextBridge } from "electron";
 import type { AuthError, AuthStatus } from "../auth.ts";
 import type { ClipboardContent } from "../clipboardContent.ts";
+import type { TrayDroppedItem } from "../ipc/contracts.ts";
 import { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
 import { invoke, on } from "../ipc/preload.ts";
-import type { TrayDroppedItem } from "../trayDrop.ts";
 import type { UserConfigPatch } from "../userConfig.ts";
 
 contextBridge.exposeInMainWorld("ipc", {

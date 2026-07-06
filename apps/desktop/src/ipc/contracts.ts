@@ -1,7 +1,6 @@
 import { Schema } from "effect";
 import { AuthErrorSchema, AuthStatusSchema } from "../auth.ts";
 import { ClipboardContentSchema } from "../clipboardContent.ts";
-import { TrayDroppedItemSchema } from "../trayDrop.ts";
 import { UserConfigPatchSchema, UserConfigSchema } from "../userConfig.ts";
 
 export type IpcSchema = Schema.ConstraintCodec<unknown, unknown, never, never>;
@@ -26,6 +25,19 @@ const event = <Payload extends IpcSchema>(input: IpcEvent<Payload>) => input;
 export type IpcPayload<T extends IpcMethod<IpcSchema, IpcSchema>> = T["payload"]["Type"];
 export type IpcResult<T extends IpcMethod<IpcSchema, IpcSchema>> = T["result"]["Type"];
 export type IpcEventPayload<T extends IpcEvent<IpcSchema>> = T["payload"]["Type"];
+
+export const TrayDroppedItemSchema = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("files"),
+    paths: Schema.Array(Schema.String),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("text"),
+    text: Schema.String,
+  }),
+]);
+
+export type TrayDroppedItem = typeof TrayDroppedItemSchema.Type;
 
 export const ipcMethods = {
   authGet: method({

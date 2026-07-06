@@ -1,15 +1,10 @@
-export type Bounds = {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-};
+import type { Rectangle } from "electron";
 
 export function getAnchoredWindowBounds(
   windowSize: { width: number; height: number },
-  anchorBounds: Bounds,
-  workArea: Bounds,
-): Bounds {
+  anchorBounds: Rectangle,
+  workArea: Rectangle,
+): Rectangle {
   const gap = 8;
   const centeredX = anchorBounds.x + anchorBounds.width / 2 - windowSize.width / 2;
   const x = clamp(centeredX, workArea.x, workArea.x + workArea.width - windowSize.width);
