@@ -1,5 +1,5 @@
 CREATE TYPE "snippet_kind" AS ENUM('TEXT', 'LINK', 'FILE', 'IMAGE');--> statement-breakpoint
-CREATE TYPE "storage_provider" AS ENUM('googleDrive', 'oneDrive', 'dropbox');--> statement-breakpoint
+CREATE TYPE "storage_provider" AS ENUM('GOOGLE_DRIVE', 'ONE_DRIVE', 'DROPBOX');--> statement-breakpoint
 CREATE TABLE "snippets" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
 	"owner_workos_user_id" text NOT NULL,

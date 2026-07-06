@@ -11,7 +11,7 @@
       "schema": "public"
     },
     {
-      "values": ["googleDrive", "oneDrive", "dropbox"],
+      "values": ["GOOGLE_DRIVE", "ONE_DRIVE", "DROPBOX"],
       "name": "storage_provider",
       "entityType": "enums",
       "schema": "public"

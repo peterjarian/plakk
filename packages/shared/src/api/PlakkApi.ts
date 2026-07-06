@@ -38,15 +38,15 @@ export class InternalServerErrorMiddleware extends RpcMiddleware.Service<Interna
 ) {}
 
 export const PlakkApi = RpcGroup.make(
-  class Ping extends Rpc.make("Ping", {
+  Rpc.make("Ping", {
     success: Schema.Struct({ ok: Schema.Boolean }),
     error: RpcError,
-  }) {},
-  class GetAccountStatus extends Rpc.make("GetAccountStatus", {
+  }),
+  Rpc.make("GetAccountStatus", {
     success: AccountStatusSchema,
     error: RpcError,
-  }) {},
-  class ListSnippets extends Rpc.make("ListSnippets", {
+  }),
+  Rpc.make("ListSnippets", {
     payload: {
       limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 })),
       cursor: Schema.optionalKey(Schema.String),
@@ -56,13 +56,13 @@ export const PlakkApi = RpcGroup.make(
       nextCursor: Schema.NullOr(Schema.String),
     }),
     error: RpcError,
-  }) {},
-  class CreateTextSnippet extends Rpc.make("CreateTextSnippet", {
+  }),
+  Rpc.make("CreateTextSnippet", {
     payload: { text: Schema.String },
     success: ApiSnippetSchema,
     error: RpcError,
-  }) {},
-  class CreateStoredSnippet extends Rpc.make("CreateStoredSnippet", {
+  }),
+  Rpc.make("CreateStoredSnippet", {
     payload: {
       kind: Schema.Literals(["FILE", "IMAGE"] as const),
       title: Schema.String,
@@ -74,10 +74,10 @@ export const PlakkApi = RpcGroup.make(
     },
     success: ApiSnippetSchema,
     error: RpcError,
-  }) {},
-  class DeleteSnippet extends Rpc.make("DeleteSnippet", {
+  }),
+  Rpc.make("DeleteSnippet", {
     payload: { id: Schema.String },
     success: Schema.Void,
     error: RpcError,
-  }) {},
+  }),
 ).middleware(InternalServerErrorMiddleware);
