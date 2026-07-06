@@ -57,7 +57,14 @@ function writeSnippets(snippets: Snippet[]) {
 }
 
 function updateSnippets(updater: (current: Snippet[]) => Snippet[]) {
-  writeSnippets(updater(readSnippets()));
+  const mutate = () => writeSnippets(updater(readSnippets()));
+  if (navigator.locks) {
+    void navigator.locks.request("plakk.snippets", mutate);
+    return;
+  }
+
+  // ponytail: fallback is best-effort for old runtimes; real sync moves to Effect atoms + SSE.
+  mutate();
 }
 
 export function useSnippets(): Snippet[] {

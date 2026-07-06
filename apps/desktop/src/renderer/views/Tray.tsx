@@ -57,7 +57,7 @@ export function Tray() {
         }}
       >
         <TrayDropZone isDragging={isDragging} />
-        <TrayQueue snippets={snippets.slice(0, 8)} />
+        <TrayQueue snippets={snippets.slice(0, 8)} totalCount={snippets.length} />
         <TrayActions />
       </div>
     </TrayShell>

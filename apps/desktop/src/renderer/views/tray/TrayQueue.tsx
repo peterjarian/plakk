@@ -8,16 +8,14 @@ const icons = {
   TEXT: Type,
 };
 
-export function TrayQueue({ snippets }: { snippets: Snippet[] }) {
+export function TrayQueue({ snippets, totalCount }: { snippets: Snippet[]; totalCount: number }) {
   return (
     <section className="min-h-0 flex-1 overflow-hidden px-4 pt-4">
       <div className="mb-1 flex items-center justify-between">
         <h2 className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
           Queue
         </h2>
-        <span className="text-[11px] tabular-nums text-muted-foreground">
-          {snippets.length} items
-        </span>
+        <span className="text-[11px] tabular-nums text-muted-foreground">{totalCount} items</span>
       </div>
 
       <ul className="-mx-2 overflow-hidden">

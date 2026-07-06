@@ -22,13 +22,10 @@ import {
   addFiles,
   addTextSnippet,
   advanceUploads,
-  canAddSnippets,
   deleteSnippet,
   useSnippets,
 } from "../lib/snippets.ts";
 import { navigate } from "../lib/navigate.ts";
-
-const accountSetupUrl = "https://app.plakk.io/account/setup";
 
 export function Home() {
   const auth = useAuth();
@@ -40,7 +37,6 @@ export function Home() {
   const [showExternalLinkWarning, setShowExternalLinkWarning] = useState(true);
   const copiedTimerRef = useRef<number | undefined>(undefined);
 
-  const accountBlocked = !canAddSnippets;
   const user = auth.user;
   const hasUploads = snippets.some((snippet) => snippet.uploadProgress !== undefined);
 
@@ -70,19 +66,16 @@ export function Home() {
   useEffect(
     () =>
       window.ipc.clipboard.onPaste((content) => {
-        if (accountBlocked) return;
         addClipboardContent(content);
       }),
-    [accountBlocked],
+    [],
   );
 
   function addText(value: string) {
-    if (accountBlocked) return;
     addTextSnippet(value);
   }
 
   function addHomeFiles(files: FileList) {
-    if (accountBlocked) return;
     addFiles(files);
   }
 
@@ -137,11 +130,10 @@ export function Home() {
       className="flex h-screen flex-col overflow-hidden bg-background text-foreground"
       aria-label="Plakk"
       onDragEnter={() => {
-        if (!accountBlocked) setIsDragging(true);
+        setIsDragging(true);
       }}
       onDragOver={(event) => {
         event.preventDefault();
-        if (accountBlocked) return;
         setIsDragging(true);
       }}
       onDragLeave={(event) => {
@@ -150,7 +142,6 @@ export function Home() {
       onDrop={(event) => {
         event.preventDefault();
         setIsDragging(false);
-        if (accountBlocked) return;
         addDroppedData(event.dataTransfer);
       }}
     >
@@ -161,42 +152,23 @@ export function Home() {
         onSettingsClick={() => navigate("settings")}
         onSignOutClick={() => void auth.signOut().then(() => navigate("welcome"))}
         storageAction={
-          accountBlocked ? null : (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              aria-label="Open storage in browser"
-              toolTip="Open storage"
-              onClick={() => window.ipc.openExternal("https://app.plakk.io/storage")}
-            >
-              Google Drive
-              <ArrowUpRight className="text-muted-foreground" />
-            </Button>
-          )
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            aria-label="Open storage in browser"
+            toolTip="Open storage"
+            onClick={() => window.ipc.openExternal("https://app.plakk.io/storage")}
+          >
+            Google Drive
+            <ArrowUpRight className="text-muted-foreground" />
+          </Button>
         }
       />
 
       <div className="scrollbar-hidden min-h-0 flex-1 overflow-y-auto px-6 pb-4">
         <div className="sticky top-0 z-20 bg-background pt-3 pb-5">
-          {accountBlocked && (
-            <div className="mb-2 flex items-center gap-2 rounded-md bg-muted px-2.5 py-1.5 text-xs text-muted-foreground">
-              <TriangleAlert className="size-3.5 shrink-0 text-amber-600" aria-hidden="true" />
-              <span className="min-w-0 flex-1 truncate">
-                Sync paused. Finish billing and setup storage to add snippets.
-              </span>
-              <Button
-                type="button"
-                variant="ghost"
-                size="xs"
-                onClick={() => window.ipc.openExternal(accountSetupUrl)}
-              >
-                Finish on web
-                <ArrowUpRight />
-              </Button>
-            </div>
-          )}
-          <SnippetComposer disabled={accountBlocked} onSubmit={addText} onFiles={addHomeFiles} />
+          <SnippetComposer onSubmit={addText} onFiles={addHomeFiles} />
         </div>
 
         <SnippetList empty={snippets.length === 0}>
