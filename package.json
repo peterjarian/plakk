@@ -9,7 +9,7 @@
     "db:push": "pnpm --filter @plakk/db run db:push",
     "db:studio": "pnpm --filter @plakk/db run db:studio",
     "effect-solutions": "node ./node_modules/effect-solutions/bin.js",
-    "typecheck": "vp run --filter './packages/*' --filter './oxlint-plugin-plakk' typecheck",
+    "typecheck": "vp run --filter './packages/*' --filter './oxlint-plugin-plakk' --filter './apps/web' typecheck",
     "prepare": "vp config && effect-tsgo patch"
   },
   "devDependencies": {
