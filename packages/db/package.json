@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "@effect/sql-pg": "4.0.0-beta.92",
+    "@plakk/shared": "workspace:*",
     "drizzle-orm": "1.0.0-rc.4",
     "effect": "catalog:",
     "pg": "^8.22.0"
