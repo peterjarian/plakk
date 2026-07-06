@@ -12,6 +12,13 @@ dist
 dist-ssr
 out
 .electron-runtime
+.nitro
+.tanstack
+.wrangler
+.output
+.vinxi
+__unconfig*
+todos.json
 *.local
 .env
 .env.*
