@@ -107,7 +107,3 @@ export const ipcEvents = {
     payload: clipboardContentSchema,
   }),
 } as const;
-
-export type AuthStatus = IpcResult<typeof ipcMethods.authGet>;
-export type AuthError = IpcEventPayload<typeof ipcEvents.authError>;
-export type ClipboardContent = IpcEventPayload<typeof ipcEvents.clipboardPaste>;

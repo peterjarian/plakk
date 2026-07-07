@@ -1,8 +1,12 @@
 import { contextBridge } from "electron";
-import type { AuthError, AuthStatus, ClipboardContent } from "../ipc/contracts.ts";
+import type { IpcEventPayload, IpcResult } from "../ipc/contracts.ts";
 import { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
 import { invoke, on } from "../ipc/preload.ts";
 import type { UserConfigPatch } from "../userConfig.ts";
+
+type AuthStatus = IpcResult<typeof ipcMethods.authGet>;
+type AuthError = IpcEventPayload<typeof ipcEvents.authError>;
+type ClipboardPaste = IpcEventPayload<typeof ipcEvents.clipboardPaste>;
 
 contextBridge.exposeInMainWorld("ipc", {
   auth: {
@@ -14,7 +18,7 @@ contextBridge.exposeInMainWorld("ipc", {
     signOut: () => invoke(ipcMethods.authSignOut, undefined),
   },
   clipboard: {
-    onPaste: (callback: (content: ClipboardContent) => void) =>
+    onPaste: (callback: (content: ClipboardPaste) => void) =>
       on(ipcEvents.clipboardPaste, callback),
   },
   openExternal: (url: string) => invoke(ipcMethods.openExternal, url),

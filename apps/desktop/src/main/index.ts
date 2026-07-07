@@ -1,10 +1,9 @@
 import "dotenv/config";
 
 import { join, resolve } from "node:path";
-import { isHttpUrl } from "@plakk/shared";
+import { isHttpUrl, type User } from "@plakk/shared";
 import { app, BrowserWindow, Menu, shell } from "electron";
 import { Config, Effect, Result } from "effect";
-import type { AuthStatus } from "../ipc/contracts.ts";
 import { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
 import { handle, send } from "../ipc/main.ts";
 import type { UserConfigPatch } from "../userConfig.ts";
@@ -44,7 +43,7 @@ async function runAuth<A, E>(
   return result.success;
 }
 
-function authStatus(user: AuthStatus["user"]): AuthStatus {
+function authStatus(user: User | null) {
   return {
     user,
   };
@@ -219,7 +218,7 @@ function registerAuthCallbackProtocol(redirectUrl: URL): void {
   }
 }
 
-function broadcastAuthStatus(status: AuthStatus): void {
+function broadcastAuthStatus(status: ReturnType<typeof authStatus>): void {
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed()) {
       send(window.webContents, ipcEvents.authStatusChanged, status);

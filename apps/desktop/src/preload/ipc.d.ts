@@ -1,7 +1,12 @@
-import type { AuthError, AuthStatus, ClipboardContent } from "../ipc/contracts.ts";
+import type { IpcEventPayload, IpcResult } from "../ipc/contracts.ts";
+import type { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
 import type { UserConfig, UserConfigPatch } from "../userConfig.ts";
 
 export {};
+
+type AuthStatus = IpcResult<typeof ipcMethods.authGet>;
+type AuthError = IpcEventPayload<typeof ipcEvents.authError>;
+type ClipboardPaste = IpcEventPayload<typeof ipcEvents.clipboardPaste>;
 
 declare global {
   interface Window {
@@ -14,7 +19,7 @@ declare global {
         signOut: () => Promise<void>;
       };
       clipboard: {
-        onPaste: (callback: (content: ClipboardContent) => void) => () => void;
+        onPaste: (callback: (content: ClipboardPaste) => void) => () => void;
       };
       openExternal: (url: string) => Promise<void>;
       userConfig: {
