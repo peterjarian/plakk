@@ -7,9 +7,8 @@ import {
   useMemo,
   useState,
 } from "react";
+import type { AuthStatus } from "../../preload/index.ts";
 import type { ReactNode } from "react";
-
-type AuthStatus = Awaited<ReturnType<typeof window.ipc.auth.getAuth>>;
 
 type AuthState = {
   issue: { message: string } | null;

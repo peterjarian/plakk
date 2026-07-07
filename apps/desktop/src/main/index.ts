@@ -1,17 +1,19 @@
 import "dotenv/config";
 
 import { join, resolve } from "node:path";
-import { isHttpUrl } from "@plakk/shared";
+import { isHttpUrl, type User } from "@plakk/shared";
 import { app, BrowserWindow, Menu, shell } from "electron";
 import { Config, Effect, Result } from "effect";
-import type { AuthStatus } from "../auth.ts";
 import { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
 import { handle, send } from "../ipc/main.ts";
-import type { UserConfigPatch } from "../userConfig.ts";
 import { AuthService } from "./auth/AuthService.ts";
 import { readClipboard } from "./clipboard.ts";
 import { UserConfigStore } from "./UserConfigStore.ts";
 import { runEffect } from "./runtime.ts";
+
+type AuthStatus = {
+  readonly user: User | null;
+};
 
 handle(ipcMethods.openExternal, (url) => {
   if (!isHttpUrl(url)) return;
@@ -86,7 +88,7 @@ handle(ipcMethods.authSignOut, async () => {
 
 handle(ipcMethods.userConfigGet, () => runEffect(UserConfigStore.use((store) => store.get)));
 
-handle(ipcMethods.userConfigSet, (patch: UserConfigPatch) =>
+handle(ipcMethods.userConfigSet, (patch) =>
   runEffect(UserConfigStore.use((store) => store.set(patch))),
 );
 
