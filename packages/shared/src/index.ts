@@ -11,8 +11,8 @@ export const UserSchema = Schema.Struct({
   firstName: Schema.NullOr(Schema.String),
   lastName: Schema.NullOr(Schema.String),
   email: Schema.String,
-  createdAt: Schema.String,
-  updatedAt: Schema.String,
+  createdAt: Schema.NullOr(Schema.String),
+  updatedAt: Schema.NullOr(Schema.String),
 });
 
 export type User = typeof UserSchema.Type;
@@ -61,6 +61,3 @@ export const SnippetSchema = Schema.Struct({
 });
 
 export type Snippet = typeof SnippetSchema.Type;
-
-export * from "./api/PlakkApi.ts";
-export * from "./api/RpcError.ts";

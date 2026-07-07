@@ -50,6 +50,23 @@ const userFromWorkOSUser = (user: WorkOSUser): User => ({
   updatedAt: user.updatedAt,
 });
 
+const stringClaim = (value: unknown) => (typeof value === "string" ? value : null);
+
+const userFromTokenClaims = (claims: Record<string, unknown>): User | null => {
+  const id = stringClaim(claims.sub);
+  const email = stringClaim(claims.email);
+  if (id === null || email === null) return null;
+
+  return {
+    id,
+    firstName: stringClaim(claims.first_name),
+    lastName: stringClaim(claims.last_name),
+    email,
+    createdAt: null,
+    updatedAt: null,
+  };
+};
+
 const hasCookie = (cookieHeader: string | undefined, name: string) =>
   cookieHeader?.split(";").some((cookie) => cookie.trim().startsWith(`${name}=`)) ?? false;
 
@@ -102,7 +119,7 @@ const getAuthKitCore = Effect.gen(function* () {
 const AuthLive = Layer.succeed(AuthMiddleware)(
   AuthMiddleware.of((effect, { headers }) =>
     Effect.gen(function* () {
-      const { core, cookieName, workos } = yield* getAuthKitCore;
+      const { core, cookieName } = yield* getAuthKitCore;
       const cookieHeader = headers.cookie;
       const accessToken = bearerTokenFromHeader(headers.authorization);
 
@@ -111,15 +128,13 @@ const AuthLive = Layer.succeed(AuthMiddleware)(
           return yield* unauthenticated();
         }
 
-        const userId = core.parseTokenClaims(accessToken).sub;
-        if (userId === undefined) {
-          return yield* unauthenticated();
-        }
-
-        const currentUser = yield* Effect.tryPromise({
-          try: () => workos.userManagement.getUser(userId),
+        const claims = yield* Effect.try({
+          try: () => core.parseTokenClaims<Record<string, unknown>>(accessToken),
           catch: () => unauthenticated(),
-        }).pipe(Effect.map(userFromWorkOSUser));
+        });
+        const currentUser = userFromTokenClaims(claims);
+        if (currentUser === null) return yield* unauthenticated();
+
         return yield* Effect.provideService(effect, CurrentUser, currentUser);
       });
 
