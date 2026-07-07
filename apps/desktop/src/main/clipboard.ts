@@ -4,7 +4,7 @@ import { basename, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { clipboard, nativeImage } from "electron";
 import { Data, Effect } from "effect";
-import type { ClipboardContent } from "../clipboardContent.ts";
+import type { ClipboardContent } from "../ipc/contracts.ts";
 
 export class ReadClipboardError extends Data.TaggedError("ReadClipboardError")<{
   readonly cause: unknown;

@@ -1,6 +1,5 @@
 import { contextBridge } from "electron";
-import type { AuthError, AuthStatus } from "../auth.ts";
-import type { ClipboardContent } from "../clipboardContent.ts";
+import type { AuthError, AuthStatus, ClipboardContent } from "../ipc/contracts.ts";
 import { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
 import { invoke, on } from "../ipc/preload.ts";
 import type { UserConfigPatch } from "../userConfig.ts";

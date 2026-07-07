@@ -7,7 +7,7 @@ import {
   useMemo,
   useState,
 } from "react";
-import type { AuthStatus } from "../../auth.ts";
+import type { AuthStatus } from "../../ipc/contracts.ts";
 import type { ReactNode } from "react";
 
 type AuthState = {

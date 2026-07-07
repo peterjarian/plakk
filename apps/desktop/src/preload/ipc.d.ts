@@ -1,5 +1,4 @@
-import type { AuthError, AuthStatus } from "../auth.ts";
-import type { ClipboardContent } from "../clipboardContent.ts";
+import type { AuthError, AuthStatus, ClipboardContent } from "../ipc/contracts.ts";
 import type { UserConfig, UserConfigPatch } from "../userConfig.ts";
 
 export {};
