@@ -4,6 +4,7 @@ import { basename, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { clipboard, nativeImage } from "electron";
 import { Data, Effect } from "effect";
+import type { ClipboardContent } from "../clipboardContent.ts";
 
 export class ReadClipboardError extends Data.TaggedError("ReadClipboardError")<{
   readonly cause: unknown;
@@ -21,27 +22,6 @@ export type WritableClipboardContent =
   | {
       readonly type: "image";
       readonly dataUrl: string;
-    };
-
-type ClipboardContent =
-  | {
-      readonly type: "text";
-      readonly text: string;
-    }
-  | {
-      readonly type: "image";
-      readonly dataUrl: string;
-      readonly width: number;
-      readonly height: number;
-    }
-  | {
-      readonly type: "file";
-      readonly name: string;
-      readonly extension: string;
-      readonly size?: number;
-    }
-  | {
-      readonly type: "empty";
     };
 
 function decodeXmlText(value: string): string {

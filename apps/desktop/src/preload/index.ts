@@ -1,14 +1,35 @@
 import { contextBridge } from "electron";
-import type { IpcEventPayload, IpcResult } from "../ipc/contracts.ts";
+import type { AuthError, AuthStatus } from "../auth.ts";
+import type { ClipboardContent } from "../clipboardContent.ts";
 import { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
 import { invoke, on } from "../ipc/preload.ts";
-import type { UserConfigPatch } from "../userConfig.ts";
+import type { UserConfig, UserConfigPatch } from "../userConfig.ts";
 
-type AuthStatus = IpcResult<typeof ipcMethods.authGet>;
-type AuthError = IpcEventPayload<typeof ipcEvents.authError>;
-type ClipboardPaste = IpcEventPayload<typeof ipcEvents.clipboardPaste>;
+export type DesktopApi = {
+  readonly auth: {
+    readonly getAuth: () => Promise<AuthStatus>;
+    readonly onError: (callback: (error: AuthError) => void) => () => void;
+    readonly onStatusChanged: (callback: (status: AuthStatus) => void) => () => void;
+    readonly signIn: () => Promise<void>;
+    readonly signOut: () => Promise<void>;
+  };
+  readonly clipboard: {
+    readonly onPaste: (callback: (content: ClipboardContent) => void) => () => void;
+  };
+  readonly openExternal: (url: string) => Promise<void>;
+  readonly userConfig: {
+    readonly get: () => Promise<UserConfig>;
+    readonly reset: () => Promise<UserConfig>;
+    readonly set: (patch: UserConfigPatch) => Promise<UserConfig>;
+  };
+  readonly versions: {
+    readonly chrome: string;
+    readonly electron: string;
+    readonly node: string;
+  };
+};
 
-contextBridge.exposeInMainWorld("ipc", {
+const desktopApi = {
   auth: {
     getAuth: () => invoke(ipcMethods.authGet, undefined),
     onError: (callback: (error: AuthError) => void) => on(ipcEvents.authError, callback),
@@ -18,7 +39,7 @@ contextBridge.exposeInMainWorld("ipc", {
     signOut: () => invoke(ipcMethods.authSignOut, undefined),
   },
   clipboard: {
-    onPaste: (callback: (content: ClipboardPaste) => void) =>
+    onPaste: (callback: (content: ClipboardContent) => void) =>
       on(ipcEvents.clipboardPaste, callback),
   },
   openExternal: (url: string) => invoke(ipcMethods.openExternal, url),
@@ -32,4 +53,6 @@ contextBridge.exposeInMainWorld("ipc", {
     electron: process.versions.electron,
     node: process.versions.node,
   },
-});
+} satisfies DesktopApi;
+
+contextBridge.exposeInMainWorld("ipc", desktopApi);

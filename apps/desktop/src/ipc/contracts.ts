@@ -1,5 +1,6 @@
-import { UserSchema } from "@plakk/shared";
 import { Schema } from "effect";
+import { AuthErrorSchema, AuthStatusSchema } from "../auth.ts";
+import { ClipboardContentSchema } from "../clipboardContent.ts";
 import { UserConfigPatchSchema, UserConfigSchema } from "../userConfig.ts";
 
 export type IpcSchema = Schema.ConstraintCodec<unknown, unknown, never, never>;
@@ -25,41 +26,11 @@ export type IpcPayload<T extends IpcMethod<IpcSchema, IpcSchema>> = T["payload"]
 export type IpcResult<T extends IpcMethod<IpcSchema, IpcSchema>> = T["result"]["Type"];
 export type IpcEventPayload<T extends IpcEvent<IpcSchema>> = T["payload"]["Type"];
 
-const authStatusSchema = Schema.Struct({
-  user: Schema.NullOr(UserSchema),
-});
-
-const authErrorSchema = Schema.Struct({
-  message: Schema.String,
-});
-
-const clipboardContentSchema = Schema.Union([
-  Schema.Struct({
-    type: Schema.Literal("text"),
-    text: Schema.String,
-  }),
-  Schema.Struct({
-    type: Schema.Literal("image"),
-    dataUrl: Schema.String,
-    width: Schema.Number,
-    height: Schema.Number,
-  }),
-  Schema.Struct({
-    type: Schema.Literal("file"),
-    name: Schema.String,
-    extension: Schema.String,
-    size: Schema.optionalKey(Schema.Number),
-  }),
-  Schema.Struct({
-    type: Schema.Literal("empty"),
-  }),
-]);
-
 export const ipcMethods = {
   authGet: method({
     channel: "auth:get",
     payload: Schema.Void,
-    result: authStatusSchema,
+    result: AuthStatusSchema,
   }),
   authSignIn: method({
     channel: "auth:sign-in",
@@ -96,14 +67,14 @@ export const ipcMethods = {
 export const ipcEvents = {
   authStatusChanged: event({
     channel: "auth:status-changed",
-    payload: authStatusSchema,
+    payload: AuthStatusSchema,
   }),
   authError: event({
     channel: "auth:error",
-    payload: authErrorSchema,
+    payload: AuthErrorSchema,
   }),
   clipboardPaste: event({
     channel: "clipboard:paste",
-    payload: clipboardContentSchema,
+    payload: ClipboardContentSchema,
   }),
 } as const;
