@@ -44,3 +44,5 @@ export const snippets = pgTable(
     ),
   ],
 );
+
+export type SnippetRow = typeof snippets.$inferSelect;

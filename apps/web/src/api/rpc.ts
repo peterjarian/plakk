@@ -6,6 +6,7 @@ import { HttpRouter } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 
 import { PlakkApiLive } from "./PlakkApiLive.ts";
+import { ServerRuntimeLive } from "./ServerRuntime.ts";
 
 const InternalServerErrorLive = Layer.succeed(InternalServerErrorMiddleware)(
   InternalServerErrorMiddleware.of((effect) =>
@@ -30,53 +31,14 @@ const InternalServerErrorLive = Layer.succeed(InternalServerErrorMiddleware)(
   ),
 );
 
-const PlakkApiHandlers = PlakkApi.toLayer(
-  PlakkApi.of({
-    Ping: () =>
-      Effect.succeed({ ok: true }).pipe(
-        Effect.tap(() => Effect.logInfo("Ping")),
-        Effect.withSpan("rpc.Ping"),
-      ),
-    GetAccountStatus: () =>
-      PlakkApiLive.pipe(
-        Effect.flatMap((api) => api.getAccountStatus),
-        Effect.withSpan("rpc.GetAccountStatus"),
-      ),
-    ListSnippets: (input) =>
-      PlakkApiLive.pipe(
-        Effect.flatMap((api) => api.listSnippets(input)),
-        Effect.withSpan("rpc.ListSnippets", {
-          attributes: { limit: input.limit },
-        }),
-      ),
-    CreateTextSnippet: (input) =>
-      PlakkApiLive.pipe(
-        Effect.flatMap((api) => api.createTextSnippet(input.text)),
-        Effect.withSpan("rpc.CreateTextSnippet", { attributes: { byteSize: input.text.length } }),
-      ),
-    CreateStoredSnippet: (input) =>
-      PlakkApiLive.pipe(
-        Effect.flatMap((api) => api.createStoredSnippet(input)),
-        Effect.withSpan("rpc.CreateStoredSnippet", {
-          attributes: { kind: input.kind },
-        }),
-      ),
-    DeleteSnippet: (input) =>
-      PlakkApiLive.pipe(
-        Effect.flatMap((api) => api.deleteSnippet(input.id)),
-        Effect.withSpan("rpc.DeleteSnippet", { attributes: { id: input.id } }),
-      ),
-  }),
-);
-
 const RpcRoutes = RpcServer.layerHttp({
   group: PlakkApi,
   path: "/api/rpc",
   protocol: "http",
   disableFatalDefects: true,
 }).pipe(
-  Layer.provide(PlakkApiHandlers),
-  Layer.provide(PlakkApiLive.Live),
+  Layer.provide(PlakkApiLive),
+  Layer.provide(ServerRuntimeLive),
   Layer.provide(InternalServerErrorLive),
   Layer.provide(RpcSerialization.layerNdjson),
 );
