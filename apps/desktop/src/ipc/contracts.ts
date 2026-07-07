@@ -24,15 +24,19 @@ export type IpcPayload<T extends IpcMethod<IpcSchema, IpcSchema>> = T["payload"]
 export type IpcResult<T extends IpcMethod<IpcSchema, IpcSchema>> = T["result"]["Type"];
 export type IpcEventPayload<T extends IpcEvent<IpcSchema>> = T["payload"]["Type"];
 
-const authStatusSchema = Schema.Struct({
+export const AuthStatusSchema = Schema.Struct({
   user: Schema.NullOr(UserSchema),
 });
 
-const authErrorSchema = Schema.Struct({
+export type AuthStatus = typeof AuthStatusSchema.Type;
+
+export const AuthErrorSchema = Schema.Struct({
   message: Schema.String,
 });
 
-const clipboardContentSchema = Schema.Union([
+export type AuthError = typeof AuthErrorSchema.Type;
+
+export const ClipboardContentSchema = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("text"),
     text: Schema.String,
@@ -54,11 +58,17 @@ const clipboardContentSchema = Schema.Union([
   }),
 ]);
 
-const userConfigSchema = Schema.Struct({
+export type ClipboardContent = typeof ClipboardContentSchema.Type;
+
+const UserConfigSchema = Schema.Struct({
   showExternalLinkWarning: Schema.Boolean,
 });
 
-const userConfigPatchSchema = Schema.Struct({
+export type UserConfig = typeof UserConfigSchema.Type;
+
+export type UserConfigPatch = Partial<UserConfig>;
+
+const UserConfigPatchSchema = Schema.Struct({
   showExternalLinkWarning: Schema.optionalKey(Schema.Boolean),
 });
 
@@ -66,7 +76,7 @@ export const ipcMethods = {
   authGet: method({
     channel: "auth:get",
     payload: Schema.Void,
-    result: authStatusSchema,
+    result: AuthStatusSchema,
   }),
   authSignIn: method({
     channel: "auth:sign-in",
@@ -86,31 +96,31 @@ export const ipcMethods = {
   userConfigGet: method({
     channel: "user-config:get",
     payload: Schema.Void,
-    result: userConfigSchema,
+    result: UserConfigSchema,
   }),
   userConfigReset: method({
     channel: "user-config:reset",
     payload: Schema.Void,
-    result: userConfigSchema,
+    result: UserConfigSchema,
   }),
   userConfigSet: method({
     channel: "user-config:set",
-    payload: userConfigPatchSchema,
-    result: userConfigSchema,
+    payload: UserConfigPatchSchema,
+    result: UserConfigSchema,
   }),
 } as const;
 
 export const ipcEvents = {
   authStatusChanged: event({
     channel: "auth:status-changed",
-    payload: authStatusSchema,
+    payload: AuthStatusSchema,
   }),
   authError: event({
     channel: "auth:error",
-    payload: authErrorSchema,
+    payload: AuthErrorSchema,
   }),
   clipboardPaste: event({
     channel: "clipboard:paste",
-    payload: clipboardContentSchema,
+    payload: ClipboardContentSchema,
   }),
 } as const;

@@ -11,9 +11,7 @@ const UserConfigSchema = Schema.Struct({
 
 type UserConfig = typeof UserConfigSchema.Type;
 
-type UserConfigPatch = {
-  readonly showExternalLinkWarning?: boolean;
-};
+type UserConfigPatch = Partial<UserConfig>;
 
 const defaultUserConfig: UserConfig = {
   showExternalLinkWarning: true,

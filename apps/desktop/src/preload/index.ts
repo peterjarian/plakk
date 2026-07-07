@@ -1,44 +1,13 @@
 import { contextBridge } from "electron";
-import type { User } from "@plakk/shared";
+import type {
+  AuthError,
+  AuthStatus,
+  ClipboardContent,
+  UserConfig,
+  UserConfigPatch,
+} from "../ipc/contracts.ts";
 import { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
 import { invoke, on } from "../ipc/preload.ts";
-
-export type AuthStatus = {
-  readonly user: User | null;
-};
-
-type AuthError = {
-  readonly message: string;
-};
-
-type ClipboardContent =
-  | {
-      readonly type: "text";
-      readonly text: string;
-    }
-  | {
-      readonly type: "image";
-      readonly dataUrl: string;
-      readonly width: number;
-      readonly height: number;
-    }
-  | {
-      readonly type: "file";
-      readonly name: string;
-      readonly extension: string;
-      readonly size?: number;
-    }
-  | {
-      readonly type: "empty";
-    };
-
-type UserConfig = {
-  readonly showExternalLinkWarning: boolean;
-};
-
-type UserConfigPatch = {
-  readonly showExternalLinkWarning?: boolean;
-};
 
 export type DesktopApi = {
   readonly auth: {
