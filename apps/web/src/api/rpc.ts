@@ -2,7 +2,7 @@ import { RpcError } from "@plakk/shared/RpcError";
 import { InternalServerErrorMiddleware, PlakkApi } from "@plakk/shared/PlakkApi";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { HttpRouter } from "effect/unstable/http";
+import { FetchHttpClient, HttpRouter } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 
 import { PlakkApiLive } from "./PlakkApiLive.ts";
@@ -40,6 +40,7 @@ const RpcRoutes = RpcServer.layerHttp({
   Layer.provide(PlakkApiLive),
   Layer.provide(ServerRuntimeLive),
   Layer.provide(InternalServerErrorLive),
+  Layer.provide(FetchHttpClient.layer),
   Layer.provide(RpcSerialization.layerNdjson),
 );
 

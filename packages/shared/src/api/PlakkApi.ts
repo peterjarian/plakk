@@ -54,15 +54,21 @@ export class InternalServerErrorMiddleware extends RpcMiddleware.Service<Interna
   { error: RpcError },
 ) {}
 
-export const PlakkApi = RpcGroup.make(
+export const HealthRpcs = RpcGroup.make(
   Rpc.make("Ping", {
     success: Schema.Struct({ ok: Schema.Boolean }),
     error: RpcError,
   }),
+);
+
+export const AccountRpcs = RpcGroup.make(
   Rpc.make("GetAccountStatus", {
     success: AccountStatusSchema,
     error: RpcError,
   }),
+);
+
+export const StorageRpcs = RpcGroup.make(
   Rpc.make("GetPipeConnectionUrl", {
     payload: { storageProvider: StorageProviderLiteral },
     success: Schema.Struct({ url: Schema.String }),
@@ -78,6 +84,9 @@ export const PlakkApi = RpcGroup.make(
     success: Schema.Void,
     error: RpcError,
   }),
+);
+
+export const SnippetRpcs = RpcGroup.make(
   Rpc.make("ListSnippets", {
     payload: {
       limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 })),
@@ -109,4 +118,8 @@ export const PlakkApi = RpcGroup.make(
     success: Schema.Void,
     error: RpcError,
   }),
-).middleware(InternalServerErrorMiddleware);
+);
+
+export const PlakkApi = HealthRpcs.merge(AccountRpcs, StorageRpcs, SnippetRpcs).middleware(
+  InternalServerErrorMiddleware,
+);
