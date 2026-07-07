@@ -20,6 +20,7 @@ const accountStatus: AccountStatus = {
 const placeholderStorageObjectId = () => `pending-storage:${crypto.randomUUID()}`;
 
 type CreateSnippetInput = {
+  readonly id: string;
   readonly kind: Extract<SnippetKind, "TEXT" | "FILE" | "IMAGE">;
   readonly title: string;
   readonly fileName: string;
@@ -82,6 +83,7 @@ export const PlakkApiLive = PlakkApi.toLayer(
 
         yield* Effect.logInfo("Creating text snippet", { byteSize: input.text.length });
         return yield* insertSnippet(drizzle, {
+          id: input.id,
           kind: "TEXT",
           title: input.text,
           fileName: "text.txt",
