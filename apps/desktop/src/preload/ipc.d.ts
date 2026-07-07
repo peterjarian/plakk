@@ -1,5 +1,6 @@
 import type { AuthError, AuthStatus } from "../auth.ts";
 import type { ClipboardContent } from "../clipboardContent.ts";
+import type { TrayDroppedItem } from "../ipc/contracts.ts";
 import type { UserConfig, UserConfigPatch } from "../userConfig.ts";
 
 export {};
@@ -18,6 +19,9 @@ declare global {
         onPaste: (callback: (content: ClipboardContent) => void) => () => void;
       };
       openExternal: (url: string) => Promise<void>;
+      tray: {
+        onDroppedItem: (callback: (item: TrayDroppedItem) => void) => () => void;
+      };
       userConfig: {
         get: () => Promise<UserConfig>;
         reset: () => Promise<UserConfig>;

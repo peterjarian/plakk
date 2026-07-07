@@ -1,6 +1,7 @@
 import { contextBridge } from "electron";
 import type { AuthError, AuthStatus } from "../auth.ts";
 import type { ClipboardContent } from "../clipboardContent.ts";
+import type { TrayDroppedItem } from "../ipc/contracts.ts";
 import { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
 import { invoke, on } from "../ipc/preload.ts";
 import type { UserConfigPatch } from "../userConfig.ts";
@@ -19,6 +20,10 @@ contextBridge.exposeInMainWorld("ipc", {
       on(ipcEvents.clipboardPaste, callback),
   },
   openExternal: (url: string) => invoke(ipcMethods.openExternal, url),
+  tray: {
+    onDroppedItem: (callback: (item: TrayDroppedItem) => void) =>
+      on(ipcEvents.trayDroppedItem, callback),
+  },
   userConfig: {
     get: () => invoke(ipcMethods.userConfigGet, undefined),
     reset: () => invoke(ipcMethods.userConfigReset, undefined),

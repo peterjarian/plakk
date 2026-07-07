@@ -26,6 +26,19 @@ export type IpcPayload<T extends IpcMethod<IpcSchema, IpcSchema>> = T["payload"]
 export type IpcResult<T extends IpcMethod<IpcSchema, IpcSchema>> = T["result"]["Type"];
 export type IpcEventPayload<T extends IpcEvent<IpcSchema>> = T["payload"]["Type"];
 
+export const TrayDroppedItemSchema = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("files"),
+    paths: Schema.Array(Schema.String),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("text"),
+    text: Schema.String,
+  }),
+]);
+
+export type TrayDroppedItem = typeof TrayDroppedItemSchema.Type;
+
 export const ipcMethods = {
   authGet: method({
     channel: "auth:get",
@@ -76,5 +89,9 @@ export const ipcEvents = {
   clipboardPaste: event({
     channel: "clipboard:paste",
     payload: ClipboardContentSchema,
+  }),
+  trayDroppedItem: event({
+    channel: "tray:dropped-item",
+    payload: TrayDroppedItemSchema,
   }),
 } as const;
