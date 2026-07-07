@@ -18,6 +18,21 @@ export const AccountStatusSchema = Schema.Struct({
 
 export type AccountStatus = typeof AccountStatusSchema.Type;
 
+export const PipeConnectionStatusSchema = Schema.Literals([
+  "CONNECTED",
+  "NEEDS_REAUTHORIZATION",
+  "NOT_CONNECTED",
+] as const);
+
+export type PipeConnectionStatus = typeof PipeConnectionStatusSchema.Type;
+
+export const PipeConnectionSchema = Schema.Struct({
+  storageProvider: StorageProviderLiteral,
+  status: PipeConnectionStatusSchema,
+});
+
+export type PipeConnection = typeof PipeConnectionSchema.Type;
+
 export const SnippetIdSchema = Schema.String.check(Schema.isUUID());
 
 export const ApiSnippetSchema = Schema.Struct({
@@ -46,6 +61,21 @@ export const PlakkApi = RpcGroup.make(
   }),
   Rpc.make("GetAccountStatus", {
     success: AccountStatusSchema,
+    error: RpcError,
+  }),
+  Rpc.make("GetPipeConnectionUrl", {
+    payload: { storageProvider: StorageProviderLiteral },
+    success: Schema.Struct({ url: Schema.String }),
+    error: RpcError,
+  }),
+  Rpc.make("GetPipeConnectionStatus", {
+    payload: { storageProvider: StorageProviderLiteral },
+    success: PipeConnectionSchema,
+    error: RpcError,
+  }),
+  Rpc.make("DisconnectPipe", {
+    payload: { storageProvider: StorageProviderLiteral },
+    success: Schema.Void,
     error: RpcError,
   }),
   Rpc.make("ListSnippets", {

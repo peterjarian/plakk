@@ -24,7 +24,15 @@ pnpm --filter @plakk/web typecheck
 
 ## Environment
 
-No environment variables are required for the blank app or the current `/api/rpc` `Ping` handler.
+WorkOS Pipes RPCs require:
+
+```bash
+WORKOS_API_KEY=sk_...
+WORKOS_USER_ID=user_...
+WORKOS_PIPES_GOOGLE_DRIVE_SLUG=google-drive
+WORKOS_PIPES_ONE_DRIVE_SLUG=microsoft-onedrive
+WORKOS_PIPES_DROPBOX_SLUG=dropbox
+```
 
 ## RPC
 
