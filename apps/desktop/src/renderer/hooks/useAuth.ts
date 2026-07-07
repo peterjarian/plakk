@@ -7,7 +7,7 @@ import {
   useMemo,
   useState,
 } from "react";
-import type { AuthStatus } from "../../auth.ts";
+import type { User } from "@plakk/shared";
 import type { ReactNode } from "react";
 
 type AuthState = {
@@ -15,13 +15,14 @@ type AuthState = {
   isLoading: boolean;
   signIn: () => Promise<void>;
   signOut: () => Promise<void>;
-  user: AuthStatus["user"];
+  user: User | null;
 };
 
 const AuthContext = createContext<AuthState | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [status, setStatus] = useState<AuthStatus | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [user, setUser] = useState<User | null>(null);
   const [issue, setIssue] = useState<{ message: string } | null>(null);
 
   useEffect(() => {
@@ -33,19 +34,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const unsubscribe = window.ipc.auth.onStatusChanged((nextStatus) => {
       if (!isMounted) return;
       setIssue(null);
-      setStatus(nextStatus);
+      setIsLoading(false);
+      setUser(nextStatus.user);
     });
 
     void window.ipc.auth.getAuth().then(
       (nextStatus) => {
         if (!isMounted) return;
         setIssue(null);
-        setStatus(nextStatus);
+        setIsLoading(false);
+        setUser(nextStatus.user);
       },
       (error) => {
         if (!isMounted) return;
         setIssue({ message: error instanceof Error ? error.message : "Could not check session." });
-        setStatus({ user: null });
+        setIsLoading(false);
+        setUser(null);
       },
     );
 
@@ -75,16 +79,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(() => {
-    const user = status?.user ?? null;
-
     return {
       issue,
-      isLoading: status === null,
+      isLoading,
       signIn,
       signOut,
       user,
     };
-  }, [issue, signIn, signOut, status]);
+  }, [isLoading, issue, signIn, signOut, user]);
 
   return createElement(AuthContext.Provider, { value }, children);
 }

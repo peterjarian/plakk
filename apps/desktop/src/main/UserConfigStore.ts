@@ -1,15 +1,21 @@
 import ElectronStore from "electron-store";
 import { Context, Data, Effect, Layer, Schema } from "effect";
-import {
-  defaultUserConfig,
-  UserConfigSchema,
-  type UserConfig,
-  type UserConfigPatch,
-} from "../userConfig.ts";
 
 export class UserConfigStoreError extends Data.TaggedError("UserConfigStoreError")<{
   readonly cause: unknown;
 }> {}
+
+const UserConfigSchema = Schema.Struct({
+  showExternalLinkWarning: Schema.Boolean,
+});
+
+type UserConfig = typeof UserConfigSchema.Type;
+
+type UserConfigPatch = Partial<UserConfig>;
+
+const defaultUserConfig: UserConfig = {
+  showExternalLinkWarning: true,
+};
 
 const decodeUserConfig = (input: unknown) =>
   Schema.decodeUnknownEffect(UserConfigSchema)(input).pipe(

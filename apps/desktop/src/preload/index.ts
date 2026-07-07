@@ -1,12 +1,43 @@
 import { contextBridge } from "electron";
-import type { AuthError, AuthStatus } from "../auth.ts";
-import type { ClipboardContent } from "../clipboardContent.ts";
-import type { TrayDroppedItem } from "../ipc/contracts.ts";
+import type {
+  AuthError,
+  AuthStatus,
+  ClipboardContent,
+  TrayDroppedItem,
+  UserConfig,
+  UserConfigPatch,
+} from "../ipc/contracts.ts";
 import { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
 import { invoke, on } from "../ipc/preload.ts";
-import type { UserConfigPatch } from "../userConfig.ts";
 
-contextBridge.exposeInMainWorld("ipc", {
+export type DesktopApi = {
+  readonly auth: {
+    readonly getAuth: () => Promise<AuthStatus>;
+    readonly onError: (callback: (error: AuthError) => void) => () => void;
+    readonly onStatusChanged: (callback: (status: AuthStatus) => void) => () => void;
+    readonly signIn: () => Promise<void>;
+    readonly signOut: () => Promise<void>;
+  };
+  readonly clipboard: {
+    readonly onPaste: (callback: (content: ClipboardContent) => void) => () => void;
+  };
+  readonly openExternal: (url: string) => Promise<void>;
+  readonly tray: {
+    readonly onDroppedItem: (callback: (item: TrayDroppedItem) => void) => () => void;
+  };
+  readonly userConfig: {
+    readonly get: () => Promise<UserConfig>;
+    readonly reset: () => Promise<UserConfig>;
+    readonly set: (patch: UserConfigPatch) => Promise<UserConfig>;
+  };
+  readonly versions: {
+    readonly chrome: string;
+    readonly electron: string;
+    readonly node: string;
+  };
+};
+
+const desktopApi = {
   auth: {
     getAuth: () => invoke(ipcMethods.authGet, undefined),
     onError: (callback: (error: AuthError) => void) => on(ipcEvents.authError, callback),
@@ -34,4 +65,6 @@ contextBridge.exposeInMainWorld("ipc", {
     electron: process.versions.electron,
     node: process.versions.node,
   },
-});
+} satisfies DesktopApi;
+
+contextBridge.exposeInMainWorld("ipc", desktopApi);

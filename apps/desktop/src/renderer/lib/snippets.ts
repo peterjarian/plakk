@@ -18,8 +18,7 @@ import {
   mockUploadProgressStep,
   mockUploadTickMs,
 } from "../data/mockSnippets.ts";
-import type { ClipboardContent } from "../../clipboardContent.ts";
-import type { TrayDroppedItem } from "../../ipc/contracts.ts";
+import type { ClipboardContent, TrayDroppedItem } from "../../ipc/contracts.ts";
 
 const SnippetListSchema = Schema.Array(SnippetSchema);
 const listeners = new Set<() => void>();
