@@ -4,10 +4,12 @@ import { join, resolve } from "node:path";
 import { isHttpUrl, type User } from "@plakk/shared";
 import { app, BrowserWindow, Menu, shell } from "electron";
 import { Config, Effect, Result } from "effect";
+import type { TrayDroppedItem } from "../ipc/contracts.ts";
 import { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
 import { handle, send } from "../ipc/main.ts";
 import { AuthService } from "./auth/AuthService.ts";
 import { readClipboard } from "./clipboard.ts";
+import { createTrayWindowController } from "./trayWindow.ts";
 import { UserConfigStore } from "./UserConfigStore.ts";
 import { runEffect } from "./runtime.ts";
 
@@ -94,9 +96,10 @@ handle(ipcMethods.userConfigSet, (patch) =>
 
 handle(ipcMethods.userConfigReset, () => runEffect(UserConfigStore.use((store) => store.reset)));
 
-type RendererView = "home" | "settings" | "welcome";
+type RendererView = "home" | "settings" | "tray" | "welcome";
 
 let mainWindow: BrowserWindow | undefined;
+let trayWindowController: ReturnType<typeof createTrayWindowController> | undefined;
 let isQuitting = false;
 
 app.setName(app.isPackaged ? "Plakk" : "Plakk (Dev)");
@@ -237,6 +240,14 @@ function broadcastAuthError(message: string): void {
   }
 }
 
+function broadcastTrayDroppedItem(item: TrayDroppedItem): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) {
+      send(window.webContents, ipcEvents.trayDroppedItem, item);
+    }
+  }
+}
+
 async function handleAuthUrls(values: readonly string[]): Promise<boolean> {
   for (const rawUrl of values) {
     pendingOpenUrls.add(rawUrl);
@@ -331,6 +342,19 @@ if (!hasSingleInstanceLock) {
         { role: "windowMenu" },
       ]),
     );
+
+    trayWindowController = createTrayWindowController({
+      guardExternalWindows,
+      loadTrayRenderer: (window) => loadRenderer(window, "tray"),
+      onDropFiles: ({ files }) => {
+        broadcastTrayDroppedItem({ type: "files", paths: files });
+      },
+      onDropText: ({ text }) => {
+        if (text.trim()) broadcastTrayDroppedItem({ type: "text", text });
+      },
+      preloadPath: join(__dirname, "../preload/index.cjs"),
+    });
+    trayWindowController.setup();
 
     createWindow();
     void handleAuthUrls(process.argv);

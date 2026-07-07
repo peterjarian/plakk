@@ -3,6 +3,7 @@ import type {
   AuthError,
   AuthStatus,
   ClipboardContent,
+  TrayDroppedItem,
   UserConfig,
   UserConfigPatch,
 } from "../ipc/contracts.ts";
@@ -21,6 +22,9 @@ export type DesktopApi = {
     readonly onPaste: (callback: (content: ClipboardContent) => void) => () => void;
   };
   readonly openExternal: (url: string) => Promise<void>;
+  readonly tray: {
+    readonly onDroppedItem: (callback: (item: TrayDroppedItem) => void) => () => void;
+  };
   readonly userConfig: {
     readonly get: () => Promise<UserConfig>;
     readonly reset: () => Promise<UserConfig>;
@@ -47,6 +51,10 @@ const desktopApi = {
       on(ipcEvents.clipboardPaste, callback),
   },
   openExternal: (url: string) => invoke(ipcMethods.openExternal, url),
+  tray: {
+    onDroppedItem: (callback: (item: TrayDroppedItem) => void) =>
+      on(ipcEvents.trayDroppedItem, callback),
+  },
   userConfig: {
     get: () => invoke(ipcMethods.userConfigGet, undefined),
     reset: () => invoke(ipcMethods.userConfigReset, undefined),
