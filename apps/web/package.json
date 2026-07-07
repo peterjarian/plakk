@@ -17,6 +17,8 @@
     "@tanstack/react-router": "^1.132.0",
     "@tanstack/react-start": "^1.132.0",
     "@tanstack/router-plugin": "^1.132.0",
+    "@workos-inc/node": "^10.7.0",
+    "@workos/authkit-session": "^0.7.1",
     "@workos/authkit-tanstack-react-start": "^0.11.0",
     "effect": "catalog:",
     "react": "^19.2.0",
