@@ -1,9 +1,10 @@
+import * as Context from "effect/Context";
 import * as Schema from "effect/Schema";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 import * as RpcMiddleware from "effect/unstable/rpc/RpcMiddleware";
 
-import { SnippetKindLiteral, StorageProviderLiteral } from "../index.ts";
+import { SnippetKindLiteral, StorageProviderLiteral, type User } from "../index.ts";
 import { RpcError } from "./RpcError.ts";
 
 export const AccountBlockedReasonSchema = Schema.Literals(["billing", "storage"] as const);
@@ -49,10 +50,19 @@ export const ApiSnippetSchema = Schema.Struct({
 
 export type ApiSnippet = typeof ApiSnippetSchema.Type;
 
+export class CurrentUser extends Context.Service<CurrentUser, User>()(
+  "@plakk/shared/api/PlakkApi/CurrentUser",
+) {}
+
 export class InternalServerErrorMiddleware extends RpcMiddleware.Service<InternalServerErrorMiddleware>()(
   "InternalServerErrorMiddleware",
   { error: RpcError },
 ) {}
+
+export class AuthMiddleware extends RpcMiddleware.Service<
+  AuthMiddleware,
+  { provides: CurrentUser }
+>()("AuthMiddleware", { error: RpcError }) {}
 
 export const HealthRpcs = RpcGroup.make(
   Rpc.make("Ping", {
@@ -120,6 +130,6 @@ export const SnippetRpcs = RpcGroup.make(
   }),
 );
 
-export const PlakkApi = HealthRpcs.merge(AccountRpcs, StorageRpcs, SnippetRpcs).middleware(
-  InternalServerErrorMiddleware,
-);
+const ProtectedRpcs = AccountRpcs.merge(StorageRpcs, SnippetRpcs).middleware(AuthMiddleware);
+
+export const PlakkApi = HealthRpcs.merge(ProtectedRpcs).middleware(InternalServerErrorMiddleware);

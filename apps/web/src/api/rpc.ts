@@ -1,5 +1,12 @@
 import { RpcError } from "@plakk/shared/RpcError";
-import { InternalServerErrorMiddleware, PlakkApi } from "@plakk/shared/PlakkApi";
+import type { User } from "@plakk/shared";
+import {
+  AuthMiddleware,
+  CurrentUser,
+  InternalServerErrorMiddleware,
+  PlakkApi,
+} from "@plakk/shared/PlakkApi";
+import { getAuth } from "@workos/authkit-tanstack-react-start";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { FetchHttpClient, HttpRouter } from "effect/unstable/http";
@@ -31,6 +38,32 @@ const InternalServerErrorLive = Layer.succeed(InternalServerErrorMiddleware)(
   ),
 );
 
+const AuthLive = Layer.succeed(AuthMiddleware)(
+  AuthMiddleware.of((effect) =>
+    Effect.gen(function* () {
+      const { user } = yield* Effect.promise(() => getAuth());
+
+      if (user === null) {
+        return yield* new RpcError({
+          code: "UNAUTHENTICATED",
+          message: "Sign in to continue.",
+        });
+      }
+
+      const currentUser: User = {
+        id: user.id,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        email: user.email,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
+      };
+
+      return yield* Effect.provideService(effect, CurrentUser, currentUser);
+    }),
+  ),
+);
+
 const RpcRoutes = RpcServer.layerHttp({
   group: PlakkApi,
   path: "/api/rpc",
@@ -39,6 +72,7 @@ const RpcRoutes = RpcServer.layerHttp({
 }).pipe(
   Layer.provide(PlakkApiLive),
   Layer.provide(ServerRuntimeLive),
+  Layer.provide(AuthLive),
   Layer.provide(InternalServerErrorLive),
   Layer.provide(FetchHttpClient.layer),
   Layer.provide(RpcSerialization.layerNdjson),
