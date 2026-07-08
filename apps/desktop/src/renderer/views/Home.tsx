@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowUpRight, Plus, TriangleAlert } from "lucide-react";
-import { formatFileSize, isHttpUrl, snippetKindForFileName, type Snippet } from "@plakk/shared";
+import { formatFileSize, isHttpUrl, type Snippet } from "@plakk/shared";
 import type { ApiSnippet } from "@plakk/shared/PlakkApi";
 import { AppHeader } from "@plakk/ui/components/AppHeader";
 import { SnippetList } from "@plakk/ui/components/SnippetList";
@@ -18,7 +18,9 @@ import {
 import { useUploadActions, useUploadTasks } from "@plakk/ui/hooks/useUploadFlow";
 import { SnippetComposer } from "../components/SnippetComposer.tsx";
 import { useAuth } from "../hooks/useAuth.ts";
+import { useStoredSnippetUpload } from "../hooks/useStoredSnippetUpload.ts";
 import { navigate } from "../lib/navigate.ts";
+import { plakkApi } from "../lib/plakkApi.ts";
 
 const accountSetupUrl = "https://app.plakk.io/account/setup";
 const storageProvider = "GOOGLE_DRIVE" as const;
@@ -50,6 +52,7 @@ export function Home() {
   const auth = useAuth();
   const uploadActions = useUploadActions();
   const uploadTasks = useUploadTasks();
+  const uploadStoredSnippet = useStoredSnippetUpload(storageProvider);
   const [isDragging, setIsDragging] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [accountIssue, setAccountIssue] = useState<string | null>(null);
@@ -93,7 +96,7 @@ export function Home() {
   useEffect(() => {
     let isCancelled = false;
 
-    window.ipc.plakkApi.listSnippets({ limit: 20 }).then(
+    plakkApi.listSnippets({ limit: 20 }).then(
       ({ items }) => {
         if (!isCancelled) setSnippets(items.map(apiSnippetToSnippet));
       },
@@ -150,7 +153,7 @@ export function Home() {
       synced: false,
     });
 
-    void window.ipc.plakkApi.createTextSnippet({ id, text: value }).then(
+    void plakkApi.createTextSnippet({ id, text: value }).then(
       (snippet) => {
         addSnippet(apiSnippetToSnippet(snippet));
       },
@@ -184,35 +187,11 @@ export function Home() {
   }
 
   async function startStoredUpload(file: File) {
-    const kind = snippetKindForFileName(file.name) === "IMAGE" ? "IMAGE" : "FILE";
-    const task = uploadActions.enqueue({
-      fileName: file.name,
-      byteSize: file.size,
-      contentType: file.type || null,
-      kind,
-      storageProvider,
-    });
-
     try {
       setAccountIssue(null);
-      uploadActions.setPhase(task.id, "UPLOADING");
-      const snippet = await window.ipc.storage.uploadStoredSnippetFile({
-        file,
-        id: task.id,
-        kind,
-        title: file.name,
-        fileName: file.name,
-        byteSize: file.size,
-        contentType: file.type || null,
-        storageProvider,
-      });
-      uploadActions.setProgress(task.id, 100);
-      uploadActions.remove(task.id);
-      addSnippet(apiSnippetToSnippet(snippet));
+      addSnippet(apiSnippetToSnippet(await uploadStoredSnippet(file)));
     } catch (error) {
-      const message = errorMessage(error, "Could not upload file.");
-      uploadActions.setPhase(task.id, "FAILED", message);
-      setAccountIssue(message);
+      setAccountIssue(errorMessage(error, "Could not upload file."));
     }
   }
 
@@ -236,7 +215,7 @@ export function Home() {
   function deleteSnippet(id: string) {
     const deleted = snippets.find((snippet) => snippet.id === id);
     setSnippets((current) => current.filter((snippet) => snippet.id !== id));
-    void window.ipc.plakkApi.deleteSnippet({ id }).catch((error) => {
+    void plakkApi.deleteSnippet({ id }).catch((error) => {
       if (deleted !== undefined) addSnippet(deleted);
       setAccountIssue(errorMessage(error, "Could not delete snippet."));
     });

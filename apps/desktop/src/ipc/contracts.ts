@@ -2,20 +2,8 @@ import { Schema } from "effect";
 import { AuthErrorSchema, AuthStatusSchema } from "../auth.ts";
 import { ClipboardContentSchema } from "../clipboardContent.ts";
 import { UserConfigPatchSchema, UserConfigSchema } from "../userConfig.ts";
-import {
-  AccountStatusSchema,
-  ApiSnippetSchema,
-  CreateTextSnippetPayloadSchema,
-  CreateStoredSnippetPayloadSchema,
-  DeleteSnippetPayloadSchema,
-  GetPipeConnectionStatusPayloadSchema,
-  ListSnippetsPayloadSchema,
-  PipeConnectionSchema,
-  PreparedStorageUploadSchema,
-  PrepareStoredSnippetUploadPayloadSchema,
-  UpdateStoredSnippetUploadStatusPayloadSchema,
-} from "@plakk/shared/PlakkApi";
-import type { StoredSnippetFileUploadPayload } from "../storageUpload.ts";
+import { PreparedStorageUploadSchema } from "@plakk/shared/PlakkApi";
+import type { PreparedFileUploadPayload } from "../storageUpload.ts";
 
 export type IpcSchema = Schema.ConstraintCodec<unknown, unknown, never, never>;
 
@@ -40,24 +28,22 @@ export type IpcPayload<T extends IpcMethod<IpcSchema, IpcSchema>> = T["payload"]
 export type IpcResult<T extends IpcMethod<IpcSchema, IpcSchema>> = T["result"]["Type"];
 export type IpcEventPayload<T extends IpcEvent<IpcSchema>> = T["payload"]["Type"];
 
-const createStoredSnippetPayloadFields = CreateStoredSnippetPayloadSchema.fields;
-
-export const StoredSnippetFileUploadPayloadSchema = Schema.Struct({
-  byteSize: createStoredSnippetPayloadFields.byteSize,
-  contentType: createStoredSnippetPayloadFields.contentType,
-  fileName: createStoredSnippetPayloadFields.fileName,
+export const PreparedFileUploadPayloadSchema = Schema.Struct({
+  byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   filePath: Schema.String,
-  id: createStoredSnippetPayloadFields.id,
-  kind: createStoredSnippetPayloadFields.kind,
-  storageProvider: createStoredSnippetPayloadFields.storageProvider,
-  title: createStoredSnippetPayloadFields.title,
-}) satisfies Schema.Schema<StoredSnippetFileUploadPayload>;
+  prepared: PreparedStorageUploadSchema,
+}) satisfies Schema.Schema<PreparedFileUploadPayload>;
 
 export const ipcMethods = {
   authGet: method({
     channel: "auth:get",
     payload: Schema.Void,
     result: AuthStatusSchema,
+  }),
+  authGetAccessToken: method({
+    channel: "auth:get-access-token",
+    payload: Schema.Void,
+    result: Schema.NullOr(Schema.String),
   }),
   authSignIn: method({
     channel: "auth:sign-in",
@@ -74,52 +60,10 @@ export const ipcMethods = {
     payload: Schema.String,
     result: Schema.Void,
   }),
-  plakkApiGetAccountStatus: method({
-    channel: "plakk-api:get-account-status",
-    payload: Schema.Void,
-    result: AccountStatusSchema,
-  }),
-  plakkApiGetPipeConnectionStatus: method({
-    channel: "plakk-api:get-pipe-connection-status",
-    payload: GetPipeConnectionStatusPayloadSchema,
-    result: PipeConnectionSchema,
-  }),
-  plakkApiListSnippets: method({
-    channel: "plakk-api:list-snippets",
-    payload: ListSnippetsPayloadSchema,
-    result: Schema.Struct({
-      items: Schema.Array(ApiSnippetSchema),
-    }),
-  }),
-  plakkApiCreateStoredSnippet: method({
-    channel: "plakk-api:create-stored-snippet",
-    payload: CreateStoredSnippetPayloadSchema,
-    result: ApiSnippetSchema,
-  }),
-  plakkApiCreateTextSnippet: method({
-    channel: "plakk-api:create-text-snippet",
-    payload: CreateTextSnippetPayloadSchema,
-    result: ApiSnippetSchema,
-  }),
-  plakkApiPrepareStoredSnippetUpload: method({
-    channel: "plakk-api:prepare-stored-snippet-upload",
-    payload: PrepareStoredSnippetUploadPayloadSchema,
-    result: PreparedStorageUploadSchema,
-  }),
-  plakkApiUpdateStoredSnippetUploadStatus: method({
-    channel: "plakk-api:update-stored-snippet-upload-status",
-    payload: UpdateStoredSnippetUploadStatusPayloadSchema,
-    result: ApiSnippetSchema,
-  }),
-  plakkApiDeleteSnippet: method({
-    channel: "plakk-api:delete-snippet",
-    payload: DeleteSnippetPayloadSchema,
+  storageUploadPreparedFile: method({
+    channel: "storage:upload-prepared-file",
+    payload: PreparedFileUploadPayloadSchema,
     result: Schema.Void,
-  }),
-  storageUploadStoredSnippetFile: method({
-    channel: "storage:upload-stored-snippet-file",
-    payload: StoredSnippetFileUploadPayloadSchema,
-    result: ApiSnippetSchema,
   }),
   userConfigGet: method({
     channel: "user-config:get",

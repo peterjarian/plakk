@@ -1,7 +1,6 @@
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import type { PreparedStorageUpload } from "@plakk/shared/PlakkApi";
-import type { CreateStoredSnippetPayload } from "@plakk/shared/PlakkApi";
 
 export type PreparedFileUploadPayload = {
   readonly prepared: PreparedStorageUpload;
@@ -9,14 +8,7 @@ export type PreparedFileUploadPayload = {
   readonly byteSize: number;
 };
 
-export type StoredSnippetFileUploadPayload = Omit<CreateStoredSnippetPayload, "storageObjectId"> & {
-  readonly filePath: string;
-};
-
-export type RendererStoredSnippetFileUploadPayload = Omit<
-  StoredSnippetFileUploadPayload,
-  "filePath"
-> & {
+export type RendererPreparedFileUploadPayload = Omit<PreparedFileUploadPayload, "filePath"> & {
   readonly file: File;
 };
 
