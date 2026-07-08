@@ -4,7 +4,12 @@ import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 import * as RpcMiddleware from "effect/unstable/rpc/RpcMiddleware";
 
-import { SnippetKindLiteral, StorageProviderLiteral, type User } from "../index.ts";
+import {
+  SnippetKindLiteral,
+  SnippetUploadStatusLiteral,
+  StorageProviderLiteral,
+  type User,
+} from "../index.ts";
 import { RpcError } from "./RpcError.ts";
 
 export const AccountBlockedReasonSchema = Schema.Literals(["billing", "storage"] as const);
@@ -65,6 +70,7 @@ export const ApiSnippetSchema = Schema.Struct({
   byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   contentType: Schema.NullOr(Schema.String),
   storageProvider: Schema.NullOr(StorageProviderLiteral),
+  uploadStatus: SnippetUploadStatusLiteral,
   createdAt: Schema.String,
   updatedAt: Schema.String,
 });
@@ -152,7 +158,16 @@ export const SnippetRpcs = RpcGroup.make(
       byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
       contentType: Schema.NullOr(Schema.String),
       storageProvider: StorageProviderLiteral,
-      storageObjectId: Schema.String,
+      storageObjectId: Schema.NullOr(Schema.String),
+    },
+    success: ApiSnippetSchema,
+    error: RpcError,
+  }),
+  Rpc.make("UpdateStoredSnippetUploadStatus", {
+    payload: {
+      id: SnippetIdSchema,
+      uploadStatus: Schema.Literals(["READY", "FAILED"] as const),
+      storageObjectId: Schema.optionalKey(Schema.NullOr(Schema.String)),
     },
     success: ApiSnippetSchema,
     error: RpcError,

@@ -1,6 +1,6 @@
-import { and, desc, Drizzle, eq, isNull, type DrizzleService } from "@plakk/db";
+import { and, desc, Drizzle, eq, isNull, or, type DrizzleService } from "@plakk/db";
 import { snippets } from "@plakk/db/schema";
-import type { SnippetKind, StorageProvider } from "@plakk/shared";
+import type { SnippetKind, SnippetUploadStatus, StorageProvider } from "@plakk/shared";
 import {
   AccountRpcs,
   CurrentUser,
@@ -50,7 +50,7 @@ type CreateSnippetInput =
   | (CreateSnippetInputBase & {
       readonly kind: Extract<SnippetKind, "FILE" | "IMAGE">;
       readonly storageProvider: StorageProvider;
-      readonly storageObjectId: string;
+      readonly storageObjectId: string | null;
     });
 
 const insertSnippet = Effect.fn("@plakk/web/api/PlakkApiLive.insertSnippet")(function* (
@@ -62,12 +62,14 @@ const insertSnippet = Effect.fn("@plakk/web/api/PlakkApiLive.insertSnippet")(fun
     input.kind === "TEXT"
       ? { storageProvider: null, storageObjectId: null }
       : { storageProvider: input.storageProvider, storageObjectId: input.storageObjectId };
+  const uploadStatus: SnippetUploadStatus = input.kind === "TEXT" ? "READY" : "UPLOADING";
   const [snippet] = yield* drizzle.db
     .insert(snippets)
     .values({
       ...input,
       ownerWorkosUserId: currentUser.id,
       ...storage,
+      uploadStatus,
     })
     .returning()
     .pipe(Effect.orDie);
@@ -237,14 +239,67 @@ const SnippetsLive = SnippetRpcs.of({
   CreateStoredSnippet: Effect.fn("rpc.CreateStoredSnippet")(function* (input) {
     return yield* Effect.gen(function* () {
       const drizzle = yield* Drizzle;
+      const storage = yield* StorageProviderService;
+      const currentUser = yield* CurrentUser;
 
       yield* Effect.logInfo("Creating stored snippet metadata", {
         kind: input.kind,
         byteSize: input.byteSize,
       });
+      yield* storage
+        .ensureConnected({
+          storageProvider: input.storageProvider,
+          workosUserId: currentUser.id,
+        })
+        .pipe(
+          Effect.catchTags({
+            StorageNotConnectedError: (error) =>
+              Effect.fail(new RpcError({ code: "FORBIDDEN", message: error.message })),
+            StorageNeedsReauthorizationError: (error) =>
+              Effect.fail(new RpcError({ code: "FORBIDDEN", message: error.message })),
+            StorageCredentialsError: (error) =>
+              Effect.fail(new RpcError({ code: "INTERNAL_SERVER_ERROR", message: error.message })),
+          }),
+        );
       return yield* insertSnippet(drizzle, input);
     }).pipe(Effect.annotateSpans({ kind: input.kind }));
   }),
+  UpdateStoredSnippetUploadStatus: Effect.fn("rpc.UpdateStoredSnippetUploadStatus")(
+    function* (input) {
+      return yield* Effect.gen(function* () {
+        const drizzle = yield* Drizzle;
+        const currentUser = yield* CurrentUser;
+        const now = DateTime.toDateUtc(yield* DateTime.now);
+        const [snippet] = yield* drizzle.db
+          .update(snippets)
+          .set({
+            uploadStatus: input.uploadStatus,
+            updatedAt: now,
+            ...(input.storageObjectId !== undefined
+              ? { storageObjectId: input.storageObjectId }
+              : {}),
+          })
+          .where(
+            and(
+              eq(snippets.id, input.id),
+              eq(snippets.ownerWorkosUserId, currentUser.id),
+              or(eq(snippets.kind, "FILE"), eq(snippets.kind, "IMAGE")),
+            ),
+          )
+          .returning()
+          .pipe(Effect.orDie);
+
+        if (snippet === undefined) {
+          return yield* new RpcError({
+            code: "NOT_FOUND",
+            message: "Stored snippet not found.",
+          });
+        }
+
+        return toApiSnippet(snippet);
+      }).pipe(Effect.annotateSpans({ id: input.id }));
+    },
+  ),
   DeleteSnippet: Effect.fn("rpc.DeleteSnippet")(function* (input) {
     return yield* Effect.gen(function* () {
       const drizzle = yield* Drizzle;

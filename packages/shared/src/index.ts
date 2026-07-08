@@ -23,6 +23,12 @@ export const SnippetKindLiteral = Schema.Literals(SNIPPET_KINDS);
 
 export type SnippetKind = typeof SnippetKindLiteral.Type;
 
+export const SNIPPET_UPLOAD_STATUSES = ["UPLOADING", "READY", "FAILED"] as const;
+
+export const SnippetUploadStatusLiteral = Schema.Literals(SNIPPET_UPLOAD_STATUSES);
+
+export type SnippetUploadStatus = typeof SnippetUploadStatusLiteral.Type;
+
 export const isHttpUrl = (value: string): boolean => {
   try {
     const url = new URL(value);

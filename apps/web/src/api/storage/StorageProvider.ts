@@ -17,6 +17,15 @@ import type {
   StorageProviderError,
 } from "./types.ts";
 
+type ConnectedStorageInput = {
+  readonly storageProvider: PrepareStorageUploadInput["storageProvider"];
+  readonly workosUserId: string;
+};
+
+type ConnectedStorageToken = {
+  readonly accessToken: string;
+};
+
 export class StorageNotConnectedError extends Schema.TaggedErrorClass<StorageNotConnectedError>()(
   "StorageNotConnectedError",
   { message: Schema.String },
@@ -57,6 +66,12 @@ const storageProviderAdapters = {
 export class StorageProviderService extends Context.Service<
   StorageProviderService,
   {
+    readonly ensureConnected: (
+      input: ConnectedStorageInput,
+    ) => Effect.Effect<
+      void,
+      StorageCredentialsError | StorageNotConnectedError | StorageNeedsReauthorizationError
+    >;
     readonly prepareUpload: (
       input: Omit<PrepareStorageUploadInput, "accessToken"> & { readonly workosUserId: string },
     ) => Effect.Effect<PreparedStorageUpload, StorageUploadError>;
@@ -72,9 +87,12 @@ export class StorageProviderService extends Context.Service<
       const workos = yield* makeWorkOSClient(Redacted.value(apiKey), clientId);
       const httpClient = yield* HttpClient.HttpClient;
 
-      const prepareUpload = Effect.fn("StorageProviderService.prepareUpload")(function* (
-        input: Omit<PrepareStorageUploadInput, "accessToken"> & { readonly workosUserId: string },
-      ): Effect.fn.Return<PreparedStorageUpload, StorageUploadError> {
+      const getConnectedToken = Effect.fn("StorageProviderService.getConnectedToken")(function* (
+        input: ConnectedStorageInput,
+      ): Effect.fn.Return<
+        ConnectedStorageToken,
+        StorageCredentialsError | StorageNotConnectedError | StorageNeedsReauthorizationError
+      > {
         const token = yield* Effect.tryPromise({
           try: () =>
             workos.pipes.getAccessToken({
@@ -100,13 +118,26 @@ export class StorageProviderService extends Context.Service<
           });
         }
 
-        const providerInput = { ...input, accessToken: token.accessToken.accessToken };
+        return { accessToken: token.accessToken.accessToken };
+      });
+
+      const ensureConnected = Effect.fn("StorageProviderService.ensureConnected")(function* (
+        input: ConnectedStorageInput,
+      ) {
+        yield* getConnectedToken(input);
+      });
+
+      const prepareUpload = Effect.fn("StorageProviderService.prepareUpload")(function* (
+        input: Omit<PrepareStorageUploadInput, "accessToken"> & { readonly workosUserId: string },
+      ): Effect.fn.Return<PreparedStorageUpload, StorageUploadError> {
+        const token = yield* getConnectedToken(input);
+        const providerInput = { ...input, accessToken: token.accessToken };
         return yield* storageProviderAdapters[input.storageProvider]
           .prepareUpload(providerInput)
           .pipe(Effect.provideService(HttpClient.HttpClient, httpClient));
       });
 
-      return StorageProviderService.of({ prepareUpload });
+      return StorageProviderService.of({ ensureConnected, prepareUpload });
     }),
   );
 }
