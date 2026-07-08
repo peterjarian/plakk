@@ -10,6 +10,7 @@
     "preview": "electron-vite preview"
   },
   "dependencies": {
+    "@effect/atom-react": "4.0.0-beta.92",
     "@plakk/shared": "workspace:*",
     "@plakk/ui": "workspace:*",
     "@workos-inc/node": "^10.7.0",

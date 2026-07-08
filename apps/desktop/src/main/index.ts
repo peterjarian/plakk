@@ -2,12 +2,8 @@ import "dotenv/config";
 
 import { join, resolve } from "node:path";
 import { isHttpUrl } from "@plakk/shared";
-import { PlakkApi } from "@plakk/shared/PlakkApi";
 import { app, BrowserWindow, Menu, shell } from "electron";
 import { Config, Effect, Result } from "effect";
-import { FetchHttpClient } from "effect/unstable/http";
-import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
-import type { RpcClientError } from "effect/unstable/rpc/RpcClientError";
 import type { AuthStatus } from "../auth.ts";
 import { handle, send } from "../ipc/main.ts";
 import { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
@@ -61,6 +57,13 @@ handle(ipcMethods.authGet, () =>
   ),
 );
 
+handle(ipcMethods.authGetAccessToken, () =>
+  runAuth(
+    AuthService.use((auth) => auth.getAccessToken()),
+    "Could not get access token.",
+  ),
+);
+
 handle(ipcMethods.authSignIn, async () => {
   const redirectUrl = await runAuth(
     Config.url("WORKOS_REDIRECT_URI"),
@@ -104,88 +107,6 @@ let isQuitting = false;
 app.setName(app.isPackaged ? "Plakk" : "Plakk (Dev)");
 
 const pendingOpenUrls = new Set<string>();
-const DEFAULT_PLAKK_API_RPC_URL = "http://localhost:3000/api/rpc";
-type PlakkApiClient = RpcClient.FromGroup<typeof PlakkApi, RpcClientError>;
-
-function callPlakkApi<A>(useClient: (client: PlakkApiClient) => Effect.Effect<A, unknown>) {
-  return Effect.gen(function* () {
-    const accessToken = yield* AuthService.use((auth) => auth.getAccessToken());
-    if (accessToken === null) {
-      return yield* Effect.fail(new Error("Sign in to continue."));
-    }
-
-    const url = yield* Config.string("PLAKK_API_RPC_URL").pipe(
-      Effect.orElseSucceed(() => DEFAULT_PLAKK_API_RPC_URL),
-    );
-    const program = Effect.gen(function* () {
-      const client = yield* RpcClient.make(PlakkApi);
-      return yield* useClient(client).pipe(
-        RpcClient.withHeaders({ authorization: `Bearer ${accessToken}` }),
-      );
-    });
-
-    return yield* program.pipe(
-      Effect.provide(RpcClient.layerProtocolHttp({ url })),
-      Effect.provide(FetchHttpClient.layer),
-      Effect.provide(RpcSerialization.layerNdjson),
-      Effect.scoped,
-    );
-  });
-}
-
-async function runPlakkApi<A>(
-  effect: (client: PlakkApiClient) => Effect.Effect<A, unknown>,
-  fallback: string,
-): Promise<A> {
-  const result = await runEffect(Effect.result(callPlakkApi(effect)));
-
-  if (!Result.isSuccess(result)) {
-    throw new Error(authErrorMessage(result.failure, fallback));
-  }
-
-  return result.success;
-}
-
-handle(ipcMethods.plakkApiGetAccountStatus, () =>
-  runPlakkApi((client) => client.GetAccountStatus(), "Could not load account status."),
-);
-
-handle(ipcMethods.plakkApiGetPipeConnectionStatus, (payload) =>
-  runPlakkApi(
-    (client) => client.GetPipeConnectionStatus(payload),
-    "Could not load storage connection status.",
-  ),
-);
-
-handle(ipcMethods.plakkApiListSnippets, (payload) =>
-  runPlakkApi((client) => client.ListSnippets(payload), "Could not load snippets."),
-);
-
-handle(ipcMethods.plakkApiCreateStoredSnippet, (payload) =>
-  runPlakkApi((client) => client.CreateStoredSnippet(payload), "Could not create stored snippet."),
-);
-
-handle(ipcMethods.plakkApiCreateTextSnippet, (payload) =>
-  runPlakkApi((client) => client.CreateTextSnippet(payload), "Could not create text snippet."),
-);
-
-handle(ipcMethods.plakkApiPrepareStoredSnippetUpload, (payload) =>
-  runPlakkApi(
-    (client) => client.PrepareStoredSnippetUpload(payload),
-    "Could not prepare stored snippet upload.",
-  ),
-);
-
-handle(ipcMethods.plakkApiUpdateStoredSnippetUploadStatus, (payload) =>
-  runPlakkApi(
-    (client) => client.UpdateStoredSnippetUploadStatus(payload),
-    "Could not update upload status.",
-  ),
-);
-
-handle(ipcMethods.plakkApiDeleteSnippet, (payload) =>
-  runPlakkApi((client) => client.DeleteSnippet(payload), "Could not delete snippet."),
-);
 
 function loadRenderer(window: BrowserWindow, view?: RendererView) {
   if (!app.isPackaged && process.env.ELECTRON_RENDERER_URL) {
