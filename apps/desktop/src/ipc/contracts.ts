@@ -2,6 +2,19 @@ import { Schema } from "effect";
 import { AuthErrorSchema, AuthStatusSchema } from "../auth.ts";
 import { ClipboardContentSchema } from "../clipboardContent.ts";
 import { UserConfigPatchSchema, UserConfigSchema } from "../userConfig.ts";
+import {
+  AccountStatusSchema,
+  ApiSnippetSchema,
+  CreateTextSnippetPayloadSchema,
+  CreateStoredSnippetPayloadSchema,
+  DeleteSnippetPayloadSchema,
+  GetPipeConnectionStatusPayloadSchema,
+  ListSnippetsPayloadSchema,
+  PipeConnectionSchema,
+  PreparedStorageUploadSchema,
+  PrepareStoredSnippetUploadPayloadSchema,
+  UpdateStoredSnippetUploadStatusPayloadSchema,
+} from "@plakk/shared/PlakkApi";
 
 export type IpcSchema = Schema.ConstraintCodec<unknown, unknown, never, never>;
 
@@ -45,6 +58,48 @@ export const ipcMethods = {
   openExternal: method({
     channel: "open-external",
     payload: Schema.String,
+    result: Schema.Void,
+  }),
+  plakkApiGetAccountStatus: method({
+    channel: "plakk-api:get-account-status",
+    payload: Schema.Void,
+    result: AccountStatusSchema,
+  }),
+  plakkApiGetPipeConnectionStatus: method({
+    channel: "plakk-api:get-pipe-connection-status",
+    payload: GetPipeConnectionStatusPayloadSchema,
+    result: PipeConnectionSchema,
+  }),
+  plakkApiListSnippets: method({
+    channel: "plakk-api:list-snippets",
+    payload: ListSnippetsPayloadSchema,
+    result: Schema.Struct({
+      items: Schema.Array(ApiSnippetSchema),
+    }),
+  }),
+  plakkApiCreateStoredSnippet: method({
+    channel: "plakk-api:create-stored-snippet",
+    payload: CreateStoredSnippetPayloadSchema,
+    result: ApiSnippetSchema,
+  }),
+  plakkApiCreateTextSnippet: method({
+    channel: "plakk-api:create-text-snippet",
+    payload: CreateTextSnippetPayloadSchema,
+    result: ApiSnippetSchema,
+  }),
+  plakkApiPrepareStoredSnippetUpload: method({
+    channel: "plakk-api:prepare-stored-snippet-upload",
+    payload: PrepareStoredSnippetUploadPayloadSchema,
+    result: PreparedStorageUploadSchema,
+  }),
+  plakkApiUpdateStoredSnippetUploadStatus: method({
+    channel: "plakk-api:update-stored-snippet-upload-status",
+    payload: UpdateStoredSnippetUploadStatusPayloadSchema,
+    result: ApiSnippetSchema,
+  }),
+  plakkApiDeleteSnippet: method({
+    channel: "plakk-api:delete-snippet",
+    payload: DeleteSnippetPayloadSchema,
     result: Schema.Void,
   }),
   userConfigGet: method({

@@ -25,6 +25,7 @@ export class AuthServiceError extends Schema.TaggedErrorClass<AuthServiceError>(
 export class AuthService extends Context.Service<
   AuthService,
   {
+    getAccessToken(): Effect.Effect<string | null, AuthServiceFailure>;
     getSession(): Effect.Effect<User | null, AuthServiceFailure>;
     handleCallbackUrl(rawUrl: string): Effect.Effect<User | null, AuthServiceFailure>;
     startSignIn(): Effect.Effect<string, AuthServiceFailure>;
@@ -142,6 +143,10 @@ export class AuthService extends Context.Service<
       });
 
       return AuthService.of({
+        getAccessToken: Effect.fn("AuthService.getAccessToken")(function* () {
+          const credentials = yield* getValidCredentials();
+          return credentials?.accessToken ?? null;
+        }),
         getSession,
         handleCallbackUrl: Effect.fn("AuthService.handleCallbackUrl")(function* (rawUrl: string) {
           const url = yield* Effect.sync(() => (URL.canParse(rawUrl) ? new URL(rawUrl) : null));

@@ -1,4 +1,13 @@
 import { contextBridge } from "electron";
+import type {
+  CreateStoredSnippetPayload,
+  CreateTextSnippetPayload,
+  DeleteSnippetPayload,
+  GetPipeConnectionStatusPayload,
+  ListSnippetsPayload,
+  PrepareStoredSnippetUploadPayload,
+  UpdateStoredSnippetUploadStatusPayload,
+} from "@plakk/shared/PlakkApi";
 import type { AuthError, AuthStatus } from "../auth.ts";
 import type { ClipboardContent } from "../clipboardContent.ts";
 import { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
@@ -19,6 +28,23 @@ contextBridge.exposeInMainWorld("ipc", {
       on(ipcEvents.clipboardPaste, callback),
   },
   openExternal: (url: string) => invoke(ipcMethods.openExternal, url),
+  plakkApi: {
+    createStoredSnippet: (payload: CreateStoredSnippetPayload) =>
+      invoke(ipcMethods.plakkApiCreateStoredSnippet, payload),
+    createTextSnippet: (payload: CreateTextSnippetPayload) =>
+      invoke(ipcMethods.plakkApiCreateTextSnippet, payload),
+    deleteSnippet: (payload: DeleteSnippetPayload) =>
+      invoke(ipcMethods.plakkApiDeleteSnippet, payload),
+    getAccountStatus: () => invoke(ipcMethods.plakkApiGetAccountStatus, undefined),
+    getPipeConnectionStatus: (payload: GetPipeConnectionStatusPayload) =>
+      invoke(ipcMethods.plakkApiGetPipeConnectionStatus, payload),
+    listSnippets: (payload: ListSnippetsPayload) =>
+      invoke(ipcMethods.plakkApiListSnippets, payload),
+    prepareStoredSnippetUpload: (payload: PrepareStoredSnippetUploadPayload) =>
+      invoke(ipcMethods.plakkApiPrepareStoredSnippetUpload, payload),
+    updateStoredSnippetUploadStatus: (payload: UpdateStoredSnippetUploadStatusPayload) =>
+      invoke(ipcMethods.plakkApiUpdateStoredSnippetUploadStatus, payload),
+  },
   userConfig: {
     get: () => invoke(ipcMethods.userConfigGet, undefined),
     reset: () => invoke(ipcMethods.userConfigReset, undefined),
