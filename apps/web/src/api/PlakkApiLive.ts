@@ -181,20 +181,21 @@ const StorageLive = StorageRpcs.of({
       const currentUser = yield* CurrentUser;
 
       return yield* storage.prepareUpload({ ...input, workosUserId: currentUser.id }).pipe(
-        Effect.mapError(
-          (error) =>
-            new RpcError({
-              code:
-                error._tag === "StorageNotConnectedError" ||
-                error._tag === "StorageNeedsReauthorizationError"
-                  ? "FORBIDDEN"
-                  : "INTERNAL_SERVER_ERROR",
-              message:
-                error._tag === "StorageProviderError"
-                  ? `${error.storageProvider}: ${error.message}`
-                  : error.message,
-            }),
-        ),
+        Effect.catchTags({
+          StorageNotConnectedError: (error) =>
+            Effect.fail(new RpcError({ code: "FORBIDDEN", message: error.message })),
+          StorageNeedsReauthorizationError: (error) =>
+            Effect.fail(new RpcError({ code: "FORBIDDEN", message: error.message })),
+          StorageCredentialsError: (error) =>
+            Effect.fail(new RpcError({ code: "INTERNAL_SERVER_ERROR", message: error.message })),
+          StorageProviderError: (error) =>
+            Effect.fail(
+              new RpcError({
+                code: "INTERNAL_SERVER_ERROR",
+                message: `${error.storageProvider}: ${error.message}`,
+              }),
+            ),
+        }),
       );
     }).pipe(Effect.annotateSpans({ storageProvider: input.storageProvider }));
   }),

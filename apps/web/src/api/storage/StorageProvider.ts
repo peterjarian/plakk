@@ -14,7 +14,6 @@ import { OneDriveStorageProvider } from "./OneDriveStorageProvider.ts";
 import type {
   PreparedStorageUpload,
   PrepareStorageUploadInput,
-  StorageProviderAdapter,
   StorageProviderError,
 } from "./types.ts";
 
@@ -41,6 +40,13 @@ export type StorageUploadError =
   | StorageNeedsReauthorizationError
   | StorageCredentialsError
   | StorageProviderError;
+
+export type StorageProviderAdapter = {
+  readonly storageProvider: PrepareStorageUploadInput["storageProvider"];
+  readonly prepareUpload: (
+    input: PrepareStorageUploadInput,
+  ) => Effect.Effect<PreparedStorageUpload, StorageProviderError, HttpClient.HttpClient>;
+};
 
 const storageProviderAdapters = {
   [GoogleDriveStorageProvider.storageProvider]: GoogleDriveStorageProvider,

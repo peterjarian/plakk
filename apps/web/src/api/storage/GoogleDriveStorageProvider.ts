@@ -7,8 +7,8 @@ import {
   StorageProviderError,
   type PreparedStorageUpload,
   type PrepareStorageUploadInput,
-  type StorageProviderAdapter,
 } from "./types.ts";
+import type { StorageProviderAdapter } from "./StorageProvider.ts";
 
 const GOOGLE_DRIVE_RESUMABLE_UPLOAD_URL =
   "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id";

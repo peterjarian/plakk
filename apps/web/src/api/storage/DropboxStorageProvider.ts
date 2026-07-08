@@ -6,8 +6,8 @@ import {
   StorageProviderError,
   type PreparedStorageUpload,
   type PrepareStorageUploadInput,
-  type StorageProviderAdapter,
 } from "./types.ts";
+import type { StorageProviderAdapter } from "./StorageProvider.ts";
 
 const DROPBOX_TEMPORARY_UPLOAD_LINK_URL =
   "https://api.dropboxapi.com/2/files/get_temporary_upload_link";

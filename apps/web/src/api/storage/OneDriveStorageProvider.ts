@@ -6,8 +6,8 @@ import {
   StorageProviderError,
   type PreparedStorageUpload,
   type PrepareStorageUploadInput,
-  type StorageProviderAdapter,
 } from "./types.ts";
+import type { StorageProviderAdapter } from "./StorageProvider.ts";
 
 const ONE_DRIVE_ROOT_URL = "https://graph.microsoft.com/v1.0/me/drive/root:";
 const ONE_DRIVE_PART_BYTE_MULTIPLE = 320 * 1024;

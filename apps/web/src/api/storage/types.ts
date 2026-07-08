@@ -1,6 +1,4 @@
 import { StorageProviderLiteral, type StorageProvider } from "@plakk/shared";
-import type * as Effect from "effect/Effect";
-import type * as HttpClient from "effect/unstable/http/HttpClient";
 import * as Schema from "effect/Schema";
 
 export class StorageProviderError extends Schema.TaggedErrorClass<StorageProviderError>()(
@@ -37,11 +35,4 @@ export type PrepareStorageUploadInput = {
   readonly fileName: string;
   readonly byteSize: number;
   readonly contentType: string | null;
-};
-
-export type StorageProviderAdapter = {
-  readonly storageProvider: StorageProvider;
-  readonly prepareUpload: (
-    input: PrepareStorageUploadInput,
-  ) => Effect.Effect<PreparedStorageUpload, StorageProviderError, HttpClient.HttpClient>;
 };
