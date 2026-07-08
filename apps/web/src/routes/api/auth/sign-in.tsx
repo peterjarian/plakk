@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { getSignInUrl } from "@workos/authkit-tanstack-react-start";
 
 export const Route = createFileRoute("/api/auth/sign-in")({
@@ -10,7 +10,7 @@ export const Route = createFileRoute("/api/auth/sign-in")({
           returnPathname === null ? undefined : { data: { returnPathname } },
         );
 
-        return new Response(null, { status: 307, headers: { Location: url } });
+        throw redirect({ href: url });
       },
     },
   },

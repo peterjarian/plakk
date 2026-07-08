@@ -1,6 +1,4 @@
 import { RpcError } from "@plakk/shared/RpcError";
-import type { User } from "@plakk/shared";
-import { AuthKitCore, sessionEncryption } from "@workos/authkit-session";
 import {
   AuthMiddleware,
   CurrentUser,
@@ -8,13 +6,14 @@ import {
   PlakkApi,
 } from "@plakk/shared/PlakkApi";
 import { getAuth } from "@workos/authkit-tanstack-react-start";
-import { WorkOS, type User as WorkOSUser } from "@workos-inc/node";
+import { WorkOS } from "@workos-inc/node";
 import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { FetchHttpClient, HttpRouter } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 
+import { userFromWorkOSAccessToken, userFromWorkOSUser } from "./auth.ts";
 import { PlakkApiLive } from "./PlakkApiLive.ts";
 import { ServerRuntimeLive } from "./ServerRuntime.ts";
 
@@ -41,35 +40,6 @@ const InternalServerErrorLive = Layer.succeed(InternalServerErrorMiddleware)(
   ),
 );
 
-const userFromWorkOSUser = (user: WorkOSUser): User => ({
-  id: user.id,
-  firstName: user.firstName,
-  lastName: user.lastName,
-  email: user.email,
-  createdAt: user.createdAt,
-  updatedAt: user.updatedAt,
-});
-
-const stringClaim = (value: unknown) => (typeof value === "string" ? value : null);
-
-const userFromTokenClaims = (claims: Record<string, unknown>): User | null => {
-  const id = stringClaim(claims.sub);
-  const email = stringClaim(claims.email);
-  if (id === null || email === null) return null;
-
-  return {
-    id,
-    firstName: stringClaim(claims.first_name),
-    lastName: stringClaim(claims.last_name),
-    email,
-    createdAt: null,
-    updatedAt: null,
-  };
-};
-
-const hasCookie = (cookieHeader: string | undefined, name: string) =>
-  cookieHeader?.split(";").some((cookie) => cookie.trim().startsWith(`${name}=`)) ?? false;
-
 const bearerTokenFromHeader = (authorization: string | undefined) => {
   const [scheme, token] = authorization?.split(" ", 2) ?? [];
   return scheme?.toLowerCase() === "bearer" && token !== undefined && token !== "" ? token : null;
@@ -81,31 +51,19 @@ const unauthenticated = () =>
     message: "Sign in to continue.",
   });
 
-const getAuthKitCore = Effect.gen(function* () {
-  const apiKey = yield* Config.string("WORKOS_API_KEY");
-  const clientId = yield* Config.string("WORKOS_CLIENT_ID");
-  const redirectUri = yield* Config.string("WORKOS_REDIRECT_URI");
-  const cookiePassword = yield* Config.string("WORKOS_COOKIE_PASSWORD");
+const makeWorkOSClient = (apiKey: string, clientId: string) => new WorkOS({ apiKey, clientId });
+
+const makeAuthKitAuth = Effect.gen(function* () {
+  const config = yield* Effect.all({
+    apiKey: Config.string("WORKOS_API_KEY"),
+    clientId: Config.string("WORKOS_CLIENT_ID"),
+  });
   const cookieName = yield* Config.string("WORKOS_COOKIE_NAME").pipe(
     Effect.orElseSucceed(() => "wos-session"),
   );
+  const workos = makeWorkOSClient(config.apiKey, config.clientId);
 
-  const workos = new WorkOS({ apiKey, clientId });
-  const core = new AuthKitCore(
-    {
-      apiHttps: true,
-      apiKey,
-      clientId,
-      cookieMaxAge: 34_560_000,
-      cookieName,
-      cookiePassword,
-      redirectUri,
-    },
-    workos,
-    sessionEncryption,
-  );
-
-  return { core, cookieName, workos };
+  return { cookieName, jwksUrl: workos.userManagement.getJwksUrl(config.clientId) };
 }).pipe(
   Effect.mapError(
     () =>
@@ -116,29 +74,25 @@ const getAuthKitCore = Effect.gen(function* () {
   ),
 );
 
-const AuthLive = Layer.succeed(AuthMiddleware)(
+const AuthMiddlewareLive = Layer.succeed(AuthMiddleware)(
   AuthMiddleware.of((effect, { headers }) =>
     Effect.gen(function* () {
-      const { core, cookieName } = yield* getAuthKitCore;
+      const { cookieName, jwksUrl } = yield* makeAuthKitAuth;
       const cookieHeader = headers.cookie;
       const accessToken = bearerTokenFromHeader(headers.authorization);
 
       const provideBearerUser = Effect.gen(function* () {
-        if (accessToken === null || !(yield* Effect.promise(() => core.verifyToken(accessToken)))) {
-          return yield* unauthenticated();
-        }
-
-        const claims = yield* Effect.try({
-          try: () => core.parseTokenClaims<Record<string, unknown>>(accessToken),
+        if (accessToken === null) return yield* unauthenticated();
+        const currentUser = yield* Effect.tryPromise({
+          try: () => userFromWorkOSAccessToken(accessToken, jwksUrl),
           catch: () => unauthenticated(),
         });
-        const currentUser = userFromTokenClaims(claims);
         if (currentUser === null) return yield* unauthenticated();
 
         return yield* Effect.provideService(effect, CurrentUser, currentUser);
       });
 
-      if (hasCookie(cookieHeader, cookieName)) {
+      if (cookieHeader?.split(";").some((cookie) => cookie.trim().startsWith(`${cookieName}=`))) {
         const { user } = yield* Effect.promise(() => getAuth());
 
         if (user === null) {
@@ -161,7 +115,7 @@ const RpcRoutes = RpcServer.layerHttp({
 }).pipe(
   Layer.provide(PlakkApiLive),
   Layer.provide(ServerRuntimeLive),
-  Layer.provide(AuthLive),
+  Layer.provide(AuthMiddlewareLive),
   Layer.provide(InternalServerErrorLive),
   Layer.provide(FetchHttpClient.layer),
   Layer.provide(RpcSerialization.layerNdjson),
