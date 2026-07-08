@@ -45,12 +45,6 @@ const bearerTokenFromHeader = (authorization: string | undefined) => {
   return scheme?.toLowerCase() === "bearer" && token !== undefined && token !== "" ? token : null;
 };
 
-const unauthenticated = () =>
-  new RpcError({
-    code: "UNAUTHENTICATED",
-    message: "Sign in to continue.",
-  });
-
 const makeWorkOSClient = (apiKey: string, clientId: string) => new WorkOS({ apiKey, clientId });
 
 const makeAuthKitAuth = Effect.gen(function* () {
@@ -82,12 +76,26 @@ const AuthMiddlewareLive = Layer.succeed(AuthMiddleware)(
       const accessToken = bearerTokenFromHeader(headers.authorization);
 
       const provideBearerUser = Effect.gen(function* () {
-        if (accessToken === null) return yield* unauthenticated();
+        if (accessToken === null) {
+          return yield* new RpcError({
+            code: "UNAUTHENTICATED",
+            message: "Sign in to continue.",
+          });
+        }
         const currentUser = yield* Effect.tryPromise({
           try: () => userFromWorkOSAccessToken(accessToken, jwksUrl),
-          catch: () => unauthenticated(),
+          catch: () =>
+            new RpcError({
+              code: "UNAUTHENTICATED",
+              message: "Sign in to continue.",
+            }),
         });
-        if (currentUser === null) return yield* unauthenticated();
+        if (currentUser === null) {
+          return yield* new RpcError({
+            code: "UNAUTHENTICATED",
+            message: "Sign in to continue.",
+          });
+        }
 
         return yield* Effect.provideService(effect, CurrentUser, currentUser);
       });
