@@ -19,7 +19,7 @@ import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 
-import { StorageProviderService, type StorageUploadError } from "./storage/StorageProvider.ts";
+import { StorageProviderService } from "./storage/StorageProvider.ts";
 import { getProviderSlug } from "./storage/getProviderSlug.ts";
 import { toApiSnippet } from "./transformers/toApiSnippet.ts";
 
@@ -81,18 +81,6 @@ const insertSnippet = Effect.fn("@plakk/web/api/PlakkApiLive.insertSnippet")(fun
 
 const getConnectedAccountUrl = (provider: StorageProvider, workosUserId: string) =>
   `${WORKOS_BASE_URL}/user_management/users/${encodeURIComponent(workosUserId)}/connected_accounts/${encodeURIComponent(getProviderSlug(provider))}`;
-
-const storageUploadErrorToRpcError = (error: StorageUploadError) =>
-  new RpcError({
-    code:
-      error._tag === "StorageNotConnectedError" || error._tag === "StorageNeedsReauthorizationError"
-        ? "FORBIDDEN"
-        : "INTERNAL_SERVER_ERROR",
-    message:
-      error._tag === "StorageProviderError"
-        ? `${error.storageProvider}: ${error.message}`
-        : error.message,
-  });
 
 const HealthLive = HealthRpcs.of({
   Ping: () =>
@@ -192,9 +180,22 @@ const StorageLive = StorageRpcs.of({
       const storage = yield* StorageProviderService;
       const currentUser = yield* CurrentUser;
 
-      return yield* storage
-        .prepareUpload({ ...input, workosUserId: currentUser.id })
-        .pipe(Effect.mapError(storageUploadErrorToRpcError));
+      return yield* storage.prepareUpload({ ...input, workosUserId: currentUser.id }).pipe(
+        Effect.mapError(
+          (error) =>
+            new RpcError({
+              code:
+                error._tag === "StorageNotConnectedError" ||
+                error._tag === "StorageNeedsReauthorizationError"
+                  ? "FORBIDDEN"
+                  : "INTERNAL_SERVER_ERROR",
+              message:
+                error._tag === "StorageProviderError"
+                  ? `${error.storageProvider}: ${error.message}`
+                  : error.message,
+            }),
+        ),
+      );
     }).pipe(Effect.annotateSpans({ storageProvider: input.storageProvider }));
   }),
 });

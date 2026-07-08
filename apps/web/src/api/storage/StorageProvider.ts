@@ -43,9 +43,9 @@ export type StorageUploadError =
   | StorageProviderError;
 
 const storageProviderAdapters = {
-  GOOGLE_DRIVE: GoogleDriveStorageProvider,
-  ONE_DRIVE: OneDriveStorageProvider,
-  DROPBOX: DropboxStorageProvider,
+  [GoogleDriveStorageProvider.storageProvider]: GoogleDriveStorageProvider,
+  [OneDriveStorageProvider.storageProvider]: OneDriveStorageProvider,
+  [DropboxStorageProvider.storageProvider]: DropboxStorageProvider,
 } satisfies Record<PrepareStorageUploadInput["storageProvider"], StorageProviderAdapter>;
 
 export class StorageProviderService extends Context.Service<

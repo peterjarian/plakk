@@ -39,6 +39,7 @@ export type PrepareStorageUploadInput = {
 };
 
 export type StorageProviderAdapter = {
+  readonly storageProvider: StorageProvider;
   readonly prepareUpload: (
     input: PrepareStorageUploadInput,
   ) => Effect.Effect<PreparedStorageUpload, StorageProviderError, HttpClient.HttpClient>;
