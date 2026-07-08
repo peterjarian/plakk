@@ -10,7 +10,7 @@ export const UserSchema = Schema.Struct({
   id: Schema.String,
   firstName: Schema.NullOr(Schema.String),
   lastName: Schema.NullOr(Schema.String),
-  email: Schema.String,
+  email: Schema.NullOr(Schema.String),
   createdAt: Schema.NullOr(Schema.String),
   updatedAt: Schema.NullOr(Schema.String),
 });

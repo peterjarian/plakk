@@ -32,15 +32,15 @@ export const userFromWorkOSAccessToken = async (
 ): Promise<User | null> => {
   await jwtVerify(token, publicKeyFor(jwksUrl));
   const claims = authKitCore.parseTokenClaims<Record<string, unknown>>(token);
-  const email = stringClaim(claims.email);
+  const id = stringClaim(claims.sub);
 
-  if (claims.sub === undefined || email === null) return null;
+  if (id === null) return null;
 
   return {
-    id: claims.sub,
+    id,
     firstName: stringClaim(claims.first_name),
     lastName: stringClaim(claims.last_name),
-    email,
+    email: stringClaim(claims.email),
     createdAt: null,
     updatedAt: null,
   };

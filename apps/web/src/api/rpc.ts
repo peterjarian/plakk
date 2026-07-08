@@ -54,15 +54,7 @@ const AuthMiddlewareLive = Layer.succeed(AuthMiddleware)(
         clientId: Config.string("WORKOS_CLIENT_ID"),
         redirectUri: Config.string("WORKOS_REDIRECT_URI"),
         cookiePassword: Config.string("WORKOS_COOKIE_PASSWORD"),
-      }).pipe(
-        Effect.mapError(
-          () =>
-            new RpcError({
-              code: "INTERNAL_SERVER_ERROR",
-              message: "Authentication is not configured.",
-            }),
-        ),
-      );
+      }).pipe(Effect.orDie);
       const cookieName = yield* Config.string("WORKOS_COOKIE_NAME").pipe(
         Effect.orElseSucceed(() => "wos-session"),
       );
