@@ -165,7 +165,21 @@ export function Home() {
     if (accountBlocked) return;
 
     for (const file of Array.from(files)) {
+      if (/\.txt$/i.test(file.name)) {
+        void addTextFile(file);
+        continue;
+      }
+
       void startStoredUpload(file);
+    }
+  }
+
+  async function addTextFile(file: File) {
+    try {
+      setAccountIssue(null);
+      addText(await file.text());
+    } catch (error) {
+      setAccountIssue(errorMessage(error, "Could not read text file."));
     }
   }
 
@@ -229,7 +243,11 @@ export function Home() {
   }
 
   function copy(snippet: Snippet) {
-    void navigator.clipboard?.writeText(snippet.subtitle || snippet.title);
+    void navigator.clipboard?.writeText(
+      snippet.kind === "TEXT" || snippet.kind === "LINK"
+        ? snippet.title
+        : snippet.subtitle || snippet.title,
+    );
     setCopiedId(snippet.id);
     if (copiedTimerRef.current !== undefined) window.clearTimeout(copiedTimerRef.current);
     copiedTimerRef.current = window.setTimeout(() => {
