@@ -34,6 +34,27 @@ export const PipeConnectionSchema = Schema.Struct({
 
 export type PipeConnection = typeof PipeConnectionSchema.Type;
 
+export const PreparedStorageUploadSchema = Schema.Struct({
+  storageProvider: StorageProviderLiteral,
+  storageObjectId: Schema.NullOr(Schema.String),
+  upload: Schema.Struct({
+    method: Schema.Literals(["POST", "PUT"] as const),
+    url: Schema.String,
+    headers: Schema.Array(Schema.Struct({ name: Schema.String, value: Schema.String })),
+    strategy: Schema.Union([
+      Schema.Struct({ type: Schema.Literal("single_request") }),
+      Schema.Struct({
+        type: Schema.Literal("byte_range"),
+        maxPartByteSize: Schema.Int.check(Schema.isGreaterThan(0)),
+        partByteMultiple: Schema.Int.check(Schema.isGreaterThan(0)),
+      }),
+    ]),
+  }),
+  expiresAt: Schema.NullOr(Schema.String),
+});
+
+export type PreparedStorageUpload = typeof PreparedStorageUploadSchema.Type;
+
 export const SnippetIdSchema = Schema.String.check(Schema.isUUID());
 
 export const ApiSnippetSchema = Schema.Struct({
@@ -94,6 +115,16 @@ export const StorageRpcs = RpcGroup.make(
     success: Schema.Void,
     error: RpcError,
   }),
+  Rpc.make("PrepareStoredSnippetUpload", {
+    payload: {
+      storageProvider: StorageProviderLiteral,
+      fileName: Schema.String,
+      byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+      contentType: Schema.NullOr(Schema.String),
+    },
+    success: PreparedStorageUploadSchema,
+    error: RpcError,
+  }),
 );
 
 export const SnippetRpcs = RpcGroup.make(
@@ -119,6 +150,8 @@ export const SnippetRpcs = RpcGroup.make(
       fileName: Schema.String,
       byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
       contentType: Schema.NullOr(Schema.String),
+      storageProvider: StorageProviderLiteral,
+      storageObjectId: Schema.String,
     },
     success: ApiSnippetSchema,
     error: RpcError,

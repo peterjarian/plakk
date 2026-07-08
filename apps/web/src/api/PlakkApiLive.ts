@@ -11,6 +11,7 @@ import {
   type AccountStatus,
   type PipeConnection,
 } from "@plakk/shared/PlakkApi";
+import { RpcError } from "@plakk/shared/RpcError";
 import * as Config from "effect/Config";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -18,6 +19,11 @@ import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 
+import {
+  StorageProviderService,
+  type StorageUploadError,
+} from "./storage/StorageProviderService.ts";
+import { getProviderSlug } from "./storage/providerSlug.ts";
 import { toApiSnippet } from "./transformers/toApiSnippet.ts";
 
 const STORAGE_PROVIDER = "GOOGLE_DRIVE" as const;
@@ -33,10 +39,10 @@ const WorkosConnectedAccountSchema = Schema.Struct({
   state: Schema.Literals(["connected", "needs_reauthorization"] as const),
 });
 
-// ponytail: DB rows are real; provider object ids stay placeholders until WorkOS Pipes upload exists.
+// ponytail: text snippets get placeholder storage until text storage exists.
 const placeholderStorageObjectId = () => `pending-storage:${crypto.randomUUID()}`;
 
-type CreateSnippetInput = {
+type CreateSnippetInputBase = {
   readonly id: string;
   readonly kind: Extract<SnippetKind, "TEXT" | "FILE" | "IMAGE">;
   readonly title: string;
@@ -45,18 +51,29 @@ type CreateSnippetInput = {
   readonly contentType: string | null;
 };
 
+type CreateSnippetInput =
+  | (CreateSnippetInputBase & { readonly kind: "TEXT" })
+  | (CreateSnippetInputBase & {
+      readonly kind: Extract<SnippetKind, "FILE" | "IMAGE">;
+      readonly storageProvider: StorageProvider;
+      readonly storageObjectId: string;
+    });
+
 const insertSnippet = Effect.fn("@plakk/web/api/PlakkApiLive.insertSnippet")(function* (
   drizzle: DrizzleService,
   input: CreateSnippetInput,
 ) {
   const currentUser = yield* CurrentUser;
+  const storage =
+    input.kind === "TEXT"
+      ? { storageProvider: STORAGE_PROVIDER, storageObjectId: placeholderStorageObjectId() }
+      : { storageProvider: input.storageProvider, storageObjectId: input.storageObjectId };
   const [snippet] = yield* drizzle.db
     .insert(snippets)
     .values({
       ...input,
       ownerWorkosUserId: currentUser.id,
-      storageProvider: STORAGE_PROVIDER,
-      storageObjectId: placeholderStorageObjectId(),
+      ...storage,
     })
     .returning()
     .pipe(Effect.orDie);
@@ -68,19 +85,19 @@ const insertSnippet = Effect.fn("@plakk/web/api/PlakkApiLive.insertSnippet")(fun
   return toApiSnippet(snippet);
 });
 
-const getProviderSlug = (provider: StorageProvider) => {
-  switch (provider) {
-    case "GOOGLE_DRIVE":
-      return "google-drive";
-    case "ONE_DRIVE":
-      return "microsoft-onedrive";
-    case "DROPBOX":
-      return "dropbox";
-  }
-};
-
 const getConnectedAccountUrl = (provider: StorageProvider, workosUserId: string) =>
   `${WORKOS_BASE_URL}/user_management/users/${encodeURIComponent(workosUserId)}/connected_accounts/${encodeURIComponent(getProviderSlug(provider))}`;
+
+const storageUploadErrorToRpcError = (error: StorageUploadError) =>
+  new RpcError({
+    code: error._tag === "StorageConnectionError" ? "FORBIDDEN" : "INTERNAL_SERVER_ERROR",
+    message:
+      error._tag === "StorageConnectionError" && error.reason === "needs_reauthorization"
+        ? "Reconnect storage to upload files."
+        : error._tag === "StorageProviderError"
+          ? `${error.storageProvider}: ${error.message}`
+          : error.message,
+  });
 
 const HealthLive = HealthRpcs.of({
   Ping: () =>
@@ -173,6 +190,16 @@ const StorageLive = StorageRpcs.of({
 
       yield* Effect.logError("WorkOS Pipes disconnect failed", { status: response.status });
       return yield* Effect.die(new Error("WorkOS Pipes disconnect failed"));
+    }).pipe(Effect.annotateSpans({ storageProvider: input.storageProvider }));
+  }),
+  PrepareStoredSnippetUpload: Effect.fn("rpc.PrepareStoredSnippetUpload")(function* (input) {
+    return yield* Effect.gen(function* () {
+      const storage = yield* StorageProviderService;
+      const currentUser = yield* CurrentUser;
+
+      return yield* storage
+        .prepareUpload({ ...input, workosUserId: currentUser.id })
+        .pipe(Effect.mapError(storageUploadErrorToRpcError));
     }).pipe(Effect.annotateSpans({ storageProvider: input.storageProvider }));
   }),
 });
