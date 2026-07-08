@@ -178,40 +178,27 @@ export function Home() {
       kind,
       storageProvider,
     });
-    let createdSnippet = false;
 
     try {
       setAccountIssue(null);
-      uploadActions.setPhase(task.id, "PREPARING");
-      await window.ipc.plakkApi.createStoredSnippet({
+      uploadActions.setPhase(task.id, "UPLOADING");
+      const snippet = await window.ipc.storage.uploadStoredSnippetFile({
+        file,
         id: task.id,
         kind,
         title: file.name,
         fileName: file.name,
         byteSize: file.size,
         contentType: file.type || null,
-        storageObjectId: null,
         storageProvider,
       });
-      createdSnippet = true;
-      const prepared = await window.ipc.plakkApi.prepareStoredSnippetUpload({
-        snippetId: task.id,
-        fileName: file.name,
-        byteSize: file.size,
-        contentType: file.type || null,
-        storageProvider,
-      });
-
-      uploadActions.setStorageObjectId(task.id, prepared.storageObjectId);
-      uploadActions.setPhase(task.id, "UPLOADING");
+      uploadActions.setProgress(task.id, 100);
+      uploadActions.remove(task.id);
+      addSnippet(apiSnippetToSnippet(snippet));
     } catch (error) {
-      const message = errorMessage(error, "Could not prepare upload.");
+      const message = errorMessage(error, "Could not upload file.");
       uploadActions.setPhase(task.id, "FAILED", message);
       setAccountIssue(message);
-      if (!createdSnippet) return;
-      await window.ipc.plakkApi
-        .updateStoredSnippetUploadStatus({ id: task.id, uploadStatus: "FAILED" })
-        .catch(() => undefined);
     }
   }
 

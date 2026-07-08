@@ -13,6 +13,7 @@ import type {
 } from "@plakk/shared/PlakkApi";
 import type { AuthError, AuthStatus } from "../auth.ts";
 import type { ClipboardContent } from "../clipboardContent.ts";
+import type { RendererStoredSnippetFileUploadPayload } from "../storageUpload.ts";
 import type { UserConfig, UserConfigPatch } from "../userConfig.ts";
 
 export {};
@@ -45,6 +46,11 @@ declare global {
         ) => Promise<PreparedStorageUpload>;
         updateStoredSnippetUploadStatus: (
           payload: UpdateStoredSnippetUploadStatusPayload,
+        ) => Promise<ApiSnippet>;
+      };
+      storage: {
+        uploadStoredSnippetFile: (
+          payload: RendererStoredSnippetFileUploadPayload,
         ) => Promise<ApiSnippet>;
       };
       userConfig: {

@@ -15,6 +15,7 @@ import {
   PrepareStoredSnippetUploadPayloadSchema,
   UpdateStoredSnippetUploadStatusPayloadSchema,
 } from "@plakk/shared/PlakkApi";
+import type { StoredSnippetFileUploadPayload } from "../storageUpload.ts";
 
 export type IpcSchema = Schema.ConstraintCodec<unknown, unknown, never, never>;
 
@@ -38,6 +39,19 @@ const event = <Payload extends IpcSchema>(input: IpcEvent<Payload>) => input;
 export type IpcPayload<T extends IpcMethod<IpcSchema, IpcSchema>> = T["payload"]["Type"];
 export type IpcResult<T extends IpcMethod<IpcSchema, IpcSchema>> = T["result"]["Type"];
 export type IpcEventPayload<T extends IpcEvent<IpcSchema>> = T["payload"]["Type"];
+
+const createStoredSnippetPayloadFields = CreateStoredSnippetPayloadSchema.fields;
+
+export const StoredSnippetFileUploadPayloadSchema = Schema.Struct({
+  byteSize: createStoredSnippetPayloadFields.byteSize,
+  contentType: createStoredSnippetPayloadFields.contentType,
+  fileName: createStoredSnippetPayloadFields.fileName,
+  filePath: Schema.String,
+  id: createStoredSnippetPayloadFields.id,
+  kind: createStoredSnippetPayloadFields.kind,
+  storageProvider: createStoredSnippetPayloadFields.storageProvider,
+  title: createStoredSnippetPayloadFields.title,
+}) satisfies Schema.Schema<StoredSnippetFileUploadPayload>;
 
 export const ipcMethods = {
   authGet: method({
@@ -101,6 +115,11 @@ export const ipcMethods = {
     channel: "plakk-api:delete-snippet",
     payload: DeleteSnippetPayloadSchema,
     result: Schema.Void,
+  }),
+  storageUploadStoredSnippetFile: method({
+    channel: "storage:upload-stored-snippet-file",
+    payload: StoredSnippetFileUploadPayloadSchema,
+    result: ApiSnippetSchema,
   }),
   userConfigGet: method({
     channel: "user-config:get",

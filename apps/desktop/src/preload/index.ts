@@ -1,4 +1,4 @@
-import { contextBridge } from "electron";
+import { contextBridge, webUtils } from "electron";
 import type {
   CreateStoredSnippetPayload,
   CreateTextSnippetPayload,
@@ -12,6 +12,7 @@ import type { AuthError, AuthStatus } from "../auth.ts";
 import type { ClipboardContent } from "../clipboardContent.ts";
 import { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
 import { invoke, on } from "../ipc/preload.ts";
+import type { RendererStoredSnippetFileUploadPayload } from "../storageUpload.ts";
 import type { UserConfigPatch } from "../userConfig.ts";
 
 contextBridge.exposeInMainWorld("ipc", {
@@ -44,6 +45,13 @@ contextBridge.exposeInMainWorld("ipc", {
       invoke(ipcMethods.plakkApiPrepareStoredSnippetUpload, payload),
     updateStoredSnippetUploadStatus: (payload: UpdateStoredSnippetUploadStatusPayload) =>
       invoke(ipcMethods.plakkApiUpdateStoredSnippetUploadStatus, payload),
+  },
+  storage: {
+    uploadStoredSnippetFile: ({ file, ...payload }: RendererStoredSnippetFileUploadPayload) => {
+      const filePath = webUtils.getPathForFile(file);
+      if (!filePath) return Promise.reject(new Error("Choose a local file to upload."));
+      return invoke(ipcMethods.storageUploadStoredSnippetFile, { ...payload, filePath });
+    },
   },
   userConfig: {
     get: () => invoke(ipcMethods.userConfigGet, undefined),

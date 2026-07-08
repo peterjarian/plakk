@@ -2,7 +2,7 @@ import "dotenv/config";
 
 import { join, resolve } from "node:path";
 import { isHttpUrl } from "@plakk/shared";
-import { PlakkApi } from "@plakk/shared/PlakkApi";
+import { PlakkApi, type ApiSnippet } from "@plakk/shared/PlakkApi";
 import { app, BrowserWindow, Menu, shell } from "electron";
 import { Config, Effect, Result } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
@@ -11,6 +11,7 @@ import type { RpcClientError } from "effect/unstable/rpc/RpcClientError";
 import type { AuthStatus } from "../auth.ts";
 import { handle, send } from "../ipc/main.ts";
 import { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
+import { uploadPreparedFile, type StoredSnippetFileUploadPayload } from "../storageUpload.ts";
 import type { UserConfigPatch } from "../userConfig.ts";
 import { AuthService } from "./auth/AuthService.ts";
 import { readClipboard } from "./clipboard.ts";
@@ -186,6 +187,83 @@ handle(ipcMethods.plakkApiUpdateStoredSnippetUploadStatus, (payload) =>
 handle(ipcMethods.plakkApiDeleteSnippet, (payload) =>
   runPlakkApi((client) => client.DeleteSnippet(payload), "Could not delete snippet."),
 );
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function markStoredSnippetReady(
+  id: string,
+  storageObjectId: string | null,
+): Promise<ApiSnippet> {
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await runPlakkApi(
+        (client) =>
+          client.UpdateStoredSnippetUploadStatus({
+            id,
+            uploadStatus: "READY",
+            storageObjectId,
+          }),
+        "Could not update upload status.",
+      );
+    } catch (error) {
+      lastError = error;
+      if (attempt < 2) await wait(250 * (attempt + 1));
+    }
+  }
+
+  throw lastError;
+}
+
+async function uploadStoredSnippetFile(payload: StoredSnippetFileUploadPayload) {
+  const { filePath, ...snippetInput } = payload;
+  let createdSnippet: ApiSnippet | undefined;
+  let uploadedFile = false;
+
+  try {
+    const prepared = await runPlakkApi(
+      (client) =>
+        client.PrepareStoredSnippetUpload({
+          byteSize: snippetInput.byteSize,
+          contentType: snippetInput.contentType,
+          fileName: snippetInput.fileName,
+          snippetId: snippetInput.id,
+          storageProvider: snippetInput.storageProvider,
+        }),
+      "Could not prepare stored snippet upload.",
+    );
+
+    createdSnippet = await runPlakkApi(
+      (client) =>
+        client.CreateStoredSnippet({
+          ...snippetInput,
+          storageObjectId: prepared.storageObjectId,
+        }),
+      "Could not create stored snippet.",
+    );
+
+    await uploadPreparedFile({ byteSize: snippetInput.byteSize, filePath, prepared });
+    uploadedFile = true;
+
+    return await markStoredSnippetReady(snippetInput.id, prepared.storageObjectId);
+  } catch (error) {
+    if (createdSnippet !== undefined && !uploadedFile) {
+      await runPlakkApi(
+        (client) =>
+          client.UpdateStoredSnippetUploadStatus({
+            id: snippetInput.id,
+            uploadStatus: "FAILED",
+          }),
+        "Could not update upload status.",
+      ).catch(() => undefined);
+    }
+
+    throw error;
+  }
+}
+
+handle(ipcMethods.storageUploadStoredSnippetFile, uploadStoredSnippetFile);
 
 function loadRenderer(window: BrowserWindow, view?: RendererView) {
   if (!app.isPackaged && process.env.ELECTRON_RENDERER_URL) {
