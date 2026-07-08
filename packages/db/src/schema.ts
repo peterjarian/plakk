@@ -25,9 +25,8 @@ export const snippets = pgTable(
     ownerWorkosUserId: text("owner_workos_user_id").notNull(),
     kind: snippetKind("kind").notNull(),
     title: text("title").notNull(),
-    // All snippet content is stored as one object in the user's linked provider.
-    storageProvider: storageProvider("storage_provider").notNull(),
-    storageObjectId: text("storage_object_id").notNull(),
+    storageProvider: storageProvider("storage_provider"),
+    storageObjectId: text("storage_object_id"),
     fileName: text("file_name").notNull(),
     byteSize: bigint("byte_size", { mode: "number" }).notNull(),
     contentType: text("content_type"),

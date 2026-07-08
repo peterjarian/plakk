@@ -19,11 +19,8 @@ import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 
-import {
-  StorageProviderService,
-  type StorageUploadError,
-} from "./storage/StorageProviderService.ts";
-import { getProviderSlug } from "./storage/providerSlug.ts";
+import { StorageProviderService, type StorageUploadError } from "./storage/StorageProvider.ts";
+import { getProviderSlug } from "./storage/getProviderSlug.ts";
 import { toApiSnippet } from "./transformers/toApiSnippet.ts";
 
 const STORAGE_PROVIDER = "GOOGLE_DRIVE" as const;
@@ -38,9 +35,6 @@ const WorkosAuthorizeResponseSchema = Schema.Struct({ url: Schema.String });
 const WorkosConnectedAccountSchema = Schema.Struct({
   state: Schema.Literals(["connected", "needs_reauthorization"] as const),
 });
-
-// ponytail: text snippets get placeholder storage until text storage exists.
-const placeholderStorageObjectId = () => `pending-storage:${crypto.randomUUID()}`;
 
 type CreateSnippetInputBase = {
   readonly id: string;
@@ -66,7 +60,7 @@ const insertSnippet = Effect.fn("@plakk/web/api/PlakkApiLive.insertSnippet")(fun
   const currentUser = yield* CurrentUser;
   const storage =
     input.kind === "TEXT"
-      ? { storageProvider: STORAGE_PROVIDER, storageObjectId: placeholderStorageObjectId() }
+      ? { storageProvider: null, storageObjectId: null }
       : { storageProvider: input.storageProvider, storageObjectId: input.storageObjectId };
   const [snippet] = yield* drizzle.db
     .insert(snippets)
@@ -90,13 +84,14 @@ const getConnectedAccountUrl = (provider: StorageProvider, workosUserId: string)
 
 const storageUploadErrorToRpcError = (error: StorageUploadError) =>
   new RpcError({
-    code: error._tag === "StorageConnectionError" ? "FORBIDDEN" : "INTERNAL_SERVER_ERROR",
+    code:
+      error._tag === "StorageNotConnectedError" || error._tag === "StorageNeedsReauthorizationError"
+        ? "FORBIDDEN"
+        : "INTERNAL_SERVER_ERROR",
     message:
-      error._tag === "StorageConnectionError" && error.reason === "needs_reauthorization"
-        ? "Reconnect storage to upload files."
-        : error._tag === "StorageProviderError"
-          ? `${error.storageProvider}: ${error.message}`
-          : error.message,
+      error._tag === "StorageProviderError"
+        ? `${error.storageProvider}: ${error.message}`
+        : error.message,
   });
 
 const HealthLive = HealthRpcs.of({

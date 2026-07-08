@@ -64,7 +64,7 @@ export const ApiSnippetSchema = Schema.Struct({
   fileName: Schema.String,
   byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   contentType: Schema.NullOr(Schema.String),
-  storageProvider: StorageProviderLiteral,
+  storageProvider: Schema.NullOr(StorageProviderLiteral),
   createdAt: Schema.String,
   updatedAt: Schema.String,
 });

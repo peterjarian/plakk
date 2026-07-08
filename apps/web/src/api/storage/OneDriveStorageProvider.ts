@@ -1,5 +1,6 @@
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
+import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 
 import {
   StorageProviderError,
@@ -39,7 +40,7 @@ const providerError = (
 
 const prepareUpload = Effect.fn("OneDriveStorageProvider.prepareUpload")(function* (
   input: PrepareStorageUploadInput,
-): Effect.fn.Return<PreparedStorageUpload, StorageProviderError> {
+): Effect.fn.Return<PreparedStorageUpload, StorageProviderError, HttpClient.HttpClient> {
   if (input.byteSize < 1) {
     return yield* providerError(input, "OneDrive upload sessions require a positive byte size.");
   }
@@ -56,28 +57,21 @@ const prepareUpload = Effect.fn("OneDriveStorageProvider.prepareUpload")(functio
       providerError(input, "OneDrive upload session request was invalid.", cause),
     ),
   );
-  const response = yield* Effect.tryPromise({
-    try: () =>
-      fetch(`${ONE_DRIVE_ROOT_URL}/${path}:/createUploadSession`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${input.accessToken}`,
-          "Content-Type": "application/json",
-        },
-        body,
-      }),
-    catch: (cause) => providerError(input, "OneDrive upload session request failed.", cause),
-  });
+  const request = HttpClientRequest.post(`${ONE_DRIVE_ROOT_URL}/${path}:/createUploadSession`).pipe(
+    HttpClientRequest.bearerToken(input.accessToken),
+    HttpClientRequest.bodyText(body, "application/json"),
+  );
+  const response = yield* HttpClient.execute(request).pipe(
+    Effect.mapError((cause) =>
+      providerError(input, "OneDrive upload session request failed.", cause),
+    ),
+  );
 
-  if (!response.ok) {
+  if (response.status < 200 || response.status >= 300) {
     return yield* providerError(input, `OneDrive upload session failed: ${response.status}`);
   }
 
-  const result = yield* Effect.tryPromise({
-    try: () => response.json() as Promise<unknown>,
-    catch: (cause) => providerError(input, "OneDrive upload session response was not JSON.", cause),
-  });
-  const session = yield* Schema.decodeUnknownEffect(OneDriveUploadSession)(result).pipe(
+  const session = yield* HttpClientResponse.schemaBodyJson(OneDriveUploadSession)(response).pipe(
     Effect.mapError((cause) =>
       providerError(input, "OneDrive upload session response did not include uploadUrl.", cause),
     ),

@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import * as Effect from "effect/Effect";
+import { FetchHttpClient } from "effect/unstable/http";
 
 import { DropboxStorageProvider } from "./DropboxStorageProvider.ts";
 import { GoogleDriveStorageProvider } from "./GoogleDriveStorageProvider.ts";
@@ -13,22 +14,27 @@ const input = {
   contentType: "text/plain",
 } satisfies Omit<PrepareStorageUploadInput, "storageProvider">;
 
-afterEach(() => {
-  vi.unstubAllGlobals();
+const fetchMock = vi.fn<typeof fetch>();
+
+beforeEach(() => {
+  fetchMock.mockReset();
+  vi.stubGlobal("fetch", fetchMock);
 });
+
+const firstFetchRequest = () => {
+  const [request, init] = vi.mocked(fetch).mock.calls[0] ?? [];
+  return new Request(request as RequestInfo, init);
+};
 
 describe("storage upload providers", () => {
   it("creates a Dropbox temporary upload link", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => Response.json({ link: "https://dropbox-upload.example" })),
-    );
+    fetchMock.mockResolvedValue(Response.json({ link: "https://dropbox-upload.example" }));
 
     const upload = await Effect.runPromise(
       DropboxStorageProvider.prepareUpload({
         ...input,
         storageProvider: "DROPBOX",
-      }),
+      }).pipe(Effect.provide(FetchHttpClient.layer)),
     );
 
     expect(upload).toMatchObject({
@@ -40,9 +46,9 @@ describe("storage upload providers", () => {
         strategy: { type: "single_request" },
       },
     });
-    const [url, init] = vi.mocked(fetch).mock.calls[0] ?? [];
-    expect(url).toBe("https://api.dropboxapi.com/2/files/get_temporary_upload_link");
-    expect(await new Request(url as RequestInfo, init).json()).toEqual({
+    const request = firstFetchRequest();
+    expect(request.url).toBe("https://api.dropboxapi.com/2/files/get_temporary_upload_link");
+    expect(await request.json()).toEqual({
       commit_info: {
         path: "/folder/file.txt",
         mode: "add",
@@ -54,22 +60,18 @@ describe("storage upload providers", () => {
   });
 
   it("creates a Google Drive resumable upload session", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(
-        async () =>
-          new Response(null, {
-            status: 200,
-            headers: { Location: "https://google-upload.example" },
-          }),
-      ),
+    fetchMock.mockResolvedValue(
+      new Response(null, {
+        status: 200,
+        headers: { Location: "https://google-upload.example" },
+      }),
     );
 
     const upload = await Effect.runPromise(
       GoogleDriveStorageProvider.prepareUpload({
         ...input,
         storageProvider: "GOOGLE_DRIVE",
-      }),
+      }).pipe(Effect.provide(FetchHttpClient.layer)),
     );
 
     expect(upload).toMatchObject({
@@ -79,21 +81,18 @@ describe("storage upload providers", () => {
   });
 
   it("creates a OneDrive upload session", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () =>
-        Response.json({
-          uploadUrl: "https://onedrive-upload.example",
-          expirationDateTime: "2026-07-08T12:00:00Z",
-        }),
-      ),
+    fetchMock.mockResolvedValue(
+      Response.json({
+        uploadUrl: "https://onedrive-upload.example",
+        expirationDateTime: "2026-07-08T12:00:00Z",
+      }),
     );
 
     const upload = await Effect.runPromise(
       OneDriveStorageProvider.prepareUpload({
         ...input,
         storageProvider: "ONE_DRIVE",
-      }),
+      }).pipe(Effect.provide(FetchHttpClient.layer)),
     );
 
     expect(upload).toMatchObject({
