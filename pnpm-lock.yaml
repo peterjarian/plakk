@@ -60,6 +60,9 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@effect/atom-react':
+        specifier: 4.0.0-beta.92
+        version: 4.0.0-beta.92(effect@4.0.0-beta.92)(react@19.2.7)(scheduler@0.27.0)
       '@plakk/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -87,6 +90,9 @@ importers:
       react-dom:
         specifier: ^19.2.7
         version: 19.2.7(react@19.2.7)
+      scheduler:
+        specifier: ^0.27.0
+        version: 0.27.0
     devDependencies:
       '@tailwindcss/vite':
         specifier: ^4.3.2

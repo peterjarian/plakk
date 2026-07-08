@@ -17,9 +17,11 @@ import {
 
 export let uploadAtomRegistry = AtomRegistry.make();
 
-export function UploadAtomRegistryProvider({ children }: PropsWithChildren) {
+export function PlakkAtomProvider({ children }: PropsWithChildren) {
   return createElement(RegistryContext.Provider, { value: uploadAtomRegistry }, children);
 }
+
+export const UploadAtomRegistryProvider = PlakkAtomProvider;
 
 export function resetUploadAtomRegistryForTests() {
   uploadAtomRegistry.dispose();

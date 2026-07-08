@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowUpRight, Plus, TriangleAlert } from "lucide-react";
-import { formatFileSize, isHttpUrl, snippetKindForFileName, type Snippet } from "@plakk/shared";
+import { snippetKindForFileName, type Snippet } from "@plakk/shared";
 import { AppHeader } from "@plakk/ui/components/AppHeader";
 import { SnippetList } from "@plakk/ui/components/SnippetList";
 import { SnippetRow } from "@plakk/ui/components/SnippetRow";
@@ -14,9 +14,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@plakk/ui/components/primitives/dialog";
+import { useActiveUploadTasks, useUploadActions } from "@plakk/ui/hooks/useUploadFlow";
+import { uploadTaskToSnippet } from "../atoms/snippets.ts";
 import { SnippetComposer } from "../components/SnippetComposer.tsx";
-import { initialSnippets } from "../data/initialSnippets.ts";
 import { useAuth } from "../hooks/useAuth.ts";
+import { useSnippetActions, useSnippets } from "../hooks/useSnippets.ts";
 import { navigate } from "../lib/navigate.ts";
 
 const accountSetupUrl = "https://app.plakk.io/account/setup";
@@ -27,33 +29,38 @@ export function Home() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [pendingExternalUrl, setPendingExternalUrl] = useState<string | null>(null);
   const [skipExternalLinkWarning, setSkipExternalLinkWarning] = useState(false);
-  const [snippets, setSnippets] = useState(initialSnippets);
   const [showExternalLinkWarning, setShowExternalLinkWarning] = useState(true);
   const copiedTimerRef = useRef<number | undefined>(undefined);
 
-  const accountBlocked = true;
+  const { snippets: syncedSnippets } = useSnippets(auth.accessToken);
+  const snippetActions = useSnippetActions(auth.accessToken);
+  const uploadActions = useUploadActions();
+  const uploadTasks = useActiveUploadTasks();
+  const uploadSnippets = uploadTasks.map(uploadTaskToSnippet);
+  const snippets = [...uploadSnippets, ...syncedSnippets];
+  const uploadIds = new Set(uploadTasks.map((task) => task.id));
+  const accountBlocked = auth.accessToken === null;
   const user = auth.user;
-  const hasUploads = snippets.some((snippet) => snippet.uploadProgress !== undefined);
+  const hasUploads = uploadTasks.length > 0;
 
   useEffect(() => {
     if (!hasUploads) return;
 
     const timer = window.setInterval(() => {
-      setSnippets((current) =>
-        current.map((snippet) => {
-          if (snippet.uploadProgress === undefined) return snippet;
-
-          const uploadProgress = Math.min(100, snippet.uploadProgress + 8);
-          if (uploadProgress < 100) return { ...snippet, uploadProgress };
-
-          const { uploadProgress: _uploadProgress, ...done } = snippet;
-          return { ...done, synced: true, time: "now" };
-        }),
-      );
+      for (const task of uploadActions.snapshot()) {
+        if (task.phase === "READY") continue;
+        const progress = Math.min(100, task.progress + 8);
+        if (progress < 100) {
+          uploadActions.setProgress(task.id, progress);
+        } else {
+          uploadActions.setProgress(task.id, 100);
+          uploadActions.setPhase(task.id, "READY");
+        }
+      }
     }, 160);
 
     return () => window.clearInterval(timer);
-  }, [hasUploads]);
+  }, [hasUploads, uploadActions]);
 
   useEffect(() => {
     return () => {
@@ -79,61 +86,51 @@ export function Home() {
         }
 
         if (content.type === "image") {
-          addSnippet({
-            title: "Pasted image",
-            subtitle: `${content.width} x ${content.height}`,
+          uploadActions.enqueue({
+            byteSize: 0,
+            contentType: "image/png",
+            fileName: "Pasted image",
             kind: "IMAGE",
+            storageProvider: "GOOGLE_DRIVE",
           });
           return;
         }
 
         if (content.type === "file") {
-          addSnippet({
-            title: content.name,
-            subtitle:
-              content.size === undefined
-                ? content.extension || "FILE"
-                : `${content.extension || "FILE"} · ${formatFileSize(content.size)}`,
-            kind: snippetKindForFileName(content.name),
+          const kind = snippetKindForFileName(content.name);
+          if (kind !== "FILE" && kind !== "IMAGE") return;
+
+          uploadActions.enqueue({
+            byteSize: content.size ?? 0,
+            contentType: null,
+            fileName: content.name,
+            kind,
+            storageProvider: "GOOGLE_DRIVE",
           });
         }
       }),
-    [accountBlocked],
+    [accountBlocked, uploadActions],
   );
 
-  function addSnippet(snippet: Omit<Snippet, "id" | "time" | "synced">) {
-    if (accountBlocked) return;
-
-    setSnippets((current) =>
-      [{ ...snippet, id: crypto.randomUUID(), time: "now", synced: true }, ...current].slice(0, 20),
-    );
-  }
-
   function addText(value: string) {
-    addSnippet(
-      isHttpUrl(value)
-        ? { title: value, subtitle: "", kind: "LINK" }
-        : { title: value, subtitle: `${value.length} characters`, kind: "TEXT" },
-    );
+    if (accountBlocked) return;
+    void snippetActions.createText(value);
   }
 
   function addFiles(files: FileList) {
     if (accountBlocked) return;
 
-    const uploads = Array.from(files).map((file) => {
+    for (const file of Array.from(files)) {
       const kind = snippetKindForFileName(file.name);
-      return {
-        id: crypto.randomUUID(),
-        title: file.name,
-        subtitle: `${file.name.split(".").pop()?.toUpperCase() ?? "FILE"} · ${formatFileSize(file.size)}`,
+      if (kind !== "FILE" && kind !== "IMAGE") continue;
+      uploadActions.enqueue({
+        byteSize: file.size,
+        contentType: file.type || null,
+        fileName: file.name,
         kind,
-        time: "",
-        synced: false,
-        uploadProgress: 0,
-      };
-    });
-
-    setSnippets((current) => [...uploads, ...current].slice(0, 20));
+        storageProvider: "GOOGLE_DRIVE",
+      });
+    }
   }
 
   function addDropped(dataTransfer: DataTransfer) {
@@ -146,19 +143,19 @@ export function Home() {
 
     const dropped = dataTransfer.getData("text/plain").trim();
     if (!dropped) return;
-    if (isHttpUrl(dropped)) {
-      addSnippet({ title: dropped, subtitle: "", kind: "LINK" });
-    } else {
-      addSnippet({ title: dropped, subtitle: `${dropped.length} characters`, kind: "TEXT" });
-    }
+    void snippetActions.createText(dropped);
   }
 
   function stopUpload(id: string) {
-    setSnippets((current) => current.filter((snippet) => snippet.id !== id));
+    uploadActions.remove(id);
   }
 
   function deleteSnippet(id: string) {
-    setSnippets((current) => current.filter((snippet) => snippet.id !== id));
+    if (uploadIds.has(id)) {
+      uploadActions.remove(id);
+      return;
+    }
+    void snippetActions.delete(id);
   }
 
   function copy(snippet: Snippet) {
