@@ -6,14 +6,15 @@ import {
   PlakkApi,
 } from "@plakk/shared/PlakkApi";
 import { getAuth } from "@workos/authkit-tanstack-react-start";
-import { WorkOS } from "@workos-inc/node";
 import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { FetchHttpClient, HttpRouter } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 
-import { userFromWorkOSAccessToken, userFromWorkOSUser } from "./auth.ts";
+import { makeAuthKitCoreClient } from "./auth/makeAuthKitCoreClient.ts";
+import { makeWorkOSClient } from "./auth/makeWorkOSClient.ts";
+import { userFromWorkOSAccessToken, userFromWorkOSUser } from "./auth/user.ts";
 import { PlakkApiLive } from "./PlakkApiLive.ts";
 import { ServerRuntimeLive } from "./ServerRuntime.ts";
 
@@ -45,33 +46,29 @@ const bearerTokenFromHeader = (authorization: string | undefined) => {
   return scheme?.toLowerCase() === "bearer" && token !== undefined && token !== "" ? token : null;
 };
 
-const makeWorkOSClient = (apiKey: string, clientId: string) => new WorkOS({ apiKey, clientId });
-
-const makeAuthKitAuth = Effect.gen(function* () {
-  const config = yield* Effect.all({
-    apiKey: Config.string("WORKOS_API_KEY"),
-    clientId: Config.string("WORKOS_CLIENT_ID"),
-  });
-  const cookieName = yield* Config.string("WORKOS_COOKIE_NAME").pipe(
-    Effect.orElseSucceed(() => "wos-session"),
-  );
-  const workos = makeWorkOSClient(config.apiKey, config.clientId);
-
-  return { cookieName, jwksUrl: workos.userManagement.getJwksUrl(config.clientId) };
-}).pipe(
-  Effect.mapError(
-    () =>
-      new RpcError({
-        code: "INTERNAL_SERVER_ERROR",
-        message: "Authentication is not configured.",
-      }),
-  ),
-);
-
 const AuthMiddlewareLive = Layer.succeed(AuthMiddleware)(
   AuthMiddleware.of((effect, { headers }) =>
     Effect.gen(function* () {
-      const { cookieName, jwksUrl } = yield* makeAuthKitAuth;
+      const config = yield* Effect.all({
+        apiKey: Config.string("WORKOS_API_KEY"),
+        clientId: Config.string("WORKOS_CLIENT_ID"),
+        redirectUri: Config.string("WORKOS_REDIRECT_URI"),
+        cookiePassword: Config.string("WORKOS_COOKIE_PASSWORD"),
+      }).pipe(
+        Effect.mapError(
+          () =>
+            new RpcError({
+              code: "INTERNAL_SERVER_ERROR",
+              message: "Authentication is not configured.",
+            }),
+        ),
+      );
+      const cookieName = yield* Config.string("WORKOS_COOKIE_NAME").pipe(
+        Effect.orElseSucceed(() => "wos-session"),
+      );
+      const workos = yield* makeWorkOSClient(config.apiKey, config.clientId);
+      const authKitCore = yield* makeAuthKitCoreClient(workos, { ...config, cookieName });
+      const jwksUrl = workos.userManagement.getJwksUrl(config.clientId);
       const cookieHeader = headers.cookie;
       const accessToken = bearerTokenFromHeader(headers.authorization);
 
@@ -83,7 +80,7 @@ const AuthMiddlewareLive = Layer.succeed(AuthMiddleware)(
           });
         }
         const currentUser = yield* Effect.tryPromise({
-          try: () => userFromWorkOSAccessToken(accessToken, jwksUrl),
+          try: () => userFromWorkOSAccessToken(accessToken, jwksUrl, authKitCore),
           catch: () =>
             new RpcError({
               code: "UNAUTHENTICATED",
