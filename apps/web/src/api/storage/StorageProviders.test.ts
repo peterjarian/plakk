@@ -9,6 +9,7 @@ import type { PrepareStorageUploadInput } from "./types.ts";
 
 const input = {
   accessToken: "token",
+  snippetId: "0d1e2f3a-4567-4890-8abc-def012345678",
   fileName: "folder/file.txt",
   byteSize: 4,
   contentType: "text/plain",
@@ -38,7 +39,7 @@ describe("storage upload providers", () => {
     );
 
     expect(upload).toMatchObject({
-      storageObjectId: "/folder/file.txt",
+      storageObjectId: "/0d1e2f3a-4567-4890-8abc-def012345678/folder/file.txt",
       upload: {
         method: "POST",
         url: "https://dropbox-upload.example",
@@ -50,7 +51,7 @@ describe("storage upload providers", () => {
     expect(request.url).toBe("https://api.dropboxapi.com/2/files/get_temporary_upload_link");
     expect(await request.json()).toEqual({
       commit_info: {
-        path: "/folder/file.txt",
+        path: "/0d1e2f3a-4567-4890-8abc-def012345678/folder/file.txt",
         mode: "add",
         autorename: false,
         mute: false,

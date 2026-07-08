@@ -24,7 +24,8 @@ const DropboxTemporaryUploadLinkRequest = Schema.fromJsonString(
 );
 const DropboxTemporaryUploadLink = Schema.Struct({ link: Schema.String });
 
-const asDropboxPath = (fileName: string) => (fileName.startsWith("/") ? fileName : `/${fileName}`);
+const asDropboxPath = (snippetId: string, fileName: string) =>
+  `/${snippetId}/${fileName.split("/").filter(Boolean).map(encodeURIComponent).join("/")}`;
 
 const providerError = (
   input: PrepareStorageUploadInput,
@@ -38,7 +39,7 @@ export const DropboxStorageProvider = {
   prepareUpload: Effect.fn("DropboxStorageProvider.prepareUpload")(function* (
     input: PrepareStorageUploadInput,
   ): Effect.fn.Return<PreparedStorageUpload, StorageProviderError, HttpClient.HttpClient> {
-    const path = asDropboxPath(input.fileName);
+    const path = asDropboxPath(input.snippetId, input.fileName);
     const body = yield* Schema.encodeEffect(DropboxTemporaryUploadLinkRequest)({
       commit_info: {
         path,

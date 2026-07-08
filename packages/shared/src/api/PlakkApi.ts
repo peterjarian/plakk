@@ -117,6 +117,7 @@ export const StorageRpcs = RpcGroup.make(
   }),
   Rpc.make("PrepareStoredSnippetUpload", {
     payload: {
+      snippetId: SnippetIdSchema,
       storageProvider: StorageProviderLiteral,
       fileName: Schema.String,
       byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),

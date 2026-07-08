@@ -32,6 +32,7 @@ export type PreparedStorageUpload = {
 
 export type PrepareStorageUploadInput = {
   readonly accessToken: string;
+  readonly snippetId: string;
   readonly storageProvider: StorageProvider;
   readonly fileName: string;
   readonly byteSize: number;
