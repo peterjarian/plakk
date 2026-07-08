@@ -1,4 +1,5 @@
 import { StorageProviderLiteral, type StorageProvider } from "@plakk/shared";
+import type { PreparedStorageUpload } from "@plakk/shared/PlakkApi";
 import * as Schema from "effect/Schema";
 
 export class StorageProviderError extends Schema.TaggedErrorClass<StorageProviderError>()(
@@ -10,23 +11,7 @@ export class StorageProviderError extends Schema.TaggedErrorClass<StorageProvide
   },
 ) {}
 
-export type PreparedStorageUpload = {
-  readonly storageProvider: StorageProvider;
-  readonly storageObjectId: string | null;
-  readonly upload: {
-    readonly method: "POST" | "PUT";
-    readonly url: string;
-    readonly headers: ReadonlyArray<{ readonly name: string; readonly value: string }>;
-    readonly strategy:
-      | { readonly type: "single_request" }
-      | {
-          readonly type: "byte_range";
-          readonly maxPartByteSize: number;
-          readonly partByteMultiple: number;
-        };
-  };
-  readonly expiresAt: string | null;
-};
+export type { PreparedStorageUpload };
 
 export type PrepareStorageUploadInput = {
   readonly accessToken: string;
