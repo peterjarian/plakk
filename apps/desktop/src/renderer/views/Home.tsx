@@ -178,6 +178,7 @@ export function Home() {
       kind,
       storageProvider,
     });
+    let createdSnippet = false;
 
     try {
       setAccountIssue(null);
@@ -192,6 +193,7 @@ export function Home() {
         storageObjectId: null,
         storageProvider,
       });
+      createdSnippet = true;
       const prepared = await window.ipc.plakkApi.prepareStoredSnippetUpload({
         snippetId: task.id,
         fileName: file.name,
@@ -206,6 +208,7 @@ export function Home() {
       const message = errorMessage(error, "Could not prepare upload.");
       uploadActions.setPhase(task.id, "FAILED", message);
       setAccountIssue(message);
+      if (!createdSnippet) return;
       await window.ipc.plakkApi
         .updateStoredSnippetUploadStatus({ id: task.id, uploadStatus: "FAILED" })
         .catch(() => undefined);
