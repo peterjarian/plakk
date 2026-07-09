@@ -80,11 +80,14 @@ export function Home() {
   const user = auth.user;
   const hasUploads = uploadTasks.length > 0;
   const syncPausedMessage =
-    storageStatus.kind === "connected" && storageStatus.account.blockedReasons.includes("billing")
-      ? "Sync paused. Finish billing to add snippets."
-      : storageStatus.kind === "needs-reauthorization"
-        ? `Sync paused. Reconnect ${storageProviderLabel(storageStatus.provider)} to add snippets.`
-        : "Sync paused. Finish storage setup to add snippets.";
+    storageStatus.kind === "failed"
+      ? "Storage status is unavailable. Try again shortly."
+      : storageStatus.kind === "connected" &&
+          storageStatus.account.blockedReasons.includes("billing")
+        ? "Sync paused. Finish billing to add snippets."
+        : storageStatus.kind === "needs-reauthorization"
+          ? `Sync paused. Reconnect ${storageProviderLabel(storageStatus.provider)} to add snippets.`
+          : "Sync paused. Finish storage setup to add snippets.";
   const syncSetupUrl =
     storageStatus.kind === "unlinked" || storageStatus.kind === "needs-reauthorization"
       ? storageStatus.actionUrl
@@ -286,12 +289,11 @@ export function Home() {
 
       <div className="scrollbar-hidden min-h-0 flex-1 overflow-y-auto px-6 pb-4">
         <div className="sticky top-0 z-20 bg-background pt-3 pb-5">
-          {accountBlocked &&
-            storageStatus.kind !== "loading" &&
-            storageStatus.kind !== "failed" && (
-              <div className="mb-2 flex items-center gap-2 rounded-md bg-muted px-2.5 py-1.5 text-xs text-muted-foreground">
-                <TriangleAlert className="size-3.5 shrink-0 text-amber-600" aria-hidden="true" />
-                <span className="min-w-0 flex-1 truncate">{syncPausedMessage}</span>
+          {accountBlocked && storageStatus.kind !== "loading" && (
+            <div className="mb-2 flex items-center gap-2 rounded-md bg-muted px-2.5 py-1.5 text-xs text-muted-foreground">
+              <TriangleAlert className="size-3.5 shrink-0 text-amber-600" aria-hidden="true" />
+              <span className="min-w-0 flex-1 truncate">{syncPausedMessage}</span>
+              {storageStatus.kind !== "failed" && (
                 <Button
                   type="button"
                   variant="ghost"
@@ -301,8 +303,9 @@ export function Home() {
                   Finish on web
                   <ArrowUpRight />
                 </Button>
-              </div>
-            )}
+              )}
+            </div>
+          )}
           <SnippetComposer
             disabled={accountBlocked}
             onSubmit={addTextSnippet}
