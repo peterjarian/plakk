@@ -2,6 +2,7 @@ import { UserSchema } from "@plakk/shared";
 import { Schema } from "effect";
 
 export const AuthStatusSchema = Schema.Struct({
+  accessToken: Schema.NullOr(Schema.String),
   user: Schema.NullOr(UserSchema),
 });
 

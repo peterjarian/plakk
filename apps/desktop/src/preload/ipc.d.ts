@@ -23,6 +23,9 @@ declare global {
         reset: () => Promise<UserConfig>;
         set: (patch: UserConfigPatch) => Promise<UserConfig>;
       };
+      runtimeConfig: {
+        plakkRpcUrl: string;
+      };
       versions: {
         chrome: string;
         electron: string;
