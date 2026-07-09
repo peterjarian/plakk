@@ -55,15 +55,3 @@ export function formatFileSize(bytes: number): string {
 
 export const snippetKindForFileName = (name: string): SnippetKind =>
   /\.(avif|bmp|gif|heic|jpe?g|png|svg|tiff?|webp)$/i.test(name) ? "IMAGE" : "FILE";
-
-export const SnippetSchema = Schema.Struct({
-  id: Schema.String,
-  title: Schema.String,
-  subtitle: Schema.String,
-  kind: SnippetKindLiteral,
-  time: Schema.String,
-  synced: Schema.Boolean,
-  uploadProgress: Schema.optionalKey(Schema.Finite),
-});
-
-export type Snippet = typeof SnippetSchema.Type;

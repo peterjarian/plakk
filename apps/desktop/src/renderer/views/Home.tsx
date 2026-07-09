@@ -1,18 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUpRight, Plus, TriangleAlert } from "lucide-react";
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
-import { snippetKindForFileName, type Snippet } from "@plakk/shared";
+import { snippetKindForFileName } from "@plakk/shared";
 import type { ApiSnippet } from "@plakk/shared/PlakkApi";
 import {
-  apiSnippetToSnippet,
-  createSnippetAtoms,
-  createSnippetPayload,
-  deleteSnippetPayload,
+  createTextSnippetOptions,
+  deleteSnippetOptions,
+  createTextSnippetAtom,
+  deleteSnippetAtom,
   emptySnippetsAtom,
-  snippetMutationOptions,
-  uploadTaskToSnippet,
+  listSnippetsQueryOptions,
   type SnippetRequestHeaders,
 } from "@plakk/ui/atoms/snippets";
+import { createPlakkRpc } from "@plakk/ui/atoms/rpc";
 import { AppHeader } from "@plakk/ui/components/AppHeader";
 import { SnippetList } from "@plakk/ui/components/SnippetList";
 import { SnippetRow } from "@plakk/ui/components/SnippetRow";
@@ -31,11 +31,13 @@ import { AsyncResult } from "effect/unstable/reactivity";
 import { SnippetComposer } from "../components/SnippetComposer.tsx";
 import { useAuth } from "../hooks/useAuth.ts";
 import { navigate } from "../lib/navigate.ts";
-import { nextUploadProgress } from "../lib/uploadProgress.ts";
+import { startUploadProgress } from "../lib/uploadProgress.ts";
 
 const accountSetupUrl = "https://app.plakk.io/account/setup";
 const plakkRpcUrl = import.meta.env.VITE_PLAKK_RPC_URL ?? "https://app.plakk.io/api/rpc";
-const snippetAtoms = createSnippetAtoms(plakkRpcUrl);
+const plakkRpc = createPlakkRpc(plakkRpcUrl);
+const createTextSnippetMutationAtom = createTextSnippetAtom(plakkRpc);
+const deleteSnippetMutationAtom = deleteSnippetAtom(plakkRpc);
 
 export function Home() {
   const auth = useAuth();
@@ -50,44 +52,27 @@ export function Home() {
     () => (auth.accessToken === null ? null : { authorization: `Bearer ${auth.accessToken}` }),
     [auth.accessToken],
   );
-  const snippetsAtom = useMemo(
-    () =>
-      snippetHeaders === null ? emptySnippetsAtom : snippetAtoms.snippetsQueryAtom(snippetHeaders),
-    [snippetHeaders],
-  );
+  const snippetsAtom = useMemo(() => {
+    if (snippetHeaders === null) return emptySnippetsAtom;
+    const { payload, ...options } = listSnippetsQueryOptions(snippetHeaders);
+    return plakkRpc.query("ListSnippets", payload, options);
+  }, [snippetHeaders]);
   const snippetsResult = useAtomValue(snippetsAtom);
   const syncedSnippetResponse = AsyncResult.getOrElse(snippetsResult, () => ({
     items: [] as ReadonlyArray<ApiSnippet>,
   }));
-  const syncedSnippets = syncedSnippetResponse.items.map(apiSnippetToSnippet);
-  const createTextSnippet = useAtomSet(snippetAtoms.createTextSnippetAtom, { mode: "promise" });
-  const deleteSyncedSnippet = useAtomSet(snippetAtoms.deleteSnippetAtom, { mode: "promise" });
+  const createTextSnippet = useAtomSet(createTextSnippetMutationAtom, { mode: "promise" });
+  const deleteSyncedSnippet = useAtomSet(deleteSnippetMutationAtom, { mode: "promise" });
   const uploadActions = useUploadActions();
   const uploadTasks = useActiveUploadTasks();
-  const uploadSnippets = uploadTasks.map(uploadTaskToSnippet);
-  const snippets = [...uploadSnippets, ...syncedSnippets];
-  const uploadIds = new Set(uploadTasks.map((task) => task.id));
+  const snippets = [...uploadTasks, ...syncedSnippetResponse.items];
   const accountBlocked = auth.accessToken === null;
   const user = auth.user;
   const hasUploads = uploadTasks.length > 0;
 
   useEffect(() => {
     if (!hasUploads) return;
-
-    const timer = window.setInterval(() => {
-      for (const task of uploadActions.snapshot()) {
-        if (task.phase === "READY") continue;
-        const progress = nextUploadProgress(task);
-        if (progress < 100) {
-          uploadActions.setProgress(task.id, progress);
-        } else {
-          uploadActions.setProgress(task.id, 100);
-          uploadActions.setPhase(task.id, "READY");
-        }
-      }
-    }, 160);
-
-    return () => window.clearInterval(timer);
+    return startUploadProgress(uploadActions);
   }, [hasUploads, uploadActions]);
 
   useEffect(() => {
@@ -110,9 +95,7 @@ export function Home() {
 
         if (content.type === "text") {
           if (snippetHeaders !== null) {
-            void createTextSnippet(
-              snippetMutationOptions(snippetHeaders, createSnippetPayload(content.text)),
-            );
+            void createTextSnippet(createTextSnippetOptions(snippetHeaders, content.text));
           }
           return;
         }
@@ -143,15 +126,6 @@ export function Home() {
       }),
     [accountBlocked, createTextSnippet, snippetHeaders, uploadActions],
   );
-
-  function copy(snippet: Snippet) {
-    void navigator.clipboard?.writeText(snippet.subtitle || snippet.title);
-    setCopiedId(snippet.id);
-    if (copiedTimerRef.current !== undefined) window.clearTimeout(copiedTimerRef.current);
-    copiedTimerRef.current = window.setTimeout(() => {
-      setCopiedId((copied) => (copied === snippet.id ? null : copied));
-    }, 1200);
-  }
 
   function openLink(url: string) {
     if (!showExternalLinkWarning) {
@@ -223,9 +197,7 @@ export function Home() {
 
         const dropped = event.dataTransfer.getData("text/plain").trim();
         if (dropped && snippetHeaders !== null) {
-          void createTextSnippet(
-            snippetMutationOptions(snippetHeaders, createSnippetPayload(dropped)),
-          );
+          void createTextSnippet(createTextSnippetOptions(snippetHeaders, dropped));
         }
       }}
     >
@@ -275,9 +247,7 @@ export function Home() {
             disabled={accountBlocked}
             onSubmit={(text) => {
               if (snippetHeaders !== null) {
-                void createTextSnippet(
-                  snippetMutationOptions(snippetHeaders, createSnippetPayload(text)),
-                );
+                void createTextSnippet(createTextSnippetOptions(snippetHeaders, text));
               }
             }}
             onFiles={(files) => {
@@ -304,16 +274,25 @@ export function Home() {
               key={snippet.id}
               snippet={snippet}
               copied={copiedId === snippet.id}
-              onCopy={() => copy(snippet)}
+              onCopy={() => {
+                void navigator.clipboard?.writeText(
+                  "phase" in snippet ? snippet.fileName : snippet.title,
+                );
+                setCopiedId(snippet.id);
+                if (copiedTimerRef.current !== undefined) {
+                  window.clearTimeout(copiedTimerRef.current);
+                }
+                copiedTimerRef.current = window.setTimeout(() => {
+                  setCopiedId((copied) => (copied === snippet.id ? null : copied));
+                }, 1200);
+              }}
               onDelete={() => {
-                if (uploadIds.has(snippet.id)) {
+                if ("phase" in snippet) {
                   uploadActions.remove(snippet.id);
                   return;
                 }
                 if (snippetHeaders !== null) {
-                  void deleteSyncedSnippet(
-                    snippetMutationOptions(snippetHeaders, deleteSnippetPayload(snippet.id)),
-                  );
+                  void deleteSyncedSnippet(deleteSnippetOptions(snippetHeaders, snippet.id));
                 }
               }}
               {...(snippet.kind === "LINK" ? { onOpenLink: openLink } : {})}

@@ -1,4 +1,5 @@
-import type { Snippet, SnippetKind } from "@plakk/shared";
+import { formatFileSize, type SnippetKind } from "@plakk/shared";
+import type { ApiSnippet } from "@plakk/shared/PlakkApi";
 import {
   ArrowUpRight,
   Check,
@@ -10,7 +11,10 @@ import {
   Type,
   X,
 } from "lucide-react";
+import type { UploadTask } from "../atoms/upload.ts";
 import { Button } from "./primitives/button.tsx";
+
+export type SnippetRowItem = ApiSnippet | UploadTask;
 
 const kindMeta: Record<SnippetKind, { Icon: typeof Type }> = {
   TEXT: { Icon: Type },
@@ -19,8 +23,13 @@ const kindMeta: Record<SnippetKind, { Icon: typeof Type }> = {
   IMAGE: { Icon: ImageIcon },
 };
 
+const isUploadTask = (snippet: SnippetRowItem): snippet is UploadTask => "phase" in snippet;
+
+const fileSubtitle = (snippet: Pick<ApiSnippet, "byteSize" | "fileName" | "kind">) =>
+  `${snippet.fileName.split(".").pop()?.toUpperCase() ?? snippet.kind} · ${formatFileSize(snippet.byteSize)}`;
+
 export function SnippetRow(props: {
-  snippet: Snippet;
+  snippet: SnippetRowItem;
   copied: boolean;
   onCopy: () => void;
   onDelete: () => void;
@@ -29,8 +38,16 @@ export function SnippetRow(props: {
 }) {
   const { snippet, copied, onCopy, onDelete, onOpenLink, onStopUpload } = props;
   const { Icon } = kindMeta[snippet.kind];
-  const uploadProgress = snippet.uploadProgress;
+  const uploadProgress = isUploadTask(snippet) ? snippet.progress : undefined;
   const isUploading = uploadProgress !== undefined;
+  const title = isUploadTask(snippet) ? snippet.fileName : snippet.title;
+  const subtitle =
+    snippet.kind === "FILE" || snippet.kind === "IMAGE"
+      ? fileSubtitle(snippet)
+      : isUploadTask(snippet)
+        ? ""
+        : formatFileSize(snippet.byteSize);
+  const time = isUploadTask(snippet) ? "" : snippet.createdAt.slice(0, 10);
 
   return (
     <li>
@@ -44,10 +61,8 @@ export function SnippetRow(props: {
         </span>
 
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium">{snippet.title}</p>
-          {snippet.subtitle && (
-            <p className="truncate text-xs text-muted-foreground">{snippet.subtitle}</p>
-          )}
+          <p className="truncate text-sm font-medium">{title}</p>
+          {subtitle && <p className="truncate text-xs text-muted-foreground">{subtitle}</p>}
         </div>
 
         <div className="flex shrink-0 items-center justify-end">
@@ -70,7 +85,7 @@ export function SnippetRow(props: {
           ) : (
             <>
               <span className="text-[11px] tabular-nums text-muted-foreground group-hover:hidden group-focus-within:hidden">
-                {snippet.time}
+                {time}
               </span>
 
               <div className="hidden items-center gap-0.5 group-hover:flex group-focus-within:flex">
@@ -91,13 +106,13 @@ export function SnippetRow(props: {
                         variant="ghost"
                         size="icon-sm"
                         aria-label="Open link"
-                        onClick={() => onOpenLink(snippet.title)}
+                        onClick={() => onOpenLink(title)}
                       >
                         <ArrowUpRight />
                       </Button>
                     ) : (
                       <Button
-                        render={<a href={snippet.title} target="_blank" rel="noreferrer" />}
+                        render={<a href={title} target="_blank" rel="noreferrer" />}
                         variant="ghost"
                         size="icon-sm"
                         aria-label="Open link"
