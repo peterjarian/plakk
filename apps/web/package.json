@@ -11,6 +11,7 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
+    "@plakk/db": "workspace:*",
     "@plakk/shared": "workspace:*",
     "@tailwindcss/vite": "^4.1.18",
     "@tanstack/react-router": "^1.132.0",

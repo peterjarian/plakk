@@ -21,7 +21,7 @@ const timestamps = {
 export const snippets = pgTable(
   "snippets",
   {
-    id: uuid("id").defaultRandom().primaryKey(),
+    id: uuid("id").primaryKey(),
     ownerWorkosUserId: text("owner_workos_user_id").notNull(),
     kind: snippetKind("kind").notNull(),
     title: text("title").notNull(),
@@ -44,3 +44,5 @@ export const snippets = pgTable(
     ),
   ],
 );
+
+export type SnippetRow = typeof snippets.$inferSelect;

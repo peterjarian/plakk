@@ -18,8 +18,10 @@ export const AccountStatusSchema = Schema.Struct({
 
 export type AccountStatus = typeof AccountStatusSchema.Type;
 
+export const SnippetIdSchema = Schema.String.check(Schema.isUUID());
+
 export const ApiSnippetSchema = Schema.Struct({
-  id: Schema.String,
+  id: SnippetIdSchema,
   kind: SnippetKindLiteral,
   title: Schema.String,
   fileName: Schema.String,
@@ -49,25 +51,22 @@ export const PlakkApi = RpcGroup.make(
   Rpc.make("ListSnippets", {
     payload: {
       limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 })),
-      cursor: Schema.optionalKey(Schema.String),
     },
     success: Schema.Struct({
       items: Schema.Array(ApiSnippetSchema),
-      nextCursor: Schema.NullOr(Schema.String),
     }),
     error: RpcError,
   }),
   Rpc.make("CreateTextSnippet", {
-    payload: { text: Schema.String },
+    payload: { id: SnippetIdSchema, text: Schema.String },
     success: ApiSnippetSchema,
     error: RpcError,
   }),
   Rpc.make("CreateStoredSnippet", {
     payload: {
+      id: SnippetIdSchema,
       kind: Schema.Literals(["FILE", "IMAGE"] as const),
       title: Schema.String,
-      storageProvider: StorageProviderLiteral,
-      storageObjectId: Schema.String,
       fileName: Schema.String,
       byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
       contentType: Schema.NullOr(Schema.String),
@@ -76,7 +75,7 @@ export const PlakkApi = RpcGroup.make(
     error: RpcError,
   }),
   Rpc.make("DeleteSnippet", {
-    payload: { id: Schema.String },
+    payload: { id: SnippetIdSchema },
     success: Schema.Void,
     error: RpcError,
   }),

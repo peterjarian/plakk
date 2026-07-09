@@ -27,7 +27,7 @@
       "typeSchema": null,
       "notNull": true,
       "dimensions": 0,
-      "default": "gen_random_uuid()",
+      "default": null,
       "generated": null,
       "identity": null,
       "name": "id",
