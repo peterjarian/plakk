@@ -145,7 +145,7 @@ export function Settings() {
                 <SettingsRow className="px-4">
                   <SettingsRowMain>
                     <SettingsRowIcon>
-                      <StorageProviderIcon provider={storageStatus.provider} className="size-4" />
+                      <StorageProviderIcon provider={storageStatus.provider} className="size-5" />
                     </SettingsRowIcon>
                     <SettingsRowText
                       title={`${storageProviderLabel(storageStatus.provider)} needs reconnection`}
@@ -166,7 +166,7 @@ export function Settings() {
                 <SettingsRow className="px-4">
                   <SettingsRowMain>
                     <SettingsRowIcon>
-                      <StorageProviderIcon provider={storageStatus.provider} className="size-4" />
+                      <StorageProviderIcon provider={storageStatus.provider} className="size-5" />
                     </SettingsRowIcon>
                     <SettingsRowText
                       title={`${storageProviderLabel(storageStatus.provider)} connected`}
