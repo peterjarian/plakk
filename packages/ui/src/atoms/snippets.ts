@@ -10,41 +10,44 @@ import { FetchHttpClient } from "effect/unstable/http";
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 import { AsyncResult, Atom, AtomRpc } from "effect/unstable/reactivity";
 
-const rpcUrl = import.meta.env.VITE_PLAKK_RPC_URL ?? "https://app.plakk.io/api/rpc";
+export type SnippetRequestHeaders = {
+  readonly authorization: string;
+};
+
 export const snippetReactivityKeys = ["plakk:snippets"] as const;
 
-export class PlakkRpc extends AtomRpc.Service<PlakkRpc>()("plakk/desktop/renderer/atoms/PlakkRpc", {
-  group: PlakkApi,
-  protocol: RpcClient.layerProtocolHttp({ url: rpcUrl }).pipe(
-    Layer.provideMerge(FetchHttpClient.layer),
-    Layer.provideMerge(RpcSerialization.layerNdjson),
-  ),
-}) {}
+export const createSnippetAtoms = (rpcUrl: string) => {
+  class PlakkRpc extends AtomRpc.Service<PlakkRpc>()("plakk/ui/atoms/PlakkRpc", {
+    group: PlakkApi,
+    protocol: RpcClient.layerProtocolHttp({ url: rpcUrl }).pipe(
+      Layer.provideMerge(FetchHttpClient.layer),
+      Layer.provideMerge(RpcSerialization.layerNdjson),
+    ),
+  }) {}
 
-const authHeaders = (accessToken: string) => ({ authorization: `Bearer ${accessToken}` });
+  return {
+    snippetsQueryAtom: (headers: SnippetRequestHeaders) =>
+      PlakkRpc.query("ListSnippets", listSnippetsPayload, listSnippetsQueryOptions(headers)),
+    createTextSnippetAtom: PlakkRpc.mutation("CreateTextSnippet").pipe(
+      Atom.withLabel("plakk:create-text-snippet"),
+    ),
+    deleteSnippetAtom: PlakkRpc.mutation("DeleteSnippet").pipe(
+      Atom.withLabel("plakk:delete-snippet"),
+    ),
+  };
+};
 
-export const snippetsQueryAtom = (accessToken: string) =>
-  PlakkRpc.query(
-    "ListSnippets",
-    { limit: 20 },
-    {
-      headers: authHeaders(accessToken),
-      reactivityKeys: snippetReactivityKeys,
-      serializationKey: "latest",
-    },
-  );
+export const listSnippetsPayload = { limit: 20 } as const;
+
+export const listSnippetsQueryOptions = (headers: SnippetRequestHeaders) => ({
+  headers,
+  reactivityKeys: snippetReactivityKeys,
+  serializationKey: "latest",
+});
 
 export const emptySnippetsAtom = Atom.make(
   AsyncResult.success<{ readonly items: ReadonlyArray<ApiSnippet> }, never>({ items: [] }),
 ).pipe(Atom.withLabel("plakk:empty-snippets"));
-
-export const createTextSnippetAtom = PlakkRpc.mutation("CreateTextSnippet").pipe(
-  Atom.withLabel("plakk:create-text-snippet"),
-);
-
-export const deleteSnippetAtom = PlakkRpc.mutation("DeleteSnippet").pipe(
-  Atom.withLabel("plakk:delete-snippet"),
-);
 
 export const createSnippetPayload = (text: string) => ({
   id: crypto.randomUUID(),
@@ -53,8 +56,11 @@ export const createSnippetPayload = (text: string) => ({
 
 export const deleteSnippetPayload = (id: string) => ({ id });
 
-export const snippetMutationInput = <Payload>(accessToken: string, payload: Payload) => ({
-  headers: authHeaders(accessToken),
+export const snippetMutationOptions = <Payload>(
+  headers: SnippetRequestHeaders,
+  payload: Payload,
+) => ({
+  headers,
   payload,
   reactivityKeys: snippetReactivityKeys,
 });

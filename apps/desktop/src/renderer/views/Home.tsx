@@ -1,6 +1,18 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUpRight, Plus, TriangleAlert } from "lucide-react";
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { snippetKindForFileName, type Snippet } from "@plakk/shared";
+import type { ApiSnippet } from "@plakk/shared/PlakkApi";
+import {
+  apiSnippetToSnippet,
+  createSnippetAtoms,
+  createSnippetPayload,
+  deleteSnippetPayload,
+  emptySnippetsAtom,
+  snippetMutationOptions,
+  uploadTaskToSnippet,
+  type SnippetRequestHeaders,
+} from "@plakk/ui/atoms/snippets";
 import { AppHeader } from "@plakk/ui/components/AppHeader";
 import { SnippetList } from "@plakk/ui/components/SnippetList";
 import { SnippetRow } from "@plakk/ui/components/SnippetRow";
@@ -15,13 +27,15 @@ import {
   DialogTitle,
 } from "@plakk/ui/components/primitives/dialog";
 import { useActiveUploadTasks, useUploadActions } from "@plakk/ui/hooks/useUploadFlow";
-import { uploadTaskToSnippet } from "../atoms/snippets.ts";
+import { AsyncResult } from "effect/unstable/reactivity";
 import { SnippetComposer } from "../components/SnippetComposer.tsx";
 import { useAuth } from "../hooks/useAuth.ts";
-import { useSnippetActions, useSnippets } from "../hooks/useSnippets.ts";
 import { navigate } from "../lib/navigate.ts";
+import { nextUploadProgress } from "../lib/uploadProgress.ts";
 
 const accountSetupUrl = "https://app.plakk.io/account/setup";
+const plakkRpcUrl = import.meta.env.VITE_PLAKK_RPC_URL ?? "https://app.plakk.io/api/rpc";
+const snippetAtoms = createSnippetAtoms(plakkRpcUrl);
 
 export function Home() {
   const auth = useAuth();
@@ -32,8 +46,22 @@ export function Home() {
   const [showExternalLinkWarning, setShowExternalLinkWarning] = useState(true);
   const copiedTimerRef = useRef<number | undefined>(undefined);
 
-  const { snippets: syncedSnippets } = useSnippets(auth.accessToken);
-  const snippetActions = useSnippetActions(auth.accessToken);
+  const snippetHeaders = useMemo<SnippetRequestHeaders | null>(
+    () => (auth.accessToken === null ? null : { authorization: `Bearer ${auth.accessToken}` }),
+    [auth.accessToken],
+  );
+  const snippetsAtom = useMemo(
+    () =>
+      snippetHeaders === null ? emptySnippetsAtom : snippetAtoms.snippetsQueryAtom(snippetHeaders),
+    [snippetHeaders],
+  );
+  const snippetsResult = useAtomValue(snippetsAtom);
+  const syncedSnippetResponse = AsyncResult.getOrElse(snippetsResult, () => ({
+    items: [] as ReadonlyArray<ApiSnippet>,
+  }));
+  const syncedSnippets = syncedSnippetResponse.items.map(apiSnippetToSnippet);
+  const createTextSnippet = useAtomSet(snippetAtoms.createTextSnippetAtom, { mode: "promise" });
+  const deleteSyncedSnippet = useAtomSet(snippetAtoms.deleteSnippetAtom, { mode: "promise" });
   const uploadActions = useUploadActions();
   const uploadTasks = useActiveUploadTasks();
   const uploadSnippets = uploadTasks.map(uploadTaskToSnippet);
@@ -49,7 +77,7 @@ export function Home() {
     const timer = window.setInterval(() => {
       for (const task of uploadActions.snapshot()) {
         if (task.phase === "READY") continue;
-        const progress = Math.min(100, task.progress + 8);
+        const progress = nextUploadProgress(task);
         if (progress < 100) {
           uploadActions.setProgress(task.id, progress);
         } else {
@@ -81,7 +109,11 @@ export function Home() {
         if (accountBlocked) return;
 
         if (content.type === "text") {
-          addText(content.text);
+          if (snippetHeaders !== null) {
+            void createTextSnippet(
+              snippetMutationOptions(snippetHeaders, createSnippetPayload(content.text)),
+            );
+          }
           return;
         }
 
@@ -109,54 +141,8 @@ export function Home() {
           });
         }
       }),
-    [accountBlocked, uploadActions],
+    [accountBlocked, createTextSnippet, snippetHeaders, uploadActions],
   );
-
-  function addText(value: string) {
-    if (accountBlocked) return;
-    void snippetActions.createText(value);
-  }
-
-  function addFiles(files: FileList) {
-    if (accountBlocked) return;
-
-    for (const file of Array.from(files)) {
-      const kind = snippetKindForFileName(file.name);
-      if (kind !== "FILE" && kind !== "IMAGE") continue;
-      uploadActions.enqueue({
-        byteSize: file.size,
-        contentType: file.type || null,
-        fileName: file.name,
-        kind,
-        storageProvider: "GOOGLE_DRIVE",
-      });
-    }
-  }
-
-  function addDropped(dataTransfer: DataTransfer) {
-    if (accountBlocked) return;
-
-    if (dataTransfer.files.length) {
-      addFiles(dataTransfer.files);
-      return;
-    }
-
-    const dropped = dataTransfer.getData("text/plain").trim();
-    if (!dropped) return;
-    void snippetActions.createText(dropped);
-  }
-
-  function stopUpload(id: string) {
-    uploadActions.remove(id);
-  }
-
-  function deleteSnippet(id: string) {
-    if (uploadIds.has(id)) {
-      uploadActions.remove(id);
-      return;
-    }
-    void snippetActions.delete(id);
-  }
 
   function copy(snippet: Snippet) {
     void navigator.clipboard?.writeText(snippet.subtitle || snippet.title);
@@ -219,7 +205,28 @@ export function Home() {
         event.preventDefault();
         setIsDragging(false);
         if (accountBlocked) return;
-        addDropped(event.dataTransfer);
+
+        if (event.dataTransfer.files.length) {
+          for (const file of Array.from(event.dataTransfer.files)) {
+            const kind = snippetKindForFileName(file.name);
+            if (kind !== "FILE" && kind !== "IMAGE") continue;
+            uploadActions.enqueue({
+              byteSize: file.size,
+              contentType: file.type || null,
+              fileName: file.name,
+              kind,
+              storageProvider: "GOOGLE_DRIVE",
+            });
+          }
+          return;
+        }
+
+        const dropped = event.dataTransfer.getData("text/plain").trim();
+        if (dropped && snippetHeaders !== null) {
+          void createTextSnippet(
+            snippetMutationOptions(snippetHeaders, createSnippetPayload(dropped)),
+          );
+        }
       }}
     >
       <div className="drag-region h-12" aria-hidden="true" />
@@ -264,7 +271,31 @@ export function Home() {
               </Button>
             </div>
           )}
-          <SnippetComposer disabled={accountBlocked} onSubmit={addText} onFiles={addFiles} />
+          <SnippetComposer
+            disabled={accountBlocked}
+            onSubmit={(text) => {
+              if (snippetHeaders !== null) {
+                void createTextSnippet(
+                  snippetMutationOptions(snippetHeaders, createSnippetPayload(text)),
+                );
+              }
+            }}
+            onFiles={(files) => {
+              if (accountBlocked) return;
+
+              for (const file of Array.from(files)) {
+                const kind = snippetKindForFileName(file.name);
+                if (kind !== "FILE" && kind !== "IMAGE") continue;
+                uploadActions.enqueue({
+                  byteSize: file.size,
+                  contentType: file.type || null,
+                  fileName: file.name,
+                  kind,
+                  storageProvider: "GOOGLE_DRIVE",
+                });
+              }
+            }}
+          />
         </div>
 
         <SnippetList empty={snippets.length === 0}>
@@ -274,9 +305,19 @@ export function Home() {
               snippet={snippet}
               copied={copiedId === snippet.id}
               onCopy={() => copy(snippet)}
-              onDelete={() => deleteSnippet(snippet.id)}
+              onDelete={() => {
+                if (uploadIds.has(snippet.id)) {
+                  uploadActions.remove(snippet.id);
+                  return;
+                }
+                if (snippetHeaders !== null) {
+                  void deleteSyncedSnippet(
+                    snippetMutationOptions(snippetHeaders, deleteSnippetPayload(snippet.id)),
+                  );
+                }
+              }}
               {...(snippet.kind === "LINK" ? { onOpenLink: openLink } : {})}
-              onStopUpload={() => stopUpload(snippet.id)}
+              onStopUpload={() => uploadActions.remove(snippet.id)}
             />
           ))}
         </SnippetList>
