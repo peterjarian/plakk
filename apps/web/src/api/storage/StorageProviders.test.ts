@@ -82,6 +82,9 @@ describe("storage upload providers", () => {
       upload: { method: "PUT", url: "https://google-upload.example" },
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(new URL(fetchRequest(0).url).searchParams.get("q")).toBe(
+      "mimeType = 'application/vnd.google-apps.folder' and name = 'Plakk' and 'root' in parents and trashed = false",
+    );
     expect(await fetchRequest(1).json()).toEqual({
       name: "folder/file.txt",
       mimeType: "text/plain",

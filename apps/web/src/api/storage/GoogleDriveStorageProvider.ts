@@ -47,7 +47,7 @@ const getPlakkFolder = Effect.fn("GoogleDriveStorageProvider.getPlakkFolder")(fu
     HttpClientRequest.bearerToken(accessToken),
     HttpClientRequest.setUrlParam(
       "q",
-      `mimeType = '${GOOGLE_DRIVE_FOLDER_MIME_TYPE}' and name = '${GOOGLE_DRIVE_FOLDER_NAME}' and trashed = false`,
+      `mimeType = '${GOOGLE_DRIVE_FOLDER_MIME_TYPE}' and name = '${GOOGLE_DRIVE_FOLDER_NAME}' and 'root' in parents and trashed = false`,
     ),
     HttpClientRequest.setUrlParam("fields", "files(id)"),
     HttpClientRequest.setUrlParam("pageSize", "1"),

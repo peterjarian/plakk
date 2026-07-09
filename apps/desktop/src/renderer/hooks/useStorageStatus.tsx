@@ -7,7 +7,7 @@ import { GoogleDriveIcon } from "@plakk/ui/icons/GoogleDriveIcon";
 import { OneDriveIcon } from "@plakk/ui/icons/OneDriveIcon";
 import type { StorageProvider } from "@plakk/shared";
 import { createPlakkRpc } from "@plakk/ui/atoms/rpc";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "./useAuth.ts";
 
 const storageSetupUrl = "https://app.plakk.io/storage";
@@ -80,6 +80,7 @@ export const storageStatusFrom = (
 
 export function useStorageStatus(): StorageStatus {
   const auth = useAuth();
+  const [refreshKey, setRefreshKey] = useState(0);
   const plakkRpc = useMemo(() => createPlakkRpc(window.ipc.runtimeConfig.plakkRpcUrl), []);
   const headers = useMemo(
     () => (auth.accessToken === null ? null : { authorization: `Bearer ${auth.accessToken}` }),
@@ -89,8 +90,11 @@ export function useStorageStatus(): StorageStatus {
     () =>
       headers === null
         ? emptyAccountStatusAtom
-        : plakkRpc.query("GetAccountStatus", undefined, { headers }),
-    [headers],
+        : plakkRpc.query("GetAccountStatus", undefined, {
+            headers,
+            serializationKey: `account-status-${refreshKey}`,
+          }),
+    [headers, refreshKey],
   );
   const accountResult = useAtomValue(accountAtom);
   const account = AsyncResult.getOrElse(accountResult, () => null);
@@ -101,11 +105,20 @@ export function useStorageStatus(): StorageStatus {
         : plakkRpc.query(
             "GetPipeConnectionStatus",
             { storageProvider: account.storageProvider },
-            { headers },
+            {
+              headers,
+              serializationKey: `pipe-connection-${account.storageProvider}-${refreshKey}`,
+            },
           ),
-    [account, headers],
+    [account, headers, refreshKey],
   );
   const connectionResult = useAtomValue(connectionAtom);
+
+  useEffect(() => {
+    const refresh = () => setRefreshKey((current) => current + 1);
+    window.addEventListener("focus", refresh);
+    return () => window.removeEventListener("focus", refresh);
+  }, []);
 
   return storageStatusFrom(accountResult, connectionResult);
 }
