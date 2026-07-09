@@ -6,10 +6,8 @@ import type { ApiSnippet } from "@plakk/shared/PlakkApi";
 import {
   createTextSnippetOptions,
   deleteSnippetOptions,
-  createTextSnippetAtom,
-  deleteSnippetAtom,
   emptySnippetsAtom,
-  listSnippetsQueryOptions,
+  snippetReactivityKeys,
   type SnippetRequestHeaders,
 } from "@plakk/ui/atoms/snippets";
 import { createPlakkRpc } from "@plakk/ui/atoms/rpc";
@@ -34,10 +32,9 @@ import { navigate } from "../lib/navigate.ts";
 import { startUploadProgress } from "../lib/uploadProgress.ts";
 
 const accountSetupUrl = "https://app.plakk.io/account/setup";
-const plakkRpcUrl = import.meta.env.VITE_PLAKK_RPC_URL ?? "https://app.plakk.io/api/rpc";
-const plakkRpc = createPlakkRpc(plakkRpcUrl);
-const createTextSnippetMutationAtom = createTextSnippetAtom(plakkRpc);
-const deleteSnippetMutationAtom = deleteSnippetAtom(plakkRpc);
+const plakkRpc = createPlakkRpc(window.ipc.runtimeConfig.plakkRpcUrl);
+const createTextSnippetMutationAtom = plakkRpc.mutation("CreateTextSnippet");
+const deleteSnippetMutationAtom = plakkRpc.mutation("DeleteSnippet");
 
 export function Home() {
   const auth = useAuth();
@@ -54,8 +51,15 @@ export function Home() {
   );
   const snippetsAtom = useMemo(() => {
     if (snippetHeaders === null) return emptySnippetsAtom;
-    const { payload, ...options } = listSnippetsQueryOptions(snippetHeaders);
-    return plakkRpc.query("ListSnippets", payload, options);
+    return plakkRpc.query(
+      "ListSnippets",
+      { limit: 20 },
+      {
+        headers: snippetHeaders,
+        reactivityKeys: snippetReactivityKeys,
+        serializationKey: "latest",
+      },
+    );
   }, [snippetHeaders]);
   const snippetsResult = useAtomValue(snippetsAtom);
   const syncedSnippetResponse = AsyncResult.getOrElse(snippetsResult, () => ({
