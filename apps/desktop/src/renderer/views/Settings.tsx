@@ -37,7 +37,8 @@ export function Settings() {
 
   if (user === null) return null;
 
-  const name = [user.firstName, user.lastName].filter(Boolean).join(" ") || user.email;
+  const fallback = user.email || user.id;
+  const name = [user.firstName, user.lastName].filter(Boolean).join(" ") || fallback;
 
   return (
     <main className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
@@ -62,12 +63,12 @@ export function Settings() {
                 <SettingsRowMain>
                   <Avatar className="size-10">
                     <AvatarFallback className="text-sm font-medium">
-                      {getInitials(name, user.email)}
+                      {getInitials(name, fallback)}
                     </AvatarFallback>
                   </Avatar>
                   <SettingsRowText
                     title={name}
-                    description={name === user.email ? undefined : user.email}
+                    description={name === fallback ? undefined : fallback}
                   />
                 </SettingsRowMain>
                 <span className="rounded-full bg-muted px-2 py-1 text-[11px] leading-none font-medium text-muted-foreground">

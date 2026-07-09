@@ -10,9 +10,9 @@ export const UserSchema = Schema.Struct({
   id: Schema.String,
   firstName: Schema.NullOr(Schema.String),
   lastName: Schema.NullOr(Schema.String),
-  email: Schema.String,
-  createdAt: Schema.String,
-  updatedAt: Schema.String,
+  email: Schema.NullOr(Schema.String),
+  createdAt: Schema.NullOr(Schema.String),
+  updatedAt: Schema.NullOr(Schema.String),
 });
 
 export type User = typeof UserSchema.Type;
@@ -22,6 +22,12 @@ export const SNIPPET_KINDS = ["TEXT", "LINK", "FILE", "IMAGE"] as const;
 export const SnippetKindLiteral = Schema.Literals(SNIPPET_KINDS);
 
 export type SnippetKind = typeof SnippetKindLiteral.Type;
+
+export const SNIPPET_UPLOAD_STATUSES = ["UPLOADING", "READY", "FAILED"] as const;
+
+export const SnippetUploadStatusLiteral = Schema.Literals(SNIPPET_UPLOAD_STATUSES);
+
+export type SnippetUploadStatus = typeof SnippetUploadStatusLiteral.Type;
 
 export const isHttpUrl = (value: string): boolean => {
   try {
@@ -49,18 +55,3 @@ export function formatFileSize(bytes: number): string {
 
 export const snippetKindForFileName = (name: string): SnippetKind =>
   /\.(avif|bmp|gif|heic|jpe?g|png|svg|tiff?|webp)$/i.test(name) ? "IMAGE" : "FILE";
-
-export const SnippetSchema = Schema.Struct({
-  id: Schema.String,
-  title: Schema.String,
-  subtitle: Schema.String,
-  kind: SnippetKindLiteral,
-  time: Schema.String,
-  synced: Schema.Boolean,
-  uploadProgress: Schema.optionalKey(Schema.Finite),
-});
-
-export type Snippet = typeof SnippetSchema.Type;
-
-export * from "./api/PlakkApi.ts";
-export * from "./api/RpcError.ts";

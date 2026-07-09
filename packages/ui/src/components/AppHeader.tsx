@@ -21,7 +21,8 @@ export function AppHeader(props: {
 }) {
   const { user, storageAction, className, onSettingsClick, onSignOutClick } = props;
   const name = [user.firstName, user.lastName].filter(Boolean).join(" ");
-  const displayName = name || user.email;
+  const displayName = name || user.email || user.id;
+  const fallback = user.email || user.id;
 
   return (
     <header className={cn("drag-region flex h-9 items-center justify-between px-6", className)}>
@@ -37,17 +38,17 @@ export function AppHeader(props: {
         <DropdownMenu>
           <DropdownMenuTrigger aria-label="Account menu">
             <Avatar className="size-8">
-              <AvatarFallback className="text-xs">{getInitials(name, user.email)}</AvatarFallback>
+              <AvatarFallback className="text-xs">{getInitials(name, fallback)}</AvatarFallback>
             </Avatar>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-64">
             <div className="flex items-center gap-3 px-2 py-1.5">
               <Avatar className="size-9">
-                <AvatarFallback className="text-xs">{getInitials(name, user.email)}</AvatarFallback>
+                <AvatarFallback className="text-xs">{getInitials(name, fallback)}</AvatarFallback>
               </Avatar>
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium">{displayName}</p>
-                <p className="truncate text-xs text-muted-foreground">{user.email}</p>
+                <p className="truncate text-xs text-muted-foreground">{fallback}</p>
               </div>
             </div>
             <DropdownMenuSeparator />
