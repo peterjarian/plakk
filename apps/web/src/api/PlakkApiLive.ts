@@ -21,6 +21,7 @@ import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstab
 
 import { StorageProviderService } from "./storage/StorageProvider.ts";
 import { getProviderSlug } from "./storage/getProviderSlug.ts";
+import { getStorageProviderDestinationUrl } from "./storage/getStorageProviderDestinationUrl.ts";
 import { toApiSnippet } from "./transformers/toApiSnippet.ts";
 
 const STORAGE_PROVIDER = "GOOGLE_DRIVE" as const;
@@ -143,6 +144,7 @@ const StorageLive = StorageRpcs.of({
         return {
           storageProvider: input.storageProvider,
           status: "NOT_CONNECTED",
+          externalDestinationUrl: null,
         } satisfies PipeConnection;
       }
 
@@ -154,9 +156,18 @@ const StorageLive = StorageRpcs.of({
       const account = yield* HttpClientResponse.schemaBodyJson(WorkosConnectedAccountSchema)(
         response,
       ).pipe(Effect.orDie);
+      if (account.state === "connected") {
+        return {
+          storageProvider: input.storageProvider,
+          status: "CONNECTED",
+          externalDestinationUrl: getStorageProviderDestinationUrl(input.storageProvider),
+        } satisfies PipeConnection;
+      }
+
       return {
         storageProvider: input.storageProvider,
-        status: account.state === "connected" ? "CONNECTED" : "NEEDS_REAUTHORIZATION",
+        status: "NEEDS_REAUTHORIZATION",
+        externalDestinationUrl: null,
       } satisfies PipeConnection;
     }).pipe(Effect.annotateSpans({ storageProvider: input.storageProvider }));
   }),
