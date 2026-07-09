@@ -15,6 +15,7 @@ import type {
   PreparedStorageUpload,
   PrepareStorageUploadInput,
   StorageProviderError,
+  StorageProviderDestination,
 } from "./types.ts";
 
 type ConnectedStorageInput = {
@@ -52,6 +53,9 @@ export type StorageUploadError =
 
 export type StorageProviderAdapter = {
   readonly storageProvider: PrepareStorageUploadInput["storageProvider"];
+  readonly getDestination: (
+    input: Pick<PrepareStorageUploadInput, "accessToken">,
+  ) => Effect.Effect<StorageProviderDestination, StorageProviderError, HttpClient.HttpClient>;
   readonly prepareUpload: (
     input: PrepareStorageUploadInput,
   ) => Effect.Effect<PreparedStorageUpload, StorageProviderError, HttpClient.HttpClient>;
@@ -75,6 +79,9 @@ export class StorageProviderService extends Context.Service<
     readonly prepareUpload: (
       input: Omit<PrepareStorageUploadInput, "accessToken"> & { readonly workosUserId: string },
     ) => Effect.Effect<PreparedStorageUpload, StorageUploadError>;
+    readonly getDestinationUrl: (
+      input: ConnectedStorageInput,
+    ) => Effect.Effect<string, StorageUploadError>;
   }
 >()("@plakk/web/api/storage/StorageProvider/StorageProviderService") {
   static readonly Live = Layer.effect(
@@ -137,7 +144,17 @@ export class StorageProviderService extends Context.Service<
           .pipe(Effect.provideService(HttpClient.HttpClient, httpClient));
       });
 
-      return StorageProviderService.of({ ensureConnected, prepareUpload });
+      const getDestinationUrl = Effect.fn("StorageProviderService.getDestinationUrl")(function* (
+        input: ConnectedStorageInput,
+      ): Effect.fn.Return<string, StorageUploadError> {
+        const token = yield* getConnectedToken(input);
+        const destination = yield* storageProviderAdapters[input.storageProvider]
+          .getDestination(token)
+          .pipe(Effect.provideService(HttpClient.HttpClient, httpClient));
+        return destination.url;
+      });
+
+      return StorageProviderService.of({ ensureConnected, prepareUpload, getDestinationUrl });
     }),
   );
 }

@@ -22,8 +22,8 @@ beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
 });
 
-const firstFetchRequest = () => {
-  const [request, init] = vi.mocked(fetch).mock.calls[0] ?? [];
+const fetchRequest = (index: number) => {
+  const [request, init] = vi.mocked(fetch).mock.calls[index] ?? [];
   return new Request(request as RequestInfo, init);
 };
 
@@ -47,7 +47,7 @@ describe("storage upload providers", () => {
         strategy: { type: "single_request" },
       },
     });
-    const request = firstFetchRequest();
+    const request = fetchRequest(0);
     expect(request.url).toBe("https://api.dropboxapi.com/2/files/get_temporary_upload_link");
     expect(await request.json()).toEqual({
       commit_info: {
@@ -61,12 +61,14 @@ describe("storage upload providers", () => {
   });
 
   it("creates a Google Drive resumable upload session", async () => {
-    fetchMock.mockResolvedValue(
-      new Response(null, {
-        status: 200,
-        headers: { Location: "https://google-upload.example" },
-      }),
-    );
+    fetchMock
+      .mockResolvedValueOnce(Response.json({ files: [{ id: "plakk-folder" }] }))
+      .mockResolvedValueOnce(
+        new Response(null, {
+          status: 200,
+          headers: { Location: "https://google-upload.example" },
+        }),
+      );
 
     const upload = await Effect.runPromise(
       GoogleDriveStorageProvider.prepareUpload({
@@ -78,6 +80,35 @@ describe("storage upload providers", () => {
     expect(upload).toMatchObject({
       storageObjectId: null,
       upload: { method: "PUT", url: "https://google-upload.example" },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(await fetchRequest(1).json()).toEqual({
+      name: "folder/file.txt",
+      mimeType: "text/plain",
+      parents: ["plakk-folder"],
+    });
+  });
+
+  it("creates the Plakk folder when Google Drive does not have one", async () => {
+    fetchMock
+      .mockResolvedValueOnce(Response.json({ files: [] }))
+      .mockResolvedValueOnce(Response.json({ id: "plakk-folder" }));
+
+    const destination = await Effect.runPromise(
+      GoogleDriveStorageProvider.getDestination({ accessToken: "token" }).pipe(
+        Effect.provide(FetchHttpClient.layer),
+      ),
+    );
+
+    expect(destination).toEqual({
+      url: "https://drive.google.com/drive/folders/plakk-folder",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const request = fetchRequest(1);
+    expect(request.url).toContain("https://www.googleapis.com/drive/v3/files?fields=id");
+    expect(await request.json()).toEqual({
+      name: "Plakk",
+      mimeType: "application/vnd.google-apps.folder",
     });
   });
 

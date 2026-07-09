@@ -21,7 +21,6 @@ import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstab
 
 import { StorageProviderService } from "./storage/StorageProvider.ts";
 import { getProviderSlug } from "./storage/getProviderSlug.ts";
-import { getStorageProviderDestinationUrl } from "./storage/getStorageProviderDestinationUrl.ts";
 import { toApiSnippet } from "./transformers/toApiSnippet.ts";
 
 const STORAGE_PROVIDER = "GOOGLE_DRIVE" as const;
@@ -157,10 +156,17 @@ const StorageLive = StorageRpcs.of({
         response,
       ).pipe(Effect.orDie);
       if (account.state === "connected") {
+        const storage = yield* StorageProviderService;
+        const externalDestinationUrl = yield* storage
+          .getDestinationUrl({
+            storageProvider: input.storageProvider,
+            workosUserId: currentUser.id,
+          })
+          .pipe(Effect.orDie);
         return {
           storageProvider: input.storageProvider,
           status: "CONNECTED",
-          externalDestinationUrl: getStorageProviderDestinationUrl(input.storageProvider),
+          externalDestinationUrl,
         } satisfies PipeConnection;
       }
 

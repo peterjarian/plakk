@@ -6,6 +6,7 @@ import {
   StorageProviderError,
   type PreparedStorageUpload,
   type PrepareStorageUploadInput,
+  type StorageProviderDestination,
 } from "./types.ts";
 import type { StorageProviderAdapter } from "./StorageProvider.ts";
 
@@ -40,6 +41,8 @@ const providerError = (
 
 export const OneDriveStorageProvider = {
   storageProvider: "ONE_DRIVE",
+  getDestination: () =>
+    Effect.succeed({ url: "https://onedrive.live.com/" } satisfies StorageProviderDestination),
   prepareUpload: Effect.fn("OneDriveStorageProvider.prepareUpload")(function* (
     input: PrepareStorageUploadInput,
   ): Effect.fn.Return<PreparedStorageUpload, StorageProviderError, HttpClient.HttpClient> {
