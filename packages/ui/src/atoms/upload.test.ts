@@ -6,6 +6,7 @@ import {
   makeUploadTask,
   removeUploadTask,
   updateUploadTask,
+  uploadSnippetsAtom,
   uploadTasksAtom,
   upsertUploadTask,
 } from "./upload.ts";
@@ -40,5 +41,24 @@ describe("upload atoms", () => {
     registry.set(uploadTasksAtom, [uploading, { ...ready, phase: "READY" }]);
 
     expect(registry.get(activeUploadTasksAtom)).toEqual([uploading]);
+  });
+
+  it("maps upload tasks to snippet rows", () => {
+    const registry = AtomRegistry.make();
+    const uploading = makeUploadTask(draft);
+
+    registry.set(uploadTasksAtom, [{ ...uploading, phase: "UPLOADING", progress: 50 }]);
+
+    expect(registry.get(uploadSnippetsAtom)).toEqual([
+      {
+        id: uploading.id,
+        title: uploading.fileName,
+        subtitle: "PNG · 4 B",
+        kind: uploading.kind,
+        time: "",
+        synced: false,
+        uploadProgress: 50,
+      },
+    ]);
   });
 });

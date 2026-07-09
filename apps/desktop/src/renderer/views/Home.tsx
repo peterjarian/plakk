@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowUpRight, Plus, TriangleAlert } from "lucide-react";
-import { formatFileSize, isHttpUrl, type Snippet } from "@plakk/shared";
-import type { ApiSnippet } from "@plakk/shared/PlakkApi";
+import type { Snippet } from "@plakk/shared";
 import { AppHeader } from "@plakk/ui/components/AppHeader";
 import { SnippetList } from "@plakk/ui/components/SnippetList";
 import { SnippetRow } from "@plakk/ui/components/SnippetRow";
@@ -15,70 +14,39 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@plakk/ui/components/primitives/dialog";
-import { useUploadActions, useUploadTasks } from "@plakk/ui/hooks/useUploadFlow";
+import { useSnippetActions, useVisibleSnippets } from "@plakk/ui/hooks/useSnippets";
+import { useUploadActions } from "@plakk/ui/hooks/useUploadFlow";
 import { SnippetComposer } from "../components/SnippetComposer.tsx";
 import { useAuth } from "../hooks/useAuth.ts";
 import { useStoredSnippetUpload } from "../hooks/useStoredSnippetUpload.ts";
 import { navigate } from "../lib/navigate.ts";
 import { plakkApi } from "../lib/plakkApi.ts";
+import {
+  apiSnippetToSnippet,
+  errorMessage,
+  optimisticTextSnippet,
+  snippetClipboardText,
+} from "../lib/snippets.ts";
 
 const accountSetupUrl = "https://app.plakk.io/account/setup";
 const storageProvider = "GOOGLE_DRIVE" as const;
 
-function errorMessage(error: unknown, fallback: string) {
-  return error instanceof Error ? error.message : fallback;
-}
-
-function apiSnippetToSnippet(snippet: ApiSnippet): Snippet {
-  const kind: Snippet["kind"] =
-    snippet.kind === "TEXT" && isHttpUrl(snippet.title) ? "LINK" : snippet.kind;
-  return {
-    id: snippet.id,
-    title: snippet.title,
-    subtitle:
-      snippet.kind === "TEXT"
-        ? isHttpUrl(snippet.title)
-          ? ""
-          : formatFileSize(snippet.byteSize)
-        : `${snippet.fileName.split(".").pop()?.toUpperCase() ?? "FILE"} · ${formatFileSize(snippet.byteSize)}`,
-    kind,
-    time: "now",
-    synced: snippet.uploadStatus === "READY",
-    ...(snippet.uploadStatus === "UPLOADING" ? { uploadProgress: 0 } : {}),
-  };
-}
-
 export function Home() {
   const auth = useAuth();
+  const snippetActions = useSnippetActions();
   const uploadActions = useUploadActions();
-  const uploadTasks = useUploadTasks();
   const uploadStoredSnippet = useStoredSnippetUpload(storageProvider);
+  const visibleSnippets = useVisibleSnippets();
   const [isDragging, setIsDragging] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [accountIssue, setAccountIssue] = useState<string | null>(null);
   const [pendingExternalUrl, setPendingExternalUrl] = useState<string | null>(null);
   const [skipExternalLinkWarning, setSkipExternalLinkWarning] = useState(false);
-  const [snippets, setSnippets] = useState<Array<Snippet>>([]);
   const [showExternalLinkWarning, setShowExternalLinkWarning] = useState(true);
   const copiedTimerRef = useRef<number | undefined>(undefined);
 
   const accountBlocked = false;
   const user = auth.user;
-  const uploadSnippets: Array<Snippet> = uploadTasks.map((task) => ({
-    id: task.id,
-    title: task.fileName,
-    subtitle:
-      task.errorMessage ??
-      `${task.fileName.split(".").pop()?.toUpperCase() ?? "FILE"} · ${formatFileSize(task.byteSize)}`,
-    kind: task.kind,
-    time: task.phase === "FAILED" ? "failed" : "",
-    synced: task.phase === "READY",
-    ...(task.phase === "READY" || task.phase === "FAILED" ? {} : { uploadProgress: task.progress }),
-  }));
-  const visibleSnippets = [
-    ...uploadSnippets,
-    ...snippets.filter((snippet) => !uploadTasks.some((task) => task.id === snippet.id)),
-  ].slice(0, 20);
 
   useEffect(() => {
     return () => {
@@ -96,9 +64,10 @@ export function Home() {
   useEffect(() => {
     let isCancelled = false;
 
+    snippetActions.setAll([]);
     plakkApi.listSnippets({ limit: 20 }).then(
       ({ items }) => {
-        if (!isCancelled) setSnippets(items.map(apiSnippetToSnippet));
+        if (!isCancelled) snippetActions.setAll(items.map(apiSnippetToSnippet));
       },
       (error) => {
         if (!isCancelled) setAccountIssue(errorMessage(error, "Could not load snippets."));
@@ -108,7 +77,7 @@ export function Home() {
     return () => {
       isCancelled = true;
     };
-  }, []);
+  }, [snippetActions]);
 
   useEffect(
     () =>
@@ -135,30 +104,21 @@ export function Home() {
   function addSnippet(snippet: Snippet) {
     if (accountBlocked) return;
 
-    setSnippets((current) =>
-      [snippet, ...current.filter((item) => item.id !== snippet.id)].slice(0, 20),
-    );
+    snippetActions.upsert(snippet);
   }
 
   function addText(value: string) {
     if (accountBlocked) return;
 
     const id = crypto.randomUUID();
-    addSnippet({
-      id,
-      title: value,
-      subtitle: isHttpUrl(value) ? "" : `${value.length} characters`,
-      kind: isHttpUrl(value) ? "LINK" : "TEXT",
-      time: "now",
-      synced: false,
-    });
+    addSnippet(optimisticTextSnippet(id, value));
 
     void plakkApi.createTextSnippet({ id, text: value }).then(
       (snippet) => {
         addSnippet(apiSnippetToSnippet(snippet));
       },
       (error) => {
-        setSnippets((current) => current.filter((snippet) => snippet.id !== id));
+        snippetActions.remove(id);
         setAccountIssue(errorMessage(error, "Could not add snippet."));
       },
     );
@@ -213,8 +173,8 @@ export function Home() {
   }
 
   function deleteSnippet(id: string) {
-    const deleted = snippets.find((snippet) => snippet.id === id);
-    setSnippets((current) => current.filter((snippet) => snippet.id !== id));
+    const deleted = snippetActions.snapshot().find((snippet) => snippet.id === id);
+    snippetActions.remove(id);
     void plakkApi.deleteSnippet({ id }).catch((error) => {
       if (deleted !== undefined) addSnippet(deleted);
       setAccountIssue(errorMessage(error, "Could not delete snippet."));
@@ -222,11 +182,7 @@ export function Home() {
   }
 
   function copy(snippet: Snippet) {
-    void navigator.clipboard?.writeText(
-      snippet.kind === "TEXT" || snippet.kind === "LINK"
-        ? snippet.title
-        : snippet.subtitle || snippet.title,
-    );
+    void navigator.clipboard?.writeText(snippetClipboardText(snippet));
     setCopiedId(snippet.id);
     if (copiedTimerRef.current !== undefined) window.clearTimeout(copiedTimerRef.current);
     copiedTimerRef.current = window.setTimeout(() => {

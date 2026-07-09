@@ -1,4 +1,9 @@
-import type { SnippetKind, StorageProvider } from "@plakk/shared";
+import {
+  formatFileSize,
+  type Snippet,
+  type SnippetKind,
+  type StorageProvider,
+} from "@plakk/shared";
 import { Atom } from "effect/unstable/reactivity";
 
 export type UploadPhase = "QUEUED" | "PREPARING" | "UPLOADING" | "READY" | "FAILED";
@@ -28,6 +33,23 @@ export const uploadTasksAtom = Atom.make<ReadonlyArray<UploadTask>>([]).pipe(
 export const activeUploadTasksAtom = Atom.make((get) =>
   get(uploadTasksAtom).filter((task) => task.phase !== "READY"),
 ).pipe(Atom.withLabel("plakk:active-storage-upload-tasks"));
+
+export const uploadSnippetsAtom = Atom.make(
+  (get): ReadonlyArray<Snippet> =>
+    get(uploadTasksAtom).map((task) => ({
+      id: task.id,
+      title: task.fileName,
+      subtitle:
+        task.errorMessage ??
+        `${task.fileName.split(".").pop()?.toUpperCase() ?? "FILE"} · ${formatFileSize(task.byteSize)}`,
+      kind: task.kind,
+      time: task.phase === "FAILED" ? "failed" : "",
+      synced: task.phase === "READY",
+      ...(task.phase === "READY" || task.phase === "FAILED"
+        ? {}
+        : { uploadProgress: task.progress }),
+    })),
+).pipe(Atom.withLabel("plakk:storage-upload-snippets"));
 
 export const makeUploadTask = (draft: UploadDraft): UploadTask => ({
   ...draft,
