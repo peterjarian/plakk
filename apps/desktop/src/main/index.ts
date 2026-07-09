@@ -4,7 +4,7 @@ import { join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { isHttpUrl } from "@plakk/shared";
 import { app, BrowserWindow, Menu, net, protocol, shell } from "electron";
-import { Config, Effect, Result } from "effect";
+import { Effect, Result } from "effect";
 import type { AuthStatus, TrayDroppedItem } from "../ipc/contracts.ts";
 import { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
 import { handle, send } from "../ipc/main.ts";
@@ -75,11 +75,11 @@ handle(ipcMethods.authGet, () =>
 );
 
 handle(ipcMethods.authSignIn, async () => {
-  const redirectUrl = await runAuth(
-    Config.url("WORKOS_REDIRECT_URI"),
+  const callbackUrl = await runAuth(
+    AuthService.use((auth) => Effect.succeed(auth.callbackUrl)),
     "Desktop auth is not configured.",
   );
-  registerAuthCallbackProtocol(redirectUrl);
+  registerAuthCallbackProtocol(callbackUrl);
 
   const authorizationUrl = await runAuth(
     AuthService.use((auth) => auth.startSignIn()),
@@ -238,8 +238,8 @@ function revealMainWindow() {
   mainWindow?.focus();
 }
 
-function registerAuthCallbackProtocol(redirectUrl: URL): void {
-  redirectUrl.protocol = app.isPackaged ? "plakk:" : "plakk-dev:";
+function registerAuthCallbackProtocol(callbackUrl: string): void {
+  const redirectUrl = new URL(callbackUrl);
 
   if (["http:", "https:", "file:"].includes(redirectUrl.protocol)) {
     throw new Error("Desktop auth callback URL must use a private app scheme.");

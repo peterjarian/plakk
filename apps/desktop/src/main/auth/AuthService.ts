@@ -1,4 +1,8 @@
-import { WorkOS, type User as WorkOSUser } from "@workos-inc/node";
+import {
+  createWorkOS,
+  type AuthenticationResponse,
+  type User as WorkOSUser,
+} from "@workos-inc/node";
 import type { User } from "@plakk/shared";
 import { app } from "electron";
 import { Clock, Config, Context, Effect, Layer, Schema } from "effect";
@@ -7,11 +11,8 @@ import { AuthStore } from "./AuthStore.ts";
 const AUTH_REQUEST_TTL_MS = 10 * 60 * 1000;
 const ACCESS_TOKEN_REFRESH_WINDOW_MS = 60 * 1000;
 
-const AccessTokenClaimsSchema = Schema.Struct({
-  exp: Schema.Number,
-});
+const AccessTokenClaimsCodec = Schema.fromJsonString(Schema.Struct({ exp: Schema.Number }));
 
-type AuthenticationResponse = Awaited<ReturnType<WorkOS["userManagement"]["authenticateWithCode"]>>;
 type AuthSession = {
   readonly accessToken: string;
   readonly user: User;
@@ -26,9 +27,42 @@ export class AuthServiceError extends Schema.TaggedErrorClass<AuthServiceError>(
   },
 ) {}
 
+export function deriveDesktopAuthCallbackUrl(configuredUrl: URL, isPackaged: boolean): URL {
+  const protocol = isPackaged ? "plakk:" : "plakk-dev:";
+  return new URL(`${protocol}${configuredUrl.href.slice(configuredUrl.protocol.length)}`);
+}
+
+export function parseTrustedAuthCallbackUrl(rawUrl: string, callbackUrl: URL): URL | null {
+  if (!URL.canParse(rawUrl)) return null;
+
+  const url = new URL(rawUrl);
+  return url.protocol === callbackUrl.protocol &&
+    url.username === callbackUrl.username &&
+    url.password === callbackUrl.password &&
+    url.host === callbackUrl.host &&
+    url.pathname === callbackUrl.pathname
+    ? url
+    : null;
+}
+
+export const accessTokenNeedsRefresh = Effect.fn("AuthService.accessTokenNeedsRefresh")(function* (
+  accessToken: string,
+  now: number,
+) {
+  const payload = accessToken.split(".")[1];
+  if (payload === undefined) return true;
+
+  return yield* Effect.try(() => Buffer.from(payload, "base64url").toString("utf8")).pipe(
+    Effect.flatMap(Schema.decodeUnknownEffect(AccessTokenClaimsCodec)),
+    Effect.map((claims) => claims.exp * 1000 - now <= ACCESS_TOKEN_REFRESH_WINDOW_MS),
+    Effect.catch(() => Effect.succeed(true)),
+  );
+});
+
 export class AuthService extends Context.Service<
   AuthService,
   {
+    readonly callbackUrl: string;
     getSession(): Effect.Effect<AuthSession | null, AuthServiceFailure>;
     handleCallbackUrl(rawUrl: string): Effect.Effect<AuthSession | null, AuthServiceFailure>;
     startSignIn(): Effect.Effect<string, AuthServiceFailure>;
@@ -39,6 +73,10 @@ export class AuthService extends Context.Service<
     AuthService,
     Effect.gen(function* () {
       const store = yield* AuthStore;
+      const clientId = yield* Config.nonEmptyString("WORKOS_CLIENT_ID");
+      const configuredCallbackUrl = yield* Config.url("WORKOS_REDIRECT_URI");
+      const callbackUrl = deriveDesktopAuthCallbackUrl(configuredCallbackUrl, app.isPackaged);
+      const workos = createWorkOS({ clientId });
 
       const readStoredCredentials = Effect.fn("AuthService.readStoredCredentials")(function* () {
         const isEncryptionAvailable = yield* store.isEncryptionAvailable;
@@ -78,42 +116,9 @@ export class AuthService extends Context.Service<
         const credentials = yield* readStoredCredentials();
         if (credentials === null) return null;
 
-        const accessTokenPayload = credentials.accessToken.split(".")[1];
-        const expiresAt = yield* Effect.try({
-          try: () =>
-            accessTokenPayload === undefined
-              ? null
-              : (JSON.parse(
-                  Buffer.from(accessTokenPayload, "base64url").toString("utf8"),
-                ) as unknown),
-          catch: (cause) =>
-            new AuthServiceError({
-              cause,
-              message: "Stored desktop auth access token is invalid.",
-            }),
-        }).pipe(
-          Effect.flatMap((payload) =>
-            payload === null
-              ? Effect.succeed(0)
-              : Schema.decodeUnknownEffect(AccessTokenClaimsSchema)(payload).pipe(
-                  Effect.map((claims) => claims.exp * 1000),
-                  Effect.mapError(
-                    (cause) =>
-                      new AuthServiceError({
-                        cause,
-                        message: "Stored desktop auth access token is invalid.",
-                      }),
-                  ),
-                ),
-          ),
-          Effect.catch(() => Effect.succeed(0)),
-        );
-
         const now = yield* Clock.currentTimeMillis;
-        if (expiresAt - now > ACCESS_TOKEN_REFRESH_WINDOW_MS) return credentials;
+        if (!(yield* accessTokenNeedsRefresh(credentials.accessToken, now))) return credentials;
 
-        const clientId = yield* Config.string("WORKOS_CLIENT_ID");
-        const workos = new WorkOS({ clientId });
         const response = yield* Effect.tryPromise({
           try: () =>
             workos.userManagement.authenticateWithRefreshToken({
@@ -148,23 +153,11 @@ export class AuthService extends Context.Service<
       });
 
       return AuthService.of({
+        callbackUrl: callbackUrl.href,
         getSession,
         handleCallbackUrl: Effect.fn("AuthService.handleCallbackUrl")(function* (rawUrl: string) {
-          const url = yield* Effect.sync(() => (URL.canParse(rawUrl) ? new URL(rawUrl) : null));
+          const url = parseTrustedAuthCallbackUrl(rawUrl, callbackUrl);
           if (url === null) return null;
-
-          const clientId = yield* Config.string("WORKOS_CLIENT_ID");
-          const redirectUrl = yield* Config.url("WORKOS_REDIRECT_URI");
-          redirectUrl.protocol = app.isPackaged ? "plakk:" : "plakk-dev:";
-          const workos = new WorkOS({ clientId });
-
-          if (
-            url.protocol !== redirectUrl.protocol ||
-            url.host !== redirectUrl.host ||
-            url.pathname !== redirectUrl.pathname
-          ) {
-            return null;
-          }
 
           const storedPkce = yield* store
             .get("pkce")
@@ -231,18 +224,13 @@ export class AuthService extends Context.Service<
             });
           }
 
-          const clientId = yield* Config.string("WORKOS_CLIENT_ID");
-          const redirectUrl = yield* Config.url("WORKOS_REDIRECT_URI");
-          redirectUrl.protocol = app.isPackaged ? "plakk:" : "plakk-dev:";
-          const workos = new WorkOS({ clientId });
-
           const now = yield* Clock.currentTimeMillis;
           const request = yield* Effect.tryPromise({
             try: () =>
               workos.userManagement.getAuthorizationUrlWithPKCE({
                 clientId,
                 provider: "authkit",
-                redirectUri: redirectUrl.href,
+                redirectUri: callbackUrl.href,
               }),
             catch: (cause) =>
               new AuthServiceError({ cause, message: "Could not start desktop sign-in." }),
