@@ -62,7 +62,7 @@ export const accessTokenNeedsRefresh = Effect.fn("AuthService.accessTokenNeedsRe
 export class AuthService extends Context.Service<
   AuthService,
   {
-    readonly callbackUrl: string;
+    readonly callbackUrl: Effect.Effect<string, Config.ConfigError>;
     getSession(): Effect.Effect<AuthSession | null, AuthServiceFailure>;
     handleCallbackUrl(rawUrl: string): Effect.Effect<AuthSession | null, AuthServiceFailure>;
     startSignIn(): Effect.Effect<string, AuthServiceFailure>;
@@ -73,10 +73,14 @@ export class AuthService extends Context.Service<
     AuthService,
     Effect.gen(function* () {
       const store = yield* AuthStore;
-      const clientId = yield* Config.nonEmptyString("WORKOS_CLIENT_ID");
-      const configuredCallbackUrl = yield* Config.url("WORKOS_REDIRECT_URI");
-      const callbackUrl = deriveDesktopAuthCallbackUrl(configuredCallbackUrl, app.isPackaged);
-      const workos = createWorkOS({ clientId });
+      const clientConfig = yield* Effect.cached(
+        Effect.gen(function* () {
+          const clientId = yield* Config.nonEmptyString("WORKOS_CLIENT_ID");
+          const configuredCallbackUrl = yield* Config.url("WORKOS_REDIRECT_URI");
+          const callbackUrl = deriveDesktopAuthCallbackUrl(configuredCallbackUrl, app.isPackaged);
+          return { callbackUrl, clientId, workos: createWorkOS({ clientId }) };
+        }),
+      );
 
       const readStoredCredentials = Effect.fn("AuthService.readStoredCredentials")(function* () {
         const isEncryptionAvailable = yield* store.isEncryptionAvailable;
@@ -119,6 +123,7 @@ export class AuthService extends Context.Service<
         const now = yield* Clock.currentTimeMillis;
         if (!(yield* accessTokenNeedsRefresh(credentials.accessToken, now))) return credentials;
 
+        const { clientId, workos } = yield* clientConfig;
         const response = yield* Effect.tryPromise({
           try: () =>
             workos.userManagement.authenticateWithRefreshToken({
@@ -153,9 +158,10 @@ export class AuthService extends Context.Service<
       });
 
       return AuthService.of({
-        callbackUrl: callbackUrl.href,
+        callbackUrl: clientConfig.pipe(Effect.map(({ callbackUrl }) => callbackUrl.href)),
         getSession,
         handleCallbackUrl: Effect.fn("AuthService.handleCallbackUrl")(function* (rawUrl: string) {
+          const { callbackUrl, clientId, workos } = yield* clientConfig;
           const url = parseTrustedAuthCallbackUrl(rawUrl, callbackUrl);
           if (url === null) return null;
 
@@ -224,6 +230,7 @@ export class AuthService extends Context.Service<
             });
           }
 
+          const { callbackUrl, clientId, workos } = yield* clientConfig;
           const now = yield* Clock.currentTimeMillis;
           const request = yield* Effect.tryPromise({
             try: () =>

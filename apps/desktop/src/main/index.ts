@@ -76,7 +76,7 @@ handle(ipcMethods.authGet, () =>
 
 handle(ipcMethods.authSignIn, async () => {
   const callbackUrl = await runAuth(
-    AuthService.use((auth) => Effect.succeed(auth.callbackUrl)),
+    AuthService.use((auth) => auth.callbackUrl),
     "Desktop auth is not configured.",
   );
   registerAuthCallbackProtocol(callbackUrl);

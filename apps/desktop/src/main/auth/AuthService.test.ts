@@ -1,6 +1,9 @@
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+const workos = vi.hoisted(() => ({ create: vi.fn() }));
+
+vi.mock("@workos-inc/node", () => ({ createWorkOS: workos.create }));
 vi.mock("electron", () => ({
   app: { isPackaged: false },
   safeStorage: {},
@@ -10,7 +13,9 @@ import {
   accessTokenNeedsRefresh,
   deriveDesktopAuthCallbackUrl,
   parseTrustedAuthCallbackUrl,
+  AuthService,
 } from "./AuthService.ts";
+import { AuthStore } from "./AuthStore.ts";
 
 const callbackUrl = new URL("plakk-dev://auth/callback");
 
@@ -67,5 +72,31 @@ describe("desktop access token refresh", () => {
     await expect(
       Effect.runPromise(accessTokenNeedsRefresh(accessToken({ exp: "invalid" }), now)),
     ).resolves.toBe(true);
+  });
+});
+
+describe("desktop auth service configuration", () => {
+  it("acquires and signs out without loading WorkOS configuration", async () => {
+    let cleared = false;
+    const storeLayer = Layer.succeed(
+      AuthStore,
+      AuthStore.of({
+        clear: Effect.sync(() => {
+          cleared = true;
+        }),
+        get: () => Effect.succeed(null),
+        isEncryptionAvailable: Effect.succeed(true),
+        set: () => Effect.void,
+      }),
+    );
+
+    await Effect.runPromise(
+      AuthService.use((auth) => auth.signOut()).pipe(
+        Effect.provide(AuthService.layer.pipe(Layer.provide(storeLayer))),
+      ),
+    );
+
+    expect(cleared).toBe(true);
+    expect(workos.create).not.toHaveBeenCalled();
   });
 });
