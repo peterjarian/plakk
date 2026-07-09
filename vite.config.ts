@@ -12,6 +12,7 @@ export default defineConfig({
       "dist-electron",
       "node_modules",
       "pnpm-lock.yaml",
+      "apps/web/src/routeTree.gen.ts",
       "*.tsbuildinfo",
     ],
   },
@@ -23,6 +24,7 @@ export default defineConfig({
       "dist-electron",
       "node_modules",
       "pnpm-lock.yaml",
+      "apps/web/src/routeTree.gen.ts",
       "*.tsbuildinfo",
     ],
     jsPlugins: [

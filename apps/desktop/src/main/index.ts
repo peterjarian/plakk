@@ -1,8 +1,9 @@
 import "dotenv/config";
 
-import { join, resolve } from "node:path";
+import { join, resolve, sep } from "node:path";
+import { pathToFileURL } from "node:url";
 import { isHttpUrl } from "@plakk/shared";
-import { app, BrowserWindow, Menu, shell } from "electron";
+import { app, BrowserWindow, Menu, net, protocol, shell } from "electron";
 import { Config, Effect, Result } from "effect";
 import type { AuthStatus, TrayDroppedItem } from "../ipc/contracts.ts";
 import { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
@@ -12,6 +13,21 @@ import { readClipboard } from "./clipboard.ts";
 import { createTrayWindowController } from "./trayWindow.ts";
 import { UserConfigStore } from "./UserConfigStore.ts";
 import { runEffect } from "./runtime.ts";
+
+const rendererScheme = "plakk-app";
+const rendererHost = "renderer";
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: rendererScheme,
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+    },
+  },
+]);
 
 handle(ipcMethods.openExternal, (url) => {
   if (!isHttpUrl(url)) return;
@@ -114,10 +130,25 @@ function loadRenderer(window: BrowserWindow, view?: RendererView) {
     return window.loadURL(url.toString());
   }
 
-  return window.loadFile(
-    join(__dirname, "../renderer/index.html"),
-    view === undefined ? undefined : { query: { view } },
-  );
+  const url = new URL(`${rendererScheme}://${rendererHost}/index.html`);
+  if (view !== undefined) url.searchParams.set("view", view);
+  return window.loadURL(url.toString());
+}
+
+function registerRendererProtocol(): void {
+  const rendererRoot = resolve(__dirname, "../renderer");
+
+  protocol.handle(rendererScheme, (request) => {
+    const url = new URL(request.url);
+    if (url.host !== rendererHost) return new Response(null, { status: 404 });
+
+    const filePath = resolve(rendererRoot, `.${decodeURIComponent(url.pathname)}`);
+    if (filePath !== rendererRoot && !filePath.startsWith(`${rendererRoot}${sep}`)) {
+      return new Response(null, { status: 404 });
+    }
+
+    return net.fetch(pathToFileURL(filePath).toString());
+  });
 }
 
 function guardExternalWindows(window: BrowserWindow) {
@@ -138,6 +169,10 @@ function isSameRendererNavigation(current: string, next: string) {
   try {
     const currentUrl = new URL(current);
     const nextUrl = new URL(next);
+
+    if (currentUrl.protocol === `${rendererScheme}:` || nextUrl.protocol === `${rendererScheme}:`) {
+      return currentUrl.protocol === nextUrl.protocol && currentUrl.host === nextUrl.host;
+    }
 
     if (currentUrl.protocol === "file:" || nextUrl.protocol === "file:") {
       return currentUrl.protocol === nextUrl.protocol && currentUrl.pathname === nextUrl.pathname;
@@ -312,6 +347,8 @@ if (!hasSingleInstanceLock) {
   });
 
   void app.whenReady().then(() => {
+    registerRendererProtocol();
+
     Menu.setApplicationMenu(
       Menu.buildFromTemplate([
         {
