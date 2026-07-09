@@ -167,6 +167,13 @@ export class AuthService extends Context.Service<
         callbackUrl: clientConfig.pipe(Effect.map(({ callbackUrl }) => callbackUrl.href)),
         getSession,
         handleCallbackUrl: Effect.fn("AuthService.handleCallbackUrl")(function* (rawUrl: string) {
+          if (
+            !URL.canParse(rawUrl) ||
+            !["plakk:", "plakk-dev:"].includes(new URL(rawUrl).protocol)
+          ) {
+            return null;
+          }
+
           const { callbackUrl, clientId, workos } = yield* clientConfig;
           const url = parseTrustedAuthCallbackUrl(rawUrl, callbackUrl);
           if (url === null) return null;

@@ -89,6 +89,31 @@ describe("desktop access token refresh", () => {
 });
 
 describe("desktop auth service configuration", () => {
+  it("ignores non-callback arguments without loading WorkOS configuration", async () => {
+    const storeLayer = Layer.succeed(
+      AuthStore,
+      AuthStore.of({
+        clear: Effect.void,
+        get: () => Effect.succeed(null),
+        isEncryptionAvailable: Effect.succeed(true),
+        set: () => Effect.void,
+      }),
+    );
+
+    const results = await Effect.runPromise(
+      AuthService.use((auth) =>
+        Effect.all([
+          auth.handleCallbackUrl("--flag"),
+          auth.handleCallbackUrl("/Applications/Plakk.app/Contents/MacOS/Plakk"),
+          auth.handleCallbackUrl("C:\\Program Files\\Plakk\\Plakk.exe"),
+        ]),
+      ).pipe(Effect.provide(AuthService.layer.pipe(Layer.provide(storeLayer)))),
+    );
+
+    expect(results).toEqual([null, null, null]);
+    expect(workos.create).not.toHaveBeenCalled();
+  });
+
   it("acquires and signs out without loading WorkOS configuration", async () => {
     let cleared = false;
     const storeLayer = Layer.succeed(
