@@ -5,6 +5,8 @@ import { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
 import { invoke, on } from "../ipc/preload.ts";
 import type { UserConfigPatch } from "../userConfig.ts";
 
+const plakkRpcUrl = process.env.PLAKK_RPC_URL ?? "https://app.plakk.io/api/rpc";
+
 contextBridge.exposeInMainWorld("ipc", {
   auth: {
     getAuth: () => invoke(ipcMethods.authGet, undefined),
@@ -23,6 +25,9 @@ contextBridge.exposeInMainWorld("ipc", {
     get: () => invoke(ipcMethods.userConfigGet, undefined),
     reset: () => invoke(ipcMethods.userConfigReset, undefined),
     set: (patch: UserConfigPatch) => invoke(ipcMethods.userConfigSet, patch),
+  },
+  runtimeConfig: {
+    plakkRpcUrl,
   },
   versions: {
     chrome: process.versions.chrome,

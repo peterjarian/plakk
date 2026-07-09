@@ -1,4 +1,6 @@
 import { Drizzle } from "@plakk/db";
 import * as Layer from "effect/Layer";
 
-export const ServerRuntimeLive = Layer.mergeAll(Drizzle.Live);
+import { StorageProviderService } from "./storage/StorageProvider.ts";
+
+export const ServerRuntimeLive = Layer.mergeAll(Drizzle.Live, StorageProviderService.Live);

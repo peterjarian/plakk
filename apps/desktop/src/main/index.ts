@@ -44,9 +44,10 @@ async function runAuth<A, E>(
   return result.success;
 }
 
-function authStatus(user: AuthStatus["user"]): AuthStatus {
+function authStatus(session: { accessToken: string; user: AuthStatus["user"] } | null): AuthStatus {
   return {
-    user,
+    accessToken: session?.accessToken ?? null,
+    user: session?.user ?? null,
   };
 }
 
