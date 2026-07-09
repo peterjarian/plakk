@@ -7,7 +7,7 @@ import {
   useMemo,
   useState,
 } from "react";
-import type { User } from "@plakk/shared";
+import type { AuthStatus } from "../../ipc/contracts.ts";
 import type { ReactNode } from "react";
 
 type AuthState = {
@@ -15,14 +15,14 @@ type AuthState = {
   isLoading: boolean;
   signIn: () => Promise<void>;
   signOut: () => Promise<void>;
-  user: User | null;
+  accessToken: string | null;
+  user: AuthStatus["user"];
 };
 
 const AuthContext = createContext<AuthState | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [isLoading, setIsLoading] = useState(true);
-  const [user, setUser] = useState<User | null>(null);
+  const [status, setStatus] = useState<AuthStatus | null>(null);
   const [issue, setIssue] = useState<{ message: string } | null>(null);
 
   useEffect(() => {
@@ -34,22 +34,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const unsubscribe = window.ipc.auth.onStatusChanged((nextStatus) => {
       if (!isMounted) return;
       setIssue(null);
-      setIsLoading(false);
-      setUser(nextStatus.user);
+      setStatus(nextStatus);
     });
 
     void window.ipc.auth.getAuth().then(
       (nextStatus) => {
         if (!isMounted) return;
         setIssue(null);
-        setIsLoading(false);
-        setUser(nextStatus.user);
+        setStatus(nextStatus);
       },
       (error) => {
         if (!isMounted) return;
         setIssue({ message: error instanceof Error ? error.message : "Could not check session." });
-        setIsLoading(false);
-        setUser(null);
+        setStatus({ accessToken: null, user: null });
       },
     );
 
@@ -79,14 +76,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(() => {
+    const user = status?.user ?? null;
+
     return {
+      accessToken: status?.accessToken ?? null,
       issue,
-      isLoading,
+      isLoading: status === null,
       signIn,
       signOut,
       user,
     };
-  }, [isLoading, issue, signIn, signOut, user]);
+  }, [issue, signIn, signOut, status]);
 
   return createElement(AuthContext.Provider, { value }, children);
 }

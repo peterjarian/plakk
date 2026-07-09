@@ -1,6 +1,16 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUpRight, Plus, TriangleAlert } from "lucide-react";
-import type { Snippet } from "@plakk/shared";
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
+import { snippetKindForFileName } from "@plakk/shared";
+import type { ApiSnippet } from "@plakk/shared/PlakkApi";
+import {
+  createTextSnippetOptions,
+  deleteSnippetOptions,
+  emptySnippetsAtom,
+  snippetReactivityKeys,
+  type SnippetRequestHeaders,
+} from "@plakk/ui/atoms/snippets";
+import { createPlakkRpc } from "@plakk/ui/atoms/rpc";
 import { AppHeader } from "@plakk/ui/components/AppHeader";
 import { SnippetList } from "@plakk/ui/components/SnippetList";
 import { SnippetRow } from "@plakk/ui/components/SnippetRow";
@@ -14,18 +24,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@plakk/ui/components/primitives/dialog";
+import { useActiveUploadTasks, useUploadActions } from "@plakk/ui/hooks/useUploadFlow";
+import { AsyncResult } from "effect/unstable/reactivity";
 import { SnippetComposer } from "../components/SnippetComposer.tsx";
 import { useAuth } from "../hooks/useAuth.ts";
-import {
-  addClipboardContent,
-  addDroppedData,
-  addFiles,
-  addTextSnippet,
-  advanceUploads,
-  deleteSnippet,
-  useSnippets,
-} from "../lib/snippets.ts";
 import { navigate } from "../lib/navigate.ts";
+import { startUploadProgress } from "../lib/uploadProgress.ts";
+
+const accountSetupUrl = "https://app.plakk.io/account/setup";
+const plakkRpc = createPlakkRpc(window.ipc.runtimeConfig.plakkRpcUrl);
+const createTextSnippetMutationAtom = plakkRpc.mutation("CreateTextSnippet");
+const deleteSnippetMutationAtom = plakkRpc.mutation("DeleteSnippet");
 
 export function Home() {
   const auth = useAuth();
@@ -33,22 +42,93 @@ export function Home() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [pendingExternalUrl, setPendingExternalUrl] = useState<string | null>(null);
   const [skipExternalLinkWarning, setSkipExternalLinkWarning] = useState(false);
-  const snippets = useSnippets();
   const [showExternalLinkWarning, setShowExternalLinkWarning] = useState(true);
   const copiedTimerRef = useRef<number | undefined>(undefined);
 
+  const snippetHeaders = useMemo<SnippetRequestHeaders | null>(
+    () => (auth.accessToken === null ? null : { authorization: `Bearer ${auth.accessToken}` }),
+    [auth.accessToken],
+  );
+  const snippetsAtom = useMemo(() => {
+    if (snippetHeaders === null) return emptySnippetsAtom;
+    return plakkRpc.query(
+      "ListSnippets",
+      { limit: 20 },
+      {
+        headers: snippetHeaders,
+        reactivityKeys: snippetReactivityKeys,
+        serializationKey: "latest",
+      },
+    );
+  }, [snippetHeaders]);
+  const snippetsResult = useAtomValue(snippetsAtom);
+  const syncedSnippetResponse = AsyncResult.getOrElse(snippetsResult, () => ({
+    items: [] as ReadonlyArray<ApiSnippet>,
+  }));
+  const createTextSnippet = useAtomSet(createTextSnippetMutationAtom, { mode: "promise" });
+  const deleteSyncedSnippet = useAtomSet(deleteSnippetMutationAtom, { mode: "promise" });
+  const uploadActions = useUploadActions();
+  const uploadTasks = useActiveUploadTasks();
+  const snippets = [...uploadTasks, ...syncedSnippetResponse.items];
+  const accountBlocked = auth.accessToken === null;
   const user = auth.user;
-  const hasUploads = snippets.some((snippet) => snippet.uploadProgress !== undefined);
+  const hasUploads = uploadTasks.length > 0;
+
+  function addTextSnippet(text: string) {
+    if (snippetHeaders !== null) {
+      void createTextSnippet(createTextSnippetOptions(snippetHeaders, text));
+    }
+  }
+
+  function enqueueFileSnippet(input: {
+    byteSize: number;
+    contentType: string | null;
+    fileName: string;
+  }) {
+    const kind = snippetKindForFileName(input.fileName);
+    if (kind !== "FILE" && kind !== "IMAGE") return;
+
+    uploadActions.enqueue({
+      ...input,
+      kind,
+      storageProvider: "GOOGLE_DRIVE",
+    });
+  }
+
+  function handleClipboardPaste(
+    content: Parameters<Parameters<typeof window.ipc.clipboard.onPaste>[0]>[0],
+  ) {
+    if (accountBlocked) return;
+
+    if (content.type === "text") {
+      addTextSnippet(content.text);
+      return;
+    }
+
+    if (content.type === "image") {
+      uploadActions.enqueue({
+        byteSize: 0,
+        contentType: "image/png",
+        fileName: "Pasted image",
+        kind: "IMAGE",
+        storageProvider: "GOOGLE_DRIVE",
+      });
+      return;
+    }
+
+    if (content.type === "file") {
+      enqueueFileSnippet({
+        byteSize: content.size ?? 0,
+        contentType: null,
+        fileName: content.name,
+      });
+    }
+  }
 
   useEffect(() => {
     if (!hasUploads) return;
-
-    const timer = window.setInterval(() => {
-      advanceUploads();
-    }, 160);
-
-    return () => window.clearInterval(timer);
-  }, [hasUploads]);
+    return startUploadProgress(uploadActions);
+  }, [hasUploads, uploadActions]);
 
   useEffect(() => {
     return () => {
@@ -64,33 +144,9 @@ export function Home() {
   }, []);
 
   useEffect(
-    () =>
-      window.ipc.clipboard.onPaste((content) => {
-        addClipboardContent(content);
-      }),
-    [],
+    () => window.ipc.clipboard.onPaste((content) => handleClipboardPaste(content)),
+    [accountBlocked, createTextSnippet, snippetHeaders, uploadActions],
   );
-
-  function addText(value: string) {
-    addTextSnippet(value);
-  }
-
-  function addHomeFiles(files: FileList) {
-    addFiles(files);
-  }
-
-  function stopUpload(id: string) {
-    deleteSnippet(id);
-  }
-
-  function copy(snippet: Snippet) {
-    void navigator.clipboard?.writeText(snippet.subtitle || snippet.title);
-    setCopiedId(snippet.id);
-    if (copiedTimerRef.current !== undefined) window.clearTimeout(copiedTimerRef.current);
-    copiedTimerRef.current = window.setTimeout(() => {
-      setCopiedId((copied) => (copied === snippet.id ? null : copied));
-    }, 1200);
-  }
 
   function openLink(url: string) {
     if (!showExternalLinkWarning) {
@@ -130,10 +186,11 @@ export function Home() {
       className="flex h-screen flex-col overflow-hidden bg-background text-foreground"
       aria-label="Plakk"
       onDragEnter={() => {
-        setIsDragging(true);
+        if (!accountBlocked) setIsDragging(true);
       }}
       onDragOver={(event) => {
         event.preventDefault();
+        if (accountBlocked) return;
         setIsDragging(true);
       }}
       onDragLeave={(event) => {
@@ -142,7 +199,21 @@ export function Home() {
       onDrop={(event) => {
         event.preventDefault();
         setIsDragging(false);
-        addDroppedData(event.dataTransfer);
+        if (accountBlocked) return;
+
+        if (event.dataTransfer.files.length) {
+          for (const file of Array.from(event.dataTransfer.files)) {
+            enqueueFileSnippet({
+              byteSize: file.size,
+              contentType: file.type || null,
+              fileName: file.name,
+            });
+          }
+          return;
+        }
+
+        const dropped = event.dataTransfer.getData("text/plain").trim();
+        if (dropped) addTextSnippet(dropped);
       }}
     >
       <div className="drag-region h-12" aria-hidden="true" />
@@ -152,23 +223,56 @@ export function Home() {
         onSettingsClick={() => navigate("settings")}
         onSignOutClick={() => void auth.signOut().then(() => navigate("welcome"))}
         storageAction={
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            aria-label="Open storage in browser"
-            toolTip="Open storage"
-            onClick={() => window.ipc.openExternal("https://app.plakk.io/storage")}
-          >
-            Google Drive
-            <ArrowUpRight className="text-muted-foreground" />
-          </Button>
+          accountBlocked ? null : (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              aria-label="Open storage in browser"
+              toolTip="Open storage"
+              onClick={() => window.ipc.openExternal("https://app.plakk.io/storage")}
+            >
+              Google Drive
+              <ArrowUpRight className="text-muted-foreground" />
+            </Button>
+          )
         }
       />
 
       <div className="scrollbar-hidden min-h-0 flex-1 overflow-y-auto px-6 pb-4">
         <div className="sticky top-0 z-20 bg-background pt-3 pb-5">
-          <SnippetComposer onSubmit={addText} onFiles={addHomeFiles} />
+          {accountBlocked && (
+            <div className="mb-2 flex items-center gap-2 rounded-md bg-muted px-2.5 py-1.5 text-xs text-muted-foreground">
+              <TriangleAlert className="size-3.5 shrink-0 text-amber-600" aria-hidden="true" />
+              <span className="min-w-0 flex-1 truncate">
+                Sync paused. Finish billing and setup storage to add snippets.
+              </span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                onClick={() => window.ipc.openExternal(accountSetupUrl)}
+              >
+                Finish on web
+                <ArrowUpRight />
+              </Button>
+            </div>
+          )}
+          <SnippetComposer
+            disabled={accountBlocked}
+            onSubmit={addTextSnippet}
+            onFiles={(files) => {
+              if (accountBlocked) return;
+
+              for (const file of Array.from(files)) {
+                enqueueFileSnippet({
+                  byteSize: file.size,
+                  contentType: file.type || null,
+                  fileName: file.name,
+                });
+              }
+            }}
+          />
         </div>
 
         <SnippetList empty={snippets.length === 0}>
@@ -177,10 +281,29 @@ export function Home() {
               key={snippet.id}
               snippet={snippet}
               copied={copiedId === snippet.id}
-              onCopy={() => copy(snippet)}
-              onDelete={() => deleteSnippet(snippet.id)}
+              onCopy={() => {
+                void navigator.clipboard?.writeText(
+                  "phase" in snippet ? snippet.fileName : snippet.title,
+                );
+                setCopiedId(snippet.id);
+                if (copiedTimerRef.current !== undefined) {
+                  window.clearTimeout(copiedTimerRef.current);
+                }
+                copiedTimerRef.current = window.setTimeout(() => {
+                  setCopiedId((copied) => (copied === snippet.id ? null : copied));
+                }, 1200);
+              }}
+              onDelete={() => {
+                if ("phase" in snippet) {
+                  uploadActions.remove(snippet.id);
+                  return;
+                }
+                if (snippetHeaders !== null) {
+                  void deleteSyncedSnippet(deleteSnippetOptions(snippetHeaders, snippet.id));
+                }
+              }}
               {...(snippet.kind === "LINK" ? { onOpenLink: openLink } : {})}
-              onStopUpload={() => stopUpload(snippet.id)}
+              onStopUpload={() => uploadActions.remove(snippet.id)}
             />
           ))}
         </SnippetList>

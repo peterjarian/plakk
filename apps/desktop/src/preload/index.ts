@@ -10,6 +10,8 @@ import type {
 import { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
 import { invoke, on } from "../ipc/preload.ts";
 
+const plakkRpcUrl = process.env.PLAKK_RPC_URL ?? "https://app.plakk.io/api/rpc";
+
 export type DesktopApi = {
   readonly auth: {
     readonly getAuth: () => Promise<AuthStatus>;
@@ -29,6 +31,9 @@ export type DesktopApi = {
     readonly get: () => Promise<UserConfig>;
     readonly reset: () => Promise<UserConfig>;
     readonly set: (patch: UserConfigPatch) => Promise<UserConfig>;
+  };
+  readonly runtimeConfig: {
+    readonly plakkRpcUrl: string;
   };
   readonly versions: {
     readonly chrome: string;
@@ -59,6 +64,9 @@ const desktopApi = {
     get: () => invoke(ipcMethods.userConfigGet, undefined),
     reset: () => invoke(ipcMethods.userConfigReset, undefined),
     set: (patch: UserConfigPatch) => invoke(ipcMethods.userConfigSet, patch),
+  },
+  runtimeConfig: {
+    plakkRpcUrl,
   },
   versions: {
     chrome: process.versions.chrome,

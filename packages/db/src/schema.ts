@@ -1,4 +1,4 @@
-import { SNIPPET_KINDS, STORAGE_PROVIDERS } from "@plakk/shared";
+import { SNIPPET_KINDS, SNIPPET_UPLOAD_STATUSES, STORAGE_PROVIDERS } from "@plakk/shared";
 import {
   bigint,
   index,
@@ -11,6 +11,7 @@ import {
 } from "drizzle-orm/pg-core";
 
 export const snippetKind = pgEnum("snippet_kind", SNIPPET_KINDS);
+export const snippetUploadStatus = pgEnum("snippet_upload_status", SNIPPET_UPLOAD_STATUSES);
 export const storageProvider = pgEnum("storage_provider", STORAGE_PROVIDERS);
 
 const timestamps = {
@@ -21,13 +22,13 @@ const timestamps = {
 export const snippets = pgTable(
   "snippets",
   {
-    id: uuid("id").defaultRandom().primaryKey(),
+    id: uuid("id").primaryKey(),
     ownerWorkosUserId: text("owner_workos_user_id").notNull(),
     kind: snippetKind("kind").notNull(),
     title: text("title").notNull(),
-    // All snippet content is stored as one object in the user's linked provider.
-    storageProvider: storageProvider("storage_provider").notNull(),
-    storageObjectId: text("storage_object_id").notNull(),
+    storageProvider: storageProvider("storage_provider"),
+    storageObjectId: text("storage_object_id"),
+    uploadStatus: snippetUploadStatus("upload_status").default("READY").notNull(),
     fileName: text("file_name").notNull(),
     byteSize: bigint("byte_size", { mode: "number" }).notNull(),
     contentType: text("content_type"),
@@ -44,3 +45,5 @@ export const snippets = pgTable(
     ),
   ],
 );
+
+export type SnippetRow = typeof snippets.$inferSelect;

@@ -1,7 +1,12 @@
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
-export const RpcErrorCodeSchema = Schema.Literal("INTERNAL_SERVER_ERROR");
+export const RpcErrorCodeSchema = Schema.Literals([
+  "UNAUTHENTICATED",
+  "FORBIDDEN",
+  "NOT_FOUND",
+  "INTERNAL_SERVER_ERROR",
+] as const);
 
 export type RpcErrorCode = typeof RpcErrorCodeSchema.Type;
 

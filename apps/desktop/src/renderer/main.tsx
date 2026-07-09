@@ -2,6 +2,7 @@ import { LoaderCircle } from "lucide-react";
 import { useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { TooltipProvider } from "@plakk/ui/components/primitives/tooltip";
+import { PlakkAtomProvider } from "@plakk/ui/hooks/useUploadFlow";
 import { Home } from "./views/Home.tsx";
 import { Settings } from "./views/Settings.tsx";
 import { Tray } from "./views/Tray.tsx";
@@ -61,12 +62,14 @@ const isProtectedView = view !== null && view !== "welcome";
 
 createRoot(document.querySelector<HTMLDivElement>("#app")!).render(
   <TooltipProvider>
-    <AuthProvider>
-      {isProtectedView ? (
-        <ProtectedView View={View} redirectOnSignOut={view !== "tray"} />
-      ) : (
-        <View />
-      )}
-    </AuthProvider>
+    <PlakkAtomProvider>
+      <AuthProvider>
+        {isProtectedView ? (
+          <ProtectedView View={View} redirectOnSignOut={view !== "tray"} />
+        ) : (
+          <View />
+        )}
+      </AuthProvider>
+    </PlakkAtomProvider>
   </TooltipProvider>,
 );

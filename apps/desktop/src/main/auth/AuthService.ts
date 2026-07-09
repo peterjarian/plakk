@@ -12,6 +12,10 @@ const AccessTokenClaimsSchema = Schema.Struct({
 });
 
 type AuthenticationResponse = Awaited<ReturnType<WorkOS["userManagement"]["authenticateWithCode"]>>;
+type AuthSession = {
+  readonly accessToken: string;
+  readonly user: User;
+};
 type AuthServiceFailure = AuthServiceError | Config.ConfigError;
 
 export class AuthServiceError extends Schema.TaggedErrorClass<AuthServiceError>()(
@@ -25,8 +29,8 @@ export class AuthServiceError extends Schema.TaggedErrorClass<AuthServiceError>(
 export class AuthService extends Context.Service<
   AuthService,
   {
-    getSession(): Effect.Effect<User | null, AuthServiceFailure>;
-    handleCallbackUrl(rawUrl: string): Effect.Effect<User | null, AuthServiceFailure>;
+    getSession(): Effect.Effect<AuthSession | null, AuthServiceFailure>;
+    handleCallbackUrl(rawUrl: string): Effect.Effect<AuthSession | null, AuthServiceFailure>;
     startSignIn(): Effect.Effect<string, AuthServiceFailure>;
     signOut(): Effect.Effect<void, AuthServiceError>;
   }
@@ -134,11 +138,13 @@ export class AuthService extends Context.Service<
       });
 
       const getSession = Effect.fn("AuthService.getSession")(function* (): Effect.fn.Return<
-        User | null,
+        AuthSession | null,
         AuthServiceFailure
       > {
         const credentials = yield* getValidCredentials();
-        return credentials?.user ?? null;
+        return credentials === null
+          ? null
+          : { accessToken: credentials.accessToken, user: credentials.user };
       });
 
       return AuthService.of({
@@ -214,7 +220,7 @@ export class AuthService extends Context.Service<
             .pipe(
               Effect.mapError((cause) => new AuthServiceError({ cause, message: cause.reason })),
             );
-          return credentials.user;
+          return { accessToken: credentials.accessToken, user: credentials.user };
         }),
         startSignIn: Effect.fn("AuthService.startSignIn")(function* () {
           const isEncryptionAvailable = yield* store.isEncryptionAvailable;

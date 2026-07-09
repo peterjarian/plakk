@@ -1,10 +1,10 @@
 import "dotenv/config";
 
 import { join, resolve } from "node:path";
-import { isHttpUrl, type User } from "@plakk/shared";
+import { isHttpUrl } from "@plakk/shared";
 import { app, BrowserWindow, Menu, shell } from "electron";
 import { Config, Effect, Result } from "effect";
-import type { TrayDroppedItem } from "../ipc/contracts.ts";
+import type { AuthStatus, TrayDroppedItem } from "../ipc/contracts.ts";
 import { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
 import { handle, send } from "../ipc/main.ts";
 import { AuthService } from "./auth/AuthService.ts";
@@ -12,10 +12,6 @@ import { readClipboard } from "./clipboard.ts";
 import { createTrayWindowController } from "./trayWindow.ts";
 import { UserConfigStore } from "./UserConfigStore.ts";
 import { runEffect } from "./runtime.ts";
-
-type AuthStatus = {
-  readonly user: User | null;
-};
 
 handle(ipcMethods.openExternal, (url) => {
   if (!isHttpUrl(url)) return;
@@ -48,9 +44,10 @@ async function runAuth<A, E>(
   return result.success;
 }
 
-function authStatus(user: AuthStatus["user"]): AuthStatus {
+function authStatus(session: { accessToken: string; user: AuthStatus["user"] } | null): AuthStatus {
   return {
-    user,
+    accessToken: session?.accessToken ?? null,
+    user: session?.user ?? null,
   };
 }
 

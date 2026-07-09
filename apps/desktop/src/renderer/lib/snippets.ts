@@ -1,13 +1,5 @@
 import { useSyncExternalStore } from "react";
-import {
-  formatFileSize,
-  isHttpUrl,
-  SnippetSchema,
-  snippetKindForFileName,
-  type Snippet,
-} from "@plakk/shared";
-import { Schema } from "effect";
-import { initialSnippets } from "../data/initialSnippets.ts";
+import { formatFileSize, isHttpUrl, snippetKindForFileName, type SnippetKind } from "@plakk/shared";
 import {
   mockCanAddSnippets,
   mockDroppedSnippetSubtitle,
@@ -20,10 +12,19 @@ import {
 } from "../data/mockSnippets.ts";
 import type { ClipboardContent, TrayDroppedItem } from "../../ipc/contracts.ts";
 
-const SnippetListSchema = Schema.Array(SnippetSchema);
+export type Snippet = {
+  readonly id: string;
+  readonly title: string;
+  readonly subtitle: string;
+  readonly kind: SnippetKind;
+  readonly time: string;
+  readonly synced: boolean;
+  readonly uploadProgress?: number;
+};
+
 const listeners = new Set<() => void>();
 let cachedRaw: string | null | undefined;
-let cachedSnippets = initialSnippets;
+let cachedSnippets: Snippet[] = [];
 
 // Temporary renderer-only mock store. Effect atoms + SSE should replace this as the real
 // sync path; keep IPC for native facts such as tray drops and file paths.
@@ -35,14 +36,14 @@ function readSnippets(): Snippet[] {
 
   cachedRaw = raw;
   if (raw === null) {
-    cachedSnippets = initialSnippets;
+    cachedSnippets = [];
     return cachedSnippets;
   }
 
   try {
-    cachedSnippets = Array.from(Schema.decodeUnknownSync(SnippetListSchema)(JSON.parse(raw)));
+    cachedSnippets = JSON.parse(raw) as Snippet[];
   } catch {
-    cachedSnippets = initialSnippets;
+    cachedSnippets = [];
   }
 
   return cachedSnippets;
@@ -81,7 +82,7 @@ export function useSnippets(): Snippet[] {
       };
     },
     readSnippets,
-    () => initialSnippets,
+    () => [],
   );
 }
 

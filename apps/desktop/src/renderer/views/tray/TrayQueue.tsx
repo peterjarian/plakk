@@ -1,5 +1,5 @@
 import { FileText, ImageIcon, LinkIcon, Type } from "lucide-react";
-import type { Snippet } from "@plakk/shared";
+import type { Snippet } from "../../lib/snippets.ts";
 
 const icons = {
   FILE: FileText,
