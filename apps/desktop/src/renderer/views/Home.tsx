@@ -74,6 +74,57 @@ export function Home() {
   const user = auth.user;
   const hasUploads = uploadTasks.length > 0;
 
+  function addTextSnippet(text: string) {
+    if (snippetHeaders !== null) {
+      void createTextSnippet(createTextSnippetOptions(snippetHeaders, text));
+    }
+  }
+
+  function enqueueFileSnippet(input: {
+    byteSize: number;
+    contentType: string | null;
+    fileName: string;
+  }) {
+    const kind = snippetKindForFileName(input.fileName);
+    if (kind !== "FILE" && kind !== "IMAGE") return;
+
+    uploadActions.enqueue({
+      ...input,
+      kind,
+      storageProvider: "GOOGLE_DRIVE",
+    });
+  }
+
+  function handleClipboardPaste(
+    content: Parameters<Parameters<typeof window.ipc.clipboard.onPaste>[0]>[0],
+  ) {
+    if (accountBlocked) return;
+
+    if (content.type === "text") {
+      addTextSnippet(content.text);
+      return;
+    }
+
+    if (content.type === "image") {
+      uploadActions.enqueue({
+        byteSize: 0,
+        contentType: "image/png",
+        fileName: "Pasted image",
+        kind: "IMAGE",
+        storageProvider: "GOOGLE_DRIVE",
+      });
+      return;
+    }
+
+    if (content.type === "file") {
+      enqueueFileSnippet({
+        byteSize: content.size ?? 0,
+        contentType: null,
+        fileName: content.name,
+      });
+    }
+  }
+
   useEffect(() => {
     if (!hasUploads) return;
     return startUploadProgress(uploadActions);
@@ -93,41 +144,7 @@ export function Home() {
   }, []);
 
   useEffect(
-    () =>
-      window.ipc.clipboard.onPaste((content) => {
-        if (accountBlocked) return;
-
-        if (content.type === "text") {
-          if (snippetHeaders !== null) {
-            void createTextSnippet(createTextSnippetOptions(snippetHeaders, content.text));
-          }
-          return;
-        }
-
-        if (content.type === "image") {
-          uploadActions.enqueue({
-            byteSize: 0,
-            contentType: "image/png",
-            fileName: "Pasted image",
-            kind: "IMAGE",
-            storageProvider: "GOOGLE_DRIVE",
-          });
-          return;
-        }
-
-        if (content.type === "file") {
-          const kind = snippetKindForFileName(content.name);
-          if (kind !== "FILE" && kind !== "IMAGE") return;
-
-          uploadActions.enqueue({
-            byteSize: content.size ?? 0,
-            contentType: null,
-            fileName: content.name,
-            kind,
-            storageProvider: "GOOGLE_DRIVE",
-          });
-        }
-      }),
+    () => window.ipc.clipboard.onPaste((content) => handleClipboardPaste(content)),
     [accountBlocked, createTextSnippet, snippetHeaders, uploadActions],
   );
 
@@ -186,23 +203,17 @@ export function Home() {
 
         if (event.dataTransfer.files.length) {
           for (const file of Array.from(event.dataTransfer.files)) {
-            const kind = snippetKindForFileName(file.name);
-            if (kind !== "FILE" && kind !== "IMAGE") continue;
-            uploadActions.enqueue({
+            enqueueFileSnippet({
               byteSize: file.size,
               contentType: file.type || null,
               fileName: file.name,
-              kind,
-              storageProvider: "GOOGLE_DRIVE",
             });
           }
           return;
         }
 
         const dropped = event.dataTransfer.getData("text/plain").trim();
-        if (dropped && snippetHeaders !== null) {
-          void createTextSnippet(createTextSnippetOptions(snippetHeaders, dropped));
-        }
+        if (dropped) addTextSnippet(dropped);
       }}
     >
       <div className="drag-region h-12" aria-hidden="true" />
@@ -249,23 +260,15 @@ export function Home() {
           )}
           <SnippetComposer
             disabled={accountBlocked}
-            onSubmit={(text) => {
-              if (snippetHeaders !== null) {
-                void createTextSnippet(createTextSnippetOptions(snippetHeaders, text));
-              }
-            }}
+            onSubmit={addTextSnippet}
             onFiles={(files) => {
               if (accountBlocked) return;
 
               for (const file of Array.from(files)) {
-                const kind = snippetKindForFileName(file.name);
-                if (kind !== "FILE" && kind !== "IMAGE") continue;
-                uploadActions.enqueue({
+                enqueueFileSnippet({
                   byteSize: file.size,
                   contentType: file.type || null,
                   fileName: file.name,
-                  kind,
-                  storageProvider: "GOOGLE_DRIVE",
                 });
               }
             }}
