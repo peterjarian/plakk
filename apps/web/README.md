@@ -28,7 +28,9 @@ WorkOS Pipes RPCs require:
 
 ```bash
 WORKOS_API_KEY=sk_...
-WORKOS_USER_ID=user_...
+WORKOS_CLIENT_ID=client_...
+WORKOS_REDIRECT_URI=http://localhost:3000/api/auth/callback
+WORKOS_COOKIE_PASSWORD=32+ chars
 ```
 
 ## RPC

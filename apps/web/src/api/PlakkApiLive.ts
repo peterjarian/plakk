@@ -3,6 +3,7 @@ import { snippets } from "@plakk/db/schema";
 import type { SnippetKind, StorageProvider } from "@plakk/shared";
 import {
   AccountRpcs,
+  CurrentUser,
   HealthRpcs,
   PlakkApi,
   SnippetRpcs,
@@ -35,9 +36,6 @@ const WorkosConnectedAccountSchema = Schema.Struct({
 // ponytail: DB rows are real; provider object ids stay placeholders until WorkOS Pipes upload exists.
 const placeholderStorageObjectId = () => `pending-storage:${crypto.randomUUID()}`;
 
-// ponytail: single-tenant backend until web AuthKit owns the request user.
-const getOwnerWorkosUserId = Config.string("WORKOS_USER_ID").pipe(Effect.orDie);
-
 type CreateSnippetInput = {
   readonly id: string;
   readonly kind: Extract<SnippetKind, "TEXT" | "FILE" | "IMAGE">;
@@ -51,12 +49,12 @@ const insertSnippet = Effect.fn("@plakk/web/api/PlakkApiLive.insertSnippet")(fun
   drizzle: DrizzleService,
   input: CreateSnippetInput,
 ) {
-  const ownerWorkosUserId = yield* getOwnerWorkosUserId;
+  const currentUser = yield* CurrentUser;
   const [snippet] = yield* drizzle.db
     .insert(snippets)
     .values({
       ...input,
-      ownerWorkosUserId,
+      ownerWorkosUserId: currentUser.id,
       storageProvider: STORAGE_PROVIDER,
       storageObjectId: placeholderStorageObjectId(),
     })
@@ -94,7 +92,11 @@ const HealthLive = HealthRpcs.of({
 
 const AccountLive = AccountRpcs.of({
   GetAccountStatus: Effect.fn("rpc.GetAccountStatus")(function* () {
-    yield* Effect.logInfo("Returning account status", { storageProvider: STORAGE_PROVIDER });
+    const currentUser = yield* CurrentUser;
+    yield* Effect.logInfo("Returning account status", {
+      storageProvider: STORAGE_PROVIDER,
+      workosUserId: currentUser.id,
+    });
     return accountStatus;
   }),
 });
@@ -103,13 +105,13 @@ const StorageLive = StorageRpcs.of({
   GetPipeConnectionUrl: Effect.fn("rpc.GetPipeConnectionUrl")(function* (input) {
     return yield* Effect.gen(function* () {
       const apiKey = yield* Config.redacted("WORKOS_API_KEY").pipe(Effect.orDie);
-      const workosUserId = yield* getOwnerWorkosUserId;
+      const currentUser = yield* CurrentUser;
       const request = yield* HttpClientRequest.post(
         `${WORKOS_BASE_URL}/data-integrations/${encodeURIComponent(getProviderSlug(input.storageProvider))}/authorize`,
       ).pipe(
         HttpClientRequest.bearerToken(Redacted.value(apiKey)),
         HttpClientRequest.setHeader("Content-Type", "application/json"),
-        HttpClientRequest.bodyJson({ user_id: workosUserId }),
+        HttpClientRequest.bodyJson({ user_id: currentUser.id }),
         Effect.orDie,
       );
       const response = yield* HttpClient.execute(request).pipe(Effect.orDie);
@@ -127,9 +129,9 @@ const StorageLive = StorageRpcs.of({
   GetPipeConnectionStatus: Effect.fn("rpc.GetPipeConnectionStatus")(function* (input) {
     return yield* Effect.gen(function* () {
       const apiKey = yield* Config.redacted("WORKOS_API_KEY").pipe(Effect.orDie);
-      const workosUserId = yield* getOwnerWorkosUserId;
+      const currentUser = yield* CurrentUser;
       const response = yield* HttpClient.get(
-        getConnectedAccountUrl(input.storageProvider, workosUserId),
+        getConnectedAccountUrl(input.storageProvider, currentUser.id),
         {
           headers: { Authorization: `Bearer ${Redacted.value(apiKey)}` },
         },
@@ -159,9 +161,9 @@ const StorageLive = StorageRpcs.of({
   DisconnectPipe: Effect.fn("rpc.DisconnectPipe")(function* (input) {
     return yield* Effect.gen(function* () {
       const apiKey = yield* Config.redacted("WORKOS_API_KEY").pipe(Effect.orDie);
-      const workosUserId = yield* getOwnerWorkosUserId;
+      const currentUser = yield* CurrentUser;
       const response = yield* HttpClient.del(
-        getConnectedAccountUrl(input.storageProvider, workosUserId),
+        getConnectedAccountUrl(input.storageProvider, currentUser.id),
         {
           headers: { Authorization: `Bearer ${Redacted.value(apiKey)}` },
         },
@@ -179,13 +181,13 @@ const SnippetsLive = SnippetRpcs.of({
   ListSnippets: Effect.fn("rpc.ListSnippets")(function* (input) {
     return yield* Effect.gen(function* () {
       const drizzle = yield* Drizzle;
-      const ownerWorkosUserId = yield* getOwnerWorkosUserId;
+      const currentUser = yield* CurrentUser;
 
       yield* Effect.logInfo("Listing snippets", { limit: input.limit });
       const rows = yield* drizzle.db
         .select()
         .from(snippets)
-        .where(and(eq(snippets.ownerWorkosUserId, ownerWorkosUserId), isNull(snippets.deletedAt)))
+        .where(and(eq(snippets.ownerWorkosUserId, currentUser.id), isNull(snippets.deletedAt)))
         .orderBy(desc(snippets.createdAt))
         .limit(input.limit)
         .pipe(Effect.orDie);
@@ -222,14 +224,14 @@ const SnippetsLive = SnippetRpcs.of({
   DeleteSnippet: Effect.fn("rpc.DeleteSnippet")(function* (input) {
     return yield* Effect.gen(function* () {
       const drizzle = yield* Drizzle;
-      const ownerWorkosUserId = yield* getOwnerWorkosUserId;
+      const currentUser = yield* CurrentUser;
 
       yield* Effect.logInfo("Deleting snippet", { id: input.id });
       const now = DateTime.toDateUtc(yield* DateTime.now);
       yield* drizzle.db
         .update(snippets)
         .set({ deletedAt: now, updatedAt: now })
-        .where(and(eq(snippets.id, input.id), eq(snippets.ownerWorkosUserId, ownerWorkosUserId)))
+        .where(and(eq(snippets.id, input.id), eq(snippets.ownerWorkosUserId, currentUser.id)))
         .pipe(Effect.orDie);
     }).pipe(Effect.annotateSpans({ id: input.id }));
   }),
