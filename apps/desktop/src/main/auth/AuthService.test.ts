@@ -68,7 +68,20 @@ describe("desktop access token refresh", () => {
   });
 
   it("refreshes malformed tokens", async () => {
+    const validPayload = Buffer.from(JSON.stringify({ exp: now / 1000 + 61 })).toString(
+      "base64url",
+    );
+
     await expect(Effect.runPromise(accessTokenNeedsRefresh("malformed", now))).resolves.toBe(true);
+    await expect(
+      Effect.runPromise(accessTokenNeedsRefresh(`header.${validPayload}`, now)),
+    ).resolves.toBe(true);
+    await expect(
+      Effect.runPromise(accessTokenNeedsRefresh(`header.${validPayload}.signature.extra`, now)),
+    ).resolves.toBe(true);
+    await expect(
+      Effect.runPromise(accessTokenNeedsRefresh(`header.${validPayload}.invalid+signature`, now)),
+    ).resolves.toBe(true);
     await expect(
       Effect.runPromise(accessTokenNeedsRefresh(accessToken({ exp: "invalid" }), now)),
     ).resolves.toBe(true);

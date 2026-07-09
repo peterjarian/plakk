@@ -49,9 +49,15 @@ export const accessTokenNeedsRefresh = Effect.fn("AuthService.accessTokenNeedsRe
   accessToken: string,
   now: number,
 ) {
-  const payload = accessToken.split(".")[1];
-  if (payload === undefined) return true;
+  const segments = accessToken.split(".");
+  if (
+    segments.length !== 3 ||
+    segments.some((segment) => segment.length === 0 || !/^[A-Za-z0-9_-]+$/.test(segment))
+  ) {
+    return true;
+  }
 
+  const payload = segments[1]!;
   return yield* Effect.try(() => Buffer.from(payload, "base64url").toString("utf8")).pipe(
     Effect.flatMap(Schema.decodeUnknownEffect(AccessTokenClaimsCodec)),
     Effect.map((claims) => claims.exp * 1000 - now <= ACCESS_TOKEN_REFRESH_WINDOW_MS),
