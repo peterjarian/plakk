@@ -15,6 +15,7 @@ type AuthState = {
   isLoading: boolean;
   signIn: () => Promise<void>;
   signOut: () => Promise<void>;
+  accessToken: string | null;
   user: AuthStatus["user"];
 };
 
@@ -45,7 +46,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       (error) => {
         if (!isMounted) return;
         setIssue({ message: error instanceof Error ? error.message : "Could not check session." });
-        setStatus({ user: null });
+        setStatus({ accessToken: null, user: null });
       },
     );
 
@@ -78,6 +79,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const user = status?.user ?? null;
 
     return {
+      accessToken: status?.accessToken ?? null,
       issue,
       isLoading: status === null,
       signIn,

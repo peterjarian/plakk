@@ -23,6 +23,12 @@ export const SnippetKindLiteral = Schema.Literals(SNIPPET_KINDS);
 
 export type SnippetKind = typeof SnippetKindLiteral.Type;
 
+export const SNIPPET_UPLOAD_STATUSES = ["UPLOADING", "READY", "FAILED"] as const;
+
+export const SnippetUploadStatusLiteral = Schema.Literals(SNIPPET_UPLOAD_STATUSES);
+
+export type SnippetUploadStatus = typeof SnippetUploadStatusLiteral.Type;
+
 export const isHttpUrl = (value: string): boolean => {
   try {
     const url = new URL(value);
@@ -49,15 +55,3 @@ export function formatFileSize(bytes: number): string {
 
 export const snippetKindForFileName = (name: string): SnippetKind =>
   /\.(avif|bmp|gif|heic|jpe?g|png|svg|tiff?|webp)$/i.test(name) ? "IMAGE" : "FILE";
-
-export const SnippetSchema = Schema.Struct({
-  id: Schema.String,
-  title: Schema.String,
-  subtitle: Schema.String,
-  kind: SnippetKindLiteral,
-  time: Schema.String,
-  synced: Schema.Boolean,
-  uploadProgress: Schema.optionalKey(Schema.Finite),
-});
-
-export type Snippet = typeof SnippetSchema.Type;

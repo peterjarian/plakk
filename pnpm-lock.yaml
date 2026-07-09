@@ -60,6 +60,9 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@effect/atom-react':
+        specifier: 4.0.0-beta.92
+        version: 4.0.0-beta.92(effect@4.0.0-beta.92)(react@19.2.7)(scheduler@0.27.0)
       '@plakk/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -87,6 +90,9 @@ importers:
       react-dom:
         specifier: ^19.2.7
         version: 19.2.7(react@19.2.7)
+      scheduler:
+        specifier: ^0.27.0
+        version: 0.27.0
     devDependencies:
       '@tailwindcss/vite':
         specifier: ^4.3.2
@@ -242,6 +248,9 @@ importers:
       '@base-ui/react':
         specifier: ^1.6.0
         version: 1.6.0(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      '@effect/atom-react':
+        specifier: 4.0.0-beta.92
+        version: 4.0.0-beta.92(effect@4.0.0-beta.92)(react@19.2.7)(scheduler@0.27.0)
       '@plakk/shared':
         specifier: workspace:*
         version: link:../shared
@@ -251,6 +260,9 @@ importers:
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.0-beta.92
       lucide-react:
         specifier: ^1.23.0
         version: 1.23.0(react@19.2.7)
@@ -260,6 +272,9 @@ importers:
       react-dom:
         specifier: ^19.2.7
         version: 19.2.7(react@19.2.7)
+      scheduler:
+        specifier: ^0.27.0
+        version: 0.27.0
       shadcn:
         specifier: ^4.12.0
         version: 4.12.0(typescript@6.0.3)
@@ -467,6 +482,13 @@ packages:
 
   '@drizzle-team/brocli@0.12.0':
     resolution: {integrity: sha512-mlUE+rZ8CatQekLhnaiN91Iemdd+e2gFKooGlnRB3oPTL3VghLfX24dx7HrzMNeC1JrIB/0kpsfyty3f5HNfxQ==}
+
+  '@effect/atom-react@4.0.0-beta.92':
+    resolution: {integrity: sha512-C3KfrgtD550d2o5vjWwnElkCAz3dzYS9uZMYjsS208cxuMsg/sKYyCaGdh9P8oC1wZ+AL5hbboaPsCpP7dawPg==}
+    peerDependencies:
+      effect: ^4.0.0-beta.92
+      react: ^19.2.4
+      scheduler: '*'
 
   '@effect/language-service@0.86.2':
     resolution: {integrity: sha512-SaPln+8srOqDJDUwNTDmP5e+IYpEDr9+1epGznnsLqu8xvo6VnxyWARdeLpqvZJlb0Pgy9ca7ppqvvdWbHPXAg==}
@@ -4032,6 +4054,12 @@ snapshots:
   '@dotenvx/primitives@0.8.0': {}
 
   '@drizzle-team/brocli@0.12.0': {}
+
+  '@effect/atom-react@4.0.0-beta.92(effect@4.0.0-beta.92)(react@19.2.7)(scheduler@0.27.0)':
+    dependencies:
+      effect: 4.0.0-beta.92
+      react: 19.2.7
+      scheduler: 0.27.0
 
   '@effect/language-service@0.86.2': {}
 

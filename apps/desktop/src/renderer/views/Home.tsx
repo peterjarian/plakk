@@ -1,6 +1,16 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUpRight, Plus, TriangleAlert } from "lucide-react";
-import { formatFileSize, isHttpUrl, snippetKindForFileName, type Snippet } from "@plakk/shared";
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
+import { snippetKindForFileName } from "@plakk/shared";
+import type { ApiSnippet } from "@plakk/shared/PlakkApi";
+import {
+  createTextSnippetOptions,
+  deleteSnippetOptions,
+  emptySnippetsAtom,
+  snippetReactivityKeys,
+  type SnippetRequestHeaders,
+} from "@plakk/ui/atoms/snippets";
+import { createPlakkRpc } from "@plakk/ui/atoms/rpc";
 import { AppHeader } from "@plakk/ui/components/AppHeader";
 import { SnippetList } from "@plakk/ui/components/SnippetList";
 import { SnippetRow } from "@plakk/ui/components/SnippetRow";
@@ -14,12 +24,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@plakk/ui/components/primitives/dialog";
+import { useActiveUploadTasks, useUploadActions } from "@plakk/ui/hooks/useUploadFlow";
+import { AsyncResult } from "effect/unstable/reactivity";
 import { SnippetComposer } from "../components/SnippetComposer.tsx";
-import { initialSnippets } from "../data/initialSnippets.ts";
 import { useAuth } from "../hooks/useAuth.ts";
 import { navigate } from "../lib/navigate.ts";
+import { startUploadProgress } from "../lib/uploadProgress.ts";
 
 const accountSetupUrl = "https://app.plakk.io/account/setup";
+const plakkRpc = createPlakkRpc(window.ipc.runtimeConfig.plakkRpcUrl);
+const createTextSnippetMutationAtom = plakkRpc.mutation("CreateTextSnippet");
+const deleteSnippetMutationAtom = plakkRpc.mutation("DeleteSnippet");
 
 export function Home() {
   const auth = useAuth();
@@ -27,33 +42,93 @@ export function Home() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [pendingExternalUrl, setPendingExternalUrl] = useState<string | null>(null);
   const [skipExternalLinkWarning, setSkipExternalLinkWarning] = useState(false);
-  const [snippets, setSnippets] = useState(initialSnippets);
   const [showExternalLinkWarning, setShowExternalLinkWarning] = useState(true);
   const copiedTimerRef = useRef<number | undefined>(undefined);
 
-  const accountBlocked = true;
+  const snippetHeaders = useMemo<SnippetRequestHeaders | null>(
+    () => (auth.accessToken === null ? null : { authorization: `Bearer ${auth.accessToken}` }),
+    [auth.accessToken],
+  );
+  const snippetsAtom = useMemo(() => {
+    if (snippetHeaders === null) return emptySnippetsAtom;
+    return plakkRpc.query(
+      "ListSnippets",
+      { limit: 20 },
+      {
+        headers: snippetHeaders,
+        reactivityKeys: snippetReactivityKeys,
+        serializationKey: "latest",
+      },
+    );
+  }, [snippetHeaders]);
+  const snippetsResult = useAtomValue(snippetsAtom);
+  const syncedSnippetResponse = AsyncResult.getOrElse(snippetsResult, () => ({
+    items: [] as ReadonlyArray<ApiSnippet>,
+  }));
+  const createTextSnippet = useAtomSet(createTextSnippetMutationAtom, { mode: "promise" });
+  const deleteSyncedSnippet = useAtomSet(deleteSnippetMutationAtom, { mode: "promise" });
+  const uploadActions = useUploadActions();
+  const uploadTasks = useActiveUploadTasks();
+  const snippets = [...uploadTasks, ...syncedSnippetResponse.items];
+  const accountBlocked = auth.accessToken === null;
   const user = auth.user;
-  const hasUploads = snippets.some((snippet) => snippet.uploadProgress !== undefined);
+  const hasUploads = uploadTasks.length > 0;
+
+  function addTextSnippet(text: string) {
+    if (snippetHeaders !== null) {
+      void createTextSnippet(createTextSnippetOptions(snippetHeaders, text));
+    }
+  }
+
+  function enqueueFileSnippet(input: {
+    byteSize: number;
+    contentType: string | null;
+    fileName: string;
+  }) {
+    const kind = snippetKindForFileName(input.fileName);
+    if (kind !== "FILE" && kind !== "IMAGE") return;
+
+    uploadActions.enqueue({
+      ...input,
+      kind,
+      storageProvider: "GOOGLE_DRIVE",
+    });
+  }
+
+  function handleClipboardPaste(
+    content: Parameters<Parameters<typeof window.ipc.clipboard.onPaste>[0]>[0],
+  ) {
+    if (accountBlocked) return;
+
+    if (content.type === "text") {
+      addTextSnippet(content.text);
+      return;
+    }
+
+    if (content.type === "image") {
+      uploadActions.enqueue({
+        byteSize: 0,
+        contentType: "image/png",
+        fileName: "Pasted image",
+        kind: "IMAGE",
+        storageProvider: "GOOGLE_DRIVE",
+      });
+      return;
+    }
+
+    if (content.type === "file") {
+      enqueueFileSnippet({
+        byteSize: content.size ?? 0,
+        contentType: null,
+        fileName: content.name,
+      });
+    }
+  }
 
   useEffect(() => {
     if (!hasUploads) return;
-
-    const timer = window.setInterval(() => {
-      setSnippets((current) =>
-        current.map((snippet) => {
-          if (snippet.uploadProgress === undefined) return snippet;
-
-          const uploadProgress = Math.min(100, snippet.uploadProgress + 8);
-          if (uploadProgress < 100) return { ...snippet, uploadProgress };
-
-          const { uploadProgress: _uploadProgress, ...done } = snippet;
-          return { ...done, synced: true, time: "now" };
-        }),
-      );
-    }, 160);
-
-    return () => window.clearInterval(timer);
-  }, [hasUploads]);
+    return startUploadProgress(uploadActions);
+  }, [hasUploads, uploadActions]);
 
   useEffect(() => {
     return () => {
@@ -69,106 +144,9 @@ export function Home() {
   }, []);
 
   useEffect(
-    () =>
-      window.ipc.clipboard.onPaste((content) => {
-        if (accountBlocked) return;
-
-        if (content.type === "text") {
-          addText(content.text);
-          return;
-        }
-
-        if (content.type === "image") {
-          addSnippet({
-            title: "Pasted image",
-            subtitle: `${content.width} x ${content.height}`,
-            kind: "IMAGE",
-          });
-          return;
-        }
-
-        if (content.type === "file") {
-          addSnippet({
-            title: content.name,
-            subtitle:
-              content.size === undefined
-                ? content.extension || "FILE"
-                : `${content.extension || "FILE"} · ${formatFileSize(content.size)}`,
-            kind: snippetKindForFileName(content.name),
-          });
-        }
-      }),
-    [accountBlocked],
+    () => window.ipc.clipboard.onPaste((content) => handleClipboardPaste(content)),
+    [accountBlocked, createTextSnippet, snippetHeaders, uploadActions],
   );
-
-  function addSnippet(snippet: Omit<Snippet, "id" | "time" | "synced">) {
-    if (accountBlocked) return;
-
-    setSnippets((current) =>
-      [{ ...snippet, id: crypto.randomUUID(), time: "now", synced: true }, ...current].slice(0, 20),
-    );
-  }
-
-  function addText(value: string) {
-    addSnippet(
-      isHttpUrl(value)
-        ? { title: value, subtitle: "", kind: "LINK" }
-        : { title: value, subtitle: `${value.length} characters`, kind: "TEXT" },
-    );
-  }
-
-  function addFiles(files: FileList) {
-    if (accountBlocked) return;
-
-    const uploads = Array.from(files).map((file) => {
-      const kind = snippetKindForFileName(file.name);
-      return {
-        id: crypto.randomUUID(),
-        title: file.name,
-        subtitle: `${file.name.split(".").pop()?.toUpperCase() ?? "FILE"} · ${formatFileSize(file.size)}`,
-        kind,
-        time: "",
-        synced: false,
-        uploadProgress: 0,
-      };
-    });
-
-    setSnippets((current) => [...uploads, ...current].slice(0, 20));
-  }
-
-  function addDropped(dataTransfer: DataTransfer) {
-    if (accountBlocked) return;
-
-    if (dataTransfer.files.length) {
-      addFiles(dataTransfer.files);
-      return;
-    }
-
-    const dropped = dataTransfer.getData("text/plain").trim();
-    if (!dropped) return;
-    if (isHttpUrl(dropped)) {
-      addSnippet({ title: dropped, subtitle: "", kind: "LINK" });
-    } else {
-      addSnippet({ title: dropped, subtitle: `${dropped.length} characters`, kind: "TEXT" });
-    }
-  }
-
-  function stopUpload(id: string) {
-    setSnippets((current) => current.filter((snippet) => snippet.id !== id));
-  }
-
-  function deleteSnippet(id: string) {
-    setSnippets((current) => current.filter((snippet) => snippet.id !== id));
-  }
-
-  function copy(snippet: Snippet) {
-    void navigator.clipboard?.writeText(snippet.subtitle || snippet.title);
-    setCopiedId(snippet.id);
-    if (copiedTimerRef.current !== undefined) window.clearTimeout(copiedTimerRef.current);
-    copiedTimerRef.current = window.setTimeout(() => {
-      setCopiedId((copied) => (copied === snippet.id ? null : copied));
-    }, 1200);
-  }
 
   function openLink(url: string) {
     if (!showExternalLinkWarning) {
@@ -222,7 +200,20 @@ export function Home() {
         event.preventDefault();
         setIsDragging(false);
         if (accountBlocked) return;
-        addDropped(event.dataTransfer);
+
+        if (event.dataTransfer.files.length) {
+          for (const file of Array.from(event.dataTransfer.files)) {
+            enqueueFileSnippet({
+              byteSize: file.size,
+              contentType: file.type || null,
+              fileName: file.name,
+            });
+          }
+          return;
+        }
+
+        const dropped = event.dataTransfer.getData("text/plain").trim();
+        if (dropped) addTextSnippet(dropped);
       }}
     >
       <div className="drag-region h-12" aria-hidden="true" />
@@ -267,7 +258,21 @@ export function Home() {
               </Button>
             </div>
           )}
-          <SnippetComposer disabled={accountBlocked} onSubmit={addText} onFiles={addFiles} />
+          <SnippetComposer
+            disabled={accountBlocked}
+            onSubmit={addTextSnippet}
+            onFiles={(files) => {
+              if (accountBlocked) return;
+
+              for (const file of Array.from(files)) {
+                enqueueFileSnippet({
+                  byteSize: file.size,
+                  contentType: file.type || null,
+                  fileName: file.name,
+                });
+              }
+            }}
+          />
         </div>
 
         <SnippetList empty={snippets.length === 0}>
@@ -276,10 +281,29 @@ export function Home() {
               key={snippet.id}
               snippet={snippet}
               copied={copiedId === snippet.id}
-              onCopy={() => copy(snippet)}
-              onDelete={() => deleteSnippet(snippet.id)}
+              onCopy={() => {
+                void navigator.clipboard?.writeText(
+                  "phase" in snippet ? snippet.fileName : snippet.title,
+                );
+                setCopiedId(snippet.id);
+                if (copiedTimerRef.current !== undefined) {
+                  window.clearTimeout(copiedTimerRef.current);
+                }
+                copiedTimerRef.current = window.setTimeout(() => {
+                  setCopiedId((copied) => (copied === snippet.id ? null : copied));
+                }, 1200);
+              }}
+              onDelete={() => {
+                if ("phase" in snippet) {
+                  uploadActions.remove(snippet.id);
+                  return;
+                }
+                if (snippetHeaders !== null) {
+                  void deleteSyncedSnippet(deleteSnippetOptions(snippetHeaders, snippet.id));
+                }
+              }}
               {...(snippet.kind === "LINK" ? { onOpenLink: openLink } : {})}
-              onStopUpload={() => stopUpload(snippet.id)}
+              onStopUpload={() => uploadActions.remove(snippet.id)}
             />
           ))}
         </SnippetList>
