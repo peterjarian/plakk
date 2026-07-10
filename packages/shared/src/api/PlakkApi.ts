@@ -25,6 +25,9 @@ export const AccountStatusSchema = Schema.Struct({
 
 export type AccountStatus = typeof AccountStatusSchema.Type;
 
+export const accountCanSync = (account: AccountStatus): boolean =>
+  account.canSync && account.blockedReasons.length === 0 && account.storageProvider !== null;
+
 export const PipeConnectionStatusSchema = Schema.Literals([
   "CONNECTED",
   "NEEDS_REAUTHORIZATION",

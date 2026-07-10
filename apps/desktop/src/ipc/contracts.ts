@@ -1,5 +1,9 @@
 import { UserSchema } from "@plakk/shared";
-import { PreparedStorageUploadSchema, SnippetIdSchema } from "@plakk/shared/PlakkApi";
+import {
+  AccountStatusSchema,
+  PreparedStorageUploadSchema,
+  SnippetIdSchema,
+} from "@plakk/shared/PlakkApi";
 import { Schema } from "effect";
 import type { PreparedFileUploadPayload, StorageUploadResult } from "../storageUpload.ts";
 
@@ -90,6 +94,14 @@ export const TrayDroppedItemSchema = Schema.Union([
 
 export type TrayDroppedItem = typeof TrayDroppedItemSchema.Type;
 
+export const TrayAccountStateSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("loading") }),
+  Schema.Struct({ kind: Schema.Literal("failed") }),
+  Schema.Struct({ kind: Schema.Literal("resolved"), account: AccountStatusSchema }),
+]);
+
+export type TrayAccountState = typeof TrayAccountStateSchema.Type;
+
 const PreparedUploadBaseSchema = {
   id: SnippetIdSchema,
   prepared: PreparedStorageUploadSchema,
@@ -141,6 +153,11 @@ export const ipcMethods = {
     payload: SnippetIdSchema,
     result: Schema.Void,
   }),
+  trayGetAccountState: method({
+    channel: "tray:get-account-state",
+    payload: Schema.Void,
+    result: TrayAccountStateSchema,
+  }),
   userConfigGet: method({
     channel: "user-config:get",
     payload: Schema.Void,
@@ -174,6 +191,14 @@ export const ipcEvents = {
   trayDroppedItem: event({
     channel: "tray:dropped-item",
     payload: TrayDroppedItemSchema,
+  }),
+  trayAccountStateChanged: event({
+    channel: "tray:account-state-changed",
+    payload: TrayAccountStateSchema,
+  }),
+  navigate: event({
+    channel: "navigation:requested",
+    payload: Schema.Literals(["home", "settings"] as const),
   }),
   storageUploadProgress: event({
     channel: "storage:upload-progress",

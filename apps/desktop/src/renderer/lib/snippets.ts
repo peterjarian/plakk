@@ -28,7 +28,13 @@ let cachedSnippets: Snippet[] = [];
 
 // Temporary renderer-only mock store. Effect atoms + SSE should replace this as the real
 // sync path; keep IPC for native facts such as tray drops and file paths.
-export const canAddSnippets = mockCanAddSnippets;
+let ingestionEnabled = false;
+
+export const canAddSnippets = () => mockCanAddSnippets && ingestionEnabled;
+
+export function setSnippetIngestionEnabled(enabled: boolean) {
+  ingestionEnabled = enabled;
+}
 
 function readSnippets(): Snippet[] {
   const raw = window.localStorage.getItem(mockSnippetStorageKey);
@@ -87,7 +93,7 @@ export function useSnippets(): Snippet[] {
 }
 
 export function addSnippet(snippet: Omit<Snippet, "id" | "time" | "synced">) {
-  if (!canAddSnippets) return;
+  if (!canAddSnippets()) return;
 
   updateSnippets((current) =>
     [
@@ -106,7 +112,7 @@ export function addTextSnippet(value: string) {
 }
 
 export function addFiles(files: FileList) {
-  if (!canAddSnippets) return;
+  if (!canAddSnippets()) return;
 
   const uploads: Snippet[] = Array.from(files).map((file) => ({
     id: crypto.randomUUID(),
@@ -122,7 +128,7 @@ export function addFiles(files: FileList) {
 }
 
 export function addDroppedData(dataTransfer: DataTransfer) {
-  if (!canAddSnippets) return;
+  if (!canAddSnippets()) return;
 
   if (dataTransfer.files.length) {
     addFiles(dataTransfer.files);
@@ -134,7 +140,7 @@ export function addDroppedData(dataTransfer: DataTransfer) {
 }
 
 export function addTrayDroppedItem(item: TrayDroppedItem) {
-  if (!canAddSnippets) return;
+  if (!canAddSnippets()) return;
 
   if (item.type === "text") {
     const text = item.text.trim();

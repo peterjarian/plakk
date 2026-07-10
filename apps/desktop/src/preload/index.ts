@@ -4,6 +4,7 @@ import type {
   AuthStatus,
   ClipboardContent,
   TrayDroppedItem,
+  TrayAccountState,
   UserConfig,
   UserConfigPatch,
 } from "../ipc/contracts.ts";
@@ -25,6 +26,9 @@ export type DesktopApi = {
     readonly onPaste: (callback: (content: ClipboardContent) => void) => () => void;
   };
   readonly openExternal: (url: string) => Promise<void>;
+  readonly navigation: {
+    readonly onRequested: (callback: (view: "home" | "settings") => void) => () => void;
+  };
   readonly storage: {
     readonly cancelUpload: (id: string) => Promise<void>;
     readonly uploadPreparedFile: (
@@ -35,6 +39,8 @@ export type DesktopApi = {
     ) => () => void;
   };
   readonly tray: {
+    readonly getAccountState: () => Promise<TrayAccountState>;
+    readonly onAccountStateChanged: (callback: (state: TrayAccountState) => void) => () => void;
     readonly onDroppedItem: (callback: (item: TrayDroppedItem) => void) => () => void;
   };
   readonly userConfig: {
@@ -66,6 +72,10 @@ const desktopApi = {
       on(ipcEvents.clipboardPaste, callback),
   },
   openExternal: (url: string) => invoke(ipcMethods.openExternal, url),
+  navigation: {
+    onRequested: (callback: (view: "home" | "settings") => void) =>
+      on(ipcEvents.navigate, callback),
+  },
   storage: {
     cancelUpload: (id: string) => invoke(ipcMethods.storageCancelUpload, id),
     uploadPreparedFile: ({ file, ...payload }: RendererPreparedFileUploadPayload) => {
@@ -81,6 +91,9 @@ const desktopApi = {
       on(ipcEvents.storageUploadProgress, callback),
   },
   tray: {
+    getAccountState: () => invoke(ipcMethods.trayGetAccountState, undefined),
+    onAccountStateChanged: (callback: (state: TrayAccountState) => void) =>
+      on(ipcEvents.trayAccountStateChanged, callback),
     onDroppedItem: (callback: (item: TrayDroppedItem) => void) =>
       on(ipcEvents.trayDroppedItem, callback),
   },

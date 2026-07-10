@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import type { AccountStatus, PipeConnection } from "@plakk/shared/PlakkApi";
+import { accountCanSync, type AccountStatus, type PipeConnection } from "@plakk/shared/PlakkApi";
 import { Atom, AsyncResult } from "effect/unstable/reactivity";
 import type { ComponentProps } from "react";
 import { DropboxIcon } from "@plakk/ui/icons/DropboxIcon";
@@ -33,9 +33,6 @@ export type StorageStatus =
       readonly provider: StorageProvider;
     };
 
-const canSync = (account: AccountStatus) =>
-  account.canSync && account.blockedReasons.length === 0 && account.storageProvider !== null;
-
 export const storageStatusFrom = (
   accountResult: AsyncResult.AsyncResult<AccountStatus, unknown>,
   connectionResult: AsyncResult.AsyncResult<PipeConnection, unknown>,
@@ -60,7 +57,7 @@ export const storageStatusFrom = (
   if (connection.status === "CONNECTED") {
     return {
       kind: "connected",
-      canSync: canSync(account),
+      canSync: accountCanSync(account),
       account,
       destinationUrl: connection.externalDestinationUrl,
       provider: account.storageProvider,

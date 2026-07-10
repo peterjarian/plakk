@@ -47,7 +47,7 @@ const updateStoredSnippetUploadStatusMutationAtom = plakkRpc.mutation(
   "UpdateStoredSnippetUploadStatus",
 );
 
-export function Home() {
+export function Home({ active = true }: { active?: boolean }) {
   const auth = useAuth();
   const storageStatus = useStorageStatus();
   const [isDragging, setIsDragging] = useState(false);
@@ -348,10 +348,10 @@ export function Home() {
     );
   }, []);
 
-  useEffect(
-    () => window.ipc.clipboard.onPaste((content) => handleClipboardPaste(content)),
-    [accountBlocked, snippetHeaders, storageStatus, uploadActions],
-  );
+  useEffect(() => {
+    if (!active) return;
+    return window.ipc.clipboard.onPaste((content) => handleClipboardPaste(content));
+  }, [accountBlocked, active, snippetHeaders, storageStatus, uploadActions]);
 
   function openLink(url: string) {
     if (!showExternalLinkWarning) {

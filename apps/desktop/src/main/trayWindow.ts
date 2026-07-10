@@ -4,6 +4,7 @@ import { getAnchoredWindowBounds } from "./trayPosition.ts";
 import type { Rectangle } from "electron";
 
 const trayWindowSize = { width: 360, height: 480 };
+const accountStateMaxAgeMs = 5 * 60 * 1000;
 
 type TrayNativeEvent = {
   bounds: Rectangle;
@@ -12,6 +13,8 @@ type TrayNativeEvent = {
 type TrayWindowControllerOptions = {
   guardExternalWindows: (window: BrowserWindow) => void;
   loadTrayRenderer: (window: BrowserWindow) => void | Promise<void>;
+  onAccountRefreshRequested?: () => void;
+  onRendererLoaded?: () => void;
   onDragEnd?: (event: TrayNativeEvent) => void;
   onDragEnter?: (event: TrayNativeEvent) => void;
   onDragLeave?: (event: TrayNativeEvent) => void;
@@ -23,6 +26,8 @@ type TrayWindowControllerOptions = {
 export function createTrayWindowController({
   guardExternalWindows,
   loadTrayRenderer,
+  onAccountRefreshRequested,
+  onRendererLoaded,
   onDragEnd,
   onDragEnter,
   onDragLeave,
@@ -32,6 +37,13 @@ export function createTrayWindowController({
 }: TrayWindowControllerOptions) {
   let tray: Tray | undefined;
   let window: BrowserWindow | undefined;
+  let accountStateResolved = false;
+  let accountStateUpdatedAt = 0;
+  let ingestionEnabled = false;
+  let hasBeenShown = false;
+  let rendererLoaded = false;
+  let freshnessTimer: ReturnType<typeof setTimeout> | undefined;
+  let showWhenReady: { bounds?: Rectangle; focus: boolean } | undefined;
   let lastBlurHideAt = 0;
 
   function createTrayIcon() {
@@ -47,18 +59,30 @@ export function createTrayWindowController({
       toggleWindow(bounds);
     });
     tray.on("drag-enter", () => {
+      if (!accountStateIsCurrent()) {
+        requestAccountRefresh();
+        showWindow(getTrayBounds());
+        return;
+      }
+      if (!canIngest()) return;
       const bounds = getTrayBounds();
       showWindow(bounds);
       onDragEnter?.({ bounds });
     });
-    tray.on("drag-leave", () => onDragLeave?.({ bounds: getTrayBounds() }));
-    tray.on("drag-end", () => onDragEnd?.({ bounds: getTrayBounds() }));
+    tray.on("drag-leave", () => {
+      if (canIngest()) onDragLeave?.({ bounds: getTrayBounds() });
+    });
+    tray.on("drag-end", () => {
+      if (canIngest()) onDragEnd?.({ bounds: getTrayBounds() });
+    });
     tray.on("drop-files", (_event, files) => {
+      if (!canIngest()) return;
       const bounds = getTrayBounds();
       showWindow(bounds);
       onDropFiles?.({ bounds, files });
     });
     tray.on("drop-text", (_event, text) => {
+      if (!canIngest()) return;
       const bounds = getTrayBounds();
       showWindow(bounds);
       onDropText?.({ bounds, text });
@@ -92,6 +116,13 @@ export function createTrayWindowController({
 
     window.once("closed", () => {
       window = undefined;
+      rendererLoaded = false;
+    });
+
+    window.webContents.once("did-finish-load", () => {
+      rendererLoaded = true;
+      onRendererLoaded?.();
+      revealWhenReady();
     });
 
     guardExternalWindows(window);
@@ -110,12 +141,22 @@ export function createTrayWindowController({
       return;
     }
 
+    if (hasBeenShown || !accountStateIsCurrent()) requestAccountRefresh();
+
     showWindow(activationBounds);
   }
 
   function showWindow(activationBounds?: Rectangle, focus = true) {
     if (window === undefined || window.isDestroyed()) createWindow();
     if (window === undefined) return;
+
+    if (!rendererLoaded || !accountStateResolved) {
+      showWhenReady = {
+        ...(activationBounds === undefined ? {} : { bounds: activationBounds }),
+        focus,
+      };
+      return;
+    }
 
     const bounds = getTrayBounds(activationBounds);
     const display = screen.getDisplayMatching(bounds);
@@ -126,15 +167,53 @@ export function createTrayWindowController({
     if (focus) {
       window.show();
       window.focus();
+      hasBeenShown = true;
       return;
     }
 
     window.showInactive();
+    hasBeenShown = true;
   }
 
   function hideWindow() {
     lastBlurHideAt = Date.now();
     window?.hide();
+  }
+
+  function revealWhenReady() {
+    if (!rendererLoaded || !accountStateResolved || showWhenReady === undefined) return;
+    const pending = showWhenReady;
+    showWhenReady = undefined;
+    showWindow(pending.bounds, pending.focus);
+  }
+
+  function disable() {
+    ingestionEnabled = false;
+    accountStateResolved = false;
+    accountStateUpdatedAt = 0;
+    rendererLoaded = false;
+    hasBeenShown = false;
+    showWhenReady = undefined;
+    if (freshnessTimer !== undefined) clearTimeout(freshnessTimer);
+    freshnessTimer = undefined;
+    window?.destroy();
+    window = undefined;
+    tray?.destroy();
+    tray = undefined;
+  }
+
+  function accountStateIsCurrent() {
+    return accountStateResolved && Date.now() - accountStateUpdatedAt <= accountStateMaxAgeMs;
+  }
+
+  function requestAccountRefresh() {
+    accountStateResolved = false;
+    ingestionEnabled = false;
+    onAccountRefreshRequested?.();
+  }
+
+  function canIngest() {
+    return ingestionEnabled && accountStateIsCurrent();
   }
 
   function keepLayered(target: BrowserWindow) {
@@ -162,10 +241,30 @@ export function createTrayWindowController({
   }
 
   return {
+    disable,
+    isIngestionEnabled: canIngest,
+    ownsWebContents: (contents: Electron.WebContents) => window?.webContents === contents,
+    setAccountState(resolved: boolean, canIngest: boolean) {
+      accountStateResolved = resolved;
+      if (freshnessTimer !== undefined) clearTimeout(freshnessTimer);
+      freshnessTimer = undefined;
+      if (resolved) {
+        accountStateUpdatedAt = Date.now();
+        freshnessTimer = setTimeout(() => {
+          ingestionEnabled = false;
+          if (window?.isVisible() === true) {
+            requestAccountRefresh();
+          }
+        }, accountStateMaxAgeMs);
+      }
+      ingestionEnabled = resolved && canIngest;
+      revealWhenReady();
+    },
     show: showWindow,
     setup() {
       if (tray !== undefined) return;
       createTrayIcon();
+      createWindow();
     },
   };
 }
