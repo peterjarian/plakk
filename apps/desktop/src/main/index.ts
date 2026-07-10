@@ -5,19 +5,20 @@ import { pathToFileURL } from "node:url";
 import { isHttpUrl } from "@plakk/shared";
 import { app, BrowserWindow, Menu, net, protocol, shell } from "electron";
 import { Effect, Result } from "effect";
+import * as Fiber from "effect/Fiber";
 import type { AuthStatus, TrayDroppedItem } from "../ipc/contracts.ts";
 import { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
 import { handle, send } from "../ipc/main.ts";
-import { uploadPreparedFile } from "../storageUpload.ts";
+import { StorageUpload, type StorageUploadResult } from "../storageUpload.ts";
 import { AuthService } from "./auth/AuthService.ts";
 import { readClipboard } from "./clipboard.ts";
 import { createTrayWindowController } from "./trayWindow.ts";
 import { UserConfigStore } from "./UserConfigStore.ts";
-import { runEffect } from "./runtime.ts";
+import { runEffect, runtime } from "./runtime.ts";
 
 const rendererScheme = "plakk-app";
 const rendererHost = "renderer";
-const activeUploadControllers = new Map<string, AbortController>();
+const activeUploads = new Map<string, Fiber.Fiber<StorageUploadResult, unknown>>();
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -37,21 +38,24 @@ handle(ipcMethods.openExternal, (url) => {
 });
 
 handle(ipcMethods.storageUploadPreparedFile, async (payload, event) => {
-  const controller = new AbortController();
-  activeUploadControllers.set(payload.id, controller);
+  const upload = StorageUpload.use((storage) =>
+    storage.upload(payload, (progress) =>
+      send(event.sender, ipcEvents.storageUploadProgress, { id: payload.id, progress }),
+    ),
+  );
+  const fiber = runtime.runFork(upload);
+  activeUploads.set(payload.id, fiber);
   try {
-    return await uploadPreparedFile(
-      payload,
-      (progress) =>
-        send(event.sender, ipcEvents.storageUploadProgress, { id: payload.id, progress }),
-      controller.signal,
-    );
+    return await runEffect(Fiber.join(fiber));
   } finally {
-    activeUploadControllers.delete(payload.id);
+    if (activeUploads.get(payload.id) === fiber) activeUploads.delete(payload.id);
   }
 });
 
-handle(ipcMethods.storageCancelUpload, (id) => activeUploadControllers.get(id)?.abort());
+handle(ipcMethods.storageCancelUpload, (id) => {
+  const fiber = activeUploads.get(id);
+  if (fiber !== undefined) runtime.runFork(Fiber.interrupt(fiber));
+});
 
 function authErrorMessage(error: unknown, fallback: string): string {
   if (

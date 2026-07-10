@@ -1,6 +1,10 @@
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import type { PreparedStorageUpload } from "@plakk/shared/PlakkApi";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 
 export type PreparedFileUploadPayload = {
   readonly id: string;
@@ -14,6 +18,40 @@ export type RendererPreparedFileUploadPayload = Omit<PreparedFileUploadPayload, 
 };
 
 export type StorageUploadResult = { readonly storageObjectId: string | null };
+
+export class StorageUploadError extends Schema.TaggedErrorClass<StorageUploadError>()(
+  "StorageUploadError",
+  {
+    cause: Schema.optionalKey(Schema.Defect()),
+    message: Schema.String,
+  },
+) {}
+
+export class StorageUpload extends Context.Service<
+  StorageUpload,
+  {
+    readonly upload: (
+      payload: PreparedFileUploadPayload,
+      onProgress: (progress: number) => void,
+    ) => Effect.Effect<StorageUploadResult, StorageUploadError>;
+  }
+>()("@plakk/desktop/storageUpload/StorageUpload") {
+  static readonly layer = Layer.succeed(
+    StorageUpload,
+    StorageUpload.of({
+      upload: Effect.fn("StorageUpload.upload")(function* (payload, onProgress) {
+        return yield* Effect.tryPromise({
+          try: (signal) => uploadPreparedFile(payload, onProgress, signal),
+          catch: (cause) =>
+            new StorageUploadError({
+              cause,
+              message: cause instanceof Error ? cause.message : "Could not upload file.",
+            }),
+        });
+      }),
+    }),
+  );
+}
 
 type ByteRange = { readonly start: number; readonly end: number };
 
