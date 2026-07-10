@@ -24,14 +24,9 @@ describe("uploadPreparedFile", () => {
     const filePath = await uploadFile([1, 2, 3]);
     let body: ReadonlyArray<number> = [];
     fetchMock.mockImplementationOnce(async (_url, init) => {
-      const chunks: Array<Uint8Array> = [];
       const requestBody = init?.body;
-      if (requestBody === undefined || requestBody === null)
-        throw new Error("Expected request body.");
-      for await (const chunk of requestBody as unknown as AsyncIterable<Uint8Array>) {
-        chunks.push(chunk);
-      }
-      body = Array.from(Buffer.concat(chunks));
+      if (!(requestBody instanceof Blob)) throw new Error("Expected request body.");
+      body = Array.from(new Uint8Array(await requestBody.arrayBuffer()));
       return Response.json({ id: "ignored-provider-id" });
     });
 
@@ -61,10 +56,10 @@ describe("uploadPreparedFile", () => {
       method: "POST",
       headers: {
         "Content-Type": "application/octet-stream",
-        "Content-Length": "3",
       },
     });
     expect(init?.body).toBeDefined();
+    expect(init?.body).toBeInstanceOf(Blob);
     expect(body).toEqual([1, 2, 3]);
   });
 
@@ -95,12 +90,10 @@ describe("uploadPreparedFile", () => {
     expect(fetchMock.mock.calls.map(([, init]) => init?.headers)).toEqual([
       {
         "Content-Type": "text/plain",
-        "Content-Length": "2",
         "Content-Range": "bytes 0-1/3",
       },
       {
         "Content-Type": "text/plain",
-        "Content-Length": "1",
         "Content-Range": "bytes 2-2/3",
       },
     ]);
@@ -131,8 +124,8 @@ describe("uploadPreparedFile", () => {
 
     expect(result).toEqual({ storageObjectId: "one-drive-item" });
     expect(fetchMock.mock.calls.map(([, init]) => init?.headers)).toEqual([
-      { "Content-Length": "4", "Content-Range": "bytes 0-3/5" },
-      { "Content-Length": "1", "Content-Range": "bytes 4-4/5" },
+      { "Content-Range": "bytes 0-3/5" },
+      { "Content-Range": "bytes 4-4/5" },
     ]);
   });
 
@@ -158,5 +151,34 @@ describe("uploadPreparedFile", () => {
         },
       }),
     ).rejects.toThrow("Upload failed: 410 expired");
+  });
+
+  it("reports nested Electron network codes without exposing the upload link", async () => {
+    const filePath = await uploadFile([1]);
+    const failure = Object.assign(new Error("https://upload.example/secret"), {
+      name: "HttpError",
+      code: -2,
+      cause: Object.assign(new Error("net::ERR_CONNECTION_REFUSED"), { code: "ECONNREFUSED" }),
+    });
+    fetchMock.mockRejectedValueOnce(failure);
+
+    await expect(
+      uploadPreparedFile({
+        id: "0d1e2f3a-4567-4890-8abc-def012345678",
+        filePath,
+        byteSize: 1,
+        prepared: {
+          storageProvider: "GOOGLE_DRIVE",
+          storageObjectId: null,
+          upload: {
+            method: "PUT",
+            url: "https://upload.example/secret",
+            headers: [],
+            strategy: { type: "single_request" },
+          },
+          expiresAt: null,
+        },
+      }),
+    ).rejects.toThrow("HttpError code -2; Error code ECONNREFUSED net::ERR_CONNECTION_REFUSED");
   });
 });

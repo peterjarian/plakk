@@ -1,3 +1,4 @@
+import { net } from "electron";
 import { Layer, ManagedRuntime } from "effect";
 import { StorageUpload } from "../storageUpload.ts";
 import { AuthService } from "./auth/AuthService.ts";
@@ -7,7 +8,7 @@ import { UserConfigStore } from "./UserConfigStore.ts";
 const MainLayer = Layer.mergeAll(
   UserConfigStore.Live,
   AuthService.layer.pipe(Layer.provideMerge(AuthStore.Live)),
-  StorageUpload.layer,
+  StorageUpload.layer((input, init) => net.fetch(input, init)),
 );
 
 export const runtime = ManagedRuntime.make(MainLayer);
