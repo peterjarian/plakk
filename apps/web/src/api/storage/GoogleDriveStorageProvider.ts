@@ -14,6 +14,8 @@ import type { StorageProviderAdapter } from "./StorageProvider.ts";
 const GOOGLE_DRIVE_FILES_URL = "https://www.googleapis.com/drive/v3/files";
 const GOOGLE_DRIVE_RESUMABLE_UPLOAD_URL =
   "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id";
+const GOOGLE_DRIVE_PART_BYTE_MULTIPLE = 256 * 1024;
+const GOOGLE_DRIVE_MAX_PART_BYTE_SIZE = 64 * GOOGLE_DRIVE_PART_BYTE_MULTIPLE;
 const GOOGLE_DRIVE_FOLDER_MIME_TYPE = "application/vnd.google-apps.folder";
 const GOOGLE_DRIVE_FOLDER_NAME = "Plakk";
 const GoogleDriveUploadMetadata = Schema.fromJsonString(
@@ -172,7 +174,11 @@ export const GoogleDriveStorageProvider = {
         method: "PUT",
         url,
         headers: [{ name: "Content-Type", value: contentType }],
-        strategy: { type: "single_request" },
+        strategy: {
+          type: "byte_range",
+          maxPartByteSize: GOOGLE_DRIVE_MAX_PART_BYTE_SIZE,
+          partByteMultiple: GOOGLE_DRIVE_PART_BYTE_MULTIPLE,
+        },
       },
       expiresAt: null,
     };

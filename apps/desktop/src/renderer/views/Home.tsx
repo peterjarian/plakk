@@ -188,6 +188,11 @@ export function Home() {
     }
   }
 
+  function cancelUpload(id: string) {
+    cancelStoredSnippetUpload(id);
+    void window.ipc.storage.cancelUpload(id);
+  }
+
   useEffect(() => {
     return window.ipc.storage.onProgress(({ id, progress }) =>
       uploadActions.setProgress(id, progress),
@@ -308,11 +313,7 @@ export function Home() {
 
         if (event.dataTransfer.files.length) {
           for (const file of Array.from(event.dataTransfer.files)) {
-            enqueueFileSnippet({
-              byteSize: file.size,
-              contentType: file.type || null,
-              fileName: file.name,
-            });
+            enqueueFileSnippet(file);
           }
           return;
         }
@@ -356,11 +357,7 @@ export function Home() {
               if (accountBlocked) return;
 
               for (const file of Array.from(files)) {
-                enqueueFileSnippet({
-                  byteSize: file.size,
-                  contentType: file.type || null,
-                  fileName: file.name,
-                });
+                enqueueFileSnippet(file);
               }
             }}
           />
@@ -386,7 +383,8 @@ export function Home() {
               }}
               onDelete={() => {
                 if ("phase" in snippet) {
-                  uploadActions.remove(snippet.id);
+                  if (snippet.phase === "FAILED") uploadActions.remove(snippet.id);
+                  else cancelUpload(snippet.id);
                   return;
                 }
                 if (snippetHeaders !== null) {
@@ -394,7 +392,7 @@ export function Home() {
                 }
               }}
               {...(snippet.kind === "LINK" ? { onOpenLink: openLink } : {})}
-              onStopUpload={() => uploadActions.remove(snippet.id)}
+              onStopUpload={() => cancelUpload(snippet.id)}
             />
           ))}
         </SnippetList>
