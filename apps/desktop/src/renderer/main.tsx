@@ -10,6 +10,7 @@ import { Welcome } from "./views/Welcome.tsx";
 import type { ComponentType } from "react";
 import type { ViewType } from "./lib/navigate.ts";
 import { AuthProvider, useAuth } from "./hooks/useAuth.ts";
+import { StorageStatusProvider } from "./hooks/useStorageStatus.tsx";
 import {
   getDesktopView,
   navigate,
@@ -67,14 +68,14 @@ function DesktopViews() {
   useEffect(() => window.ipc.navigation.onRequested(setDesktopView), []);
 
   return (
-    <>
+    <StorageStatusProvider>
       <div hidden={view !== "home"}>
         <Home active={view === "home"} />
       </div>
       <div hidden={view !== "settings"}>
         <Settings />
       </div>
-    </>
+    </StorageStatusProvider>
   );
 }
 

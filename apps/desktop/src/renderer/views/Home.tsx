@@ -31,6 +31,7 @@ import { useAuth } from "../hooks/useAuth.ts";
 import {
   StorageProviderIcon,
   storageProviderLabel,
+  useStorageSetup,
   useStorageStatus,
 } from "../hooks/useStorageStatus.tsx";
 import { navigate } from "../lib/navigate.ts";
@@ -50,6 +51,7 @@ const updateStoredSnippetUploadStatusMutationAtom = plakkRpc.mutation(
 export function Home({ active = true }: { active?: boolean }) {
   const auth = useAuth();
   const storageStatus = useStorageStatus();
+  const openStorageSetup = useStorageSetup();
   const [isDragging, setIsDragging] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [pendingExternalUrl, setPendingExternalUrl] = useState<string | null>(null);
@@ -384,6 +386,14 @@ export function Home({ active = true }: { active?: boolean }) {
 
   const pendingExternalHost = pendingExternalUrl ? new URL(pendingExternalUrl).host : "";
 
+  function openSyncSetup() {
+    if (storageStatus.kind === "unlinked" || storageStatus.kind === "needs-reauthorization") {
+      openStorageSetup(syncSetupUrl);
+      return;
+    }
+    void window.ipc.openExternal(syncSetupUrl);
+  }
+
   const storageAction =
     storageStatus.kind === "unlinked" ? (
       <Button
@@ -392,7 +402,7 @@ export function Home({ active = true }: { active?: boolean }) {
         size="sm"
         aria-label="Set up storage"
         toolTip="Set up storage"
-        onClick={() => void window.ipc.openExternal(storageStatus.actionUrl)}
+        onClick={() => openStorageSetup(storageStatus.actionUrl)}
       >
         Set up storage
         <ArrowUpRight className="text-muted-foreground" />
@@ -404,7 +414,7 @@ export function Home({ active = true }: { active?: boolean }) {
         size="sm"
         aria-label={`Reconnect ${storageProviderLabel(storageStatus.provider)}`}
         toolTip="Reconnect storage"
-        onClick={() => void window.ipc.openExternal(storageStatus.actionUrl)}
+        onClick={() => openStorageSetup(storageStatus.actionUrl)}
       >
         <StorageProviderIcon provider={storageStatus.provider} className="size-4" />
         {storageProviderLabel(storageStatus.provider)}
@@ -474,12 +484,7 @@ export function Home({ active = true }: { active?: boolean }) {
               <TriangleAlert className="size-3.5 shrink-0 text-amber-600" aria-hidden="true" />
               <span className="min-w-0 flex-1 truncate">{syncPausedMessage}</span>
               {storageStatus.kind !== "failed" && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="xs"
-                  onClick={() => void window.ipc.openExternal(syncSetupUrl)}
-                >
+                <Button type="button" variant="ghost" size="xs" onClick={openSyncSetup}>
                   Finish on web
                   <ArrowUpRight />
                 </Button>
