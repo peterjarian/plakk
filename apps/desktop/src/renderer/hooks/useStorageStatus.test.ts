@@ -70,4 +70,25 @@ describe("storage status", () => {
 
     expect(status).toMatchObject({ kind: "failed", canSync: false, provider: "GOOGLE_DRIVE" });
   });
+
+  it("reports loading while account status is pending", () => {
+    const status = storageStatusFrom(AsyncResult.initial(), AsyncResult.initial());
+
+    expect(status).toMatchObject({ kind: "loading", canSync: false, provider: null });
+  });
+
+  it("reports failure when account status fails", () => {
+    const status = storageStatusFrom(
+      AsyncResult.fail(new Error("account failure")),
+      AsyncResult.initial(),
+    );
+
+    expect(status).toMatchObject({ kind: "failed", canSync: false, provider: null });
+  });
+
+  it("reports loading while a configured connection is pending", () => {
+    const status = storageStatusFrom(AsyncResult.success(account()), AsyncResult.initial());
+
+    expect(status).toMatchObject({ kind: "loading", canSync: false, provider: "GOOGLE_DRIVE" });
+  });
 });

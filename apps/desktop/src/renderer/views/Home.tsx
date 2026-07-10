@@ -85,9 +85,11 @@ export function Home() {
       : storageStatus.kind === "connected" &&
           storageStatus.account.blockedReasons.includes("billing")
         ? "Sync paused. Finish billing to add snippets."
-        : storageStatus.kind === "needs-reauthorization"
-          ? `Sync paused. Reconnect ${storageProviderLabel(storageStatus.provider)} to add snippets.`
-          : "Sync paused. Finish storage setup to add snippets.";
+        : storageStatus.kind === "connected"
+          ? "Sync is currently paused."
+          : storageStatus.kind === "needs-reauthorization"
+            ? `Sync paused. Reconnect ${storageProviderLabel(storageStatus.provider)} to add snippets.`
+            : "Sync paused. Finish storage setup to add snippets.";
   const syncSetupUrl =
     storageStatus.kind === "unlinked" || storageStatus.kind === "needs-reauthorization"
       ? storageStatus.actionUrl
@@ -166,7 +168,7 @@ export function Home() {
 
   useEffect(
     () => window.ipc.clipboard.onPaste((content) => handleClipboardPaste(content)),
-    [accountBlocked, createTextSnippet, snippetHeaders, uploadActions],
+    [accountBlocked, createTextSnippet, snippetHeaders, storageStatus, uploadActions],
   );
 
   function openLink(url: string) {
