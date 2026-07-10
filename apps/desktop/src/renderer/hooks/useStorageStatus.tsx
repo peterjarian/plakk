@@ -1,18 +1,30 @@
-import { useAtomValue } from "@effect/atom-react";
+import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
 import { accountCanSync, type AccountStatus, type PipeConnection } from "@plakk/shared/PlakkApi";
 import { Atom, AsyncResult } from "effect/unstable/reactivity";
-import type { ComponentProps } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  type ComponentProps,
+  type ReactNode,
+} from "react";
 import { DropboxIcon } from "@plakk/ui/icons/DropboxIcon";
 import { GoogleDriveIcon } from "@plakk/ui/icons/GoogleDriveIcon";
 import { OneDriveIcon } from "@plakk/ui/icons/OneDriveIcon";
 import type { StorageProvider } from "@plakk/shared";
 import { createPlakkRpc } from "@plakk/ui/atoms/rpc";
-import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "./useAuth.ts";
 
 const storageSetupUrl = "https://app.plakk.io/storage";
 const emptyAccountStatusAtom = Atom.make(AsyncResult.initial<AccountStatus>());
 const emptyPipeConnectionAtom = Atom.make(AsyncResult.initial<PipeConnection>());
+let sharedPlakkRpc: ReturnType<typeof createPlakkRpc> | undefined;
+
+const getPlakkRpc = () => (sharedPlakkRpc ??= createPlakkRpc(window.ipc.runtimeConfig.plakkRpcUrl));
+
+export const storageStatusReactivityKeys = ["storage-status"] as const;
 
 export type StorageStatus =
   | { readonly kind: "loading"; readonly canSync: false; readonly provider: StorageProvider | null }
@@ -75,10 +87,33 @@ export const storageStatusFrom = (
   return { kind: "unlinked", canSync: false, actionUrl: storageSetupUrl };
 };
 
-export function useStorageStatus(): StorageStatus {
+export const createStorageSetupRefresh = () => {
+  let pending = false;
+  return {
+    begin: () => {
+      pending = true;
+    },
+    cancel: () => {
+      pending = false;
+    },
+    focus: (refresh: () => void) => {
+      if (!pending) return;
+      pending = false;
+      refresh();
+    },
+  };
+};
+
+type StorageStatusContextValue = {
+  readonly openSetup: (url: string) => void;
+  readonly status: StorageStatus;
+};
+
+const StorageStatusContext = createContext<StorageStatusContextValue | null>(null);
+
+export function StorageStatusProvider({ children }: { children: ReactNode }) {
   const auth = useAuth();
-  const [refreshKey, setRefreshKey] = useState(0);
-  const plakkRpc = useMemo(() => createPlakkRpc(window.ipc.runtimeConfig.plakkRpcUrl), []);
+  const plakkRpc = useMemo(getPlakkRpc, []);
   const headers = useMemo(
     () => (auth.accessToken === null ? null : { authorization: `Bearer ${auth.accessToken}` }),
     [auth.accessToken],
@@ -89,9 +124,10 @@ export function useStorageStatus(): StorageStatus {
         ? emptyAccountStatusAtom
         : plakkRpc.query("GetAccountStatus", undefined, {
             headers,
-            serializationKey: `account-status-${refreshKey}`,
+            reactivityKeys: storageStatusReactivityKeys,
+            serializationKey: "account-status",
           }),
-    [headers, refreshKey],
+    [headers],
   );
   const accountResult = useAtomValue(accountAtom);
   const account = AsyncResult.getOrElse(accountResult, () => null);
@@ -104,20 +140,53 @@ export function useStorageStatus(): StorageStatus {
             { storageProvider: account.storageProvider },
             {
               headers,
-              serializationKey: `pipe-connection-${account.storageProvider}-${refreshKey}`,
+              reactivityKeys: storageStatusReactivityKeys,
+              serializationKey: `pipe-connection-${account.storageProvider}`,
             },
           ),
-    [account, headers, refreshKey],
+    [account, headers],
   );
   const connectionResult = useAtomValue(connectionAtom);
+  const refreshAccount = useAtomRefresh(accountAtom);
+  const refreshConnection = useAtomRefresh(connectionAtom);
+  const refresh = useCallback(() => {
+    refreshAccount();
+    refreshConnection();
+  }, [refreshAccount, refreshConnection]);
+  const setupRefresh = useMemo(createStorageSetupRefresh, []);
+  const openSetup = useCallback(
+    (url: string) => {
+      setupRefresh.begin();
+      void window.ipc.openExternal(url).catch(setupRefresh.cancel);
+    },
+    [setupRefresh],
+  );
 
   useEffect(() => {
-    const refresh = () => setRefreshKey((current) => current + 1);
-    window.addEventListener("focus", refresh);
-    return () => window.removeEventListener("focus", refresh);
-  }, []);
+    const onFocus = () => setupRefresh.focus(refresh);
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [refresh, setupRefresh]);
 
-  return storageStatusFrom(accountResult, connectionResult);
+  const value = useMemo(
+    () => ({ openSetup, status: storageStatusFrom(accountResult, connectionResult) }),
+    [accountResult, connectionResult, openSetup],
+  );
+  return <StorageStatusContext value={value}>{children}</StorageStatusContext>;
+}
+
+const useStorageStatusContext = () => {
+  const value = useContext(StorageStatusContext);
+  if (value === null) throw new Error("Storage status must be used inside StorageStatusProvider.");
+  return value;
+};
+
+export function useStorageStatus(): StorageStatus {
+  return useStorageStatusContext().status;
+}
+
+export function useStorageSetup(): (url: string) => void {
+  return useStorageStatusContext().openSetup;
 }
 
 export const storageProviderLabel = (provider: StorageProvider) => {

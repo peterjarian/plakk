@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { AsyncResult } from "effect/unstable/reactivity";
 import type { AccountStatus, PipeConnection } from "@plakk/shared/PlakkApi";
-import { storageStatusFrom } from "./useStorageStatus.tsx";
+import { createStorageSetupRefresh, storageStatusFrom } from "./useStorageStatus.tsx";
 
 const account = (overrides: Partial<AccountStatus> = {}): AccountStatus => ({
   canSync: true,
@@ -90,5 +90,35 @@ describe("storage status", () => {
     const status = storageStatusFrom(AsyncResult.success(account()), AsyncResult.initial());
 
     expect(status).toMatchObject({ kind: "loading", canSync: false, provider: "GOOGLE_DRIVE" });
+  });
+
+  it("keeps connected state visible during intentional background revalidation", () => {
+    const status = storageStatusFrom(
+      AsyncResult.waiting(AsyncResult.success(account())),
+      AsyncResult.waiting(AsyncResult.success(connection())),
+    );
+
+    expect(status).toMatchObject({ kind: "connected", canSync: true });
+  });
+});
+
+describe("storage setup refresh", () => {
+  it("ignores ordinary focus and refreshes once after an initiated setup flow", () => {
+    const refresh = vi.fn();
+    const setup = createStorageSetupRefresh();
+
+    setup.focus(refresh);
+    setup.focus(refresh);
+    expect(refresh).not.toHaveBeenCalled();
+
+    setup.begin();
+    setup.cancel();
+    setup.focus(refresh);
+    expect(refresh).not.toHaveBeenCalled();
+
+    setup.begin();
+    setup.focus(refresh);
+    setup.focus(refresh);
+    expect(refresh).toHaveBeenCalledOnce();
   });
 });

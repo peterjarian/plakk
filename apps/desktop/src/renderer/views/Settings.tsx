@@ -28,6 +28,7 @@ import { useAuth } from "../hooks/useAuth.ts";
 import {
   StorageProviderIcon,
   storageProviderLabel,
+  useStorageSetup,
   useStorageStatus,
 } from "../hooks/useStorageStatus.tsx";
 import { navigate } from "../lib/navigate.ts";
@@ -35,6 +36,7 @@ import { navigate } from "../lib/navigate.ts";
 export function Settings() {
   const auth = useAuth();
   const storageStatus = useStorageStatus();
+  const openStorageSetup = useStorageSetup();
   const [autoUpdate, setAutoUpdate] = useState(true);
   const [globalHotkey, setGlobalHotkey] = useState(true);
   const [toolbarWidget, setToolbarWidget] = useState(true);
@@ -135,7 +137,7 @@ export function Settings() {
                     type="button"
                     variant="ghost"
                     size="sm"
-                    onClick={() => void window.ipc.openExternal(storageStatus.actionUrl)}
+                    onClick={() => openStorageSetup(storageStatus.actionUrl)}
                   >
                     Connect
                     <ArrowUpRight />
@@ -156,7 +158,7 @@ export function Settings() {
                     type="button"
                     variant="ghost"
                     size="sm"
-                    onClick={() => void window.ipc.openExternal(storageStatus.actionUrl)}
+                    onClick={() => openStorageSetup(storageStatus.actionUrl)}
                   >
                     Reconnect
                     <ArrowUpRight />

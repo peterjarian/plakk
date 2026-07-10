@@ -31,6 +31,7 @@ import { useAuth } from "../hooks/useAuth.ts";
 import {
   StorageProviderIcon,
   storageProviderLabel,
+  useStorageSetup,
   useStorageStatus,
 } from "../hooks/useStorageStatus.tsx";
 import { navigate } from "../lib/navigate.ts";
@@ -50,6 +51,7 @@ const updateStoredSnippetUploadStatusMutationAtom = plakkRpc.mutation(
 export function Home({ active = true }: { active?: boolean }) {
   const auth = useAuth();
   const storageStatus = useStorageStatus();
+  const openStorageSetup = useStorageSetup();
   const [isDragging, setIsDragging] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [pendingExternalUrl, setPendingExternalUrl] = useState<string | null>(null);
@@ -392,7 +394,7 @@ export function Home({ active = true }: { active?: boolean }) {
         size="sm"
         aria-label="Set up storage"
         toolTip="Set up storage"
-        onClick={() => void window.ipc.openExternal(storageStatus.actionUrl)}
+        onClick={() => openStorageSetup(storageStatus.actionUrl)}
       >
         Set up storage
         <ArrowUpRight className="text-muted-foreground" />
@@ -404,7 +406,7 @@ export function Home({ active = true }: { active?: boolean }) {
         size="sm"
         aria-label={`Reconnect ${storageProviderLabel(storageStatus.provider)}`}
         toolTip="Reconnect storage"
-        onClick={() => void window.ipc.openExternal(storageStatus.actionUrl)}
+        onClick={() => openStorageSetup(storageStatus.actionUrl)}
       >
         <StorageProviderIcon provider={storageStatus.provider} className="size-4" />
         {storageProviderLabel(storageStatus.provider)}
@@ -478,7 +480,7 @@ export function Home({ active = true }: { active?: boolean }) {
                   type="button"
                   variant="ghost"
                   size="xs"
-                  onClick={() => void window.ipc.openExternal(syncSetupUrl)}
+                  onClick={() => openStorageSetup(syncSetupUrl)}
                 >
                   Finish on web
                   <ArrowUpRight />
