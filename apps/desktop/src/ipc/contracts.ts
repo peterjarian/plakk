@@ -1,5 +1,7 @@
 import { UserSchema } from "@plakk/shared";
+import { PreparedStorageUploadSchema, SnippetIdSchema } from "@plakk/shared/PlakkApi";
 import { Schema } from "effect";
+import type { PreparedFileUploadPayload, StorageUploadResult } from "../storageUpload.ts";
 
 export type IpcSchema = Schema.ConstraintCodec<unknown, unknown, never, never>;
 
@@ -45,12 +47,14 @@ export const ClipboardContentSchema = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("image"),
     dataUrl: Schema.String,
+    path: Schema.String,
     width: Schema.Number,
     height: Schema.Number,
   }),
   Schema.Struct({
     type: Schema.Literal("file"),
     name: Schema.String,
+    path: Schema.String,
     extension: Schema.String,
     size: Schema.optionalKey(Schema.Number),
   }),
@@ -86,6 +90,22 @@ export const TrayDroppedItemSchema = Schema.Union([
 
 export type TrayDroppedItem = typeof TrayDroppedItemSchema.Type;
 
+export const PreparedFileUploadPayloadSchema = Schema.Struct({
+  id: SnippetIdSchema,
+  prepared: PreparedStorageUploadSchema,
+  filePath: Schema.String,
+  byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+}) satisfies Schema.Schema<PreparedFileUploadPayload>;
+
+export const StorageUploadProgressSchema = Schema.Struct({
+  id: SnippetIdSchema,
+  progress: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 100 })),
+});
+
+export const StorageUploadResultSchema = Schema.Struct({
+  storageObjectId: Schema.NullOr(Schema.String),
+}) satisfies Schema.Schema<StorageUploadResult>;
+
 export const ipcMethods = {
   authGet: method({
     channel: "auth:get",
@@ -105,6 +125,16 @@ export const ipcMethods = {
   openExternal: method({
     channel: "open-external",
     payload: Schema.String,
+    result: Schema.Void,
+  }),
+  storageUploadPreparedFile: method({
+    channel: "storage:upload-prepared-file",
+    payload: PreparedFileUploadPayloadSchema,
+    result: StorageUploadResultSchema,
+  }),
+  storageCancelUpload: method({
+    channel: "storage:cancel-upload",
+    payload: SnippetIdSchema,
     result: Schema.Void,
   }),
   userConfigGet: method({
@@ -140,5 +170,9 @@ export const ipcEvents = {
   trayDroppedItem: event({
     channel: "tray:dropped-item",
     payload: TrayDroppedItemSchema,
+  }),
+  storageUploadProgress: event({
+    channel: "storage:upload-progress",
+    payload: StorageUploadProgressSchema,
   }),
 } as const;

@@ -34,12 +34,17 @@ import {
   useStorageStatus,
 } from "../hooks/useStorageStatus.tsx";
 import { navigate } from "../lib/navigate.ts";
-import { startUploadProgress } from "../lib/uploadProgress.ts";
+import { cancelStoredSnippetUpload, uploadStoredSnippet } from "../lib/storedSnippetUpload.ts";
 
 const accountSetupUrl = "https://app.plakk.io/account/setup";
 const plakkRpc = createPlakkRpc(window.ipc.runtimeConfig.plakkRpcUrl);
 const createTextSnippetMutationAtom = plakkRpc.mutation("CreateTextSnippet");
 const deleteSnippetMutationAtom = plakkRpc.mutation("DeleteSnippet");
+const prepareStoredSnippetUploadMutationAtom = plakkRpc.mutation("PrepareStoredSnippetUpload");
+const createStoredSnippetMutationAtom = plakkRpc.mutation("CreateStoredSnippet");
+const updateStoredSnippetUploadStatusMutationAtom = plakkRpc.mutation(
+  "UpdateStoredSnippetUploadStatus",
+);
 
 export function Home() {
   const auth = useAuth();
@@ -73,12 +78,23 @@ export function Home() {
   }));
   const createTextSnippet = useAtomSet(createTextSnippetMutationAtom, { mode: "promise" });
   const deleteSyncedSnippet = useAtomSet(deleteSnippetMutationAtom, { mode: "promise" });
+  const prepareStoredSnippetUpload = useAtomSet(prepareStoredSnippetUploadMutationAtom, {
+    mode: "promise",
+  });
+  const createStoredSnippet = useAtomSet(createStoredSnippetMutationAtom, { mode: "promise" });
+  const updateStoredSnippetUploadStatus = useAtomSet(updateStoredSnippetUploadStatusMutationAtom, {
+    mode: "promise",
+  });
   const uploadActions = useUploadActions();
   const uploadTasks = useActiveUploadTasks();
-  const snippets = [...uploadTasks, ...syncedSnippetResponse.items];
+  const snippets = [
+    ...uploadTasks,
+    ...syncedSnippetResponse.items.filter(
+      (snippet) => !uploadTasks.some((task) => task.id === snippet.id),
+    ),
+  ];
   const accountBlocked = !storageStatus.canSync;
   const user = auth.user;
-  const hasUploads = uploadTasks.length > 0;
   const syncPausedMessage =
     storageStatus.kind === "failed"
       ? "Storage status is unavailable. Try again shortly."
@@ -101,21 +117,48 @@ export function Home() {
     }
   }
 
-  function enqueueFileSnippet(input: {
-    byteSize: number;
-    contentType: string | null;
-    fileName: string;
-  }) {
+  function enqueueFileSnippet(file: Pick<File, "name" | "size" | "type">, filePath?: string) {
     if (storageStatus.kind !== "connected" || !storageStatus.canSync) return;
 
-    const kind = snippetKindForFileName(input.fileName);
+    const kind = snippetKindForFileName(file.name);
     if (kind !== "FILE" && kind !== "IMAGE") return;
 
-    uploadActions.enqueue({
-      ...input,
+    const task = uploadActions.enqueue({
+      byteSize: file.size,
+      contentType: file.type || null,
+      fileName: file.name,
       kind,
       storageProvider: storageStatus.provider,
     });
+    if (snippetHeaders === null) return;
+
+    void uploadStoredSnippet({
+      file,
+      ...(filePath === undefined ? {} : { filePath }),
+      task,
+      actions: uploadActions,
+      uploader: window.ipc.storage,
+      api: {
+        prepare: (payload) =>
+          prepareStoredSnippetUpload({
+            headers: snippetHeaders,
+            payload,
+            reactivityKeys: snippetReactivityKeys,
+          }),
+        create: (payload) =>
+          createStoredSnippet({
+            headers: snippetHeaders,
+            payload,
+            reactivityKeys: snippetReactivityKeys,
+          }),
+        updateStatus: (payload) =>
+          updateStoredSnippetUploadStatus({
+            headers: snippetHeaders,
+            payload,
+            reactivityKeys: snippetReactivityKeys,
+          }),
+      },
+    }).catch(() => undefined);
   }
 
   function handleClipboardPaste(
@@ -128,30 +171,33 @@ export function Home() {
       return;
     }
 
-    if (content.type === "image" && storageStatus.kind === "connected") {
-      uploadActions.enqueue({
-        byteSize: 0,
-        contentType: "image/png",
-        fileName: "Pasted image",
-        kind: "IMAGE",
-        storageProvider: storageStatus.provider,
-      });
+    if (content.type === "image") {
+      void fetch(content.dataUrl)
+        .then((response) => response.blob())
+        .then((blob) =>
+          enqueueFileSnippet(
+            new File([blob], "Pasted image.png", { type: blob.type }),
+            content.path,
+          ),
+        );
       return;
     }
 
-    if (content.type === "file") {
-      enqueueFileSnippet({
-        byteSize: content.size ?? 0,
-        contentType: null,
-        fileName: content.name,
-      });
+    if (content.type === "file" && content.size !== undefined) {
+      enqueueFileSnippet({ name: content.name, size: content.size, type: "" }, content.path);
     }
   }
 
+  function cancelUpload(id: string) {
+    cancelStoredSnippetUpload(id);
+    void window.ipc.storage.cancelUpload(id);
+  }
+
   useEffect(() => {
-    if (!hasUploads) return;
-    return startUploadProgress(uploadActions);
-  }, [hasUploads, uploadActions]);
+    return window.ipc.storage.onProgress(({ id, progress }) =>
+      uploadActions.setProgress(id, progress),
+    );
+  }, [uploadActions]);
 
   useEffect(() => {
     return () => {
@@ -267,11 +313,7 @@ export function Home() {
 
         if (event.dataTransfer.files.length) {
           for (const file of Array.from(event.dataTransfer.files)) {
-            enqueueFileSnippet({
-              byteSize: file.size,
-              contentType: file.type || null,
-              fileName: file.name,
-            });
+            enqueueFileSnippet(file);
           }
           return;
         }
@@ -315,11 +357,7 @@ export function Home() {
               if (accountBlocked) return;
 
               for (const file of Array.from(files)) {
-                enqueueFileSnippet({
-                  byteSize: file.size,
-                  contentType: file.type || null,
-                  fileName: file.name,
-                });
+                enqueueFileSnippet(file);
               }
             }}
           />
@@ -345,7 +383,8 @@ export function Home() {
               }}
               onDelete={() => {
                 if ("phase" in snippet) {
-                  uploadActions.remove(snippet.id);
+                  if (snippet.phase === "FAILED") uploadActions.remove(snippet.id);
+                  else cancelUpload(snippet.id);
                   return;
                 }
                 if (snippetHeaders !== null) {
@@ -353,7 +392,7 @@ export function Home() {
                 }
               }}
               {...(snippet.kind === "LINK" ? { onOpenLink: openLink } : {})}
-              onStopUpload={() => uploadActions.remove(snippet.id)}
+              onStopUpload={() => cancelUpload(snippet.id)}
             />
           ))}
         </SnippetList>

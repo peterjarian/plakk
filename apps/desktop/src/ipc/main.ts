@@ -1,4 +1,4 @@
-import { ipcMain, type WebContents } from "electron";
+import { ipcMain, type IpcMainInvokeEvent, type WebContents } from "electron";
 import { Schema } from "effect";
 import type {
   IpcEvent,
@@ -11,14 +11,17 @@ import type {
 
 export function handle<T extends IpcMethod<IpcSchema, IpcSchema>>(
   method: T,
-  handler: (payload: IpcPayload<T>) => IpcResult<T> | Promise<IpcResult<T>>,
+  handler: (
+    payload: IpcPayload<T>,
+    event: IpcMainInvokeEvent,
+  ) => IpcResult<T> | Promise<IpcResult<T>>,
 ) {
   const decodePayload = Schema.decodeUnknownPromise(method.payload);
   const encodeResult = Schema.encodeUnknownPromise(method.result);
 
-  ipcMain.handle(method.channel, async (_event, raw: unknown) => {
+  ipcMain.handle(method.channel, async (event, raw: unknown) => {
     const payload = await decodePayload(raw);
-    return encodeResult(await handler(payload));
+    return encodeResult(await handler(payload, event));
   });
 }
 
