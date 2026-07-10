@@ -25,6 +25,7 @@ Every issue child thread must:
 
 - Start in a new worktree, based on the project’s normal default branch unless the issue explicitly requires another base.
 - Read the repo instructions, inspect ownership before editing, implement the issue, and run the project’s required checks.
+- Before opening a PR, create a separate read-only Codex review thread to inspect the scoped diff and relevant surrounding code independently. The reviewer must not edit, commit, approve, or merge; it must return concrete, evidence-backed correctness, regression, security, and ownership findings. The issue child evaluates those findings, makes only supported fixes, and remains accountable for final checks and integration.
 - Commit only the scoped change, push its branch, and open a ready-for-review PR when the implementation is ready. Include the issue reference in the PR and report the PR URL.
 - Never merge the PR unless the user or repository policy explicitly authorizes that action.
 - If blocked by missing credentials, unclear requirements, or an external failure, explain the blocker in the issue/PR and keep the thread associated with the work rather than silently abandoning it.
