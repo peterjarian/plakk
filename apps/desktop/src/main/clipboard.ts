@@ -222,17 +222,28 @@ const writeSnippetBytes = (content: SnippetContent) => {
   clipboard.writeBuffer(clipboardFormatFor(content.contentType), Buffer.from(content.bytes));
 };
 
+const windowsFileDrop = (path: string) => {
+  const pathBytes = Buffer.from(`${path}\u0000\u0000`, "utf16le");
+  const header = Buffer.alloc(20);
+  header.writeUInt32LE(20, 0);
+  header.writeUInt32LE(1, 16);
+  return Buffer.concat([header, pathBytes]);
+};
+
 const writeSnippetFile = (content: SnippetContent) => {
   const fileName = basename(content.fileName);
   const path = join(app.getPath("temp"), `plakk-snippet-${crypto.randomUUID()}-${fileName}`);
   const url = pathToFileURL(path).toString();
 
   writeFileSync(path, content.bytes);
-  if (process.platform === "linux") {
-    clipboard.clear();
+  clipboard.clear();
+  if (process.platform === "darwin") {
+    clipboard.writeBuffer("public.file-url", Buffer.from(url));
+  } else if (process.platform === "linux") {
+    clipboard.writeBuffer("x-special/gnome-copied-files", Buffer.from(`copy\n${url}`));
     clipboard.writeBuffer("text/uri-list", Buffer.from(url));
   } else {
-    clipboard.writeBookmark(fileName, url);
+    clipboard.writeBuffer("CF_HDROP", windowsFileDrop(path));
   }
 };
 

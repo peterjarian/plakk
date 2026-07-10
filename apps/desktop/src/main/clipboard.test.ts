@@ -4,7 +4,6 @@ import * as Effect from "effect/Effect";
 const electron = vi.hoisted(() => ({
   clear: vi.fn(),
   writeBuffer: vi.fn(),
-  writeBookmark: vi.fn(),
   writeImage: vi.fn(),
   createFromBuffer: vi.fn(),
   getPath: vi.fn(() => "/tmp"),
@@ -22,7 +21,6 @@ vi.mock("electron", () => ({
   clipboard: {
     clear: electron.clear,
     writeBuffer: electron.writeBuffer,
-    writeBookmark: electron.writeBookmark,
     writeImage: electron.writeImage,
   },
   nativeImage: { createFromBuffer: electron.createFromBuffer },
@@ -78,10 +76,11 @@ describe("stored snippet clipboard writes", () => {
       expect.stringContaining("-report.pdf"),
       new Uint8Array([1, 2]),
     );
-    expect(electron.writeBookmark).toHaveBeenCalledWith(
-      "report.pdf",
-      expect.stringMatching(/^file:\/\//),
-    );
+    expect(electron.clear).toHaveBeenCalled();
+    const fileUrl = electron.writeBuffer.mock.calls.find(
+      ([format]) => format === "public.file-url",
+    )?.[1];
+    expect(fileUrl?.toString()).toMatch(/^file:\/\//);
     expect(electron.writeBuffer).not.toHaveBeenCalledWith("application/pdf", Buffer.from([1, 2]));
   });
 });
