@@ -8,6 +8,7 @@ import {
   SnippetKindLiteral,
   SnippetUploadStatusLiteral,
   StorageProviderLiteral,
+  MAX_TEXT_SNIPPET_BYTE_SIZE,
   type User,
 } from "../index.ts";
 import { RpcError } from "./RpcError.ts";
@@ -88,6 +89,28 @@ export const ApiSnippetSchema = Schema.Struct({
 
 export type ApiSnippet = typeof ApiSnippetSchema.Type;
 
+export const CreateStoredSnippetPayloadSchema = Schema.Union([
+  Schema.Struct({
+    id: SnippetIdSchema,
+    kind: Schema.Literal("TEXT"),
+    byteSize: Schema.Int.check(
+      Schema.isBetween({ minimum: 1, maximum: MAX_TEXT_SNIPPET_BYTE_SIZE }),
+    ),
+    storageProvider: StorageProviderLiteral,
+    storageObjectId: Schema.NullOr(Schema.String),
+  }),
+  Schema.Struct({
+    id: SnippetIdSchema,
+    kind: Schema.Literals(["FILE", "IMAGE"] as const),
+    title: Schema.String,
+    fileName: Schema.String,
+    byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+    contentType: Schema.NullOr(Schema.String),
+    storageProvider: StorageProviderLiteral,
+    storageObjectId: Schema.NullOr(Schema.String),
+  }),
+]);
+
 export class CurrentUser extends Context.Service<CurrentUser, User>()(
   "@plakk/shared/api/PlakkApi/CurrentUser",
 ) {}
@@ -136,9 +159,6 @@ export const StorageRpcs = RpcGroup.make(
     payload: {
       snippetId: SnippetIdSchema,
       storageProvider: StorageProviderLiteral,
-      fileName: Schema.String,
-      byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-      contentType: Schema.NullOr(Schema.String),
     },
     success: PreparedStorageUploadSchema,
     error: RpcError,
@@ -155,32 +175,31 @@ export const SnippetRpcs = RpcGroup.make(
     }),
     error: RpcError,
   }),
-  Rpc.make("CreateTextSnippet", {
-    payload: { id: SnippetIdSchema, text: Schema.String },
-    success: ApiSnippetSchema,
-    error: RpcError,
-  }),
   Rpc.make("CreateStoredSnippet", {
-    payload: {
-      id: SnippetIdSchema,
-      kind: Schema.Literals(["FILE", "IMAGE"] as const),
-      title: Schema.String,
-      fileName: Schema.String,
-      byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-      contentType: Schema.NullOr(Schema.String),
-      storageProvider: StorageProviderLiteral,
-      storageObjectId: Schema.NullOr(Schema.String),
-    },
+    payload: CreateStoredSnippetPayloadSchema,
     success: ApiSnippetSchema,
     error: RpcError,
   }),
   Rpc.make("UpdateStoredSnippetUploadStatus", {
-    payload: {
-      id: SnippetIdSchema,
-      uploadStatus: Schema.Literals(["READY", "FAILED"] as const),
-      storageObjectId: Schema.optionalKey(Schema.NullOr(Schema.String)),
-    },
+    payload: Schema.Union([
+      Schema.Struct({
+        id: SnippetIdSchema,
+        uploadStatus: Schema.Literal("READY"),
+        storageObjectId: Schema.String,
+        storageProvider: Schema.optionalKey(StorageProviderLiteral),
+      }),
+      Schema.Struct({
+        id: SnippetIdSchema,
+        uploadStatus: Schema.Literal("FAILED"),
+        storageObjectId: Schema.optionalKey(Schema.NullOr(Schema.String)),
+      }),
+    ]),
     success: ApiSnippetSchema,
+    error: RpcError,
+  }),
+  Rpc.make("GetSnippetContent", {
+    payload: { id: SnippetIdSchema },
+    success: Schema.Struct({ bytes: Schema.Uint8ArrayFromBase64 }),
     error: RpcError,
   }),
   Rpc.make("DeleteSnippet", {

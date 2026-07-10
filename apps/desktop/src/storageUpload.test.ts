@@ -20,6 +20,35 @@ beforeEach(() => {
 });
 
 describe("uploadPreparedFile", () => {
+  it("uploads renderer-provided bytes without re-encoding them", async () => {
+    const bytes = new TextEncoder().encode("héllo 👋\n");
+    let uploaded = new Uint8Array();
+    fetchMock.mockImplementationOnce(async (_url, init) => {
+      uploaded = new Uint8Array(await new Response(init?.body).arrayBuffer());
+      return Response.json({ id: "drive-text-id" });
+    });
+
+    const result = await uploadPreparedFile({
+      id: "0d1e2f3a-4567-4890-8abc-def012345678",
+      bytes,
+      byteSize: bytes.byteLength,
+      prepared: {
+        storageProvider: "GOOGLE_DRIVE",
+        storageObjectId: null,
+        upload: {
+          method: "PUT",
+          url: "https://upload.example/drive",
+          headers: [{ name: "Content-Type", value: "text/plain; charset=utf-8" }],
+          strategy: { type: "single_request" },
+        },
+        expiresAt: null,
+      },
+    });
+
+    expect(result).toEqual({ storageObjectId: "drive-text-id" });
+    expect(uploaded).toEqual(bytes);
+  });
+
   it("honors a prepared raw single-request upload and keeps the prepared Dropbox path", async () => {
     const filePath = await uploadFile([1, 2, 3]);
     let body: ReadonlyArray<number> = [];

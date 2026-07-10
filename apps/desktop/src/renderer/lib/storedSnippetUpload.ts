@@ -10,25 +10,32 @@ export type StoredSnippetUploadApi = {
   readonly prepare: (input: {
     snippetId: string;
     storageProvider: StorageProvider;
-    fileName: string;
-    byteSize: number;
-    contentType: string | null;
   }) => Promise<PreparedStorageUpload>;
-  readonly create: (input: {
-    id: string;
-    kind: "FILE" | "IMAGE";
-    title: string;
-    fileName: string;
-    byteSize: number;
-    contentType: string | null;
-    storageProvider: StorageProvider;
-    storageObjectId: string | null;
-  }) => Promise<ApiSnippet>;
-  readonly updateStatus: (input: {
-    id: string;
-    uploadStatus: "READY" | "FAILED";
-    storageObjectId: string | null;
-  }) => Promise<ApiSnippet>;
+  readonly create: (
+    input:
+      | {
+          id: string;
+          kind: "TEXT";
+          byteSize: number;
+          storageProvider: StorageProvider;
+          storageObjectId: string | null;
+        }
+      | {
+          id: string;
+          kind: "FILE" | "IMAGE";
+          title: string;
+          fileName: string;
+          byteSize: number;
+          contentType: string | null;
+          storageProvider: StorageProvider;
+          storageObjectId: string | null;
+        },
+  ) => Promise<ApiSnippet>;
+  readonly updateStatus: (
+    input:
+      | { id: string; uploadStatus: "READY"; storageObjectId: string }
+      | { id: string; uploadStatus: "FAILED"; storageObjectId: string | null },
+  ) => Promise<ApiSnippet>;
 };
 
 export type StoredSnippetUploadActions = {
@@ -77,45 +84,57 @@ async function markUploadFailed(
 export async function uploadStoredSnippet(input: {
   readonly file: Pick<File, "name" | "size" | "type">;
   readonly filePath?: string;
+  readonly bytes?: Uint8Array;
   readonly task: UploadTask;
   readonly api: StoredSnippetUploadApi;
   readonly actions: StoredSnippetUploadActions;
   readonly uploader: StoredSnippetUploader;
 }): Promise<ApiSnippet> {
-  const { file, filePath, task, api, actions, uploader } = input;
+  const { file, filePath, bytes, task, api, actions, uploader } = input;
   let created = false;
   let storageObjectId: string | null = null;
 
   try {
     actions.setPhase(task.id, "PREPARING");
+    const storedMetadata = {
+      id: task.id,
+      byteSize: file.size,
+      storageProvider: task.storageProvider,
+      storageObjectId,
+    };
+    await api.create(
+      task.kind === "TEXT"
+        ? {
+            ...storedMetadata,
+            kind: "TEXT",
+          }
+        : {
+            ...storedMetadata,
+            kind: task.kind,
+            title: file.name,
+            fileName: file.name,
+            contentType: file.type || null,
+          },
+    );
+    created = true;
+    throwIfCancelled(task.id);
     const prepared = await api.prepare({
       snippetId: task.id,
       storageProvider: task.storageProvider,
-      fileName: file.name,
-      byteSize: file.size,
-      contentType: file.type || null,
     });
     throwIfCancelled(task.id);
     storageObjectId = prepared.storageObjectId;
     actions.setStorageObjectId(task.id, storageObjectId);
-    await api.create({
-      id: task.id,
-      kind: task.kind,
-      title: file.name,
-      fileName: file.name,
-      byteSize: file.size,
-      contentType: file.type || null,
-      storageProvider: task.storageProvider,
-      storageObjectId,
-    });
-    created = true;
-    throwIfCancelled(task.id);
     actions.setPhase(task.id, "UPLOADING");
     const upload = await uploader.uploadPreparedFile({
       id: task.id,
       byteSize: file.size,
       prepared,
-      ...(filePath === undefined ? { file: file as File } : { filePath }),
+      ...(bytes !== undefined
+        ? { bytes }
+        : filePath === undefined
+          ? { file: file as File }
+          : { filePath }),
     });
     throwIfCancelled(task.id);
     storageObjectId = upload.storageObjectId;

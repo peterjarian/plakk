@@ -7,6 +7,7 @@ import {
   FileText,
   ImageIcon,
   LinkIcon,
+  RotateCw,
   Trash2,
   Type,
   X,
@@ -15,6 +16,11 @@ import type { UploadTask } from "../atoms/upload.ts";
 import { Button } from "./primitives/button.tsx";
 
 export type SnippetRowItem = ApiSnippet | UploadTask;
+
+export type TextSnippetContent =
+  | { readonly state: "loading" }
+  | { readonly state: "ready"; readonly text: string; readonly migrationError?: string }
+  | { readonly state: "failed"; readonly message: string };
 
 const kindMeta: Record<SnippetKind, { Icon: typeof Type }> = {
   TEXT: { Icon: Type },
@@ -34,21 +40,47 @@ export function SnippetRow(props: {
   onCopy: () => void;
   onDelete: () => void;
   onOpenLink?: (url: string) => void;
+  onRetryContent?: () => void;
   onStopUpload: () => void;
+  textContent?: TextSnippetContent;
 }) {
-  const { snippet, copied, onCopy, onDelete, onOpenLink, onStopUpload } = props;
+  const {
+    snippet,
+    copied,
+    onCopy,
+    onDelete,
+    onOpenLink,
+    onRetryContent,
+    onStopUpload,
+    textContent,
+  } = props;
   const { Icon } = kindMeta[snippet.kind];
   const uploadProgress = isUploadTask(snippet) ? snippet.progress : undefined;
   const isUploading = isUploadTask(snippet) && snippet.phase !== "FAILED";
-  const title = isUploadTask(snippet) ? snippet.fileName : snippet.title;
+  const title =
+    snippet.kind === "TEXT"
+      ? textContent?.state === "ready"
+        ? textContent.text
+        : isUploadTask(snippet)
+          ? "Text snippet"
+          : snippet.title
+      : isUploadTask(snippet)
+        ? snippet.fileName
+        : snippet.title;
   const subtitle =
     isUploadTask(snippet) && snippet.phase === "FAILED"
       ? (snippet.errorMessage ?? "Upload failed. Choose the file again to retry.")
-      : snippet.kind === "FILE" || snippet.kind === "IMAGE"
-        ? fileSubtitle(snippet)
-        : isUploadTask(snippet)
-          ? ""
-          : formatFileSize(snippet.byteSize);
+      : snippet.kind === "TEXT" && textContent?.state === "loading"
+        ? "Loading text…"
+        : snippet.kind === "TEXT" && textContent?.state === "ready" && textContent.migrationError
+          ? textContent.migrationError
+          : snippet.kind === "TEXT" && textContent?.state === "failed"
+            ? textContent.message
+            : snippet.kind === "FILE" || snippet.kind === "IMAGE"
+              ? fileSubtitle(snippet)
+              : isUploadTask(snippet)
+                ? ""
+                : formatFileSize(snippet.byteSize);
   const time = isUploadTask(snippet)
     ? snippet.phase === "FAILED"
       ? "Failed"
@@ -95,11 +127,26 @@ export function SnippetRow(props: {
               </span>
 
               <div className="hidden items-center gap-0.5 group-hover:flex group-focus-within:flex">
+                {snippet.kind === "TEXT" &&
+                  (textContent?.state === "failed" ||
+                    (textContent?.state === "ready" && textContent.migrationError)) &&
+                  onRetryContent && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="Retry loading text"
+                      onClick={onRetryContent}
+                    >
+                      <RotateCw />
+                    </Button>
+                  )}
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon-sm"
                   aria-label={copied ? "Copied" : "Copy"}
+                  disabled={snippet.kind === "TEXT" && textContent?.state !== "ready"}
                   onClick={onCopy}
                 >
                   {copied ? <Check className="text-emerald-500" /> : <Copy />}
