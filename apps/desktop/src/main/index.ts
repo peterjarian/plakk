@@ -8,6 +8,7 @@ import { Effect, Result } from "effect";
 import type { AuthStatus, TrayDroppedItem } from "../ipc/contracts.ts";
 import { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
 import { handle, send } from "../ipc/main.ts";
+import { uploadPreparedFile } from "../storageUpload.ts";
 import { AuthService } from "./auth/AuthService.ts";
 import { readClipboard } from "./clipboard.ts";
 import { createTrayWindowController } from "./trayWindow.ts";
@@ -16,6 +17,7 @@ import { runEffect } from "./runtime.ts";
 
 const rendererScheme = "plakk-app";
 const rendererHost = "renderer";
+const activeUploadControllers = new Map<string, AbortController>();
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -33,6 +35,23 @@ handle(ipcMethods.openExternal, (url) => {
   if (!isHttpUrl(url)) return;
   return shell.openExternal(url);
 });
+
+handle(ipcMethods.storageUploadPreparedFile, async (payload, event) => {
+  const controller = new AbortController();
+  activeUploadControllers.set(payload.id, controller);
+  try {
+    return await uploadPreparedFile(
+      payload,
+      (progress) =>
+        send(event.sender, ipcEvents.storageUploadProgress, { id: payload.id, progress }),
+      controller.signal,
+    );
+  } finally {
+    activeUploadControllers.delete(payload.id);
+  }
+});
+
+handle(ipcMethods.storageCancelUpload, (id) => activeUploadControllers.get(id)?.abort());
 
 function authErrorMessage(error: unknown, fallback: string): string {
   if (

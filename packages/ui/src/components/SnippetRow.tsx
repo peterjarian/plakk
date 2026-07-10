@@ -39,15 +39,21 @@ export function SnippetRow(props: {
   const { snippet, copied, onCopy, onDelete, onOpenLink, onStopUpload } = props;
   const { Icon } = kindMeta[snippet.kind];
   const uploadProgress = isUploadTask(snippet) ? snippet.progress : undefined;
-  const isUploading = uploadProgress !== undefined;
+  const isUploading = isUploadTask(snippet) && snippet.phase !== "FAILED";
   const title = isUploadTask(snippet) ? snippet.fileName : snippet.title;
   const subtitle =
-    snippet.kind === "FILE" || snippet.kind === "IMAGE"
-      ? fileSubtitle(snippet)
-      : isUploadTask(snippet)
-        ? ""
-        : formatFileSize(snippet.byteSize);
-  const time = isUploadTask(snippet) ? "" : snippet.createdAt.slice(0, 10);
+    isUploadTask(snippet) && snippet.phase === "FAILED"
+      ? (snippet.errorMessage ?? "Upload failed. Choose the file again to retry.")
+      : snippet.kind === "FILE" || snippet.kind === "IMAGE"
+        ? fileSubtitle(snippet)
+        : isUploadTask(snippet)
+          ? ""
+          : formatFileSize(snippet.byteSize);
+  const time = isUploadTask(snippet)
+    ? snippet.phase === "FAILED"
+      ? "Failed"
+      : ""
+    : snippet.createdAt.slice(0, 10);
 
   return (
     <li>

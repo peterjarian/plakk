@@ -79,7 +79,15 @@ describe("storage upload providers", () => {
 
     expect(upload).toMatchObject({
       storageObjectId: null,
-      upload: { method: "PUT", url: "https://google-upload.example" },
+      upload: {
+        method: "PUT",
+        url: "https://google-upload.example",
+        strategy: {
+          type: "byte_range",
+          maxPartByteSize: 16_777_216,
+          partByteMultiple: 262_144,
+        },
+      },
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(new URL(fetchRequest(0).url).searchParams.get("q")).toBe(

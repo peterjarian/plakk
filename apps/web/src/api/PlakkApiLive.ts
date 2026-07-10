@@ -1,6 +1,11 @@
 import { and, desc, Drizzle, eq, isNull, or, type DrizzleService } from "@plakk/db";
 import { snippets } from "@plakk/db/schema";
-import type { SnippetKind, SnippetUploadStatus, StorageProvider } from "@plakk/shared";
+import {
+  STORAGE_PROVIDERS,
+  type SnippetKind,
+  type SnippetUploadStatus,
+  type StorageProvider,
+} from "@plakk/shared";
 import {
   AccountRpcs,
   CurrentUser,
@@ -23,13 +28,11 @@ import { StorageProviderService } from "./storage/StorageProvider.ts";
 import { getProviderSlug } from "./storage/getProviderSlug.ts";
 import { toApiSnippet } from "./transformers/toApiSnippet.ts";
 
-const STORAGE_PROVIDER = "GOOGLE_DRIVE" as const;
+const DEFAULT_STORAGE_PROVIDER = "GOOGLE_DRIVE" as const;
 const WORKOS_BASE_URL = "https://api.workos.com";
-const accountStatus: AccountStatus = {
-  canSync: true,
-  storageProvider: STORAGE_PROVIDER,
-  blockedReasons: [],
-};
+
+const isStorageProvider = (value: string): value is StorageProvider =>
+  STORAGE_PROVIDERS.includes(value as StorageProvider);
 
 const WorkosAuthorizeResponseSchema = Schema.Struct({ url: Schema.String });
 const WorkosConnectedAccountSchema = Schema.Struct({
@@ -95,8 +98,19 @@ const HealthLive = HealthRpcs.of({
 const AccountLive = AccountRpcs.of({
   GetAccountStatus: Effect.fn("rpc.GetAccountStatus")(function* () {
     const currentUser = yield* CurrentUser;
+    const configuredProvider = yield* Config.string("PLAKK_STORAGE_PROVIDER").pipe(
+      Effect.orElseSucceed(() => DEFAULT_STORAGE_PROVIDER),
+    );
+    if (!isStorageProvider(configuredProvider)) {
+      return yield* Effect.die(new Error("PLAKK_STORAGE_PROVIDER is invalid."));
+    }
+    const accountStatus: AccountStatus = {
+      canSync: true,
+      storageProvider: configuredProvider,
+      blockedReasons: [],
+    };
     yield* Effect.logInfo("Returning account status", {
-      storageProvider: STORAGE_PROVIDER,
+      storageProvider: configuredProvider,
       workosUserId: currentUser.id,
     });
     return accountStatus;

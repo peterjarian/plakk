@@ -1,4 +1,4 @@
-import { contextBridge } from "electron";
+import { contextBridge, webUtils } from "electron";
 import type {
   AuthError,
   AuthStatus,
@@ -9,6 +9,7 @@ import type {
 } from "../ipc/contracts.ts";
 import { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
 import { invoke, on } from "../ipc/preload.ts";
+import type { RendererPreparedFileUploadPayload, StorageUploadResult } from "../storageUpload.ts";
 
 const plakkRpcUrl = process.env.PLAKK_RPC_URL ?? "https://app.plakk.io/api/rpc";
 
@@ -24,6 +25,15 @@ export type DesktopApi = {
     readonly onPaste: (callback: (content: ClipboardContent) => void) => () => void;
   };
   readonly openExternal: (url: string) => Promise<void>;
+  readonly storage: {
+    readonly cancelUpload: (id: string) => Promise<void>;
+    readonly uploadPreparedFile: (
+      payload: RendererPreparedFileUploadPayload,
+    ) => Promise<StorageUploadResult>;
+    readonly onProgress: (
+      callback: (progress: { id: string; progress: number }) => void,
+    ) => () => void;
+  };
   readonly tray: {
     readonly onDroppedItem: (callback: (item: TrayDroppedItem) => void) => () => void;
   };
@@ -56,6 +66,16 @@ const desktopApi = {
       on(ipcEvents.clipboardPaste, callback),
   },
   openExternal: (url: string) => invoke(ipcMethods.openExternal, url),
+  storage: {
+    cancelUpload: (id: string) => invoke(ipcMethods.storageCancelUpload, id),
+    uploadPreparedFile: ({ file, ...payload }: RendererPreparedFileUploadPayload) => {
+      const filePath = webUtils.getPathForFile(file);
+      if (!filePath) return Promise.reject(new Error("Choose a local file to upload."));
+      return invoke(ipcMethods.storageUploadPreparedFile, { ...payload, filePath });
+    },
+    onProgress: (callback: (progress: { id: string; progress: number }) => void) =>
+      on(ipcEvents.storageUploadProgress, callback),
+  },
   tray: {
     onDroppedItem: (callback: (item: TrayDroppedItem) => void) =>
       on(ipcEvents.trayDroppedItem, callback),
