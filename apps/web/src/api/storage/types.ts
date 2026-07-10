@@ -11,6 +11,14 @@ export class StorageProviderError extends Schema.TaggedErrorClass<StorageProvide
   },
 ) {}
 
+export class StorageObjectNotFoundError extends Schema.TaggedErrorClass<StorageObjectNotFoundError>()(
+  "StorageObjectNotFoundError",
+  {
+    storageProvider: StorageProviderLiteral,
+    message: Schema.String,
+  },
+) {}
+
 export type { PreparedStorageUpload };
 
 export type StorageProviderDestination = {
@@ -24,4 +32,11 @@ export type PrepareStorageUploadInput = {
   readonly fileName: string;
   readonly byteSize: number;
   readonly contentType: string | null;
+};
+
+export type DownloadStorageObjectInput = {
+  readonly accessToken: string;
+  readonly storageProvider: StorageProvider;
+  readonly storageObjectId: string;
+  readonly expectedByteSize: number;
 };

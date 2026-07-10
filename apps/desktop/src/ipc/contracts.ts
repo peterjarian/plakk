@@ -90,12 +90,16 @@ export const TrayDroppedItemSchema = Schema.Union([
 
 export type TrayDroppedItem = typeof TrayDroppedItemSchema.Type;
 
-export const PreparedFileUploadPayloadSchema = Schema.Struct({
+const PreparedUploadBaseSchema = {
   id: SnippetIdSchema,
   prepared: PreparedStorageUploadSchema,
-  filePath: Schema.String,
   byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-}) satisfies Schema.Schema<PreparedFileUploadPayload>;
+};
+
+export const PreparedFileUploadPayloadSchema = Schema.Union([
+  Schema.Struct({ ...PreparedUploadBaseSchema, filePath: Schema.String }),
+  Schema.Struct({ ...PreparedUploadBaseSchema, bytes: Schema.Uint8Array }),
+]) satisfies Schema.Schema<PreparedFileUploadPayload>;
 
 export const StorageUploadProgressSchema = Schema.Struct({
   id: SnippetIdSchema,
@@ -103,7 +107,7 @@ export const StorageUploadProgressSchema = Schema.Struct({
 });
 
 export const StorageUploadResultSchema = Schema.Struct({
-  storageObjectId: Schema.NullOr(Schema.String),
+  storageObjectId: Schema.String,
 }) satisfies Schema.Schema<StorageUploadResult>;
 
 export const ipcMethods = {

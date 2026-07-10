@@ -154,3 +154,142 @@ describe("storage upload providers", () => {
     });
   });
 });
+
+describe("storage download providers", () => {
+  it.each([
+    {
+      name: "Google Drive",
+      download: GoogleDriveStorageProvider.download,
+      storageProvider: "GOOGLE_DRIVE" as const,
+      storageObjectId: "drive-id",
+      expectedUrl: "https://www.googleapis.com/drive/v3/files/drive-id?alt=media",
+    },
+    {
+      name: "OneDrive",
+      download: OneDriveStorageProvider.download,
+      storageProvider: "ONE_DRIVE" as const,
+      storageObjectId: "one-id",
+      expectedUrl: "https://graph.microsoft.com/v1.0/me/drive/items/one-id/content",
+    },
+    {
+      name: "Dropbox",
+      download: DropboxStorageProvider.download,
+      storageProvider: "DROPBOX" as const,
+      storageObjectId: "/snippet/text.txt",
+      expectedUrl: "https://content.dropboxapi.com/2/files/download",
+    },
+  ])("downloads exact opaque bytes from $name", async (provider) => {
+    const expected = new Uint8Array([0, 0xf0, 0x9f, 0x91, 0x8b, 0xff]);
+    fetchMock.mockResolvedValue(new Response(expected));
+
+    const bytes = await Effect.runPromise(
+      provider
+        .download({
+          accessToken: "secret-token",
+          storageProvider: provider.storageProvider,
+          storageObjectId: provider.storageObjectId,
+          expectedByteSize: expected.byteLength,
+        })
+        .pipe(Effect.provide(FetchHttpClient.layer)),
+    );
+
+    expect(bytes).toEqual(expected);
+    const request = fetchRequest(0);
+    expect(request.url).toBe(provider.expectedUrl);
+    expect(request.headers.get("authorization")).toBe("Bearer secret-token");
+    if (provider.storageProvider === "DROPBOX") {
+      expect(request.headers.get("dropbox-api-arg")).toBe(
+        JSON.stringify({ path: provider.storageObjectId }),
+      );
+    }
+  });
+
+  it.each([
+    {
+      name: "Google Drive",
+      download: GoogleDriveStorageProvider.download,
+      storageProvider: "GOOGLE_DRIVE" as const,
+      response: new Response(null, { status: 404 }),
+    },
+    {
+      name: "OneDrive",
+      download: OneDriveStorageProvider.download,
+      storageProvider: "ONE_DRIVE" as const,
+      response: new Response(null, { status: 404 }),
+    },
+    {
+      name: "Dropbox",
+      download: DropboxStorageProvider.download,
+      storageProvider: "DROPBOX" as const,
+      response: Response.json({ error_summary: "path/not_found/..." }, { status: 409 }),
+    },
+  ])("turns a missing $name object into a typed not-found failure", async (provider) => {
+    fetchMock.mockResolvedValue(provider.response);
+
+    const failure = await Effect.runPromise(
+      Effect.flip(
+        provider
+          .download({
+            accessToken: "token",
+            storageProvider: provider.storageProvider,
+            storageObjectId: "missing",
+            expectedByteSize: 1,
+          })
+          .pipe(Effect.provide(FetchHttpClient.layer)),
+      ),
+    );
+
+    expect(failure._tag).toBe("StorageObjectNotFoundError");
+  });
+
+  it("does not misreport other Dropbox 409 errors as missing objects", async () => {
+    fetchMock.mockResolvedValue(
+      Response.json({ error_summary: "path/malformed_path/..." }, { status: 409 }),
+    );
+
+    const failure = await Effect.runPromise(
+      Effect.flip(
+        DropboxStorageProvider.download({
+          accessToken: "token",
+          storageProvider: "DROPBOX",
+          storageObjectId: "invalid",
+          expectedByteSize: 1,
+        }).pipe(Effect.provide(FetchHttpClient.layer)),
+      ),
+    );
+
+    expect(failure).toMatchObject({
+      _tag: "StorageProviderError",
+      message: "Stored object download failed: 409",
+    });
+  });
+
+  it("stops a chunked provider response once it exceeds the expected size", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new Uint8Array([1, 2, 3]));
+            controller.close();
+          },
+        }),
+      ),
+    );
+
+    const failure = await Effect.runPromise(
+      Effect.flip(
+        GoogleDriveStorageProvider.download({
+          accessToken: "token",
+          storageProvider: "GOOGLE_DRIVE",
+          storageObjectId: "oversized",
+          expectedByteSize: 2,
+        }).pipe(Effect.provide(FetchHttpClient.layer)),
+      ),
+    );
+
+    expect(failure).toMatchObject({
+      _tag: "StorageProviderError",
+      message: "Stored object size does not match snippet metadata.",
+    });
+  });
+});

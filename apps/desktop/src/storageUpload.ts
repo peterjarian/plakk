@@ -5,19 +5,26 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 
-export type PreparedFileUploadPayload = {
+type PreparedUploadBase = {
   readonly id: string;
   readonly prepared: PreparedStorageUpload;
-  readonly filePath: string;
   readonly byteSize: number;
 };
 
-export type RendererPreparedFileUploadPayload = Omit<PreparedFileUploadPayload, "filePath"> & {
-  readonly file?: File;
-  readonly filePath?: string;
-};
+export type PreparedFileUploadPayload = PreparedUploadBase &
+  (
+    | { readonly filePath: string; readonly bytes?: never }
+    | { readonly bytes: Uint8Array; readonly filePath?: never }
+  );
 
-export type StorageUploadResult = { readonly storageObjectId: string | null };
+export type RendererPreparedFileUploadPayload = PreparedUploadBase &
+  (
+    | { readonly file: File; readonly filePath?: never; readonly bytes?: never }
+    | { readonly filePath: string; readonly file?: never; readonly bytes?: never }
+    | { readonly bytes: Uint8Array; readonly file?: never; readonly filePath?: never }
+  );
+
+export type StorageUploadResult = { readonly storageObjectId: string };
 
 type UploadFetch = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -86,18 +93,32 @@ const uploadHeaders = (
 ): Record<string, string> =>
   Object.fromEntries(headers.map((header) => [header.name, header.value]));
 
-async function assertUploadFile(filePath: string, byteSize: number) {
-  const details = await stat(filePath);
+async function assertUploadSource(payload: PreparedFileUploadPayload) {
+  if (payload.bytes !== undefined) {
+    if (payload.bytes.byteLength !== payload.byteSize)
+      throw new Error("Upload source size changed before upload.");
+    return;
+  }
+  const details = await stat(payload.filePath);
   if (!details.isFile()) throw new Error("Upload source is not a file.");
-  if (details.size !== byteSize) throw new Error("Upload source size changed before upload.");
+  if (details.size !== payload.byteSize)
+    throw new Error("Upload source size changed before upload.");
 }
 
 async function readUploadPart(input: {
-  readonly filePath: string;
+  readonly source: PreparedFileUploadPayload;
   readonly start: number;
   readonly byteSize: number;
 }) {
-  const file = await open(input.filePath);
+  if (input.source.bytes !== undefined) {
+    return new Blob([
+      input.source.bytes.slice(
+        input.start,
+        input.start + input.byteSize,
+      ) as Uint8Array<ArrayBuffer>,
+    ]);
+  }
+  const file = await open(input.source.filePath);
   const bytes = Buffer.allocUnsafe(input.byteSize);
   let offset = 0;
   try {
@@ -128,16 +149,16 @@ const partByteSize = (
 
 async function uploadPart(input: {
   readonly upload: PreparedStorageUpload["upload"];
-  readonly filePath: string;
+  readonly source: PreparedFileUploadPayload;
   readonly byteSize: number;
   readonly range: ByteRange | null;
   readonly signal: AbortSignal | undefined;
   readonly uploadFetch: UploadFetch;
 }) {
-  const { upload, filePath, byteSize, range, signal, uploadFetch } = input;
+  const { upload, source, byteSize, range, signal, uploadFetch } = input;
   const partSize = range === null ? byteSize : range.end - range.start + 1;
   const body = await readUploadPart({
-    filePath,
+    source,
     start: range?.start ?? 0,
     byteSize: partSize,
   });
@@ -214,13 +235,13 @@ export async function uploadPreparedFile(
   signal?: AbortSignal,
   uploadFetch: UploadFetch = fetch,
 ): Promise<StorageUploadResult> {
-  await assertUploadFile(payload.filePath, payload.byteSize);
+  await assertUploadSource(payload);
   onProgress(0);
 
   if (payload.prepared.upload.strategy.type === "single_request") {
     const response = await uploadPart({
       upload: payload.prepared.upload,
-      filePath: payload.filePath,
+      source: payload,
       byteSize: payload.byteSize,
       range: null,
       signal,
@@ -237,7 +258,7 @@ export async function uploadPreparedFile(
     const range = { start, end: Math.min(start + size, payload.byteSize) - 1 };
     const response = await uploadPart({
       upload: payload.prepared.upload,
-      filePath: payload.filePath,
+      source: payload,
       byteSize: payload.byteSize,
       range,
       signal,

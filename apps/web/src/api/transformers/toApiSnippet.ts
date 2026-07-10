@@ -4,7 +4,7 @@ import type { ApiSnippet } from "@plakk/shared/PlakkApi";
 export const toApiSnippet = (snippet: SnippetRow): ApiSnippet => ({
   id: snippet.id,
   kind: snippet.kind,
-  title: snippet.title,
+  title: snippet.kind === "TEXT" ? "Text snippet" : snippet.title,
   fileName: snippet.fileName,
   byteSize: snippet.byteSize,
   contentType: snippet.contentType,

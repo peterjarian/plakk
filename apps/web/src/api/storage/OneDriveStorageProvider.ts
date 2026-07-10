@@ -4,13 +4,17 @@ import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstab
 
 import {
   StorageProviderError,
+  StorageObjectNotFoundError,
+  type DownloadStorageObjectInput,
   type PreparedStorageUpload,
   type PrepareStorageUploadInput,
   type StorageProviderDestination,
 } from "./types.ts";
 import type { StorageProviderAdapter } from "./StorageProvider.ts";
+import { readStorageObjectBytes } from "./readStorageObjectBytes.ts";
 
 const ONE_DRIVE_ROOT_URL = "https://graph.microsoft.com/v1.0/me/drive/root:";
+const ONE_DRIVE_ITEMS_URL = "https://graph.microsoft.com/v1.0/me/drive/items";
 const ONE_DRIVE_PART_BYTE_MULTIPLE = 320 * 1024;
 const ONE_DRIVE_MAX_PART_BYTE_SIZE = 191 * ONE_DRIVE_PART_BYTE_MULTIPLE;
 const OneDriveUploadSessionRequest = Schema.fromJsonString(
@@ -33,7 +37,7 @@ const encodeOneDrivePath = (fileName: string) =>
     .join("/");
 
 const providerError = (
-  input: PrepareStorageUploadInput,
+  input: Pick<PrepareStorageUploadInput, "storageProvider">,
   message: string,
   cause?: unknown,
 ): StorageProviderError =>
@@ -99,5 +103,31 @@ export const OneDriveStorageProvider = {
       },
       expiresAt: session.expirationDateTime,
     };
+  }),
+  download: Effect.fn("OneDriveStorageProvider.download")(function* (
+    input: DownloadStorageObjectInput,
+  ): Effect.fn.Return<
+    Uint8Array,
+    StorageProviderError | StorageObjectNotFoundError,
+    HttpClient.HttpClient
+  > {
+    const request = HttpClientRequest.get(
+      `${ONE_DRIVE_ITEMS_URL}/${encodeURIComponent(input.storageObjectId)}/content`,
+    ).pipe(HttpClientRequest.bearerToken(input.accessToken));
+    const response = yield* HttpClient.execute(request).pipe(
+      Effect.mapError((cause) =>
+        providerError(input, "Could not download the stored object.", cause),
+      ),
+    );
+    if (response.status === 404) {
+      return yield* new StorageObjectNotFoundError({
+        storageProvider: input.storageProvider,
+        message: "The stored object no longer exists.",
+      });
+    }
+    if (response.status < 200 || response.status >= 300) {
+      return yield* providerError(input, `Stored object download failed: ${response.status}`);
+    }
+    return yield* readStorageObjectBytes(response, input);
   }),
 } satisfies StorageProviderAdapter;
