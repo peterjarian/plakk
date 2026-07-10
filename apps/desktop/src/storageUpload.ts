@@ -96,8 +96,6 @@ async function readUploadPart(input: {
   readonly filePath: string;
   readonly start: number;
   readonly byteSize: number;
-  readonly totalByteSize: number;
-  readonly onProgress: (progress: number) => void;
 }) {
   const file = await open(input.filePath);
   const bytes = Buffer.allocUnsafe(input.byteSize);
@@ -112,9 +110,6 @@ async function readUploadPart(input: {
       );
       if (bytesRead === 0) throw new Error("Upload source ended before the requested range.");
       offset += bytesRead;
-      input.onProgress(
-        Math.min(99, Math.floor(((input.start + offset) / input.totalByteSize) * 100)),
-      );
     }
   } finally {
     await file.close();
@@ -137,17 +132,14 @@ async function uploadPart(input: {
   readonly byteSize: number;
   readonly range: ByteRange | null;
   readonly signal: AbortSignal | undefined;
-  readonly onProgress: (progress: number) => void;
   readonly uploadFetch: UploadFetch;
 }) {
-  const { upload, filePath, byteSize, range, signal, onProgress, uploadFetch } = input;
+  const { upload, filePath, byteSize, range, signal, uploadFetch } = input;
   const partSize = range === null ? byteSize : range.end - range.start + 1;
   const body = await readUploadPart({
     filePath,
     start: range?.start ?? 0,
     byteSize: partSize,
-    totalByteSize: byteSize,
-    onProgress,
   });
 
   let response: Response;
@@ -232,7 +224,6 @@ export async function uploadPreparedFile(
       byteSize: payload.byteSize,
       range: null,
       signal,
-      onProgress,
       uploadFetch,
     });
     const storageObjectId = await storageObjectIdFrom(response, payload.prepared);
@@ -250,19 +241,20 @@ export async function uploadPreparedFile(
       byteSize: payload.byteSize,
       range,
       signal,
-      onProgress,
       uploadFetch,
     });
     if (response.status === 308) {
       const nextStart = confirmedRangeEnd(response) + 1;
       if (nextStart <= start) throw new Error("Upload session stalled; no progress confirmed.");
       start = nextStart;
+      onProgress(Math.min(99, Math.floor((start / payload.byteSize) * 100)));
       continue;
     }
     if (response.status === 202) {
       const nextStart = await nextExpectedStart(response);
       if (nextStart <= start) throw new Error("Upload session stalled; no progress confirmed.");
       start = nextStart;
+      onProgress(Math.min(99, Math.floor((start / payload.byteSize) * 100)));
       continue;
     }
     if (range.end !== payload.byteSize - 1) {

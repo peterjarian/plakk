@@ -75,7 +75,7 @@ export function SnippetRow(props: {
           {isUploading ? (
             <div className="flex items-center gap-1">
               <span className="w-8 text-right text-[11px] tabular-nums text-muted-foreground">
-                {uploadProgress}%
+                {uploadProgress === 0 ? "…" : `${uploadProgress}%`}
               </span>
               <Button
                 type="button"

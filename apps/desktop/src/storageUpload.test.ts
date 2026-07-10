@@ -65,27 +65,31 @@ describe("uploadPreparedFile", () => {
 
   it("persists the ID returned by a Google Drive upload", async () => {
     const filePath = await uploadFile([1, 2, 3]);
+    const progress = vi.fn();
     fetchMock
       .mockResolvedValueOnce(new Response(null, { status: 308, headers: { Range: "bytes=0-1" } }))
       .mockResolvedValueOnce(Response.json({ id: "drive-file-id" }));
 
     await expect(
-      uploadPreparedFile({
-        id: "0d1e2f3a-4567-4890-8abc-def012345678",
-        filePath,
-        byteSize: 3,
-        prepared: {
-          storageProvider: "GOOGLE_DRIVE",
-          storageObjectId: null,
-          upload: {
-            method: "PUT",
-            url: "https://upload.example/drive",
-            headers: [{ name: "Content-Type", value: "text/plain" }],
-            strategy: { type: "byte_range", maxPartByteSize: 2, partByteMultiple: 2 },
+      uploadPreparedFile(
+        {
+          id: "0d1e2f3a-4567-4890-8abc-def012345678",
+          filePath,
+          byteSize: 3,
+          prepared: {
+            storageProvider: "GOOGLE_DRIVE",
+            storageObjectId: null,
+            upload: {
+              method: "PUT",
+              url: "https://upload.example/drive",
+              headers: [{ name: "Content-Type", value: "text/plain" }],
+              strategy: { type: "byte_range", maxPartByteSize: 2, partByteMultiple: 2 },
+            },
+            expiresAt: null,
           },
-          expiresAt: null,
         },
-      }),
+        progress,
+      ),
     ).resolves.toEqual({ storageObjectId: "drive-file-id" });
     expect(fetchMock.mock.calls.map(([, init]) => init?.headers)).toEqual([
       {
@@ -97,6 +101,7 @@ describe("uploadPreparedFile", () => {
         "Content-Range": "bytes 2-2/3",
       },
     ]);
+    expect(progress.mock.calls).toEqual([[0], [66], [100]]);
   });
 
   it("uploads OneDrive byte ranges and reads the final item ID", async () => {
