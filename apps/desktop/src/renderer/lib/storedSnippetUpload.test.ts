@@ -56,7 +56,44 @@ function uploadInput() {
 }
 
 describe("uploadStoredSnippet", () => {
-  it("persists the prepared Dropbox path before marking the task ready", async () => {
+  it("creates text metadata without a body and uploads the already-encoded bytes", async () => {
+    const input = uploadInput();
+    const bytes = new TextEncoder().encode("héllo 👋\n");
+    const textTask = {
+      ...task,
+      kind: "TEXT" as const,
+      fileName: `${task.id}.txt`,
+      byteSize: bytes.byteLength,
+      contentType: "text/plain; charset=utf-8",
+    };
+    const textFile = {
+      name: textTask.fileName,
+      size: bytes.byteLength,
+      type: textTask.contentType,
+    } as File;
+
+    await uploadStoredSnippet({ ...input, task: textTask, file: textFile, bytes });
+
+    expect(input.api.create).toHaveBeenCalledWith({
+      id: textTask.id,
+      kind: "TEXT",
+      byteSize: bytes.byteLength,
+      storageProvider: "GOOGLE_DRIVE",
+      storageObjectId: null,
+    });
+    expect(input.api.prepare).toHaveBeenCalledWith({
+      snippetId: textTask.id,
+      storageProvider: "GOOGLE_DRIVE",
+    });
+    expect(input.uploader.uploadPreparedFile).toHaveBeenCalledWith({
+      id: textTask.id,
+      byteSize: bytes.byteLength,
+      prepared,
+      bytes,
+    });
+  });
+
+  it("persists the confirmed Dropbox path when marking the task ready", async () => {
     const input = uploadInput();
     const storageObjectId = "/0d1e2f3a-4567-4890-8abc-def012345678/upload.txt";
     input.api.prepare.mockResolvedValue({
@@ -69,7 +106,9 @@ describe("uploadStoredSnippet", () => {
     await expect(
       uploadStoredSnippet({ ...input, task: { ...task, storageProvider: "DROPBOX" } }),
     ).resolves.toEqual(snippet);
-    expect(input.api.create).toHaveBeenCalledWith(expect.objectContaining({ storageObjectId }));
+    expect(input.api.create).toHaveBeenCalledWith(
+      expect.objectContaining({ storageObjectId: null }),
+    );
     expect(input.api.updateStatus).toHaveBeenCalledWith({
       id: task.id,
       uploadStatus: "READY",
@@ -118,13 +157,31 @@ describe("uploadStoredSnippet", () => {
     });
   });
 
-  it("cancels before preparation can start an upload", async () => {
+  it("marks metadata failed when cancellation happens before preparation", async () => {
     const input = uploadInput();
     const upload = uploadStoredSnippet(input);
     cancelStoredSnippetUpload(task.id);
 
     await expect(upload).rejects.toThrow("Upload cancelled");
-    expect(input.api.create).not.toHaveBeenCalled();
+    expect(input.api.create).toHaveBeenCalledOnce();
+    expect(input.api.updateStatus).toHaveBeenCalledWith({
+      id: task.id,
+      uploadStatus: "FAILED",
+      storageObjectId: null,
+    });
+    expect(input.uploader.uploadPreparedFile).not.toHaveBeenCalled();
+  });
+
+  it("marks metadata failed when upload preparation fails", async () => {
+    const input = uploadInput();
+    input.api.prepare.mockRejectedValue(new Error("Storage disconnected"));
+
+    await expect(uploadStoredSnippet(input)).rejects.toThrow("Storage disconnected");
+    expect(input.api.updateStatus).toHaveBeenCalledWith({
+      id: task.id,
+      uploadStatus: "FAILED",
+      storageObjectId: null,
+    });
     expect(input.uploader.uploadPreparedFile).not.toHaveBeenCalled();
   });
 

@@ -50,7 +50,9 @@ handle(ipcMethods.storageUploadPreparedFile, async (payload, event) => {
     return await runEffect(Fiber.join(fiber));
   } finally {
     if (activeUploads.get(payload.id) === fiber) activeUploads.delete(payload.id);
-    if (consumeTemporaryClipboardFile(payload.filePath)) void rm(payload.filePath, { force: true });
+    if ("filePath" in payload && consumeTemporaryClipboardFile(payload.filePath)) {
+      void rm(payload.filePath, { force: true });
+    }
   }
 });
 

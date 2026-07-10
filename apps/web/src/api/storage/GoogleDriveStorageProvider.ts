@@ -5,11 +5,14 @@ import { Headers, HttpClient, HttpClientRequest, HttpClientResponse } from "effe
 
 import {
   StorageProviderError,
+  StorageObjectNotFoundError,
+  type DownloadStorageObjectInput,
   type PreparedStorageUpload,
   type PrepareStorageUploadInput,
   type StorageProviderDestination,
 } from "./types.ts";
 import type { StorageProviderAdapter } from "./StorageProvider.ts";
+import { readStorageObjectBytes } from "./readStorageObjectBytes.ts";
 
 const GOOGLE_DRIVE_FILES_URL = "https://www.googleapis.com/drive/v3/files";
 const GOOGLE_DRIVE_RESUMABLE_UPLOAD_URL =
@@ -182,5 +185,34 @@ export const GoogleDriveStorageProvider = {
       },
       expiresAt: null,
     };
+  }),
+  download: Effect.fn("GoogleDriveStorageProvider.download")(function* (
+    input: DownloadStorageObjectInput,
+  ): Effect.fn.Return<
+    Uint8Array,
+    StorageProviderError | StorageObjectNotFoundError,
+    HttpClient.HttpClient
+  > {
+    const request = HttpClientRequest.get(
+      `${GOOGLE_DRIVE_FILES_URL}/${encodeURIComponent(input.storageObjectId)}`,
+    ).pipe(
+      HttpClientRequest.bearerToken(input.accessToken),
+      HttpClientRequest.setUrlParam("alt", "media"),
+    );
+    const response = yield* HttpClient.execute(request).pipe(
+      Effect.mapError((cause) =>
+        providerError(input, "Could not download the stored object.", cause),
+      ),
+    );
+    if (response.status === 404) {
+      return yield* new StorageObjectNotFoundError({
+        storageProvider: input.storageProvider,
+        message: "The stored object no longer exists.",
+      });
+    }
+    if (response.status < 200 || response.status >= 300) {
+      return yield* providerError(input, `Stored object download failed: ${response.status}`);
+    }
+    return yield* readStorageObjectBytes(response, input);
   }),
 } satisfies StorageProviderAdapter;

@@ -11,10 +11,12 @@ import { DropboxStorageProvider } from "./DropboxStorageProvider.ts";
 import { GoogleDriveStorageProvider } from "./GoogleDriveStorageProvider.ts";
 import { getProviderSlug } from "./getProviderSlug.ts";
 import { OneDriveStorageProvider } from "./OneDriveStorageProvider.ts";
+import { StorageProviderError } from "./types.ts";
 import type {
   PreparedStorageUpload,
   PrepareStorageUploadInput,
-  StorageProviderError,
+  DownloadStorageObjectInput,
+  StorageObjectNotFoundError,
   StorageProviderDestination,
 } from "./types.ts";
 
@@ -51,6 +53,8 @@ export type StorageUploadError =
   | StorageCredentialsError
   | StorageProviderError;
 
+export type StorageDownloadError = StorageUploadError | StorageObjectNotFoundError;
+
 export type StorageProviderAdapter = {
   readonly storageProvider: PrepareStorageUploadInput["storageProvider"];
   readonly getDestination: (
@@ -59,6 +63,13 @@ export type StorageProviderAdapter = {
   readonly prepareUpload: (
     input: PrepareStorageUploadInput,
   ) => Effect.Effect<PreparedStorageUpload, StorageProviderError, HttpClient.HttpClient>;
+  readonly download: (
+    input: DownloadStorageObjectInput,
+  ) => Effect.Effect<
+    Uint8Array,
+    StorageProviderError | StorageObjectNotFoundError,
+    HttpClient.HttpClient
+  >;
 };
 
 const storageProviderAdapters = {
@@ -82,6 +93,9 @@ export class StorageProviderService extends Context.Service<
     readonly getDestinationUrl: (
       input: ConnectedStorageInput,
     ) => Effect.Effect<string, StorageUploadError>;
+    readonly downloadObject: (
+      input: Omit<DownloadStorageObjectInput, "accessToken"> & { readonly workosUserId: string },
+    ) => Effect.Effect<Uint8Array, StorageDownloadError>;
   }
 >()("@plakk/web/api/storage/StorageProvider/StorageProviderService") {
   static readonly Live = Layer.effect(
@@ -154,7 +168,30 @@ export class StorageProviderService extends Context.Service<
         return destination.url;
       });
 
-      return StorageProviderService.of({ ensureConnected, prepareUpload, getDestinationUrl });
+      const downloadObject = Effect.fn("StorageProviderService.downloadObject")(function* (
+        input: Omit<DownloadStorageObjectInput, "accessToken"> & {
+          readonly workosUserId: string;
+        },
+      ): Effect.fn.Return<Uint8Array, StorageDownloadError> {
+        const token = yield* getConnectedToken(input);
+        const bytes = yield* storageProviderAdapters[input.storageProvider]
+          .download({ ...input, accessToken: token.accessToken })
+          .pipe(Effect.provideService(HttpClient.HttpClient, httpClient));
+        if (bytes.byteLength !== input.expectedByteSize) {
+          return yield* new StorageProviderError({
+            storageProvider: input.storageProvider,
+            message: "Stored object size does not match snippet metadata.",
+          });
+        }
+        return bytes;
+      });
+
+      return StorageProviderService.of({
+        ensureConnected,
+        prepareUpload,
+        getDestinationUrl,
+        downloadObject,
+      });
     }),
   );
 }
