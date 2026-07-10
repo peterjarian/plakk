@@ -386,14 +386,6 @@ export function Home({ active = true }: { active?: boolean }) {
 
   const pendingExternalHost = pendingExternalUrl ? new URL(pendingExternalUrl).host : "";
 
-  function openSyncSetup() {
-    if (storageStatus.kind === "unlinked" || storageStatus.kind === "needs-reauthorization") {
-      openStorageSetup(syncSetupUrl);
-      return;
-    }
-    void window.ipc.openExternal(syncSetupUrl);
-  }
-
   const storageAction =
     storageStatus.kind === "unlinked" ? (
       <Button
@@ -484,7 +476,12 @@ export function Home({ active = true }: { active?: boolean }) {
               <TriangleAlert className="size-3.5 shrink-0 text-amber-600" aria-hidden="true" />
               <span className="min-w-0 flex-1 truncate">{syncPausedMessage}</span>
               {storageStatus.kind !== "failed" && (
-                <Button type="button" variant="ghost" size="xs" onClick={openSyncSetup}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  onClick={() => openStorageSetup(syncSetupUrl)}
+                >
                   Finish on web
                   <ArrowUpRight />
                 </Button>

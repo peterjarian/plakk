@@ -93,8 +93,8 @@ describe("StorageStatusProvider", () => {
     expect(state.refreshes).toEqual([]);
     expect(state.queries).toHaveLength(2);
 
-    provider.props.value.openSetup("https://app.plakk.io/storage");
-    expect(openExternal).toHaveBeenCalledOnce();
+    provider.props.value.openSetup("https://app.plakk.io/account/setup");
+    expect(openExternal).toHaveBeenCalledWith("https://app.plakk.io/account/setup");
     onFocus?.();
     onFocus?.();
     expect(state.refreshes).toEqual(["GetAccountStatus", "GetPipeConnectionStatus"]);
