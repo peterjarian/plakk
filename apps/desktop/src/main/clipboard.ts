@@ -1,7 +1,7 @@
 import { statSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { basename, extname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { app, clipboard, nativeImage } from "electron";
 import { Data, Effect } from "effect";
 import type { SnippetContent } from "./snippetCache.ts";
@@ -222,6 +222,20 @@ const writeSnippetBytes = (content: SnippetContent) => {
   clipboard.writeBuffer(clipboardFormatFor(content.contentType), Buffer.from(content.bytes));
 };
 
+const writeSnippetFile = (content: SnippetContent) => {
+  const fileName = basename(content.fileName);
+  const path = join(app.getPath("temp"), `plakk-snippet-${crypto.randomUUID()}-${fileName}`);
+  const url = pathToFileURL(path).toString();
+
+  writeFileSync(path, content.bytes);
+  if (process.platform === "linux") {
+    clipboard.clear();
+    clipboard.writeBuffer("text/uri-list", Buffer.from(url));
+  } else {
+    clipboard.writeBookmark(fileName, url);
+  }
+};
+
 export const writeSnippetToClipboard = Effect.fn("writeSnippetToClipboard")(function* (
   content: SnippetContent,
 ) {
@@ -234,7 +248,7 @@ export const writeSnippetToClipboard = Effect.fn("writeSnippetToClipboard")(func
         return;
       }
 
-      writeSnippetBytes(content);
+      writeSnippetFile(content);
     },
     catch: (cause) => new WriteClipboardError({ cause }),
   });
