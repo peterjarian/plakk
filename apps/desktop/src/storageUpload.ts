@@ -107,10 +107,16 @@ async function uploadPart(input: {
       duplex: "half",
       signal,
     } as RequestInit & { duplex: "half" });
-  } catch {
+  } catch (cause) {
     if (signal?.aborted) throw new Error("Upload cancelled. Choose the file again to retry.");
+    const detail =
+      cause instanceof Error
+        ? cause.cause instanceof Error
+          ? cause.cause.message
+          : cause.message
+        : "";
     throw new Error(
-      "Could not reach the upload link. It may have expired; choose the file again to retry.",
+      `Could not reach the upload link${detail ? `: ${detail}` : ""}. Choose the file again to retry.`,
     );
   }
 
