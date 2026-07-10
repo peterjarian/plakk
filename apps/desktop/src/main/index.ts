@@ -1,6 +1,7 @@
 import "dotenv/config";
 
 import { join, resolve, sep } from "node:path";
+import { rm } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { isHttpUrl } from "@plakk/shared";
 import { app, BrowserWindow, Menu, net, protocol, shell } from "electron";
@@ -11,7 +12,7 @@ import { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
 import { handle, send } from "../ipc/main.ts";
 import { StorageUpload, type StorageUploadResult } from "../storageUpload.ts";
 import { AuthService } from "./auth/AuthService.ts";
-import { readClipboard } from "./clipboard.ts";
+import { consumeTemporaryClipboardFile, readClipboard } from "./clipboard.ts";
 import { createTrayWindowController } from "./trayWindow.ts";
 import { UserConfigStore } from "./UserConfigStore.ts";
 import { runEffect, runtime } from "./runtime.ts";
@@ -49,6 +50,7 @@ handle(ipcMethods.storageUploadPreparedFile, async (payload, event) => {
     return await runEffect(Fiber.join(fiber));
   } finally {
     if (activeUploads.get(payload.id) === fiber) activeUploads.delete(payload.id);
+    if (consumeTemporaryClipboardFile(payload.filePath)) void rm(payload.filePath, { force: true });
   }
 });
 

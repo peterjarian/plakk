@@ -47,12 +47,14 @@ export const ClipboardContentSchema = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("image"),
     dataUrl: Schema.String,
+    path: Schema.String,
     width: Schema.Number,
     height: Schema.Number,
   }),
   Schema.Struct({
     type: Schema.Literal("file"),
     name: Schema.String,
+    path: Schema.String,
     extension: Schema.String,
     size: Schema.optionalKey(Schema.Number),
   }),

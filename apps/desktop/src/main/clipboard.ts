@@ -1,8 +1,8 @@
-import { statSync } from "node:fs";
+import { statSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { basename, extname } from "node:path";
+import { basename, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { clipboard, nativeImage } from "electron";
+import { app, clipboard, nativeImage } from "electron";
 import { Data, Effect } from "effect";
 
 export class ReadClipboardError extends Data.TaggedError("ReadClipboardError")<{
@@ -12,6 +12,10 @@ export class ReadClipboardError extends Data.TaggedError("ReadClipboardError")<{
 export class WriteClipboardError extends Data.TaggedError("WriteClipboardError")<{
   readonly cause: unknown;
 }> {}
+
+const temporaryClipboardFiles = new Set<string>();
+
+export const consumeTemporaryClipboardFile = (path: string) => temporaryClipboardFiles.delete(path);
 
 export type WritableClipboardContent =
   | {
@@ -31,12 +35,14 @@ type ClipboardContent =
   | {
       readonly type: "image";
       readonly dataUrl: string;
+      readonly path: string;
       readonly width: number;
       readonly height: number;
     }
   | {
       readonly type: "file";
       readonly name: string;
+      readonly path: string;
       readonly extension: string;
       readonly size?: number;
     }
@@ -60,6 +66,7 @@ function fileContentFromPath(path: string): ClipboardContent | undefined {
   const content: ClipboardContent = {
     type: "file",
     name: basename(path),
+    path,
     extension: extname(path).slice(1).toUpperCase(),
   };
 
@@ -169,7 +176,10 @@ export const readClipboard = Effect.fn("readClipboard")(function* () {
     return yield* Effect.try({
       try: (): ClipboardContent => {
         const { width, height } = image.getSize();
-        return { type: "image", dataUrl: image.toDataURL(), width, height };
+        const path = join(app.getPath("temp"), `plakk-clipboard-${crypto.randomUUID()}.png`);
+        writeFileSync(path, image.toPNG());
+        temporaryClipboardFiles.add(path);
+        return { type: "image", dataUrl: image.toDataURL(), path, width, height };
       },
       catch: (cause) => new ReadClipboardError({ cause }),
     });

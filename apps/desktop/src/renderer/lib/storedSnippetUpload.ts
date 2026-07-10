@@ -57,24 +57,32 @@ async function markUploadFailed(
   id: string,
   storageObjectId: string | null,
 ) {
+  let failure: unknown;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
       await api.updateStatus({ id, uploadStatus: "FAILED", storageObjectId });
       return;
-    } catch {
+    } catch (error) {
+      failure = error;
       // The next attempt can recover a transient finalization failure.
     }
   }
+  console.error("Could not mark stored snippet upload as failed.", {
+    id,
+    storageObjectId,
+    failure,
+  });
 }
 
 export async function uploadStoredSnippet(input: {
-  readonly file: File;
+  readonly file: Pick<File, "name" | "size" | "type">;
+  readonly filePath?: string;
   readonly task: UploadTask;
   readonly api: StoredSnippetUploadApi;
   readonly actions: StoredSnippetUploadActions;
   readonly uploader: StoredSnippetUploader;
 }): Promise<ApiSnippet> {
-  const { file, task, api, actions, uploader } = input;
+  const { file, filePath, task, api, actions, uploader } = input;
   let created = false;
   let storageObjectId: string | null = null;
 
@@ -105,9 +113,9 @@ export async function uploadStoredSnippet(input: {
     actions.setPhase(task.id, "UPLOADING");
     const upload = await uploader.uploadPreparedFile({
       id: task.id,
-      file,
       byteSize: file.size,
       prepared,
+      ...(filePath === undefined ? { file: file as File } : { filePath }),
     });
     throwIfCancelled(task.id);
     storageObjectId = upload.storageObjectId;

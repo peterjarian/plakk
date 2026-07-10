@@ -69,7 +69,8 @@ const desktopApi = {
   storage: {
     cancelUpload: (id: string) => invoke(ipcMethods.storageCancelUpload, id),
     uploadPreparedFile: ({ file, ...payload }: RendererPreparedFileUploadPayload) => {
-      const filePath = webUtils.getPathForFile(file);
+      const filePath =
+        payload.filePath ?? (file === undefined ? "" : webUtils.getPathForFile(file));
       if (!filePath) return Promise.reject(new Error("Choose a local file to upload."));
       return invoke(ipcMethods.storageUploadPreparedFile, { ...payload, filePath });
     },

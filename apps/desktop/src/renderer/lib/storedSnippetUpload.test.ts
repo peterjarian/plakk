@@ -80,6 +80,10 @@ describe("uploadStoredSnippet", () => {
       [task.id, "UPLOADING"],
       [task.id, "READY"],
     ]);
+    expect(input.actions.setStorageObjectId.mock.calls).toEqual([
+      [task.id, storageObjectId],
+      [task.id, storageObjectId],
+    ]);
   });
 
   it.each([new Error("Upload failed: 500"), new Error("Upload failed: 410 expired")])(
@@ -122,5 +126,21 @@ describe("uploadStoredSnippet", () => {
     await expect(upload).rejects.toThrow("Upload cancelled");
     expect(input.api.create).not.toHaveBeenCalled();
     expect(input.uploader.uploadPreparedFile).not.toHaveBeenCalled();
+  });
+
+  it("cancels after creation and marks the snippet failed", async () => {
+    const input = uploadInput();
+    input.uploader.uploadPreparedFile.mockImplementation(async () => {
+      cancelStoredSnippetUpload(task.id);
+      return { storageObjectId: "drive-file-id" };
+    });
+
+    await expect(uploadStoredSnippet(input)).rejects.toThrow("Upload cancelled");
+    expect(input.api.create).toHaveBeenCalledTimes(1);
+    expect(input.api.updateStatus).toHaveBeenCalledWith({
+      id: task.id,
+      uploadStatus: "FAILED",
+      storageObjectId: null,
+    });
   });
 });

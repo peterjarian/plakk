@@ -13,7 +13,8 @@ export type PreparedFileUploadPayload = {
 };
 
 export type RendererPreparedFileUploadPayload = Omit<PreparedFileUploadPayload, "filePath"> & {
-  readonly file: File;
+  readonly file?: File;
+  readonly filePath?: string;
 };
 
 export type StorageUploadResult = { readonly storageObjectId: string | null };
@@ -253,11 +254,15 @@ export async function uploadPreparedFile(
       uploadFetch,
     });
     if (response.status === 308) {
-      start = confirmedRangeEnd(response) + 1;
+      const nextStart = confirmedRangeEnd(response) + 1;
+      if (nextStart <= start) throw new Error("Upload session stalled; no progress confirmed.");
+      start = nextStart;
       continue;
     }
     if (response.status === 202) {
-      start = await nextExpectedStart(response);
+      const nextStart = await nextExpectedStart(response);
+      if (nextStart <= start) throw new Error("Upload session stalled; no progress confirmed.");
+      start = nextStart;
       continue;
     }
     if (range.end !== payload.byteSize - 1) {

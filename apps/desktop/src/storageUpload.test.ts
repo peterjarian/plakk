@@ -153,6 +153,92 @@ describe("uploadPreparedFile", () => {
     ).rejects.toThrow("Upload failed: 410 expired");
   });
 
+  it("reports cancellation while an upload request is in flight", async () => {
+    const filePath = await uploadFile([1, 2, 3]);
+    const controller = new AbortController();
+    fetchMock.mockImplementationOnce(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+        }),
+    );
+
+    const upload = uploadPreparedFile(
+      {
+        id: "0d1e2f3a-4567-4890-8abc-def012345678",
+        filePath,
+        byteSize: 3,
+        prepared: {
+          storageProvider: "GOOGLE_DRIVE",
+          storageObjectId: null,
+          upload: {
+            method: "PUT",
+            url: "https://upload.example/drive",
+            headers: [],
+            strategy: { type: "single_request" },
+          },
+          expiresAt: null,
+        },
+      },
+      undefined,
+      controller.signal,
+    );
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    controller.abort();
+
+    await expect(upload).rejects.toThrow("Upload cancelled");
+  });
+
+  it("rejects a non-progressing OneDrive response", async () => {
+    const filePath = await uploadFile([1, 2]);
+    fetchMock.mockResolvedValueOnce(Response.json({ nextExpectedRanges: ["0-"] }, { status: 202 }));
+
+    await expect(
+      uploadPreparedFile({
+        id: "0d1e2f3a-4567-4890-8abc-def012345678",
+        filePath,
+        byteSize: 2,
+        prepared: {
+          storageProvider: "GOOGLE_DRIVE",
+          storageObjectId: null,
+          upload: {
+            method: "PUT",
+            url: "https://upload.example/drive",
+            headers: [],
+            strategy: { type: "byte_range", maxPartByteSize: 2, partByteMultiple: 2 },
+          },
+          expiresAt: null,
+        },
+      }),
+    ).rejects.toThrow("Upload session stalled");
+  });
+
+  it("rejects a non-progressing Google Drive response", async () => {
+    const filePath = await uploadFile([1, 2]);
+    fetchMock
+      .mockResolvedValueOnce(new Response(null, { status: 308, headers: { Range: "bytes=0-0" } }))
+      .mockResolvedValueOnce(new Response(null, { status: 308, headers: { Range: "bytes=0-0" } }));
+
+    await expect(
+      uploadPreparedFile({
+        id: "0d1e2f3a-4567-4890-8abc-def012345678",
+        filePath,
+        byteSize: 2,
+        prepared: {
+          storageProvider: "GOOGLE_DRIVE",
+          storageObjectId: null,
+          upload: {
+            method: "PUT",
+            url: "https://upload.example/drive",
+            headers: [],
+            strategy: { type: "byte_range", maxPartByteSize: 1, partByteMultiple: 1 },
+          },
+          expiresAt: null,
+        },
+      }),
+    ).rejects.toThrow("Upload session stalled");
+  });
+
   it("reports nested Electron network codes without exposing the upload link", async () => {
     const filePath = await uploadFile([1]);
     const failure = Object.assign(new Error("https://upload.example/secret"), {
