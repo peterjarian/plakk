@@ -1,5 +1,5 @@
 import { LoaderCircle } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import { TooltipProvider } from "@plakk/ui/components/primitives/tooltip";
 import { PlakkAtomProvider } from "@plakk/ui/hooks/useUploadFlow";
@@ -10,7 +10,12 @@ import { Welcome } from "./views/Welcome.tsx";
 import type { ComponentType } from "react";
 import type { ViewType } from "./lib/navigate.ts";
 import { AuthProvider, useAuth } from "./hooks/useAuth.ts";
-import { navigate } from "./lib/navigate.ts";
+import {
+  getDesktopView,
+  navigate,
+  setDesktopView,
+  subscribeToDesktopView,
+} from "./lib/navigate.ts";
 
 import "@plakk/ui/globals.css";
 
@@ -56,8 +61,30 @@ function ProtectedView({
   return <View />;
 }
 
+function DesktopViews() {
+  const view = useSyncExternalStore(subscribeToDesktopView, getDesktopView, getDesktopView);
+
+  useEffect(() => window.ipc.navigation.onRequested(setDesktopView), []);
+
+  return (
+    <>
+      <div hidden={view !== "home"}>
+        <Home />
+      </div>
+      <div hidden={view !== "settings"}>
+        <Settings />
+      </div>
+    </>
+  );
+}
+
 const view = new URLSearchParams(window.location.search).get("view");
-const View: ComponentType = view === null ? Bootstrap : (views[view as keyof typeof views] ?? Home);
+const View: ComponentType =
+  view === "home" || view === "settings"
+    ? DesktopViews
+    : view === null
+      ? Bootstrap
+      : (views[view as keyof typeof views] ?? DesktopViews);
 const isProtectedView = view !== null && view !== "welcome";
 
 createRoot(document.querySelector<HTMLDivElement>("#app")!).render(

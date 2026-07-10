@@ -4,16 +4,19 @@ import { join, resolve, sep } from "node:path";
 import { rm } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { isHttpUrl } from "@plakk/shared";
+import { accountCanSync } from "@plakk/shared/PlakkApi";
 import { app, BrowserWindow, Menu, net, protocol, shell } from "electron";
 import { Effect, Result } from "effect";
 import * as Fiber from "effect/Fiber";
-import type { AuthStatus, TrayDroppedItem } from "../ipc/contracts.ts";
+import type { AuthStatus, TrayAccountState, TrayDroppedItem } from "../ipc/contracts.ts";
 import { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
 import { handle, send } from "../ipc/main.ts";
 import { StorageUpload, type StorageUploadResult } from "../storageUpload.ts";
+import { getAccountStatus, isUnauthenticatedAccountError } from "./accountStatus.ts";
 import { AuthService } from "./auth/AuthService.ts";
 import { consumeTemporaryClipboardFile, readClipboard } from "./clipboard.ts";
 import { createTrayWindowController } from "./trayWindow.ts";
+import { isReloadShortcut, reconcileTrayAuth } from "./lifecycle.ts";
 import { UserConfigStore } from "./UserConfigStore.ts";
 import { runEffect, runtime } from "./runtime.ts";
 
@@ -39,6 +42,12 @@ handle(ipcMethods.openExternal, (url) => {
 });
 
 handle(ipcMethods.storageUploadPreparedFile, async (payload, event) => {
+  if (
+    trayWindowController?.ownsWebContents(event.sender) === true &&
+    !trayWindowController.isIngestionEnabled()
+  ) {
+    throw new Error("Tray ingestion is unavailable until the account is ready.");
+  }
   const upload = StorageUpload.use((storage) =>
     storage.upload(payload, (progress) =>
       send(event.sender, ipcEvents.storageUploadProgress, { id: payload.id, progress }),
@@ -96,6 +105,15 @@ handle(ipcMethods.authGet, () =>
   runAuth(
     AuthService.use((auth) => auth.getSession().pipe(Effect.map(authStatus))),
     "Could not check session.",
+  ).then(
+    (status) => {
+      applyAuthStatus(status);
+      return status;
+    },
+    (error) => {
+      applyAuthStatus(authStatus(null));
+      throw error;
+    },
   ),
 );
 
@@ -123,7 +141,9 @@ handle(ipcMethods.authSignOut, async () => {
     AuthService.use((auth) => auth.signOut()),
     "Could not sign out.",
   );
-  broadcastAuthStatus(authStatus(null));
+  const status = authStatus(null);
+  applyAuthStatus(status);
+  broadcastAuthStatus(status);
 });
 
 handle(ipcMethods.userConfigGet, () => runEffect(UserConfigStore.use((store) => store.get)));
@@ -139,6 +159,74 @@ type RendererView = "home" | "settings" | "tray" | "welcome";
 let mainWindow: BrowserWindow | undefined;
 let trayWindowController: ReturnType<typeof createTrayWindowController> | undefined;
 let isQuitting = false;
+let currentAuthStatus = authStatus(null);
+let currentTrayAccountState: TrayAccountState = { kind: "loading" };
+let trayRefreshGeneration = 0;
+
+handle(ipcMethods.trayGetAccountState, (_payload, event) =>
+  trayWindowController?.ownsWebContents(event.sender) === true
+    ? currentTrayAccountState
+    : ({ kind: "failed" } satisfies TrayAccountState),
+);
+
+function sendTrayAccountState(state: TrayAccountState) {
+  currentTrayAccountState = state;
+  const window = BrowserWindow.getAllWindows().find((candidate) =>
+    trayWindowController?.ownsWebContents(candidate.webContents),
+  );
+  if (window !== undefined) send(window.webContents, ipcEvents.trayAccountStateChanged, state);
+}
+
+function applyAuthStatus(status: AuthStatus) {
+  const changed =
+    currentAuthStatus.accessToken !== status.accessToken ||
+    currentAuthStatus.user?.id !== status.user?.id;
+  currentAuthStatus = status;
+  if (changed) trayRefreshGeneration += 1;
+  reconcileTrayAuth(status, trayWindowController);
+  if (status.user === null) {
+    sendTrayAccountState({ kind: "loading" });
+  } else if (changed) {
+    void refreshTrayAccountState();
+  }
+}
+
+async function refreshTrayAccountState() {
+  const status = currentAuthStatus;
+  if (status.accessToken === null || status.user === null || trayWindowController === undefined)
+    return;
+
+  const generation = ++trayRefreshGeneration;
+  trayWindowController.setAccountState(false, false);
+  sendTrayAccountState({ kind: "loading" });
+
+  const result = await runEffect(
+    Effect.result(Effect.scoped(getAccountStatus(status.accessToken))),
+  );
+  if (generation !== trayRefreshGeneration || currentAuthStatus.accessToken !== status.accessToken)
+    return;
+
+  if (Result.isSuccess(result)) {
+    const account = result.success;
+    trayWindowController.setAccountState(true, accountCanSync(account));
+    sendTrayAccountState({ kind: "resolved", account });
+    return;
+  }
+
+  if (isUnauthenticatedAccountError(result.failure)) {
+    await runAuth(
+      AuthService.use((auth) => auth.signOut()),
+      "Could not clear the invalid session.",
+    ).catch(() => undefined);
+    const signedOut = authStatus(null);
+    applyAuthStatus(signedOut);
+    broadcastAuthStatus(signedOut);
+    return;
+  }
+
+  trayWindowController.setAccountState(true, false);
+  sendTrayAccountState({ kind: "failed" });
+}
 
 app.setName(app.isPackaged ? "Plakk" : "Plakk (Dev)");
 
@@ -188,6 +276,10 @@ function guardExternalWindows(window: BrowserWindow) {
     event.preventDefault();
     if (isHttpUrl(url)) void shell.openExternal(url);
   });
+
+  window.webContents.on("before-input-event", (event, input) => {
+    if (isReloadShortcut(input)) event.preventDefault();
+  });
 }
 
 function isSameRendererNavigation(current: string, next: string) {
@@ -211,7 +303,16 @@ function isSameRendererNavigation(current: string, next: string) {
 
 const createWindow = (view?: RendererView): void => {
   if (mainWindow !== undefined && !mainWindow.isDestroyed()) {
-    if (view !== undefined) void loadRenderer(mainWindow, view);
+    if (view === "home" || view === "settings") {
+      const currentView = new URL(mainWindow.webContents.getURL()).searchParams.get("view");
+      if (currentView === "home" || currentView === "settings") {
+        send(mainWindow.webContents, ipcEvents.navigate, view);
+      } else {
+        void loadRenderer(mainWindow, view);
+      }
+    } else if (view !== undefined) {
+      void loadRenderer(mainWindow, view);
+    }
     mainWindow.show();
     mainWindow.focus();
     return;
@@ -298,11 +399,10 @@ function broadcastAuthError(message: string): void {
 }
 
 function broadcastTrayDroppedItem(item: TrayDroppedItem): void {
-  for (const window of BrowserWindow.getAllWindows()) {
-    if (!window.isDestroyed()) {
+  if (trayWindowController?.isIngestionEnabled() !== true) return;
+  for (const window of BrowserWindow.getAllWindows())
+    if (!window.isDestroyed() && trayWindowController.ownsWebContents(window.webContents))
       send(window.webContents, ipcEvents.trayDroppedItem, item);
-    }
-  }
 }
 
 async function handleAuthUrls(values: readonly string[]): Promise<boolean> {
@@ -336,6 +436,7 @@ async function handleAuthUrls(values: readonly string[]): Promise<boolean> {
     const status = result.success;
     if (status !== null) {
       handled = true;
+      applyAuthStatus(status);
       broadcastAuthStatus(status);
       revealMainWindow();
     }
@@ -347,6 +448,11 @@ async function handleAuthUrls(values: readonly string[]): Promise<boolean> {
 function pasteIntoFocusedWindow(): void {
   const window = BrowserWindow.getFocusedWindow();
   if (window === null) return;
+  if (
+    trayWindowController?.ownsWebContents(window.webContents) === true &&
+    !trayWindowController.isIngestionEnabled()
+  )
+    return;
 
   void runEffect(readClipboard()).then((content) => {
     if (content.type !== "empty" && !window.isDestroyed()) {
@@ -397,7 +503,10 @@ if (!hasSingleInstanceLock) {
             { role: "selectAll" },
           ],
         },
-        { role: "viewMenu" },
+        {
+          label: "View",
+          submenu: [{ role: "toggleDevTools" }],
+        },
         { role: "windowMenu" },
       ]),
     );
@@ -405,6 +514,8 @@ if (!hasSingleInstanceLock) {
     trayWindowController = createTrayWindowController({
       guardExternalWindows,
       loadTrayRenderer: (window) => loadRenderer(window, "tray"),
+      onAccountRefreshRequested: () => void refreshTrayAccountState(),
+      onRendererLoaded: () => void refreshTrayAccountState(),
       onDropFiles: ({ files }) => {
         broadcastTrayDroppedItem({ type: "files", paths: files });
       },
@@ -413,9 +524,11 @@ if (!hasSingleInstanceLock) {
       },
       preloadPath: join(__dirname, "../preload/index.cjs"),
     });
-    trayWindowController.setup();
-
     createWindow();
+    void runAuth(
+      AuthService.use((auth) => auth.getSession().pipe(Effect.map(authStatus))),
+      "Could not check session.",
+    ).then(applyAuthStatus, () => applyAuthStatus(authStatus(null)));
     void handleAuthUrls(process.argv);
 
     app.on("activate", () => {
