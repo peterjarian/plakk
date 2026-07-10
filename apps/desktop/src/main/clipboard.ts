@@ -4,6 +4,7 @@ import { basename, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { app, clipboard, nativeImage } from "electron";
 import { Data, Effect } from "effect";
+import type { SnippetContent } from "./snippetCache.ts";
 
 export class ReadClipboardError extends Data.TaggedError("ReadClipboardError")<{
   readonly cause: unknown;
@@ -205,6 +206,36 @@ export const writeClipboard = Effect.fn("writeClipboard")(function* (
 
   return yield* Effect.try({
     try: () => clipboard.writeImage(nativeImage.createFromDataURL(content.dataUrl)),
+    catch: (cause) => new WriteClipboardError({ cause }),
+  });
+});
+
+const clipboardFormatFor = (contentType: string | null) => {
+  const format = contentType?.split(";", 1)[0]?.trim().toLowerCase();
+  return format !== undefined && /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/.test(format)
+    ? format
+    : "application/octet-stream";
+};
+
+const writeSnippetBytes = (content: SnippetContent) => {
+  clipboard.clear();
+  clipboard.writeBuffer(clipboardFormatFor(content.contentType), Buffer.from(content.bytes));
+};
+
+export const writeSnippetToClipboard = Effect.fn("writeSnippetToClipboard")(function* (
+  content: SnippetContent,
+) {
+  return yield* Effect.try({
+    try: () => {
+      if (content.kind === "IMAGE") {
+        const image = nativeImage.createFromBuffer(Buffer.from(content.bytes));
+        if (image.isEmpty()) writeSnippetBytes(content);
+        else clipboard.writeImage(image);
+        return;
+      }
+
+      writeSnippetBytes(content);
+    },
     catch: (cause) => new WriteClipboardError({ cause }),
   });
 });

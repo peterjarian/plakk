@@ -87,7 +87,6 @@ export const readSnippetContent = Effect.fn("@plakk/web/api/PlakkApiLive.readSni
         and(
           eq(snippets.id, snippetId),
           eq(snippets.ownerWorkosUserId, workosUserId),
-          eq(snippets.kind, "TEXT"),
           eq(snippets.uploadStatus, "READY"),
           isNull(snippets.deletedAt),
         ),
@@ -98,11 +97,15 @@ export const readSnippetContent = Effect.fn("@plakk/web/api/PlakkApiLive.readSni
     if (snippet === undefined || snippet.ownerWorkosUserId !== workosUserId) {
       return yield* new RpcError({
         code: "NOT_FOUND",
-        message: "Ready text snippet content was not found.",
+        message: "Ready snippet content was not found.",
       });
     }
 
-    if (snippet.storageProvider === null && snippet.storageObjectId === null) {
+    if (
+      snippet.kind === "TEXT" &&
+      snippet.storageProvider === null &&
+      snippet.storageObjectId === null
+    ) {
       const bytes = new TextEncoder().encode(snippet.title);
       if (bytes.byteLength !== snippet.byteSize) {
         return yield* new RpcError({
@@ -110,13 +113,18 @@ export const readSnippetContent = Effect.fn("@plakk/web/api/PlakkApiLive.readSni
           message: "Legacy snippet size does not match its stored body.",
         });
       }
-      return { bytes };
+      return {
+        bytes,
+        kind: snippet.kind,
+        fileName: snippet.fileName,
+        contentType: snippet.contentType,
+      };
     }
 
     if (snippet.storageProvider === null || snippet.storageObjectId === null) {
       return yield* new RpcError({
         code: "NOT_FOUND",
-        message: "Ready text snippet content was not found.",
+        message: "Ready snippet content was not found.",
       });
     }
 
@@ -152,7 +160,12 @@ export const readSnippetContent = Effect.fn("@plakk/web/api/PlakkApiLive.readSni
         message: "Stored object size does not match snippet metadata.",
       });
     }
-    return { bytes };
+    return {
+      bytes,
+      kind: snippet.kind,
+      fileName: snippet.fileName,
+      contentType: snippet.contentType,
+    };
   },
 );
 

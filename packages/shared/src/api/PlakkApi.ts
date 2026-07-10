@@ -199,7 +199,12 @@ export const SnippetRpcs = RpcGroup.make(
   }),
   Rpc.make("GetSnippetContent", {
     payload: { id: SnippetIdSchema },
-    success: Schema.Struct({ bytes: Schema.Uint8ArrayFromBase64 }),
+    success: Schema.Struct({
+      bytes: Schema.Uint8ArrayFromBase64,
+      kind: SnippetKindLiteral,
+      fileName: Schema.String,
+      contentType: Schema.NullOr(Schema.String),
+    }),
     error: RpcError,
   }),
   Rpc.make("DeleteSnippet", {

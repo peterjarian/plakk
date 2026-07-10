@@ -38,6 +38,11 @@ export type DesktopApi = {
       callback: (progress: { id: string; progress: number }) => void,
     ) => () => void;
   };
+  readonly snippets: {
+    readonly copy: (id: string) => Promise<void>;
+    readonly forget: (id: string) => Promise<void>;
+    readonly getThumbnail: (id: string) => Promise<{ url: string }>;
+  };
   readonly tray: {
     readonly getAccountState: () => Promise<TrayAccountState>;
     readonly onAccountStateChanged: (callback: (state: TrayAccountState) => void) => () => void;
@@ -89,6 +94,11 @@ const desktopApi = {
     },
     onProgress: (callback: (progress: { id: string; progress: number }) => void) =>
       on(ipcEvents.storageUploadProgress, callback),
+  },
+  snippets: {
+    copy: (id: string) => invoke(ipcMethods.snippetCopy, id),
+    forget: (id: string) => invoke(ipcMethods.snippetForget, id),
+    getThumbnail: (id: string) => invoke(ipcMethods.snippetGetThumbnail, id),
   },
   tray: {
     getAccountState: () => invoke(ipcMethods.trayGetAccountState, undefined),
