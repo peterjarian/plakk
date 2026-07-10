@@ -32,10 +32,18 @@ export const PipeConnectionStatusSchema = Schema.Literals([
 
 export type PipeConnectionStatus = typeof PipeConnectionStatusSchema.Type;
 
-export const PipeConnectionSchema = Schema.Struct({
-  storageProvider: StorageProviderLiteral,
-  status: PipeConnectionStatusSchema,
-});
+export const PipeConnectionSchema = Schema.Union([
+  Schema.Struct({
+    storageProvider: StorageProviderLiteral,
+    status: Schema.Literal("CONNECTED"),
+    externalDestinationUrl: Schema.String,
+  }),
+  Schema.Struct({
+    storageProvider: StorageProviderLiteral,
+    status: Schema.Literals(["NEEDS_REAUTHORIZATION", "NOT_CONNECTED"] as const),
+    externalDestinationUrl: Schema.Null,
+  }),
+]);
 
 export type PipeConnection = typeof PipeConnectionSchema.Type;
 

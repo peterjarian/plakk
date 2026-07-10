@@ -25,10 +25,16 @@ import {
 } from "@plakk/ui/components/settings";
 import { getInitials } from "@plakk/ui/lib/getInitials";
 import { useAuth } from "../hooks/useAuth.ts";
+import {
+  StorageProviderIcon,
+  storageProviderLabel,
+  useStorageStatus,
+} from "../hooks/useStorageStatus.tsx";
 import { navigate } from "../lib/navigate.ts";
 
 export function Settings() {
   const auth = useAuth();
+  const storageStatus = useStorageStatus();
   const [autoUpdate, setAutoUpdate] = useState(true);
   const [globalHotkey, setGlobalHotkey] = useState(true);
   const [toolbarWidget, setToolbarWidget] = useState(true);
@@ -94,26 +100,96 @@ export function Settings() {
                 </Button>
               </SettingsRow>
 
-              <SettingsRow className="px-4">
-                <SettingsRowMain>
-                  <SettingsRowIcon>
-                    <CloudOff className="size-4 text-amber-600" aria-hidden="true" />
-                  </SettingsRowIcon>
-                  <SettingsRowText
-                    title="Storage not linked"
-                    description="Connect storage to sync snippets."
-                  />
-                </SettingsRowMain>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => void window.ipc.openExternal("https://app.plakk.io/storage")}
-                >
-                  Connect
-                  <ArrowUpRight />
-                </Button>
-              </SettingsRow>
+              {storageStatus.kind === "loading" || storageStatus.kind === "failed" ? (
+                <SettingsRow className="px-4">
+                  <SettingsRowMain>
+                    <SettingsRowIcon>
+                      <CloudOff className="size-4 text-muted-foreground" aria-hidden="true" />
+                    </SettingsRowIcon>
+                    <SettingsRowText
+                      title={
+                        storageStatus.kind === "loading"
+                          ? "Checking storage"
+                          : "Storage status unavailable"
+                      }
+                      description={
+                        storageStatus.kind === "loading"
+                          ? "Checking your storage connection."
+                          : "Could not check storage. Try again shortly."
+                      }
+                    />
+                  </SettingsRowMain>
+                </SettingsRow>
+              ) : storageStatus.kind === "unlinked" ? (
+                <SettingsRow className="px-4">
+                  <SettingsRowMain>
+                    <SettingsRowIcon>
+                      <CloudOff className="size-4 text-amber-600" aria-hidden="true" />
+                    </SettingsRowIcon>
+                    <SettingsRowText
+                      title="Storage not linked"
+                      description="Connect storage to sync snippets."
+                    />
+                  </SettingsRowMain>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => void window.ipc.openExternal(storageStatus.actionUrl)}
+                  >
+                    Connect
+                    <ArrowUpRight />
+                  </Button>
+                </SettingsRow>
+              ) : storageStatus.kind === "needs-reauthorization" ? (
+                <SettingsRow className="px-4">
+                  <SettingsRowMain>
+                    <SettingsRowIcon>
+                      <StorageProviderIcon provider={storageStatus.provider} className="size-5" />
+                    </SettingsRowIcon>
+                    <SettingsRowText
+                      title={`${storageProviderLabel(storageStatus.provider)} needs reconnection`}
+                      description="Reconnect storage to resume syncing snippets."
+                    />
+                  </SettingsRowMain>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => void window.ipc.openExternal(storageStatus.actionUrl)}
+                  >
+                    Reconnect
+                    <ArrowUpRight />
+                  </Button>
+                </SettingsRow>
+              ) : (
+                <SettingsRow className="px-4">
+                  <SettingsRowMain>
+                    <SettingsRowIcon>
+                      <StorageProviderIcon provider={storageStatus.provider} className="size-5" />
+                    </SettingsRowIcon>
+                    <SettingsRowText
+                      title={`${storageProviderLabel(storageStatus.provider)} connected`}
+                      description={
+                        storageStatus.canSync
+                          ? "Syncing snippets to this storage provider."
+                          : storageStatus.account.blockedReasons.includes("billing")
+                            ? "Sync paused until billing is resolved."
+                            : "Sync is currently paused."
+                      }
+                    />
+                  </SettingsRowMain>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => void window.ipc.openExternal(storageStatus.destinationUrl)}
+                  >
+                    Open
+                    <ArrowUpRight />
+                  </Button>
+                </SettingsRow>
+              )}
             </SettingsSectionBody>
           </SettingsSection>
 

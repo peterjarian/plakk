@@ -6,6 +6,7 @@ import {
   StorageProviderError,
   type PreparedStorageUpload,
   type PrepareStorageUploadInput,
+  type StorageProviderDestination,
 } from "./types.ts";
 import type { StorageProviderAdapter } from "./StorageProvider.ts";
 
@@ -36,6 +37,8 @@ const providerError = (
 
 export const DropboxStorageProvider = {
   storageProvider: "DROPBOX",
+  getDestination: () =>
+    Effect.succeed({ url: "https://www.dropbox.com/home" } satisfies StorageProviderDestination),
   prepareUpload: Effect.fn("DropboxStorageProvider.prepareUpload")(function* (
     input: PrepareStorageUploadInput,
   ): Effect.fn.Return<PreparedStorageUpload, StorageProviderError, HttpClient.HttpClient> {

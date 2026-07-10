@@ -13,6 +13,10 @@ export class StorageProviderError extends Schema.TaggedErrorClass<StorageProvide
 
 export type { PreparedStorageUpload };
 
+export type StorageProviderDestination = {
+  readonly url: string;
+};
+
 export type PrepareStorageUploadInput = {
   readonly accessToken: string;
   readonly snippetId: string;

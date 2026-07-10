@@ -28,6 +28,11 @@ import { useActiveUploadTasks, useUploadActions } from "@plakk/ui/hooks/useUploa
 import { AsyncResult } from "effect/unstable/reactivity";
 import { SnippetComposer } from "../components/SnippetComposer.tsx";
 import { useAuth } from "../hooks/useAuth.ts";
+import {
+  StorageProviderIcon,
+  storageProviderLabel,
+  useStorageStatus,
+} from "../hooks/useStorageStatus.tsx";
 import { navigate } from "../lib/navigate.ts";
 import { startUploadProgress } from "../lib/uploadProgress.ts";
 
@@ -38,6 +43,7 @@ const deleteSnippetMutationAtom = plakkRpc.mutation("DeleteSnippet");
 
 export function Home() {
   const auth = useAuth();
+  const storageStatus = useStorageStatus();
   const [isDragging, setIsDragging] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [pendingExternalUrl, setPendingExternalUrl] = useState<string | null>(null);
@@ -70,9 +76,24 @@ export function Home() {
   const uploadActions = useUploadActions();
   const uploadTasks = useActiveUploadTasks();
   const snippets = [...uploadTasks, ...syncedSnippetResponse.items];
-  const accountBlocked = auth.accessToken === null;
+  const accountBlocked = !storageStatus.canSync;
   const user = auth.user;
   const hasUploads = uploadTasks.length > 0;
+  const syncPausedMessage =
+    storageStatus.kind === "failed"
+      ? "Storage status is unavailable. Try again shortly."
+      : storageStatus.kind === "connected" &&
+          storageStatus.account.blockedReasons.includes("billing")
+        ? "Sync paused. Finish billing to add snippets."
+        : storageStatus.kind === "connected"
+          ? "Sync is currently paused."
+          : storageStatus.kind === "needs-reauthorization"
+            ? `Sync paused. Reconnect ${storageProviderLabel(storageStatus.provider)} to add snippets.`
+            : "Sync paused. Finish storage setup to add snippets.";
+  const syncSetupUrl =
+    storageStatus.kind === "unlinked" || storageStatus.kind === "needs-reauthorization"
+      ? storageStatus.actionUrl
+      : accountSetupUrl;
 
   function addTextSnippet(text: string) {
     if (snippetHeaders !== null) {
@@ -85,13 +106,15 @@ export function Home() {
     contentType: string | null;
     fileName: string;
   }) {
+    if (storageStatus.kind !== "connected" || !storageStatus.canSync) return;
+
     const kind = snippetKindForFileName(input.fileName);
     if (kind !== "FILE" && kind !== "IMAGE") return;
 
     uploadActions.enqueue({
       ...input,
       kind,
-      storageProvider: "GOOGLE_DRIVE",
+      storageProvider: storageStatus.provider,
     });
   }
 
@@ -105,13 +128,13 @@ export function Home() {
       return;
     }
 
-    if (content.type === "image") {
+    if (content.type === "image" && storageStatus.kind === "connected") {
       uploadActions.enqueue({
         byteSize: 0,
         contentType: "image/png",
         fileName: "Pasted image",
         kind: "IMAGE",
-        storageProvider: "GOOGLE_DRIVE",
+        storageProvider: storageStatus.provider,
       });
       return;
     }
@@ -145,7 +168,7 @@ export function Home() {
 
   useEffect(
     () => window.ipc.clipboard.onPaste((content) => handleClipboardPaste(content)),
-    [accountBlocked, createTextSnippet, snippetHeaders, uploadActions],
+    [accountBlocked, createTextSnippet, snippetHeaders, storageStatus, uploadActions],
   );
 
   function openLink(url: string) {
@@ -178,6 +201,47 @@ export function Home() {
   }
 
   const pendingExternalHost = pendingExternalUrl ? new URL(pendingExternalUrl).host : "";
+
+  const storageAction =
+    storageStatus.kind === "unlinked" ? (
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        aria-label="Set up storage"
+        toolTip="Set up storage"
+        onClick={() => void window.ipc.openExternal(storageStatus.actionUrl)}
+      >
+        Set up storage
+        <ArrowUpRight className="text-muted-foreground" />
+      </Button>
+    ) : storageStatus.kind === "needs-reauthorization" ? (
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        aria-label={`Reconnect ${storageProviderLabel(storageStatus.provider)}`}
+        toolTip="Reconnect storage"
+        onClick={() => void window.ipc.openExternal(storageStatus.actionUrl)}
+      >
+        <StorageProviderIcon provider={storageStatus.provider} className="size-4" />
+        {storageProviderLabel(storageStatus.provider)}
+        <ArrowUpRight className="text-muted-foreground" />
+      </Button>
+    ) : storageStatus.kind === "connected" ? (
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        aria-label={`Open ${storageProviderLabel(storageStatus.provider)} in browser`}
+        toolTip={`Open ${storageProviderLabel(storageStatus.provider)}`}
+        onClick={() => void window.ipc.openExternal(storageStatus.destinationUrl)}
+      >
+        <StorageProviderIcon provider={storageStatus.provider} className="size-4" />
+        {storageProviderLabel(storageStatus.provider)}
+        <ArrowUpRight className="text-muted-foreground" />
+      </Button>
+    ) : null;
 
   if (user === null) return null;
 
@@ -222,40 +286,26 @@ export function Home() {
         user={user}
         onSettingsClick={() => navigate("settings")}
         onSignOutClick={() => void auth.signOut().then(() => navigate("welcome"))}
-        storageAction={
-          accountBlocked ? null : (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              aria-label="Open storage in browser"
-              toolTip="Open storage"
-              onClick={() => window.ipc.openExternal("https://app.plakk.io/storage")}
-            >
-              Google Drive
-              <ArrowUpRight className="text-muted-foreground" />
-            </Button>
-          )
-        }
+        storageAction={storageAction}
       />
 
       <div className="scrollbar-hidden min-h-0 flex-1 overflow-y-auto px-6 pb-4">
         <div className="sticky top-0 z-20 bg-background pt-3 pb-5">
-          {accountBlocked && (
+          {accountBlocked && storageStatus.kind !== "loading" && (
             <div className="mb-2 flex items-center gap-2 rounded-md bg-muted px-2.5 py-1.5 text-xs text-muted-foreground">
               <TriangleAlert className="size-3.5 shrink-0 text-amber-600" aria-hidden="true" />
-              <span className="min-w-0 flex-1 truncate">
-                Sync paused. Finish billing and setup storage to add snippets.
-              </span>
-              <Button
-                type="button"
-                variant="ghost"
-                size="xs"
-                onClick={() => window.ipc.openExternal(accountSetupUrl)}
-              >
-                Finish on web
-                <ArrowUpRight />
-              </Button>
+              <span className="min-w-0 flex-1 truncate">{syncPausedMessage}</span>
+              {storageStatus.kind !== "failed" && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  onClick={() => void window.ipc.openExternal(syncSetupUrl)}
+                >
+                  Finish on web
+                  <ArrowUpRight />
+                </Button>
+              )}
             </div>
           )}
           <SnippetComposer

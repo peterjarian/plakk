@@ -143,6 +143,7 @@ const StorageLive = StorageRpcs.of({
         return {
           storageProvider: input.storageProvider,
           status: "NOT_CONNECTED",
+          externalDestinationUrl: null,
         } satisfies PipeConnection;
       }
 
@@ -154,9 +155,54 @@ const StorageLive = StorageRpcs.of({
       const account = yield* HttpClientResponse.schemaBodyJson(WorkosConnectedAccountSchema)(
         response,
       ).pipe(Effect.orDie);
+      if (account.state === "connected") {
+        const storage = yield* StorageProviderService;
+        return yield* storage
+          .getDestinationUrl({
+            storageProvider: input.storageProvider,
+            workosUserId: currentUser.id,
+          })
+          .pipe(
+            Effect.map(
+              (externalDestinationUrl) =>
+                ({
+                  storageProvider: input.storageProvider,
+                  status: "CONNECTED",
+                  externalDestinationUrl,
+                }) satisfies PipeConnection,
+            ),
+            Effect.catchTags({
+              StorageNeedsReauthorizationError: () =>
+                Effect.succeed({
+                  storageProvider: input.storageProvider,
+                  status: "NEEDS_REAUTHORIZATION",
+                  externalDestinationUrl: null,
+                } satisfies PipeConnection),
+              StorageNotConnectedError: () =>
+                Effect.succeed({
+                  storageProvider: input.storageProvider,
+                  status: "NOT_CONNECTED",
+                  externalDestinationUrl: null,
+                } satisfies PipeConnection),
+              StorageCredentialsError: (error) =>
+                Effect.fail(
+                  new RpcError({ code: "INTERNAL_SERVER_ERROR", message: error.message }),
+                ),
+              StorageProviderError: (error) =>
+                Effect.fail(
+                  new RpcError({
+                    code: "INTERNAL_SERVER_ERROR",
+                    message: `${error.storageProvider}: ${error.message}`,
+                  }),
+                ),
+            }),
+          );
+      }
+
       return {
         storageProvider: input.storageProvider,
-        status: account.state === "connected" ? "CONNECTED" : "NEEDS_REAUTHORIZATION",
+        status: "NEEDS_REAUTHORIZATION",
+        externalDestinationUrl: null,
       } satisfies PipeConnection;
     }).pipe(Effect.annotateSpans({ storageProvider: input.storageProvider }));
   }),
