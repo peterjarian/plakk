@@ -20,6 +20,7 @@ type AuthState = {
 };
 
 const AuthContext = createContext<AuthState | null>(null);
+const AUTH_REFRESH_INTERVAL_MS = 30 * 1000;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus | null>(null);
@@ -27,31 +28,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let isMounted = true;
+    const applyStatus = (nextStatus: AuthStatus) => {
+      if (!isMounted) return;
+      setIssue(null);
+      setStatus(nextStatus);
+    };
+    const reportError = (error: unknown) => {
+      if (!isMounted) return;
+      setIssue({ message: error instanceof Error ? error.message : "Could not check session." });
+    };
+    const refresh = () => void window.ipc.auth.getAuth().then(applyStatus, reportError);
     const unsubscribeError = window.ipc.auth.onError((error) => {
       if (!isMounted) return;
       setIssue(error);
     });
-    const unsubscribe = window.ipc.auth.onStatusChanged((nextStatus) => {
-      if (!isMounted) return;
-      setIssue(null);
-      setStatus(nextStatus);
-    });
+    const unsubscribe = window.ipc.auth.onStatusChanged(applyStatus);
 
-    void window.ipc.auth.getAuth().then(
-      (nextStatus) => {
-        if (!isMounted) return;
-        setIssue(null);
-        setStatus(nextStatus);
-      },
-      (error) => {
-        if (!isMounted) return;
-        setIssue({ message: error instanceof Error ? error.message : "Could not check session." });
-        setStatus({ accessToken: null, user: null });
-      },
-    );
+    void window.ipc.auth.getAuth().then(applyStatus, (error) => {
+      if (!isMounted) return;
+      reportError(error);
+      setStatus({ accessToken: null, user: null });
+    });
+    const refreshInterval = window.setInterval(refresh, AUTH_REFRESH_INTERVAL_MS);
+    window.addEventListener("focus", refresh);
 
     return () => {
       isMounted = false;
+      window.clearInterval(refreshInterval);
+      window.removeEventListener("focus", refresh);
       unsubscribe();
       unsubscribeError();
     };
