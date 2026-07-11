@@ -308,6 +308,32 @@ describe("stored text finalization persistence", () => {
     });
   });
 
+  it("keeps a finalized snippet ready when download URL generation fails", async () => {
+    const pending = row({ uploadStatus: "UPLOADING" });
+    const state = statefulDb(pending);
+    const storage = {
+      downloadObject: () => Effect.succeed(new Uint8Array(pending.byteSize)),
+      getDownloadUrl: () =>
+        Effect.fail(
+          new StorageProviderError({
+            storageProvider: "GOOGLE_DRIVE",
+            message: "Provider unavailable.",
+          }),
+        ),
+    } as unknown as StorageProviderService["Service"];
+
+    await expect(
+      Effect.runPromise(
+        updateStoredSnippetUpload({ db: state.db }, storage, "user-1", {
+          id: pending.id,
+          uploadStatus: "READY",
+          storageObjectId: "drive-id",
+        }),
+      ),
+    ).resolves.toMatchObject({ uploadStatus: "READY", contentUrl: null });
+    expect(state.stored().uploadStatus).toBe("READY");
+  });
+
   it("preserves legacy persistence when same-size provider bytes are wrong", async () => {
     const legacy = row({
       title: "abc",

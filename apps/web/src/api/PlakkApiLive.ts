@@ -340,7 +340,9 @@ export const updateStoredSnippetUpload = Effect.fn(
   if (snippet === undefined) {
     return yield* new RpcError({ code: "NOT_FOUND", message: "Stored snippet not found." });
   }
-  return yield* withContentUrls(storage, snippet, workosUserId);
+  return yield* withContentUrls(storage, snippet, workosUserId).pipe(
+    Effect.orElseSucceed(() => toApiSnippet(snippet)),
+  );
 });
 
 const getConnectedAccountUrl = (provider: StorageProvider, workosUserId: string) =>
