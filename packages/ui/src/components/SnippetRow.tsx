@@ -22,6 +22,11 @@ export type TextSnippetContent =
   | { readonly state: "ready"; readonly text: string; readonly migrationError?: string }
   | { readonly state: "failed"; readonly message: string };
 
+export type ImageThumbnail =
+  | { readonly state: "loading" }
+  | { readonly state: "ready"; readonly url: string }
+  | { readonly state: "failed"; readonly message: string };
+
 const kindMeta: Record<SnippetKind, { Icon: typeof Type }> = {
   TEXT: { Icon: Type },
   LINK: { Icon: LinkIcon },
@@ -43,6 +48,10 @@ export function SnippetRow(props: {
   onRetryContent?: () => void;
   onStopUpload: () => void;
   textContent?: TextSnippetContent;
+  imageThumbnail?: ImageThumbnail;
+  onThumbnailError?: () => void;
+  copyDisabled?: boolean;
+  copyError?: string;
 }) {
   const {
     snippet,
@@ -53,6 +62,10 @@ export function SnippetRow(props: {
     onRetryContent,
     onStopUpload,
     textContent,
+    imageThumbnail,
+    onThumbnailError,
+    copyDisabled = false,
+    copyError,
   } = props;
   const { Icon } = kindMeta[snippet.kind];
   const uploadProgress = isUploadTask(snippet) ? snippet.progress : undefined;
@@ -94,8 +107,17 @@ export function SnippetRow(props: {
         tabIndex={0}
         className="group relative flex items-center gap-2.5 rounded-lg px-2 py-2 transition-colors outline-none select-none hover:bg-muted/60 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-offset-1 focus-visible:ring-offset-background focus-visible:outline-none focus-within:bg-muted/60"
       >
-        <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-          <Icon className="size-4" />
+        <span className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted text-muted-foreground">
+          {snippet.kind === "IMAGE" && imageThumbnail?.state === "ready" ? (
+            <img
+              src={imageThumbnail.url}
+              alt=""
+              className="size-full object-cover"
+              onError={onThumbnailError}
+            />
+          ) : (
+            <Icon className="size-4" />
+          )}
         </span>
 
         <div className="min-w-0 flex-1">
@@ -146,7 +168,9 @@ export function SnippetRow(props: {
                   variant="ghost"
                   size="icon-sm"
                   aria-label={copied ? "Copied" : "Copy"}
-                  disabled={snippet.kind === "TEXT" && textContent?.state !== "ready"}
+                  disabled={
+                    copyDisabled || (snippet.kind === "TEXT" && textContent?.state !== "ready")
+                  }
                   onClick={onCopy}
                 >
                   {copied ? <Check className="text-emerald-500" /> : <Copy />}
@@ -189,6 +213,16 @@ export function SnippetRow(props: {
             </>
           )}
         </div>
+        {copyError && (
+          <span className="sr-only" role="status">
+            {copyError}
+          </span>
+        )}
+        {snippet.kind === "IMAGE" && imageThumbnail?.state === "failed" && (
+          <span className="sr-only" role="status">
+            {imageThumbnail.message}
+          </span>
+        )}
       </div>
     </li>
   );

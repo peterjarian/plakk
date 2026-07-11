@@ -122,6 +122,8 @@ export const StorageUploadResultSchema = Schema.Struct({
   storageObjectId: Schema.String,
 }) satisfies Schema.Schema<StorageUploadResult>;
 
+const SnippetThumbnailSchema = Schema.Struct({ url: Schema.String });
+
 export const ipcMethods = {
   authGet: method({
     channel: "auth:get",
@@ -150,6 +152,21 @@ export const ipcMethods = {
   }),
   storageCancelUpload: method({
     channel: "storage:cancel-upload",
+    payload: SnippetIdSchema,
+    result: Schema.Void,
+  }),
+  snippetCopy: method({
+    channel: "snippet:copy",
+    payload: SnippetIdSchema,
+    result: Schema.Void,
+  }),
+  snippetGetThumbnail: method({
+    channel: "snippet:get-thumbnail",
+    payload: SnippetIdSchema,
+    result: SnippetThumbnailSchema,
+  }),
+  snippetForget: method({
+    channel: "snippet:forget",
     payload: SnippetIdSchema,
     result: Schema.Void,
   }),
