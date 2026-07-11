@@ -40,3 +40,5 @@ export type DownloadStorageObjectInput = {
   readonly storageObjectId: string;
   readonly expectedByteSize: number;
 };
+
+export type GetStorageObjectUrlInput = Omit<DownloadStorageObjectInput, "expectedByteSize">;

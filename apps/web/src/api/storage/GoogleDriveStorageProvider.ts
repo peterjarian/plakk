@@ -7,6 +7,7 @@ import {
   StorageProviderError,
   StorageObjectNotFoundError,
   type DownloadStorageObjectInput,
+  type GetStorageObjectUrlInput,
   type PreparedStorageUpload,
   type PrepareStorageUploadInput,
   type StorageProviderDestination,
@@ -32,6 +33,7 @@ const GoogleDriveFolderList = Schema.Struct({
   files: Schema.Array(Schema.Struct({ id: Schema.String })),
 });
 const GoogleDriveFolder = Schema.Struct({ id: Schema.String });
+const GoogleDriveDownload = Schema.Struct({ webContentLink: Schema.String });
 
 const providerError = (
   input: Pick<PrepareStorageUploadInput, "storageProvider">,
@@ -214,5 +216,40 @@ export const GoogleDriveStorageProvider = {
       return yield* providerError(input, `Stored object download failed: ${response.status}`);
     }
     return yield* readStorageObjectBytes(response, input);
+  }),
+  getDownloadUrl: Effect.fn("GoogleDriveStorageProvider.getDownloadUrl")(function* (
+    input: GetStorageObjectUrlInput,
+  ): Effect.fn.Return<
+    string,
+    StorageProviderError | StorageObjectNotFoundError,
+    HttpClient.HttpClient
+  > {
+    const response = yield* HttpClient.execute(
+      HttpClientRequest.get(
+        `${GOOGLE_DRIVE_FILES_URL}/${encodeURIComponent(input.storageObjectId)}`,
+      ).pipe(
+        HttpClientRequest.bearerToken(input.accessToken),
+        HttpClientRequest.setUrlParam("fields", "webContentLink"),
+      ),
+    ).pipe(
+      Effect.mapError((cause) =>
+        providerError(input, "Could not get the stored object URL.", cause),
+      ),
+    );
+    if (response.status === 404) {
+      return yield* new StorageObjectNotFoundError({
+        storageProvider: input.storageProvider,
+        message: "The stored object no longer exists.",
+      });
+    }
+    if (response.status < 200 || response.status >= 300) {
+      return yield* providerError(input, `Stored object URL failed: ${response.status}`);
+    }
+    return yield* HttpClientResponse.schemaBodyJson(GoogleDriveDownload)(response).pipe(
+      Effect.map((download) => download.webContentLink),
+      Effect.mapError((cause) =>
+        providerError(input, "Stored object response did not include webContentLink.", cause),
+      ),
+    );
   }),
 } satisfies StorageProviderAdapter;

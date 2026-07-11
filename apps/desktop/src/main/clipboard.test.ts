@@ -7,6 +7,7 @@ const electron = vi.hoisted(() => ({
   writeImage: vi.fn(),
   createFromBuffer: vi.fn(),
   getPath: vi.fn(() => "/tmp"),
+  fetch: vi.fn(),
 }));
 
 const fs = vi.hoisted(() => ({ writeFileSync: vi.fn() }));
@@ -24,9 +25,10 @@ vi.mock("electron", () => ({
     writeImage: electron.writeImage,
   },
   nativeImage: { createFromBuffer: electron.createFromBuffer },
+  net: { fetch: electron.fetch },
 }));
 
-import { writeSnippetToClipboard } from "./clipboard.ts";
+import { downloadSnippetToClipboard, writeSnippetToClipboard } from "./clipboard.ts";
 
 describe("stored snippet clipboard writes", () => {
   it("writes decodable images as native images", async () => {
@@ -82,5 +84,44 @@ describe("stored snippet clipboard writes", () => {
     )?.[1];
     expect(fileUrl?.toString()).toMatch(/^file:\/\//);
     expect(electron.writeBuffer).not.toHaveBeenCalledWith("application/pdf", Buffer.from([1, 2]));
+  });
+
+  it("downloads signed content directly before copying it", async () => {
+    electron.fetch.mockResolvedValue(new Response(new Uint8Array([1, 2])));
+
+    await Effect.runPromise(
+      downloadSnippetToClipboard({
+        kind: "FILE",
+        storageProvider: "DROPBOX",
+        url: "https://dl.dropboxusercontent.com/signed",
+        fileName: "report.pdf",
+        contentType: "application/pdf",
+        byteSize: 2,
+      }),
+    );
+
+    expect(electron.fetch).toHaveBeenCalledWith("https://dl.dropboxusercontent.com/signed");
+    expect(fs.writeFileSync).toHaveBeenCalledWith(
+      expect.stringContaining("-report.pdf"),
+      new Uint8Array([1, 2]),
+    );
+  });
+
+  it("rejects a renderer-supplied URL outside the selected storage provider", async () => {
+    const result = await Effect.runPromise(
+      Effect.exit(
+        downloadSnippetToClipboard({
+          kind: "FILE",
+          storageProvider: "DROPBOX",
+          url: "https://localhost/admin",
+          fileName: "report.pdf",
+          contentType: "application/pdf",
+          byteSize: 2,
+        }),
+      ),
+    );
+
+    expect(result._tag).toBe("Failure");
+    expect(electron.fetch).not.toHaveBeenCalledWith("https://localhost/admin");
   });
 });

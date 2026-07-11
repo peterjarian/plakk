@@ -2,9 +2,16 @@ import { statSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { basename, extname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { app, clipboard, nativeImage } from "electron";
+import { app, clipboard, nativeImage, net } from "electron";
 import { Data, Effect } from "effect";
-import type { SnippetContent } from "./snippetCache.ts";
+import type { StorageProvider } from "@plakk/shared";
+
+type SnippetContent = {
+  readonly bytes: Uint8Array;
+  readonly kind: "FILE" | "IMAGE";
+  readonly fileName: string;
+  readonly contentType: string | null;
+};
 
 export class ReadClipboardError extends Data.TaggedError("ReadClipboardError")<{
   readonly cause: unknown;
@@ -264,3 +271,43 @@ export const writeSnippetToClipboard = Effect.fn("writeSnippetToClipboard")(func
     catch: (cause) => new WriteClipboardError({ cause }),
   });
 });
+
+export const downloadSnippetToClipboard = Effect.fn("downloadSnippetToClipboard")(function* (
+  snippet: Omit<SnippetContent, "bytes"> & {
+    readonly storageProvider: StorageProvider;
+    readonly url: string;
+    readonly byteSize: number;
+  },
+) {
+  if (!isSignedStorageUrl(snippet.storageProvider, snippet.url)) {
+    return yield* new WriteClipboardError({ cause: new Error("Invalid storage download URL.") });
+  }
+  const bytes = yield* Effect.tryPromise({
+    try: async () => {
+      const response = await net.fetch(snippet.url);
+      if (!response.ok) throw new Error(`Snippet download failed: ${response.status}`);
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      if (bytes.byteLength !== snippet.byteSize)
+        throw new Error("Snippet size does not match metadata.");
+      return bytes;
+    },
+    catch: (cause) => new WriteClipboardError({ cause }),
+  });
+  return yield* writeSnippetToClipboard({ ...snippet, bytes });
+});
+
+const isSignedStorageUrl = (storageProvider: StorageProvider, value: string): boolean => {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:") return false;
+    if (storageProvider === "GOOGLE_DRIVE") {
+      return url.hostname === "drive.google.com" || url.hostname.endsWith(".googleusercontent.com");
+    }
+    if (storageProvider === "ONE_DRIVE") {
+      return url.hostname.endsWith(".1drv.com") || url.hostname.endsWith(".sharepoint.com");
+    }
+    return url.hostname.endsWith(".dropboxusercontent.com");
+  } catch {
+    return false;
+  }
+};

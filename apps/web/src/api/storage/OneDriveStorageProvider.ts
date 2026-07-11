@@ -6,6 +6,7 @@ import {
   StorageProviderError,
   StorageObjectNotFoundError,
   type DownloadStorageObjectInput,
+  type GetStorageObjectUrlInput,
   type PreparedStorageUpload,
   type PrepareStorageUploadInput,
   type StorageProviderDestination,
@@ -28,6 +29,7 @@ const OneDriveUploadSession = Schema.Struct({
   uploadUrl: Schema.String,
   expirationDateTime: Schema.String,
 });
+const OneDriveDownload = Schema.Struct({ "@microsoft.graph.downloadUrl": Schema.String });
 
 const encodeOneDrivePath = (fileName: string) =>
   fileName
@@ -129,5 +131,40 @@ export const OneDriveStorageProvider = {
       return yield* providerError(input, `Stored object download failed: ${response.status}`);
     }
     return yield* readStorageObjectBytes(response, input);
+  }),
+  getDownloadUrl: Effect.fn("OneDriveStorageProvider.getDownloadUrl")(function* (
+    input: GetStorageObjectUrlInput,
+  ): Effect.fn.Return<
+    string,
+    StorageProviderError | StorageObjectNotFoundError,
+    HttpClient.HttpClient
+  > {
+    const response = yield* HttpClient.execute(
+      HttpClientRequest.get(
+        `${ONE_DRIVE_ITEMS_URL}/${encodeURIComponent(input.storageObjectId)}`,
+      ).pipe(
+        HttpClientRequest.bearerToken(input.accessToken),
+        HttpClientRequest.setUrlParam("$select", "@microsoft.graph.downloadUrl"),
+      ),
+    ).pipe(
+      Effect.mapError((cause) =>
+        providerError(input, "Could not get the stored object URL.", cause),
+      ),
+    );
+    if (response.status === 404) {
+      return yield* new StorageObjectNotFoundError({
+        storageProvider: input.storageProvider,
+        message: "The stored object no longer exists.",
+      });
+    }
+    if (response.status < 200 || response.status >= 300) {
+      return yield* providerError(input, `Stored object URL failed: ${response.status}`);
+    }
+    return yield* HttpClientResponse.schemaBodyJson(OneDriveDownload)(response).pipe(
+      Effect.map((download) => download["@microsoft.graph.downloadUrl"]),
+      Effect.mapError((cause) =>
+        providerError(input, "Stored object response did not include downloadUrl.", cause),
+      ),
+    );
   }),
 } satisfies StorageProviderAdapter;

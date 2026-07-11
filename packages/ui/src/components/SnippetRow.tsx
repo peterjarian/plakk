@@ -23,11 +23,6 @@ export type TextSnippetContent =
   | { readonly state: "ready"; readonly text: string; readonly migrationError?: string }
   | { readonly state: "failed"; readonly message: string };
 
-export type ImageThumbnail =
-  | { readonly state: "loading" }
-  | { readonly state: "ready"; readonly url: string }
-  | { readonly state: "failed"; readonly message: string };
-
 const kindMeta: Record<SnippetKind, { Icon: typeof Type }> = {
   TEXT: { Icon: Type },
   LINK: { Icon: LinkIcon },
@@ -89,8 +84,7 @@ export function SnippetRow(props: {
   onRetryContent?: () => void;
   onStopUpload: () => void;
   textContent?: TextSnippetContent;
-  imageThumbnail?: ImageThumbnail;
-  onThumbnailError?: () => void;
+  thumbnailUrl?: string | null;
   copyDisabled?: boolean;
   copyError?: string;
 }) {
@@ -104,8 +98,7 @@ export function SnippetRow(props: {
     onRetryContent,
     onStopUpload,
     textContent,
-    imageThumbnail,
-    onThumbnailError,
+    thumbnailUrl,
     copyDisabled = false,
     copyError,
   } = props;
@@ -150,13 +143,8 @@ export function SnippetRow(props: {
         className="group relative flex items-center gap-2.5 rounded-lg px-2 py-2 transition-colors outline-none select-none hover:bg-muted/60 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-offset-1 focus-visible:ring-offset-background focus-visible:outline-none focus-within:bg-muted/60"
       >
         <span className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted text-muted-foreground">
-          {snippet.kind === "IMAGE" && imageThumbnail?.state === "ready" ? (
-            <img
-              src={imageThumbnail.url}
-              alt=""
-              className="size-full object-cover"
-              onError={onThumbnailError}
-            />
+          {snippet.kind === "IMAGE" && thumbnailUrl !== null && thumbnailUrl !== undefined ? (
+            <img src={thumbnailUrl} alt="" className="size-full object-cover" />
           ) : (
             <Icon className="size-4" />
           )}
@@ -258,11 +246,6 @@ export function SnippetRow(props: {
         {copyError && (
           <span className="sr-only" role="status">
             {copyError}
-          </span>
-        )}
-        {snippet.kind === "IMAGE" && imageThumbnail?.state === "failed" && (
-          <span className="sr-only" role="status">
-            {imageThumbnail.message}
           </span>
         )}
       </div>

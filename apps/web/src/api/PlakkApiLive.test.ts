@@ -5,19 +5,12 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 
-import {
-  StorageCredentialsError,
-  StorageNeedsReauthorizationError,
-  StorageNotConnectedError,
-  type StorageProviderService,
-} from "./storage/StorageProvider.ts";
+import { type StorageProviderService } from "./storage/StorageProvider.ts";
 import { StorageProviderError } from "./storage/types.ts";
-import { toApiSnippet } from "./transformers/toApiSnippet.ts";
 import {
   confirmTextSnippetUpload,
   insertSnippet,
   prepareSnippetUpload,
-  readSnippetContent,
   updateStoredSnippetUpload,
 } from "./PlakkApiLive.ts";
 
@@ -127,130 +120,6 @@ describe("text snippet persistence and authorization", () => {
       ownerWorkosUserId: "user-1",
       uploadStatus: "UPLOADING",
     });
-  });
-
-  it("returns exact provider bytes for an owned READY text snippet", async () => {
-    const bytes = new Uint8Array([0xf0, 0x9f, 0x91, 0x8b]);
-    const owned = row({ byteSize: bytes.byteLength });
-    const downloadObject = vi.fn(() => Effect.succeed(bytes));
-    const storage = { downloadObject } as unknown as StorageProviderService["Service"];
-
-    await expect(
-      Effect.runPromise(readSnippetContent({ db: queryDb([owned]) }, storage, "user-1", owned.id)),
-    ).resolves.toEqual({
-      bytes,
-      kind: "TEXT",
-      fileName: owned.fileName,
-      contentType: owned.contentType,
-    });
-    expect(downloadObject).toHaveBeenCalledWith({
-      storageProvider: "GOOGLE_DRIVE",
-      storageObjectId: "drive-id",
-      expectedByteSize: bytes.byteLength,
-      workosUserId: "user-1",
-    });
-  });
-
-  it("returns exact provider bytes and metadata for an owned READY image snippet", async () => {
-    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
-    const image = row({
-      kind: "IMAGE",
-      title: "photo.png",
-      fileName: "photo.png",
-      contentType: "image/png",
-      byteSize: bytes.byteLength,
-    });
-    const storage = {
-      downloadObject: () => Effect.succeed(bytes),
-    } as unknown as StorageProviderService["Service"];
-
-    await expect(
-      Effect.runPromise(readSnippetContent({ db: queryDb([image]) }, storage, "user-1", image.id)),
-    ).resolves.toEqual({
-      bytes,
-      kind: "IMAGE",
-      fileName: "photo.png",
-      contentType: "image/png",
-    });
-  });
-
-  it("does not resolve provider content even if the database returns another owner's row", async () => {
-    const downloadObject = vi.fn();
-    const storage = { downloadObject } as unknown as StorageProviderService["Service"];
-
-    const failure = await Effect.runPromise(
-      Effect.flip(readSnippetContent({ db: queryDb([row()]) }, storage, "user-2", row().id)),
-    );
-
-    expect(failure).toMatchObject({ _tag: "RpcError", code: "NOT_FOUND" });
-    expect(downloadObject).not.toHaveBeenCalled();
-  });
-
-  it("returns legacy database text as bytes without clearing it before upload finalization", async () => {
-    const legacy = row({
-      title: "héllo 👋\n",
-      storageProvider: null,
-      storageObjectId: null,
-    });
-    const downloadObject = vi.fn();
-    const storage = { downloadObject } as unknown as StorageProviderService["Service"];
-
-    const result = await Effect.runPromise(
-      readSnippetContent({ db: queryDb([legacy]) }, storage, "user-1", legacy.id),
-    );
-
-    expect(result.bytes).toEqual(new TextEncoder().encode(legacy.title));
-    expect(toApiSnippet(legacy).title).toBe("Text snippet");
-    expect(downloadObject).not.toHaveBeenCalled();
-    expect(legacy.title).toBe("héllo 👋\n");
-  });
-
-  it("rejects downloaded bytes whose size differs from metadata", async () => {
-    const storage = {
-      downloadObject: () => Effect.succeed(new Uint8Array([1])),
-    } as unknown as StorageProviderService["Service"];
-
-    const failure = await Effect.runPromise(
-      Effect.flip(readSnippetContent({ db: queryDb([row()]) }, storage, "user-1", row().id)),
-    );
-
-    expect(failure).toMatchObject({
-      _tag: "RpcError",
-      code: "INTERNAL_SERVER_ERROR",
-      message: "Stored object size does not match snippet metadata.",
-    });
-  });
-
-  it.each([
-    {
-      error: new StorageNotConnectedError({ message: "Connect storage." }),
-      code: "FORBIDDEN",
-    },
-    {
-      error: new StorageNeedsReauthorizationError({ message: "Reconnect storage." }),
-      code: "FORBIDDEN",
-    },
-    {
-      error: new StorageCredentialsError({ message: "Credentials unavailable." }),
-      code: "INTERNAL_SERVER_ERROR",
-    },
-    {
-      error: new StorageProviderError({
-        storageProvider: "GOOGLE_DRIVE",
-        message: "Provider unavailable.",
-      }),
-      code: "INTERNAL_SERVER_ERROR",
-    },
-  ])("maps $error._tag content failures to $code", async ({ error, code }) => {
-    const storage = {
-      downloadObject: () => Effect.fail(error),
-    } as unknown as StorageProviderService["Service"];
-
-    const failure = await Effect.runPromise(
-      Effect.flip(readSnippetContent({ db: queryDb([row()]) }, storage, "user-1", row().id)),
-    );
-
-    expect(failure).toMatchObject({ _tag: "RpcError", code });
   });
 });
 
@@ -413,9 +282,10 @@ describe("stored text finalization persistence", () => {
     const state = statefulDb(legacy);
     const storage = {
       downloadObject: () => Effect.succeed(bytes),
+      getDownloadUrl: () => Effect.succeed("https://storage.example/signed"),
     } as unknown as StorageProviderService["Service"];
 
-    await Effect.runPromise(
+    const result = await Effect.runPromise(
       updateStoredSnippetUpload({ db: state.db }, storage, "user-1", {
         id: legacy.id,
         uploadStatus: "READY",
@@ -431,6 +301,37 @@ describe("stored text finalization persistence", () => {
       uploadStatus: "READY",
     });
     expect(state.updateCount()).toBe(1);
+    expect(result).toMatchObject({
+      contentUrl: "https://storage.example/signed",
+      thumbnailUrl: null,
+      textContent: null,
+    });
+  });
+
+  it("keeps a finalized snippet ready when download URL generation fails", async () => {
+    const pending = row({ uploadStatus: "UPLOADING" });
+    const state = statefulDb(pending);
+    const storage = {
+      downloadObject: () => Effect.succeed(new Uint8Array(pending.byteSize)),
+      getDownloadUrl: () =>
+        Effect.fail(
+          new StorageProviderError({
+            storageProvider: "GOOGLE_DRIVE",
+            message: "Provider unavailable.",
+          }),
+        ),
+    } as unknown as StorageProviderService["Service"];
+
+    await expect(
+      Effect.runPromise(
+        updateStoredSnippetUpload({ db: state.db }, storage, "user-1", {
+          id: pending.id,
+          uploadStatus: "READY",
+          storageObjectId: "drive-id",
+        }),
+      ),
+    ).resolves.toMatchObject({ uploadStatus: "READY", contentUrl: null });
+    expect(state.stored().uploadStatus).toBe("READY");
   });
 
   it("preserves legacy persistence when same-size provider bytes are wrong", async () => {
