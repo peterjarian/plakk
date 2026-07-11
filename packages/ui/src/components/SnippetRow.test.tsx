@@ -42,6 +42,24 @@ describe("SnippetRow", () => {
     expect(markup).toContain('tabindex="0"');
     expect(markup).toContain("select-none");
   });
+
+  it("shows a spinner while copying", () => {
+    const markup = renderToStaticMarkup(
+      <SnippetRow
+        snippet={snippet}
+        now={now}
+        copied={false}
+        copying
+        onCopy={() => undefined}
+        onDelete={() => undefined}
+        onStopUpload={() => undefined}
+        textContent={{ state: "ready", text: "A text snippet" }}
+      />,
+    );
+
+    expect(markup).toContain('aria-label="Copying"');
+    expect(markup).toContain("animate-spin");
+  });
 });
 
 describe("formatSnippetDate", () => {

@@ -53,6 +53,7 @@ export function Home({ active = true }: { active?: boolean }) {
   const openStorageSetup = useStorageSetup();
   const [isDragging, setIsDragging] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [copyingId, setCopyingId] = useState<string | null>(null);
   const [pendingExternalUrl, setPendingExternalUrl] = useState<string | null>(null);
   const [skipExternalLinkWarning, setSkipExternalLinkWarning] = useState(false);
   const [showExternalLinkWarning, setShowExternalLinkWarning] = useState(true);
@@ -382,8 +383,13 @@ export function Home({ active = true }: { active?: boolean }) {
   }
 
   async function copySnippet(snippet: (typeof snippets)[number]) {
+    const needsCopySpinner =
+      (snippet.kind === "FILE" || snippet.kind === "IMAGE") &&
+      !snippet.fileName.toLowerCase().endsWith(".txt");
     try {
       if ("phase" in snippet) throw new Error("Finish uploading before copying this snippet.");
+
+      if (needsCopySpinner) setCopyingId(snippet.id);
 
       if (snippet.kind === "FILE" || snippet.kind === "IMAGE") {
         if (snippet.contentUrl === null || snippet.storageProvider === null) {
@@ -413,6 +419,8 @@ export function Home({ active = true }: { active?: boolean }) {
         ...errors,
         [snippet.id]: error instanceof Error ? error.message : "Could not copy this snippet.",
       }));
+    } finally {
+      if (needsCopySpinner) setCopyingId((id) => (id === snippet.id ? null : id));
     }
   }
 
@@ -603,6 +611,7 @@ export function Home({ active = true }: { active?: boolean }) {
               snippet={snippet}
               now={now}
               copied={copiedId === snippet.id}
+              copying={copyingId === snippet.id}
               onCopy={() => void copySnippet(snippet)}
               copyDisabled={"phase" in snippet}
               copyError={copyErrors[snippet.id]}

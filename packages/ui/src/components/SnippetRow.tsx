@@ -7,6 +7,7 @@ import {
   Copy,
   FileText,
   ImageIcon,
+  LoaderCircle,
   LinkIcon,
   RotateCw,
   Trash2,
@@ -86,6 +87,7 @@ export function SnippetRow(props: {
   textContent?: TextSnippetContent;
   thumbnailUrl?: string | null;
   copyDisabled?: boolean;
+  copying?: boolean;
   copyError?: string;
 }) {
   const {
@@ -100,6 +102,7 @@ export function SnippetRow(props: {
     textContent,
     thumbnailUrl,
     copyDisabled = false,
+    copying = false,
     copyError,
   } = props;
   const { Icon } = kindMeta[snippet.kind];
@@ -197,13 +200,21 @@ export function SnippetRow(props: {
                   type="button"
                   variant="ghost"
                   size="icon-sm"
-                  aria-label={copied ? "Copied" : "Copy"}
+                  aria-label={copying ? "Copying" : copied ? "Copied" : "Copy"}
                   disabled={
-                    copyDisabled || (snippet.kind === "TEXT" && textContent?.state !== "ready")
+                    copying ||
+                    copyDisabled ||
+                    (snippet.kind === "TEXT" && textContent?.state !== "ready")
                   }
                   onClick={onCopy}
                 >
-                  {copied ? <Check className="text-emerald-500" /> : <Copy />}
+                  {copying ? (
+                    <LoaderCircle className="animate-spin" />
+                  ) : copied ? (
+                    <Check className="text-emerald-500" />
+                  ) : (
+                    <Copy />
+                  )}
                 </Button>
                 {snippet.kind === "LINK" && (
                   <>
