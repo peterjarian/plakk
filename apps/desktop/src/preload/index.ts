@@ -40,6 +40,7 @@ export type DesktopApi = {
   };
   readonly snippets: {
     readonly copy: (id: string) => Promise<void>;
+    readonly read: (id: string) => Promise<Uint8Array>;
   };
   readonly tray: {
     readonly getAccountState: () => Promise<TrayAccountState>;
@@ -95,6 +96,7 @@ const desktopApi = {
   },
   snippets: {
     copy: (snippet) => invoke(ipcMethods.snippetCopy, snippet),
+    read: (snippet) => invoke(ipcMethods.snippetRead, snippet),
   },
   tray: {
     getAccountState: () => invoke(ipcMethods.trayGetAccountState, undefined),

@@ -296,6 +296,24 @@ export const downloadSnippetToClipboard = Effect.fn("downloadSnippetToClipboard"
     };
   },
 ) {
+  const bytes = yield* downloadSnippetBytes(snippet);
+  yield* Effect.logInfo("Downloaded stored snippet", { byteSize: bytes.byteLength });
+  yield* writeSnippetToClipboard({ ...snippet, bytes });
+  yield* Effect.logInfo("Wrote stored snippet to clipboard", {
+    formats: clipboard.availableFormats(),
+  });
+});
+
+export const downloadSnippetBytes = Effect.fn("downloadSnippetBytes")(function* (
+  snippet: Omit<SnippetContent, "bytes"> & {
+    readonly storageProvider: StorageProvider;
+    readonly byteSize: number;
+    readonly download: {
+      readonly url: string;
+      readonly headers: ReadonlyArray<{ readonly name: string; readonly value: string }>;
+    };
+  },
+) {
   if (!isSignedStorageUrl(snippet.storageProvider, snippet.download.url)) {
     return yield* new WriteClipboardError({ cause: new Error("Invalid storage download URL.") });
   }
@@ -304,7 +322,7 @@ export const downloadSnippetToClipboard = Effect.fn("downloadSnippetToClipboard"
     storageProvider: snippet.storageProvider,
     downloadHost: new URL(snippet.download.url).hostname,
   });
-  const bytes = yield* Effect.tryPromise({
+  return yield* Effect.tryPromise({
     try: async () => {
       const response = await net.fetch(snippet.download.url, {
         headers: Object.fromEntries(
@@ -319,11 +337,6 @@ export const downloadSnippetToClipboard = Effect.fn("downloadSnippetToClipboard"
       return bytes;
     },
     catch: (cause) => new WriteClipboardError({ cause }),
-  });
-  yield* Effect.logInfo("Downloaded stored snippet", { byteSize: bytes.byteLength });
-  yield* writeSnippetToClipboard({ ...snippet, bytes });
-  yield* Effect.logInfo("Wrote stored snippet to clipboard", {
-    formats: clipboard.availableFormats(),
   });
 });
 

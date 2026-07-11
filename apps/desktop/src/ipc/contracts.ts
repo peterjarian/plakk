@@ -158,6 +158,11 @@ export const ipcMethods = {
     payload: SnippetIdSchema,
     result: Schema.Void,
   }),
+  snippetRead: method({
+    channel: "snippet:read",
+    payload: SnippetIdSchema,
+    result: Schema.Uint8Array,
+  }),
   trayGetAccountState: method({
     channel: "tray:get-account-state",
     payload: Schema.Void,

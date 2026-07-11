@@ -21,6 +21,7 @@ import { AuthService } from "./auth/AuthService.ts";
 import {
   consumeTemporaryClipboardFile,
   readClipboard,
+  downloadSnippetBytes,
   downloadSnippetToClipboard,
 } from "./clipboard.ts";
 import { createTrayWindowController } from "./trayWindow.ts";
@@ -86,6 +87,16 @@ handle(ipcMethods.snippetCopy, async (id) => {
   if (session === null) throw new Error("Sign in to load stored snippets.");
   const payload = await runEffect(Effect.scoped(getSnippetCopyPayload(session.accessToken, id)));
   await runEffect(downloadSnippetToClipboard(payload));
+});
+
+handle(ipcMethods.snippetRead, async (id) => {
+  const session = await runAuth(
+    AuthService.use((auth) => auth.getSession()),
+    "Could not load the stored snippet.",
+  );
+  if (session === null) throw new Error("Sign in to load stored snippets.");
+  const payload = await runEffect(Effect.scoped(getSnippetCopyPayload(session.accessToken, id)));
+  return runEffect(downloadSnippetBytes(payload));
 });
 
 function authErrorMessage(error: unknown, fallback: string): string {

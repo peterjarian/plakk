@@ -57,6 +57,7 @@ export function Home({ active = true }: { active?: boolean }) {
   const [skipExternalLinkWarning, setSkipExternalLinkWarning] = useState(false);
   const [showExternalLinkWarning, setShowExternalLinkWarning] = useState(true);
   const [textContents, setTextContents] = useState<Record<string, TextSnippetContent>>({});
+  const [thumbnailUrls, setThumbnailUrls] = useState<Record<string, string>>({});
   const [copyErrors, setCopyErrors] = useState<Record<string, string>>({});
   const [contentUrlGeneration, setContentUrlGeneration] = useState(0);
   const [now, setNow] = useState(Date.now);
@@ -259,6 +260,42 @@ export function Home({ active = true }: { active?: boolean }) {
       }
     }
   }, [loadTextContent, syncedSnippetResponse.items, textContents]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const urls: string[] = [];
+
+    void Promise.all(
+      syncedSnippetResponse.items
+        .filter(
+          (snippet) =>
+            snippet.kind === "IMAGE" &&
+            snippet.uploadStatus === "READY" &&
+            snippet.storageProvider === "GOOGLE_DRIVE",
+        )
+        .map(async (snippet) => {
+          try {
+            const bytes = await window.ipc.snippets.read(snippet.id);
+            if (cancelled) return;
+            const url = URL.createObjectURL(
+              new Blob([Uint8Array.from(bytes)], {
+                type: snippet.contentType ?? "application/octet-stream",
+              }),
+            );
+            urls.push(url);
+            setThumbnailUrls((current) => ({ ...current, [snippet.id]: url }));
+          } catch {
+            // The image icon remains visible when preview loading fails.
+          }
+        }),
+    );
+
+    return () => {
+      cancelled = true;
+      for (const url of urls) URL.revokeObjectURL(url);
+      setThumbnailUrls({});
+    };
+  }, [syncedSnippetResponse.items]);
 
   function enqueueFileSnippet(file: Pick<File, "name" | "size" | "type">, filePath?: string) {
     if (storageStatus.kind !== "connected" || !storageStatus.canSync) return;
@@ -588,7 +625,10 @@ export function Home({ active = true }: { active?: boolean }) {
                 : {})}
               {...(snippet.kind === "IMAGE" && !("phase" in snippet)
                 ? {
-                    thumbnailUrl: snippet.thumbnailUrl,
+                    thumbnailUrl:
+                      snippet.storageProvider === "GOOGLE_DRIVE"
+                        ? (thumbnailUrls[snippet.id] ?? null)
+                        : snippet.thumbnailUrl,
                   }
                 : {})}
               onStopUpload={() => cancelUpload(snippet.id)}
