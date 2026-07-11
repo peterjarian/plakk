@@ -13,7 +13,6 @@ import {
   Type,
   X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
 import type { UploadTask } from "../atoms/upload.ts";
 import { Button } from "./primitives/button.tsx";
 
@@ -82,6 +81,7 @@ export function formatSnippetDate(
 
 export function SnippetRow(props: {
   snippet: SnippetRowItem;
+  now: number;
   copied: boolean;
   onCopy: () => void;
   onDelete: () => void;
@@ -96,6 +96,7 @@ export function SnippetRow(props: {
 }) {
   const {
     snippet,
+    now,
     copied,
     onCopy,
     onDelete,
@@ -111,14 +112,6 @@ export function SnippetRow(props: {
   const { Icon } = kindMeta[snippet.kind];
   const uploadProgress = isUploadTask(snippet) ? snippet.progress : undefined;
   const isUploading = isUploadTask(snippet) && snippet.phase !== "FAILED";
-  const [now, setNow] = useState(() => DateTime.toEpochMillis(DateTime.nowUnsafe()));
-  useEffect(() => {
-    const interval = window.setInterval(
-      () => setNow(DateTime.toEpochMillis(DateTime.nowUnsafe())),
-      60 * 1000,
-    );
-    return () => window.clearInterval(interval);
-  }, []);
   const title =
     snippet.kind === "TEXT"
       ? textContent?.state === "ready"

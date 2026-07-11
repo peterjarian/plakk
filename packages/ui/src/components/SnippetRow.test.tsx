@@ -26,6 +26,7 @@ describe("SnippetRow", () => {
     const markup = renderToStaticMarkup(
       <SnippetRow
         snippet={snippet}
+        now={now}
         copied={false}
         onCopy={() => undefined}
         onDelete={() => undefined}
@@ -61,6 +62,10 @@ describe("formatSnippetDate", () => {
   it("falls back to the stable absolute date after a year", () => {
     expect(formatSnippetDate(dateAt(12 * 30 * 24 * 60 * 60 * 1000), now)).toBe("12 months ago");
     expect(formatSnippetDate(dateAt(365 * 24 * 60 * 60 * 1000), now)).toBe("2025-07-11");
+  });
+
+  it("returns the input prefix for an invalid date", () => {
+    expect(formatSnippetDate("not-a-date", now)).toBe("not-a-date");
   });
 
   it("formats future dates without changing the absolute fallback", () => {
