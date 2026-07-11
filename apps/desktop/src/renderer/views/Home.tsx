@@ -73,6 +73,9 @@ export function Home({ active = true }: { active?: boolean }) {
   const [contentUrlGeneration, setContentUrlGeneration] = useState(0);
   const [now, setNow] = useState(Date.now);
   const copiedTimerRef = useRef<number | undefined>(undefined);
+  const thumbnailObjectUrlsRef = useRef(new Map<string, string>());
+  const loadingThumbnailIdsRef = useRef(new Set<string>());
+  const visibleThumbnailIdsRef = useRef(new Set<string>());
 
   useEffect(() => {
     const interval = window.setInterval(() => setNow(Date.now()), 60 * 1000);
@@ -168,13 +171,11 @@ export function Home({ active = true }: { active?: boolean }) {
           prepareStoredSnippetUpload({
             headers: snippetHeaders,
             payload,
-            reactivityKeys: snippetReactivityKeys,
           }),
         create: (payload) =>
           createStoredSnippet({
             headers: snippetHeaders,
             payload,
-            reactivityKeys: snippetReactivityKeys,
           }),
         updateStatus: (payload) =>
           updateStoredSnippetUploadStatus({
@@ -226,7 +227,6 @@ export function Home({ active = true }: { active?: boolean }) {
                 snippetId: snippet.id,
                 storageProvider: storageStatus.provider,
               },
-              reactivityKeys: snippetReactivityKeys,
             });
             const uploaded = await window.ipc.storage.uploadPreparedFile({
               id: snippet.id,
@@ -280,40 +280,60 @@ export function Home({ active = true }: { active?: boolean }) {
   }, [loadTextContent, syncedSnippetResponse.items, textContents]);
 
   useEffect(() => {
-    let cancelled = false;
-    const urls: string[] = [];
-
-    void Promise.all(
-      syncedSnippetResponse.items
-        .filter(
-          (snippet) =>
-            snippet.kind === "IMAGE" &&
-            snippet.uploadStatus === "READY" &&
-            snippet.storageProvider === "GOOGLE_DRIVE",
-        )
-        .map(async (snippet) => {
-          try {
-            const bytes = await window.ipc.snippets.read(snippet.id);
-            if (cancelled) return;
-            const url = URL.createObjectURL(
-              new Blob([Uint8Array.from(bytes)], {
-                type: snippet.contentType ?? "application/octet-stream",
-              }),
-            );
-            urls.push(url);
-            setThumbnailUrls((current) => ({ ...current, [snippet.id]: url }));
-          } catch {
-            // The image icon remains visible when preview loading fails.
-          }
-        }),
+    const images = syncedSnippetResponse.items.filter(
+      (snippet) =>
+        snippet.kind === "IMAGE" &&
+        snippet.uploadStatus === "READY" &&
+        snippet.storageProvider === "GOOGLE_DRIVE",
     );
+    const visibleIds = new Set(images.map((snippet) => snippet.id));
+    visibleThumbnailIdsRef.current = visibleIds;
 
-    return () => {
-      cancelled = true;
-      for (const url of urls) URL.revokeObjectURL(url);
-      setThumbnailUrls({});
-    };
+    for (const [id, url] of thumbnailObjectUrlsRef.current) {
+      if (visibleIds.has(id)) continue;
+      URL.revokeObjectURL(url);
+      thumbnailObjectUrlsRef.current.delete(id);
+      setThumbnailUrls((current) => {
+        const { [id]: _removed, ...remaining } = current;
+        return remaining;
+      });
+    }
+
+    for (const snippet of images) {
+      if (
+        thumbnailObjectUrlsRef.current.has(snippet.id) ||
+        loadingThumbnailIdsRef.current.has(snippet.id)
+      ) {
+        continue;
+      }
+      loadingThumbnailIdsRef.current.add(snippet.id);
+      void window.ipc.snippets
+        .read(snippet.id)
+        .then((bytes) => {
+          if (!visibleThumbnailIdsRef.current.has(snippet.id)) return;
+          const url = URL.createObjectURL(
+            new Blob([Uint8Array.from(bytes)], {
+              type: snippet.contentType ?? "application/octet-stream",
+            }),
+          );
+          thumbnailObjectUrlsRef.current.set(snippet.id, url);
+          setThumbnailUrls((current) => ({ ...current, [snippet.id]: url }));
+        })
+        .catch(() => {
+          // The image icon remains visible when preview loading fails.
+        })
+        .finally(() => loadingThumbnailIdsRef.current.delete(snippet.id));
+    }
   }, [syncedSnippetResponse.items]);
+
+  useEffect(
+    () => () => {
+      visibleThumbnailIdsRef.current.clear();
+      for (const url of thumbnailObjectUrlsRef.current.values()) URL.revokeObjectURL(url);
+      thumbnailObjectUrlsRef.current.clear();
+    },
+    [],
+  );
 
   function enqueueFileSnippet(file: Pick<File, "name" | "size" | "type">, filePath?: string) {
     if (storageStatus.kind !== "connected" || !storageStatus.canSync) return;
@@ -341,13 +361,11 @@ export function Home({ active = true }: { active?: boolean }) {
           prepareStoredSnippetUpload({
             headers: snippetHeaders,
             payload,
-            reactivityKeys: snippetReactivityKeys,
           }),
         create: (payload) =>
           createStoredSnippet({
             headers: snippetHeaders,
             payload,
-            reactivityKeys: snippetReactivityKeys,
           }),
         updateStatus: (payload) =>
           updateStoredSnippetUploadStatus({

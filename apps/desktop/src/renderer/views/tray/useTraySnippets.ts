@@ -62,8 +62,8 @@ export function useTraySnippets(account: AccountStatus | null) {
       actions,
       uploader: window.ipc.storage,
       api: {
-        prepare: (payload) => prepare({ headers, payload, reactivityKeys: snippetReactivityKeys }),
-        create: (payload) => create({ headers, payload, reactivityKeys: snippetReactivityKeys }),
+        prepare: (payload) => prepare({ headers, payload }),
+        create: (payload) => create({ headers, payload }),
         updateStatus: (payload) =>
           update({ headers, payload, reactivityKeys: snippetReactivityKeys }),
       },
@@ -91,8 +91,8 @@ export function useTraySnippets(account: AccountStatus | null) {
       actions,
       uploader: window.ipc.storage,
       api: {
-        prepare: (payload) => prepare({ headers, payload, reactivityKeys: snippetReactivityKeys }),
-        create: (payload) => create({ headers, payload, reactivityKeys: snippetReactivityKeys }),
+        prepare: (payload) => prepare({ headers, payload }),
+        create: (payload) => create({ headers, payload }),
         updateStatus: (payload) =>
           update({ headers, payload, reactivityKeys: snippetReactivityKeys }),
       },
