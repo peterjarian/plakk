@@ -16,6 +16,7 @@ import type {
   PreparedStorageUpload,
   PrepareStorageUploadInput,
   DownloadStorageObjectInput,
+  GetStorageObjectUrlInput,
   StorageObjectNotFoundError,
   StorageProviderDestination,
 } from "./types.ts";
@@ -70,6 +71,13 @@ export type StorageProviderAdapter = {
     StorageProviderError | StorageObjectNotFoundError,
     HttpClient.HttpClient
   >;
+  readonly getDownloadUrl: (
+    input: GetStorageObjectUrlInput,
+  ) => Effect.Effect<
+    string,
+    StorageProviderError | StorageObjectNotFoundError,
+    HttpClient.HttpClient
+  >;
 };
 
 const storageProviderAdapters = {
@@ -96,6 +104,9 @@ export class StorageProviderService extends Context.Service<
     readonly downloadObject: (
       input: Omit<DownloadStorageObjectInput, "accessToken"> & { readonly workosUserId: string },
     ) => Effect.Effect<Uint8Array, StorageDownloadError>;
+    readonly getDownloadUrl: (
+      input: Omit<GetStorageObjectUrlInput, "accessToken"> & { readonly workosUserId: string },
+    ) => Effect.Effect<string, StorageDownloadError>;
   }
 >()("@plakk/web/api/storage/StorageProvider/StorageProviderService") {
   static readonly Live = Layer.effect(
@@ -186,11 +197,21 @@ export class StorageProviderService extends Context.Service<
         return bytes;
       });
 
+      const getDownloadUrl = Effect.fn("StorageProviderService.getDownloadUrl")(function* (
+        input: Omit<GetStorageObjectUrlInput, "accessToken"> & { readonly workosUserId: string },
+      ): Effect.fn.Return<string, StorageDownloadError> {
+        const token = yield* getConnectedToken(input);
+        return yield* storageProviderAdapters[input.storageProvider]
+          .getDownloadUrl({ ...input, accessToken: token.accessToken })
+          .pipe(Effect.provideService(HttpClient.HttpClient, httpClient));
+      });
+
       return StorageProviderService.of({
         ensureConnected,
         prepareUpload,
         getDestinationUrl,
         downloadObject,
+        getDownloadUrl,
       });
     }),
   );

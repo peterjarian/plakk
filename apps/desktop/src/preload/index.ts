@@ -39,9 +39,14 @@ export type DesktopApi = {
     ) => () => void;
   };
   readonly snippets: {
-    readonly copy: (id: string) => Promise<void>;
-    readonly forget: (id: string) => Promise<void>;
-    readonly getThumbnail: (id: string) => Promise<{ url: string }>;
+    readonly copy: (snippet: {
+      kind: "FILE" | "IMAGE";
+      storageProvider: "GOOGLE_DRIVE" | "ONE_DRIVE" | "DROPBOX";
+      url: string;
+      fileName: string;
+      contentType: string | null;
+      byteSize: number;
+    }) => Promise<void>;
   };
   readonly tray: {
     readonly getAccountState: () => Promise<TrayAccountState>;
@@ -96,9 +101,7 @@ const desktopApi = {
       on(ipcEvents.storageUploadProgress, callback),
   },
   snippets: {
-    copy: (id: string) => invoke(ipcMethods.snippetCopy, id),
-    forget: (id: string) => invoke(ipcMethods.snippetForget, id),
-    getThumbnail: (id: string) => invoke(ipcMethods.snippetGetThumbnail, id),
+    copy: (snippet) => invoke(ipcMethods.snippetCopy, snippet),
   },
   tray: {
     getAccountState: () => invoke(ipcMethods.trayGetAccountState, undefined),

@@ -6,6 +6,7 @@ import {
   StorageProviderError,
   StorageObjectNotFoundError,
   type DownloadStorageObjectInput,
+  type GetStorageObjectUrlInput,
   type PreparedStorageUpload,
   type PrepareStorageUploadInput,
   type StorageProviderDestination,
@@ -16,6 +17,7 @@ import { readStorageObjectBytes } from "./readStorageObjectBytes.ts";
 const DROPBOX_TEMPORARY_UPLOAD_LINK_URL =
   "https://api.dropboxapi.com/2/files/get_temporary_upload_link";
 const DROPBOX_DOWNLOAD_URL = "https://content.dropboxapi.com/2/files/download";
+const DROPBOX_TEMPORARY_LINK_URL = "https://api.dropboxapi.com/2/files/get_temporary_link";
 const DropboxTemporaryUploadLinkRequest = Schema.fromJsonString(
   Schema.Struct({
     commit_info: Schema.Struct({
@@ -29,6 +31,8 @@ const DropboxTemporaryUploadLinkRequest = Schema.fromJsonString(
 );
 const DropboxTemporaryUploadLink = Schema.Struct({ link: Schema.String });
 const DropboxDownloadArg = Schema.fromJsonString(Schema.Struct({ path: Schema.String }));
+const DropboxTemporaryLinkRequest = Schema.fromJsonString(Schema.Struct({ path: Schema.String }));
+const DropboxTemporaryLink = Schema.Struct({ link: Schema.String });
 const DropboxDownloadError = Schema.Struct({ error_summary: Schema.String });
 
 const asDropboxPath = (snippetId: string, fileName: string) =>
@@ -137,5 +141,45 @@ export const DropboxStorageProvider = {
       return yield* providerError(input, `Stored object download failed: ${response.status}`);
     }
     return yield* readStorageObjectBytes(response, input);
+  }),
+  getDownloadUrl: Effect.fn("DropboxStorageProvider.getDownloadUrl")(function* (
+    input: GetStorageObjectUrlInput,
+  ): Effect.fn.Return<
+    string,
+    StorageProviderError | StorageObjectNotFoundError,
+    HttpClient.HttpClient
+  > {
+    const body = yield* Schema.encodeEffect(DropboxTemporaryLinkRequest)({
+      path: input.storageObjectId,
+    }).pipe(
+      Effect.mapError((cause) =>
+        providerError(input, "Stored object URL request was invalid.", cause),
+      ),
+    );
+    const response = yield* HttpClient.execute(
+      HttpClientRequest.post(DROPBOX_TEMPORARY_LINK_URL).pipe(
+        HttpClientRequest.bearerToken(input.accessToken),
+        HttpClientRequest.bodyText(body, "application/json"),
+      ),
+    ).pipe(
+      Effect.mapError((cause) =>
+        providerError(input, "Could not get the stored object URL.", cause),
+      ),
+    );
+    if (response.status === 409) {
+      return yield* new StorageObjectNotFoundError({
+        storageProvider: input.storageProvider,
+        message: "The stored object no longer exists.",
+      });
+    }
+    if (response.status < 200 || response.status >= 300) {
+      return yield* providerError(input, `Stored object URL failed: ${response.status}`);
+    }
+    return yield* HttpClientResponse.schemaBodyJson(DropboxTemporaryLink)(response).pipe(
+      Effect.map((download) => download.link),
+      Effect.mapError((cause) =>
+        providerError(input, "Stored object response did not include a temporary link.", cause),
+      ),
+    );
   }),
 } satisfies StorageProviderAdapter;

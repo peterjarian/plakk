@@ -81,6 +81,9 @@ export const ApiSnippetSchema = Schema.Struct({
   fileName: Schema.String,
   byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   contentType: Schema.NullOr(Schema.String),
+  contentUrl: Schema.NullOr(Schema.String),
+  thumbnailUrl: Schema.NullOr(Schema.String),
+  textContent: Schema.NullOr(Schema.String),
   storageProvider: Schema.NullOr(StorageProviderLiteral),
   uploadStatus: SnippetUploadStatusLiteral,
   createdAt: Schema.String,
@@ -195,16 +198,6 @@ export const SnippetRpcs = RpcGroup.make(
       }),
     ]),
     success: ApiSnippetSchema,
-    error: RpcError,
-  }),
-  Rpc.make("GetSnippetContent", {
-    payload: { id: SnippetIdSchema },
-    success: Schema.Struct({
-      bytes: Schema.Uint8ArrayFromBase64,
-      kind: SnippetKindLiteral,
-      fileName: Schema.String,
-      contentType: Schema.NullOr(Schema.String),
-    }),
     error: RpcError,
   }),
   Rpc.make("DeleteSnippet", {

@@ -8,6 +8,15 @@ export const toApiSnippet = (snippet: SnippetRow): ApiSnippet => ({
   fileName: snippet.fileName,
   byteSize: snippet.byteSize,
   contentType: snippet.contentType,
+  contentUrl: null,
+  thumbnailUrl: null,
+  textContent:
+    snippet.kind === "TEXT" &&
+    snippet.storageProvider === null &&
+    snippet.storageObjectId === null &&
+    new TextEncoder().encode(snippet.title).byteLength === snippet.byteSize
+      ? snippet.title
+      : null,
   storageProvider: snippet.storageProvider,
   uploadStatus: snippet.uploadStatus,
   createdAt: snippet.createdAt.toISOString(),

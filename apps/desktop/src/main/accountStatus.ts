@@ -18,17 +18,6 @@ export const getAccountStatus = Effect.fn("DesktopAccountStatus.get")(function* 
   });
 });
 
-export const getSnippetContent = Effect.fn("DesktopSnippetContent.get")(function* (
-  accessToken: string,
-  id: string,
-) {
-  const client = yield* RpcClient.make(PlakkApi).pipe(Effect.provide(protocolLayer));
-  return yield* client.GetSnippetContent(
-    { id },
-    { headers: { authorization: `Bearer ${accessToken}` } },
-  );
-});
-
 export const isUnauthenticatedAccountError = (error: unknown) =>
   typeof error === "object" &&
   error !== null &&

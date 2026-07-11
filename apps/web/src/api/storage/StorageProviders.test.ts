@@ -159,6 +159,55 @@ describe("storage download providers", () => {
   it.each([
     {
       name: "Google Drive",
+      getDownloadUrl: GoogleDriveStorageProvider.getDownloadUrl,
+      storageProvider: "GOOGLE_DRIVE" as const,
+      storageObjectId: "drive-id",
+      response: { webContentLink: "https://google.example/signed" },
+      expectedUrl: "https://www.googleapis.com/drive/v3/files/drive-id?fields=webContentLink",
+    },
+    {
+      name: "OneDrive",
+      getDownloadUrl: OneDriveStorageProvider.getDownloadUrl,
+      storageProvider: "ONE_DRIVE" as const,
+      storageObjectId: "one-id",
+      response: { "@microsoft.graph.downloadUrl": "https://onedrive.example/signed" },
+      expectedUrl:
+        "https://graph.microsoft.com/v1.0/me/drive/items/one-id?%24select=%40microsoft.graph.downloadUrl",
+    },
+    {
+      name: "Dropbox",
+      getDownloadUrl: DropboxStorageProvider.getDownloadUrl,
+      storageProvider: "DROPBOX" as const,
+      storageObjectId: "/snippet/file.png",
+      response: { link: "https://dropbox.example/signed" },
+      expectedUrl: "https://api.dropboxapi.com/2/files/get_temporary_link",
+    },
+  ])("returns a direct scoped download URL from $name", async (provider) => {
+    fetchMock.mockResolvedValue(Response.json(provider.response));
+
+    await expect(
+      Effect.runPromise(
+        provider
+          .getDownloadUrl({
+            accessToken: "secret-token",
+            storageProvider: provider.storageProvider,
+            storageObjectId: provider.storageObjectId,
+          })
+          .pipe(Effect.provide(FetchHttpClient.layer)),
+      ),
+    ).resolves.toContain("signed");
+
+    const request = fetchRequest(0);
+    expect(request.url).toBe(provider.expectedUrl);
+    expect(request.headers.get("authorization")).toBe("Bearer secret-token");
+    if (provider.storageProvider === "DROPBOX") {
+      expect(await request.json()).toEqual({ path: provider.storageObjectId });
+    }
+  });
+
+  it.each([
+    {
+      name: "Google Drive",
       download: GoogleDriveStorageProvider.download,
       storageProvider: "GOOGLE_DRIVE" as const,
       storageObjectId: "drive-id",

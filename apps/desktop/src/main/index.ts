@@ -12,45 +12,25 @@ import type { AuthStatus, TrayAccountState, TrayDroppedItem } from "../ipc/contr
 import { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
 import { handle, send } from "../ipc/main.ts";
 import { StorageUpload, type StorageUploadResult } from "../storageUpload.ts";
-import {
-  getAccountStatus,
-  getSnippetContent,
-  isUnauthenticatedAccountError,
-} from "./accountStatus.ts";
+import { getAccountStatus, isUnauthenticatedAccountError } from "./accountStatus.ts";
 import { AuthService } from "./auth/AuthService.ts";
 import {
   consumeTemporaryClipboardFile,
   readClipboard,
-  writeSnippetToClipboard,
+  downloadSnippetToClipboard,
 } from "./clipboard.ts";
 import { createTrayWindowController } from "./trayWindow.ts";
 import { isReloadShortcut, reconcileTrayAuth } from "./lifecycle.ts";
-import {
-  clearCachedSnippets,
-  getCachedSnippetContent,
-  readCachedSnippetFile,
-  removeCachedSnippet,
-} from "./snippetCache.ts";
 import { UserConfigStore } from "./UserConfigStore.ts";
 import { runEffect, runtime } from "./runtime.ts";
 
 const rendererScheme = "plakk-app";
 const rendererHost = "renderer";
-const snippetScheme = "plakk-snippet";
 const activeUploads = new Map<string, Fiber.Fiber<StorageUploadResult, unknown>>();
 
 protocol.registerSchemesAsPrivileged([
   {
     scheme: rendererScheme,
-    privileges: {
-      standard: true,
-      secure: true,
-      supportFetchAPI: true,
-      corsEnabled: true,
-    },
-  },
-  {
-    scheme: snippetScheme,
     privileges: {
       standard: true,
       secure: true,
@@ -94,41 +74,7 @@ handle(ipcMethods.storageCancelUpload, (id) => {
   if (fiber !== undefined) runtime.runFork(Fiber.interrupt(fiber));
 });
 
-async function cachedSnippetContent(id: string) {
-  const session = await runAuth(
-    AuthService.use((auth) => auth.getSession()),
-    "Could not load the stored snippet.",
-  );
-  if (session === null) throw new Error("Sign in to load stored snippets.");
-
-  return getCachedSnippetContent({
-    userId: session.user.id,
-    snippetId: id,
-    download: () => runEffect(Effect.scoped(getSnippetContent(session.accessToken, id))),
-  });
-}
-
-handle(ipcMethods.snippetCopy, async (id) => {
-  const content = await cachedSnippetContent(id);
-  if (content.kind !== "FILE" && content.kind !== "IMAGE") {
-    throw new Error("Only stored files and images can be copied as binary data.");
-  }
-  await runEffect(writeSnippetToClipboard(content));
-});
-
-handle(ipcMethods.snippetGetThumbnail, async (id) => {
-  const content = await cachedSnippetContent(id);
-  if (content.kind !== "IMAGE") throw new Error("Only stored images have a thumbnail.");
-  return { url: `${snippetScheme}://image/${id}` };
-});
-
-handle(ipcMethods.snippetForget, async (id) => {
-  const session = await runAuth(
-    AuthService.use((auth) => auth.getSession()),
-    "Could not clear the stored snippet cache.",
-  );
-  if (session !== null) await removeCachedSnippet({ userId: session.user.id, snippetId: id });
-});
+handle(ipcMethods.snippetCopy, (snippet) => runEffect(downloadSnippetToClipboard(snippet)));
 
 function authErrorMessage(error: unknown, fallback: string): string {
   if (
@@ -243,11 +189,9 @@ function applyAuthStatus(status: AuthStatus) {
   const changed =
     currentAuthStatus.accessToken !== status.accessToken ||
     currentAuthStatus.user?.id !== status.user?.id;
-  const previousUserId = currentAuthStatus.user?.id;
   currentAuthStatus = status;
   if (changed) {
     trayRefreshGeneration += 1;
-    if (previousUserId !== undefined) void clearCachedSnippets(previousUserId);
   }
   reconcileTrayAuth(status, trayWindowController);
   if (status.user === null) {
@@ -327,33 +271,6 @@ function registerRendererProtocol(): void {
     }
 
     return net.fetch(pathToFileURL(filePath).toString());
-  });
-}
-
-function registerSnippetProtocol(): void {
-  protocol.handle(snippetScheme, async (request) => {
-    const url = new URL(request.url);
-    const id = url.pathname.slice(1);
-    const userId = currentAuthStatus.user?.id;
-    if (
-      url.host !== "image" ||
-      userId === undefined ||
-      !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(id)
-    ) {
-      return new Response(null, { status: 404 });
-    }
-
-    const content = await readCachedSnippetFile({ userId, snippetId: id });
-    if (
-      content === null ||
-      content.kind !== "IMAGE" ||
-      !content.contentType?.startsWith("image/")
-    ) {
-      return new Response(null, { status: 404 });
-    }
-    return new Response(Buffer.from(content.bytes), {
-      headers: { "Content-Type": content.contentType, "Cache-Control": "no-store" },
-    });
   });
 }
 
@@ -572,7 +489,6 @@ if (!hasSingleInstanceLock) {
 
   void app.whenReady().then(() => {
     registerRendererProtocol();
-    registerSnippetProtocol();
 
     Menu.setApplicationMenu(
       Menu.buildFromTemplate([
