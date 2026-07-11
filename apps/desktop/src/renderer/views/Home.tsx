@@ -59,7 +59,13 @@ export function Home({ active = true }: { active?: boolean }) {
   const [textContents, setTextContents] = useState<Record<string, TextSnippetContent>>({});
   const [copyErrors, setCopyErrors] = useState<Record<string, string>>({});
   const [contentUrlGeneration, setContentUrlGeneration] = useState(0);
+  const [now, setNow] = useState(Date.now);
   const copiedTimerRef = useRef<number | undefined>(undefined);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setNow(Date.now()), 60 * 1000);
+    return () => window.clearInterval(interval);
+  }, []);
 
   const snippetHeaders = useMemo<SnippetRequestHeaders | null>(
     () => (auth.accessToken === null ? null : { authorization: `Bearer ${auth.accessToken}` }),
@@ -565,6 +571,7 @@ export function Home({ active = true }: { active?: boolean }) {
             <SnippetRow
               key={snippet.id}
               snippet={snippet}
+              now={now}
               copied={copiedId === snippet.id}
               onCopy={() => void copySnippet(snippet)}
               copyDisabled={"phase" in snippet}
