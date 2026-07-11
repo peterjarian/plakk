@@ -23,6 +23,7 @@ export type DesktopApi = {
     readonly signOut: () => Promise<void>;
   };
   readonly clipboard: {
+    readonly read: () => Promise<ClipboardContent>;
     readonly onPaste: (callback: (content: ClipboardContent) => void) => () => void;
   };
   readonly openExternal: (url: string) => Promise<void>;
@@ -46,6 +47,9 @@ export type DesktopApi = {
     readonly getAccountState: () => Promise<TrayAccountState>;
     readonly onAccountStateChanged: (callback: (state: TrayAccountState) => void) => () => void;
     readonly onDroppedItem: (callback: (item: TrayDroppedItem) => void) => () => void;
+    readonly selectFiles: () => Promise<
+      ReadonlyArray<{ path: string; name: string; size: number }>
+    >;
   };
   readonly userConfig: {
     readonly get: () => Promise<UserConfig>;
@@ -72,6 +76,7 @@ const desktopApi = {
     signOut: () => invoke(ipcMethods.authSignOut, undefined),
   },
   clipboard: {
+    read: () => invoke(ipcMethods.clipboardRead, undefined),
     onPaste: (callback: (content: ClipboardContent) => void) =>
       on(ipcEvents.clipboardPaste, callback),
   },
@@ -104,6 +109,7 @@ const desktopApi = {
       on(ipcEvents.trayAccountStateChanged, callback),
     onDroppedItem: (callback: (item: TrayDroppedItem) => void) =>
       on(ipcEvents.trayDroppedItem, callback),
+    selectFiles: () => invoke(ipcMethods.traySelectFiles, undefined),
   },
   userConfig: {
     get: () => invoke(ipcMethods.userConfigGet, undefined),

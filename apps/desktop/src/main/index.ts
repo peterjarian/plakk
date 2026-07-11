@@ -1,11 +1,11 @@
 import "dotenv/config";
 
-import { join, resolve, sep } from "node:path";
-import { rm } from "node:fs/promises";
+import { basename, join, resolve, sep } from "node:path";
+import { rm, stat } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { isHttpUrl } from "@plakk/shared";
 import { accountCanSync } from "@plakk/shared/PlakkApi";
-import { app, BrowserWindow, Menu, net, protocol, shell } from "electron";
+import { app, BrowserWindow, dialog, Menu, net, protocol, shell } from "electron";
 import { Effect, Result } from "effect";
 import * as Fiber from "effect/Fiber";
 import type { AuthStatus, TrayAccountState, TrayDroppedItem } from "../ipc/contracts.ts";
@@ -97,6 +97,25 @@ handle(ipcMethods.snippetRead, async (id) => {
   if (session === null) throw new Error("Sign in to load stored snippets.");
   const payload = await runEffect(Effect.scoped(getSnippetCopyPayload(session.accessToken, id)));
   return runEffect(downloadSnippetBytes(payload));
+});
+
+handle(ipcMethods.clipboardRead, () => runEffect(readClipboard()));
+
+handle(ipcMethods.traySelectFiles, async (_payload, event) => {
+  if (
+    trayWindowController?.ownsWebContents(event.sender) !== true ||
+    !trayWindowController.isIngestionEnabled()
+  )
+    return [];
+  const result = await dialog.showOpenDialog({ properties: ["openFile", "multiSelections"] });
+  if (result.canceled) return [];
+  return Promise.all(
+    result.filePaths.map(async (path) => ({
+      path,
+      name: basename(path),
+      size: (await stat(path)).size,
+    })),
+  );
 });
 
 function authErrorMessage(error: unknown, fallback: string): string {
@@ -550,7 +569,13 @@ if (!hasSingleInstanceLock) {
       onAccountRefreshRequested: () => void refreshTrayAccountState(),
       onRendererLoaded: () => void refreshTrayAccountState(),
       onDropFiles: ({ files }) => {
-        broadcastTrayDroppedItem({ type: "files", paths: files });
+        void Promise.all(
+          files.map(async (path) => ({
+            path,
+            name: basename(path),
+            size: (await stat(path)).size,
+          })),
+        ).then((files) => broadcastTrayDroppedItem({ type: "files", files }));
       },
       onDropText: ({ text }) => {
         if (text.trim()) broadcastTrayDroppedItem({ type: "text", text });

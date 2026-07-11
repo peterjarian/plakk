@@ -89,6 +89,7 @@ export function SnippetRow(props: {
   copyDisabled?: boolean;
   copying?: boolean;
   copyError?: string;
+  showActions?: boolean;
 }) {
   const {
     snippet,
@@ -104,6 +105,7 @@ export function SnippetRow(props: {
     copyDisabled = false,
     copying = false,
     copyError,
+    showActions = true,
   } = props;
   const { Icon } = kindMeta[snippet.kind];
   const isUploading = isUploadTask(snippet) && snippet.phase !== "FAILED";
@@ -164,24 +166,34 @@ export function SnippetRow(props: {
                 className="size-4 animate-spin text-muted-foreground"
                 aria-hidden="true"
               />
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Stop uploading"
-                className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                onClick={onStopUpload}
-              >
-                <X />
-              </Button>
+              {showActions && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Stop uploading"
+                  className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                  onClick={onStopUpload}
+                >
+                  <X />
+                </Button>
+              )}
             </div>
           ) : (
             <>
-              <span className="text-[11px] tabular-nums text-muted-foreground group-hover:hidden group-focus-within:hidden">
+              <span
+                className={`text-[11px] tabular-nums text-muted-foreground ${showActions ? "group-hover:hidden group-focus-within:hidden" : ""}`}
+              >
                 {time}
               </span>
 
-              <div className="hidden items-center gap-0.5 group-hover:flex group-focus-within:flex">
+              <div
+                className={
+                  showActions
+                    ? "hidden items-center gap-0.5 group-hover:flex group-focus-within:flex"
+                    : "hidden"
+                }
+              >
                 {snippet.kind === "TEXT" &&
                   (textContent?.state === "failed" ||
                     (textContent?.state === "ready" && textContent.migrationError)) &&

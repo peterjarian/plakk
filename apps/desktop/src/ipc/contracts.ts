@@ -84,7 +84,9 @@ const UserConfigPatchSchema = Schema.Struct({
 export const TrayDroppedItemSchema = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("files"),
-    paths: Schema.Array(Schema.String),
+    files: Schema.Array(
+      Schema.Struct({ path: Schema.String, name: Schema.String, size: Schema.Number }),
+    ),
   }),
   Schema.Struct({
     type: Schema.Literal("text"),
@@ -162,6 +164,18 @@ export const ipcMethods = {
     channel: "snippet:read",
     payload: SnippetIdSchema,
     result: Schema.Uint8Array,
+  }),
+  clipboardRead: method({
+    channel: "clipboard:read",
+    payload: Schema.Void,
+    result: ClipboardContentSchema,
+  }),
+  traySelectFiles: method({
+    channel: "tray:select-files",
+    payload: Schema.Void,
+    result: Schema.Array(
+      Schema.Struct({ path: Schema.String, name: Schema.String, size: Schema.Number }),
+    ),
   }),
   trayGetAccountState: method({
     channel: "tray:get-account-state",
