@@ -1,4 +1,4 @@
-import { StorageProviderLiteral, UserSchema } from "@plakk/shared";
+import { UserSchema } from "@plakk/shared";
 import {
   AccountStatusSchema,
   PreparedStorageUploadSchema,
@@ -122,15 +122,6 @@ export const StorageUploadResultSchema = Schema.Struct({
   storageObjectId: Schema.String,
 }) satisfies Schema.Schema<StorageUploadResult>;
 
-const SnippetCopySchema = Schema.Struct({
-  kind: Schema.Literals(["FILE", "IMAGE"] as const),
-  storageProvider: StorageProviderLiteral,
-  url: Schema.String,
-  fileName: Schema.String,
-  contentType: Schema.NullOr(Schema.String),
-  byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-});
-
 export const ipcMethods = {
   authGet: method({
     channel: "auth:get",
@@ -164,7 +155,7 @@ export const ipcMethods = {
   }),
   snippetCopy: method({
     channel: "snippet:copy",
-    payload: SnippetCopySchema,
+    payload: SnippetIdSchema,
     result: Schema.Void,
   }),
   trayGetAccountState: method({

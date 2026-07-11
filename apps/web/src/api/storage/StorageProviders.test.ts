@@ -156,6 +156,22 @@ describe("storage upload providers", () => {
 });
 
 describe("storage download providers", () => {
+  it("returns an authorized Google Drive media target without downloading bytes", async () => {
+    await expect(
+      Effect.runPromise(
+        GoogleDriveStorageProvider.getDownloadTarget({
+          accessToken: "secret-token",
+          storageProvider: "GOOGLE_DRIVE",
+          storageObjectId: "drive-id",
+        }),
+      ),
+    ).resolves.toEqual({
+      url: "https://www.googleapis.com/drive/v3/files/drive-id?alt=media",
+      headers: [{ name: "Authorization", value: "Bearer secret-token" }],
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it.each([
     {
       name: "Google Drive",

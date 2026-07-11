@@ -119,6 +119,73 @@ const withContentUrls = Effect.fn("@plakk/web/api/PlakkApiLive.withContentUrls")
   };
 });
 
+export const getSnippetCopyPayload = Effect.fn("@plakk/web/api/PlakkApiLive.getSnippetCopyPayload")(
+  function* (
+    drizzle: DrizzleService,
+    storage: StorageProviderService["Service"],
+    workosUserId: string,
+    snippetId: string,
+  ) {
+    const [snippet] = yield* drizzle.db
+      .select()
+      .from(snippets)
+      .where(
+        and(
+          eq(snippets.id, snippetId),
+          eq(snippets.ownerWorkosUserId, workosUserId),
+          eq(snippets.uploadStatus, "READY"),
+          isNull(snippets.deletedAt),
+        ),
+      )
+      .limit(1)
+      .pipe(Effect.orDie);
+
+    if (
+      snippet === undefined ||
+      (snippet.kind !== "FILE" && snippet.kind !== "IMAGE") ||
+      snippet.storageProvider === null ||
+      snippet.storageObjectId === null
+    ) {
+      return yield* new RpcError({ code: "NOT_FOUND", message: "Ready snippet was not found." });
+    }
+
+    const download = yield* storage
+      .getDownloadTarget({
+        storageProvider: snippet.storageProvider,
+        storageObjectId: snippet.storageObjectId,
+        workosUserId,
+      })
+      .pipe(
+        Effect.catchTags({
+          StorageObjectNotFoundError: (error) =>
+            Effect.fail(new RpcError({ code: "NOT_FOUND", message: error.message })),
+          StorageNotConnectedError: (error) =>
+            Effect.fail(new RpcError({ code: "FORBIDDEN", message: error.message })),
+          StorageNeedsReauthorizationError: (error) =>
+            Effect.fail(new RpcError({ code: "FORBIDDEN", message: error.message })),
+          StorageCredentialsError: (error) =>
+            Effect.fail(new RpcError({ code: "INTERNAL_SERVER_ERROR", message: error.message })),
+          StorageProviderError: (error) =>
+            Effect.fail(
+              new RpcError({
+                code: "INTERNAL_SERVER_ERROR",
+                message: `${error.storageProvider}: ${error.message}`,
+              }),
+            ),
+        }),
+      );
+
+    return {
+      kind: snippet.kind,
+      storageProvider: snippet.storageProvider,
+      fileName: snippet.fileName,
+      contentType: snippet.contentType,
+      byteSize: snippet.byteSize,
+      download,
+    };
+  },
+);
+
 export const confirmTextSnippetUpload = Effect.fn(
   "@plakk/web/api/PlakkApiLive.confirmTextSnippetUpload",
 )(function* (
@@ -600,6 +667,14 @@ const SnippetsLive = SnippetRpcs.of({
       }).pipe(Effect.annotateSpans({ id: input.id }));
     },
   ),
+  GetSnippetCopyPayload: Effect.fn("rpc.GetSnippetCopyPayload")(function* (input) {
+    return yield* Effect.gen(function* () {
+      const drizzle = yield* Drizzle;
+      const storage = yield* StorageProviderService;
+      const currentUser = yield* CurrentUser;
+      return yield* getSnippetCopyPayload(drizzle, storage, currentUser.id, input.id);
+    }).pipe(Effect.annotateSpans({ id: input.id }));
+  }),
   DeleteSnippet: Effect.fn("rpc.DeleteSnippet")(function* (input) {
     return yield* Effect.gen(function* () {
       const drizzle = yield* Drizzle;

@@ -352,14 +352,7 @@ export function Home({ active = true }: { active?: boolean }) {
         if (snippet.contentUrl === null || snippet.storageProvider === null) {
           throw new Error("Snippet download is unavailable.");
         }
-        await window.ipc.snippets.copy({
-          kind: snippet.kind,
-          storageProvider: snippet.storageProvider,
-          url: snippet.contentUrl,
-          fileName: snippet.fileName,
-          contentType: snippet.contentType,
-          byteSize: snippet.byteSize,
-        });
+        await window.ipc.snippets.copy(snippet.id);
       } else {
         const textContent = textContents[snippet.id];
         const text =

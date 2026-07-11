@@ -42,3 +42,8 @@ export type DownloadStorageObjectInput = {
 };
 
 export type GetStorageObjectUrlInput = Omit<DownloadStorageObjectInput, "expectedByteSize">;
+
+export type StorageDownloadTarget = {
+  readonly url: string;
+  readonly headers: ReadonlyArray<{ readonly name: string; readonly value: string }>;
+};

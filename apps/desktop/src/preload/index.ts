@@ -39,14 +39,7 @@ export type DesktopApi = {
     ) => () => void;
   };
   readonly snippets: {
-    readonly copy: (snippet: {
-      kind: "FILE" | "IMAGE";
-      storageProvider: "GOOGLE_DRIVE" | "ONE_DRIVE" | "DROPBOX";
-      url: string;
-      fileName: string;
-      contentType: string | null;
-      byteSize: number;
-    }) => Promise<void>;
+    readonly copy: (id: string) => Promise<void>;
   };
   readonly tray: {
     readonly getAccountState: () => Promise<TrayAccountState>;

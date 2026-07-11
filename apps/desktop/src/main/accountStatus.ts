@@ -3,7 +3,10 @@ import { Effect, Layer } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 
-const rpcUrl = process.env.PLAKK_RPC_URL ?? "https://app.plakk.io/api/rpc";
+const configuredRpcUrl = process.env.PLAKK_RPC_URL ?? "https://app.plakk.io/api/rpc";
+const rpcUrl = configuredRpcUrl.startsWith("/")
+  ? new URL(configuredRpcUrl, "http://localhost:3000").toString()
+  : configuredRpcUrl;
 const protocolLayer = RpcClient.layerProtocolHttp({ url: rpcUrl }).pipe(
   Layer.provideMerge(FetchHttpClient.layer),
   Layer.provideMerge(RpcSerialization.layerNdjson),
@@ -16,6 +19,17 @@ export const getAccountStatus = Effect.fn("DesktopAccountStatus.get")(function* 
   return yield* client.GetAccountStatus(undefined, {
     headers: { authorization: `Bearer ${accessToken}` },
   });
+});
+
+export const getSnippetCopyPayload = Effect.fn("DesktopSnippetCopyPayload.get")(function* (
+  accessToken: string,
+  id: string,
+) {
+  const client = yield* RpcClient.make(PlakkApi).pipe(Effect.provide(protocolLayer));
+  return yield* client.GetSnippetCopyPayload(
+    { id },
+    { headers: { authorization: `Bearer ${accessToken}` } },
+  );
 });
 
 export const isUnauthenticatedAccountError = (error: unknown) =>

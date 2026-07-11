@@ -18,6 +18,7 @@ import type {
   DownloadStorageObjectInput,
   GetStorageObjectUrlInput,
   StorageObjectNotFoundError,
+  StorageDownloadTarget,
   StorageProviderDestination,
 } from "./types.ts";
 
@@ -78,6 +79,9 @@ export type StorageProviderAdapter = {
     StorageProviderError | StorageObjectNotFoundError,
     HttpClient.HttpClient
   >;
+  readonly getDownloadTarget?: (
+    input: GetStorageObjectUrlInput,
+  ) => Effect.Effect<StorageDownloadTarget, StorageProviderError, HttpClient.HttpClient>;
 };
 
 const storageProviderAdapters = {
@@ -107,6 +111,9 @@ export class StorageProviderService extends Context.Service<
     readonly getDownloadUrl: (
       input: Omit<GetStorageObjectUrlInput, "accessToken"> & { readonly workosUserId: string },
     ) => Effect.Effect<string, StorageDownloadError>;
+    readonly getDownloadTarget: (
+      input: Omit<GetStorageObjectUrlInput, "accessToken"> & { readonly workosUserId: string },
+    ) => Effect.Effect<StorageDownloadTarget, StorageDownloadError>;
   }
 >()("@plakk/web/api/storage/StorageProvider/StorageProviderService") {
   static readonly Live = Layer.effect(
@@ -206,12 +213,31 @@ export class StorageProviderService extends Context.Service<
           .pipe(Effect.provideService(HttpClient.HttpClient, httpClient));
       });
 
+      const getDownloadTarget = Effect.fn("StorageProviderService.getDownloadTarget")(function* (
+        input: Omit<GetStorageObjectUrlInput, "accessToken"> & {
+          readonly workosUserId: string;
+        },
+      ): Effect.fn.Return<StorageDownloadTarget, StorageDownloadError> {
+        const token = yield* getConnectedToken(input);
+        const adapter: StorageProviderAdapter = storageProviderAdapters[input.storageProvider];
+        if (adapter.getDownloadTarget !== undefined) {
+          return yield* adapter
+            .getDownloadTarget({ ...input, accessToken: token.accessToken })
+            .pipe(Effect.provideService(HttpClient.HttpClient, httpClient));
+        }
+        const url = yield* adapter
+          .getDownloadUrl({ ...input, accessToken: token.accessToken })
+          .pipe(Effect.provideService(HttpClient.HttpClient, httpClient));
+        return { url, headers: [] };
+      });
+
       return StorageProviderService.of({
         ensureConnected,
         prepareUpload,
         getDestinationUrl,
         downloadObject,
         getDownloadUrl,
+        getDownloadTarget,
       });
     }),
   );

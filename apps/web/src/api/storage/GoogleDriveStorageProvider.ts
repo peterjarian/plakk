@@ -217,6 +217,13 @@ export const GoogleDriveStorageProvider = {
     }
     return yield* readStorageObjectBytes(response, input);
   }),
+  getDownloadTarget: Effect.fn("GoogleDriveStorageProvider.getDownloadTarget")(
+    (input: GetStorageObjectUrlInput) =>
+      Effect.succeed({
+        url: `${GOOGLE_DRIVE_FILES_URL}/${encodeURIComponent(input.storageObjectId)}?alt=media`,
+        headers: [{ name: "Authorization", value: `Bearer ${input.accessToken}` }],
+      }),
+  ),
   getDownloadUrl: Effect.fn("GoogleDriveStorageProvider.getDownloadUrl")(function* (
     input: GetStorageObjectUrlInput,
   ): Effect.fn.Return<

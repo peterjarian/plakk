@@ -12,7 +12,11 @@ import type { AuthStatus, TrayAccountState, TrayDroppedItem } from "../ipc/contr
 import { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
 import { handle, send } from "../ipc/main.ts";
 import { StorageUpload, type StorageUploadResult } from "../storageUpload.ts";
-import { getAccountStatus, isUnauthenticatedAccountError } from "./accountStatus.ts";
+import {
+  getAccountStatus,
+  getSnippetCopyPayload,
+  isUnauthenticatedAccountError,
+} from "./accountStatus.ts";
 import { AuthService } from "./auth/AuthService.ts";
 import {
   consumeTemporaryClipboardFile,
@@ -74,7 +78,15 @@ handle(ipcMethods.storageCancelUpload, (id) => {
   if (fiber !== undefined) runtime.runFork(Fiber.interrupt(fiber));
 });
 
-handle(ipcMethods.snippetCopy, (snippet) => runEffect(downloadSnippetToClipboard(snippet)));
+handle(ipcMethods.snippetCopy, async (id) => {
+  const session = await runAuth(
+    AuthService.use((auth) => auth.getSession()),
+    "Could not load the stored snippet.",
+  );
+  if (session === null) throw new Error("Sign in to load stored snippets.");
+  const payload = await runEffect(Effect.scoped(getSnippetCopyPayload(session.accessToken, id)));
+  await runEffect(downloadSnippetToClipboard(payload));
+});
 
 function authErrorMessage(error: unknown, fallback: string): string {
   if (

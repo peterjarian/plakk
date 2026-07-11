@@ -67,6 +67,15 @@ function decodeXmlText(value: string): string {
     .replaceAll("&apos;", "'");
 }
 
+function encodeXmlText(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
+}
+
 function fileContentFromPath(path: string): ClipboardContent | undefined {
   const stats = statSync(path, { throwIfNoEntry: false });
   if (stats === undefined) return undefined;
@@ -245,7 +254,12 @@ const writeSnippetFile = (content: SnippetContent) => {
   writeFileSync(path, content.bytes);
   clipboard.clear();
   if (process.platform === "darwin") {
-    clipboard.writeBuffer("public.file-url", Buffer.from(url));
+    clipboard.writeBuffer(
+      "NSFilenamesPboardType",
+      Buffer.from(
+        `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><array><string>${encodeXmlText(path)}</string></array></plist>`,
+      ),
+    );
   } else if (process.platform === "linux") {
     clipboard.writeBuffer("x-special/gnome-copied-files", Buffer.from(`copy\n${url}`));
     clipboard.writeBuffer("text/uri-list", Buffer.from(url));
@@ -275,25 +289,42 @@ export const writeSnippetToClipboard = Effect.fn("writeSnippetToClipboard")(func
 export const downloadSnippetToClipboard = Effect.fn("downloadSnippetToClipboard")(function* (
   snippet: Omit<SnippetContent, "bytes"> & {
     readonly storageProvider: StorageProvider;
-    readonly url: string;
     readonly byteSize: number;
+    readonly download: {
+      readonly url: string;
+      readonly headers: ReadonlyArray<{ readonly name: string; readonly value: string }>;
+    };
   },
 ) {
-  if (!isSignedStorageUrl(snippet.storageProvider, snippet.url)) {
+  if (!isSignedStorageUrl(snippet.storageProvider, snippet.download.url)) {
     return yield* new WriteClipboardError({ cause: new Error("Invalid storage download URL.") });
   }
+  yield* Effect.logInfo("Copying stored snippet", {
+    kind: snippet.kind,
+    storageProvider: snippet.storageProvider,
+    downloadHost: new URL(snippet.download.url).hostname,
+  });
   const bytes = yield* Effect.tryPromise({
     try: async () => {
-      const response = await net.fetch(snippet.url);
+      const response = await net.fetch(snippet.download.url, {
+        headers: Object.fromEntries(
+          snippet.download.headers.map(({ name, value }) => [name, value]),
+        ),
+      });
       if (!response.ok) throw new Error(`Snippet download failed: ${response.status}`);
       const bytes = new Uint8Array(await response.arrayBuffer());
-      if (bytes.byteLength !== snippet.byteSize)
+      if (bytes.byteLength !== snippet.byteSize) {
         throw new Error("Snippet size does not match metadata.");
+      }
       return bytes;
     },
     catch: (cause) => new WriteClipboardError({ cause }),
   });
-  return yield* writeSnippetToClipboard({ ...snippet, bytes });
+  yield* Effect.logInfo("Downloaded stored snippet", { byteSize: bytes.byteLength });
+  yield* writeSnippetToClipboard({ ...snippet, bytes });
+  yield* Effect.logInfo("Wrote stored snippet to clipboard", {
+    formats: clipboard.availableFormats(),
+  });
 });
 
 const isSignedStorageUrl = (storageProvider: StorageProvider, value: string): boolean => {
@@ -301,7 +332,12 @@ const isSignedStorageUrl = (storageProvider: StorageProvider, value: string): bo
     const url = new URL(value);
     if (url.protocol !== "https:") return false;
     if (storageProvider === "GOOGLE_DRIVE") {
-      return url.hostname === "drive.google.com" || url.hostname.endsWith(".googleusercontent.com");
+      return (
+        url.hostname === "www.googleapis.com" ||
+        url.hostname === "drive.google.com" ||
+        url.hostname === "drive.usercontent.google.com" ||
+        url.hostname.endsWith(".googleusercontent.com")
+      );
     }
     if (storageProvider === "ONE_DRIVE") {
       return url.hostname.endsWith(".1drv.com") || url.hostname.endsWith(".sharepoint.com");

@@ -200,6 +200,21 @@ export const SnippetRpcs = RpcGroup.make(
     success: ApiSnippetSchema,
     error: RpcError,
   }),
+  Rpc.make("GetSnippetCopyPayload", {
+    payload: { id: SnippetIdSchema },
+    success: Schema.Struct({
+      kind: Schema.Literals(["FILE", "IMAGE"] as const),
+      storageProvider: StorageProviderLiteral,
+      fileName: Schema.String,
+      contentType: Schema.NullOr(Schema.String),
+      byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+      download: Schema.Struct({
+        url: Schema.String,
+        headers: Schema.Array(Schema.Struct({ name: Schema.String, value: Schema.String })),
+      }),
+    }),
+    error: RpcError,
+  }),
   Rpc.make("DeleteSnippet", {
     payload: { id: SnippetIdSchema },
     success: Schema.Void,
