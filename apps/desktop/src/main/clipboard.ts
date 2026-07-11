@@ -1,9 +1,10 @@
 import { statSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { basename, extname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { app, clipboard, nativeImage } from "electron";
 import { Data, Effect } from "effect";
+import type { SnippetContent } from "./snippetCache.ts";
 
 export class ReadClipboardError extends Data.TaggedError("ReadClipboardError")<{
   readonly cause: unknown;
@@ -205,6 +206,61 @@ export const writeClipboard = Effect.fn("writeClipboard")(function* (
 
   return yield* Effect.try({
     try: () => clipboard.writeImage(nativeImage.createFromDataURL(content.dataUrl)),
+    catch: (cause) => new WriteClipboardError({ cause }),
+  });
+});
+
+const clipboardFormatFor = (contentType: string | null) => {
+  const format = contentType?.split(";", 1)[0]?.trim().toLowerCase();
+  return format !== undefined && /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/.test(format)
+    ? format
+    : "application/octet-stream";
+};
+
+const writeSnippetBytes = (content: SnippetContent) => {
+  clipboard.clear();
+  clipboard.writeBuffer(clipboardFormatFor(content.contentType), Buffer.from(content.bytes));
+};
+
+const windowsFileDrop = (path: string) => {
+  const pathBytes = Buffer.from(`${path}\u0000\u0000`, "utf16le");
+  const header = Buffer.alloc(20);
+  header.writeUInt32LE(20, 0);
+  header.writeUInt32LE(1, 16);
+  return Buffer.concat([header, pathBytes]);
+};
+
+const writeSnippetFile = (content: SnippetContent) => {
+  const fileName = basename(content.fileName);
+  const path = join(app.getPath("temp"), `plakk-snippet-${crypto.randomUUID()}-${fileName}`);
+  const url = pathToFileURL(path).toString();
+
+  writeFileSync(path, content.bytes);
+  clipboard.clear();
+  if (process.platform === "darwin") {
+    clipboard.writeBuffer("public.file-url", Buffer.from(url));
+  } else if (process.platform === "linux") {
+    clipboard.writeBuffer("x-special/gnome-copied-files", Buffer.from(`copy\n${url}`));
+    clipboard.writeBuffer("text/uri-list", Buffer.from(url));
+  } else {
+    clipboard.writeBuffer("CF_HDROP", windowsFileDrop(path));
+  }
+};
+
+export const writeSnippetToClipboard = Effect.fn("writeSnippetToClipboard")(function* (
+  content: SnippetContent,
+) {
+  return yield* Effect.try({
+    try: () => {
+      if (content.kind === "IMAGE") {
+        const image = nativeImage.createFromBuffer(Buffer.from(content.bytes));
+        if (image.isEmpty()) writeSnippetBytes(content);
+        else clipboard.writeImage(image);
+        return;
+      }
+
+      writeSnippetFile(content);
+    },
     catch: (cause) => new WriteClipboardError({ cause }),
   });
 });

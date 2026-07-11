@@ -137,12 +137,40 @@ describe("text snippet persistence and authorization", () => {
 
     await expect(
       Effect.runPromise(readSnippetContent({ db: queryDb([owned]) }, storage, "user-1", owned.id)),
-    ).resolves.toEqual({ bytes });
+    ).resolves.toEqual({
+      bytes,
+      kind: "TEXT",
+      fileName: owned.fileName,
+      contentType: owned.contentType,
+    });
     expect(downloadObject).toHaveBeenCalledWith({
       storageProvider: "GOOGLE_DRIVE",
       storageObjectId: "drive-id",
       expectedByteSize: bytes.byteLength,
       workosUserId: "user-1",
+    });
+  });
+
+  it("returns exact provider bytes and metadata for an owned READY image snippet", async () => {
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+    const image = row({
+      kind: "IMAGE",
+      title: "photo.png",
+      fileName: "photo.png",
+      contentType: "image/png",
+      byteSize: bytes.byteLength,
+    });
+    const storage = {
+      downloadObject: () => Effect.succeed(bytes),
+    } as unknown as StorageProviderService["Service"];
+
+    await expect(
+      Effect.runPromise(readSnippetContent({ db: queryDb([image]) }, storage, "user-1", image.id)),
+    ).resolves.toEqual({
+      bytes,
+      kind: "IMAGE",
+      fileName: "photo.png",
+      contentType: "image/png",
     });
   });
 

@@ -13,7 +13,7 @@ import { createPlakkRpc } from "@plakk/ui/atoms/rpc";
 import { AppHeader } from "@plakk/ui/components/AppHeader";
 import { SnippetList } from "@plakk/ui/components/SnippetList";
 import { SnippetRow } from "@plakk/ui/components/SnippetRow";
-import type { TextSnippetContent } from "@plakk/ui/components/SnippetRow";
+import type { ImageThumbnail, TextSnippetContent } from "@plakk/ui/components/SnippetRow";
 import { Button } from "@plakk/ui/components/primitives/button";
 import { Checkbox } from "@plakk/ui/components/primitives/checkbox";
 import {
@@ -58,6 +58,8 @@ export function Home({ active = true }: { active?: boolean }) {
   const [skipExternalLinkWarning, setSkipExternalLinkWarning] = useState(false);
   const [showExternalLinkWarning, setShowExternalLinkWarning] = useState(true);
   const [textContents, setTextContents] = useState<Record<string, TextSnippetContent>>({});
+  const [imageThumbnails, setImageThumbnails] = useState<Record<string, ImageThumbnail>>({});
+  const [copyErrors, setCopyErrors] = useState<Record<string, string>>({});
   const copiedTimerRef = useRef<number | undefined>(undefined);
 
   const snippetHeaders = useMemo<SnippetRequestHeaders | null>(
@@ -255,6 +257,40 @@ export function Home({ active = true }: { active?: boolean }) {
     }
   }, [loadTextContent, syncedSnippetResponse.items, textContents]);
 
+  useEffect(() => {
+    let disposed = false;
+    for (const snippet of syncedSnippetResponse.items) {
+      if (snippet.kind !== "IMAGE" || snippet.uploadStatus !== "READY") continue;
+      if (imageThumbnails[snippet.id] !== undefined) continue;
+
+      setImageThumbnails((thumbnails) => ({ ...thumbnails, [snippet.id]: { state: "loading" } }));
+      void window.ipc.snippets.getThumbnail(snippet.id).then(
+        ({ url }) => {
+          if (!disposed) {
+            setImageThumbnails((thumbnails) => ({
+              ...thumbnails,
+              [snippet.id]: { state: "ready", url },
+            }));
+          }
+        },
+        (error: unknown) => {
+          if (!disposed) {
+            setImageThumbnails((thumbnails) => ({
+              ...thumbnails,
+              [snippet.id]: {
+                state: "failed",
+                message: error instanceof Error ? error.message : "Could not load image preview.",
+              },
+            }));
+          }
+        },
+      );
+    }
+    return () => {
+      disposed = true;
+    };
+  }, [imageThumbnails, syncedSnippetResponse.items]);
+
   function enqueueFileSnippet(file: Pick<File, "name" | "size" | "type">, filePath?: string) {
     if (storageStatus.kind !== "connected" || !storageStatus.canSync) return;
 
@@ -329,6 +365,46 @@ export function Home({ active = true }: { active?: boolean }) {
   function cancelUpload(id: string) {
     cancelStoredSnippetUpload(id);
     void window.ipc.storage.cancelUpload(id);
+  }
+
+  function showCopied(id: string) {
+    setCopiedId(id);
+    if (copiedTimerRef.current !== undefined) window.clearTimeout(copiedTimerRef.current);
+    copiedTimerRef.current = window.setTimeout(() => {
+      setCopiedId((copied) => (copied === id ? null : copied));
+    }, 1200);
+  }
+
+  async function copySnippet(snippet: (typeof snippets)[number]) {
+    try {
+      if ("phase" in snippet) throw new Error("Finish uploading before copying this snippet.");
+
+      if (snippet.kind === "FILE" || snippet.kind === "IMAGE") {
+        await window.ipc.snippets.copy(snippet.id);
+      } else {
+        const textContent = textContents[snippet.id];
+        const text =
+          snippet.kind === "TEXT"
+            ? textContent?.state === "ready"
+              ? textContent.text
+              : null
+            : snippet.title;
+        if (text === null) return;
+        if (navigator.clipboard === undefined) throw new Error("Clipboard access is unavailable.");
+        await navigator.clipboard.writeText(text);
+      }
+
+      setCopyErrors((errors) => {
+        const { [snippet.id]: _error, ...remaining } = errors;
+        return remaining;
+      });
+      showCopied(snippet.id);
+    } catch (error) {
+      setCopyErrors((errors) => ({
+        ...errors,
+        [snippet.id]: error instanceof Error ? error.message : "Could not copy this snippet.",
+      }));
+    }
   }
 
   useEffect(() => {
@@ -507,26 +583,9 @@ export function Home({ active = true }: { active?: boolean }) {
               key={snippet.id}
               snippet={snippet}
               copied={copiedId === snippet.id}
-              onCopy={() => {
-                const textContent = textContents[snippet.id];
-                const copyText =
-                  snippet.kind === "TEXT"
-                    ? textContent?.state === "ready"
-                      ? textContent.text
-                      : null
-                    : "phase" in snippet
-                      ? snippet.fileName
-                      : snippet.title;
-                if (copyText === null) return;
-                void navigator.clipboard?.writeText(copyText);
-                setCopiedId(snippet.id);
-                if (copiedTimerRef.current !== undefined) {
-                  window.clearTimeout(copiedTimerRef.current);
-                }
-                copiedTimerRef.current = window.setTimeout(() => {
-                  setCopiedId((copied) => (copied === snippet.id ? null : copied));
-                }, 1200);
-              }}
+              onCopy={() => void copySnippet(snippet)}
+              copyDisabled={"phase" in snippet}
+              copyError={copyErrors[snippet.id]}
               onDelete={() => {
                 if ("phase" in snippet) {
                   if (snippet.phase === "FAILED") uploadActions.remove(snippet.id);
@@ -534,7 +593,10 @@ export function Home({ active = true }: { active?: boolean }) {
                   return;
                 }
                 if (snippetHeaders !== null) {
-                  void deleteSyncedSnippet(deleteSnippetOptions(snippetHeaders, snippet.id));
+                  void deleteSyncedSnippet(deleteSnippetOptions(snippetHeaders, snippet.id)).then(
+                    () => window.ipc.snippets.forget(snippet.id),
+                    () => undefined,
+                  );
                 }
               }}
               {...(snippet.kind === "LINK" ? { onOpenLink: openLink } : {})}
@@ -542,6 +604,19 @@ export function Home({ active = true }: { active?: boolean }) {
                 ? {
                     textContent: textContents[snippet.id],
                     onRetryContent: () => void loadTextContent(snippet),
+                  }
+                : {})}
+              {...(snippet.kind === "IMAGE" && !("phase" in snippet)
+                ? {
+                    imageThumbnail: imageThumbnails[snippet.id],
+                    onThumbnailError: () =>
+                      setImageThumbnails((thumbnails) => ({
+                        ...thumbnails,
+                        [snippet.id]: {
+                          state: "failed",
+                          message: "Could not display image preview.",
+                        },
+                      })),
                   }
                 : {})}
               onStopUpload={() => cancelUpload(snippet.id)}
