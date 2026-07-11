@@ -106,7 +106,6 @@ export function SnippetRow(props: {
     copyError,
   } = props;
   const { Icon } = kindMeta[snippet.kind];
-  const uploadProgress = isUploadTask(snippet) ? snippet.progress : undefined;
   const isUploading = isUploadTask(snippet) && snippet.phase !== "FAILED";
   const title =
     snippet.kind === "TEXT"
@@ -161,9 +160,10 @@ export function SnippetRow(props: {
         <div className="flex shrink-0 items-center justify-end">
           {isUploading ? (
             <div className="flex items-center gap-1">
-              <span className="w-8 text-right text-[11px] tabular-nums text-muted-foreground">
-                {uploadProgress === 0 ? "…" : `${uploadProgress}%`}
-              </span>
+              <LoaderCircle
+                className="size-4 animate-spin text-muted-foreground"
+                aria-hidden="true"
+              />
               <Button
                 type="button"
                 variant="ghost"

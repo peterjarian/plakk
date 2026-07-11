@@ -25,7 +25,7 @@ import {
   DialogTitle,
 } from "@plakk/ui/components/primitives/dialog";
 import { useActiveUploadTasks, useUploadActions } from "@plakk/ui/hooks/useUploadFlow";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult, Atom } from "effect/unstable/reactivity";
 import { SnippetComposer } from "../components/SnippetComposer.tsx";
 import { useAuth } from "../hooks/useAuth.ts";
 import {
@@ -46,6 +46,16 @@ const createStoredSnippetMutationAtom = plakkRpc.mutation("CreateStoredSnippet")
 const updateStoredSnippetUploadStatusMutationAtom = plakkRpc.mutation(
   "UpdateStoredSnippetUploadStatus",
 );
+const listSnippetsQuery = (headers: SnippetRequestHeaders, contentUrlGeneration: number) =>
+  plakkRpc.query(
+    "ListSnippets",
+    { limit: 20 },
+    {
+      headers,
+      reactivityKeys: snippetReactivityKeys,
+      serializationKey: `latest-${contentUrlGeneration}`,
+    },
+  );
 
 export function Home({ active = true }: { active?: boolean }) {
   const auth = useAuth();
@@ -74,22 +84,29 @@ export function Home({ active = true }: { active?: boolean }) {
     [auth.accessToken],
   );
   const snippetsAtom = useMemo(() => {
-    if (snippetHeaders === null) return emptySnippetsAtom;
-    return plakkRpc.query(
-      "ListSnippets",
-      { limit: 20 },
-      {
-        headers: snippetHeaders,
-        reactivityKeys: snippetReactivityKeys,
-        serializationKey: `latest-${contentUrlGeneration}`,
-      },
-    );
+    const source =
+      snippetHeaders === null
+        ? (emptySnippetsAtom as Atom.Atom<Atom.Type<ReturnType<typeof listSnippetsQuery>>>)
+        : listSnippetsQuery(snippetHeaders, contentUrlGeneration);
+    return Atom.optimistic(source);
   }, [contentUrlGeneration, snippetHeaders]);
   const snippetsResult = useAtomValue(snippetsAtom);
   const syncedSnippetResponse = AsyncResult.getOrElse(snippetsResult, () => ({
     items: [] as ReadonlyArray<ApiSnippet>,
   }));
-  const deleteSyncedSnippet = useAtomSet(deleteSnippetMutationAtom, { mode: "promise" });
+  const deleteSyncedSnippetAtom = useMemo(
+    () =>
+      Atom.optimisticFn(snippetsAtom, {
+        reducer: (result, { payload }) =>
+          AsyncResult.map(result, (response) => ({
+            ...response,
+            items: response.items.filter((snippet) => snippet.id !== payload.id),
+          })),
+        fn: deleteSnippetMutationAtom,
+      }),
+    [snippetsAtom],
+  );
+  const deleteSyncedSnippet = useAtomSet(deleteSyncedSnippetAtom, { mode: "promise" });
   const prepareStoredSnippetUpload = useAtomSet(prepareStoredSnippetUploadMutationAtom, {
     mode: "promise",
   });
@@ -572,7 +589,7 @@ export function Home({ active = true }: { active?: boolean }) {
         storageAction={storageAction}
       />
 
-      <div className="scrollbar-hidden min-h-0 flex-1 overflow-y-auto px-6 pb-4">
+      <div className="scrollbar-hidden flex min-h-0 flex-1 flex-col overflow-y-auto px-6 pb-4">
         <div className="sticky top-0 z-20 bg-background pt-3 pb-5">
           {accountBlocked && storageStatus.kind !== "loading" && (
             <div className="mb-2 flex items-center gap-2 rounded-md bg-muted px-2.5 py-1.5 text-xs text-muted-foreground">
