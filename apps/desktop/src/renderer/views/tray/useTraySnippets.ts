@@ -1,16 +1,15 @@
 import { useMemo } from "react";
-import { useAtomSet, useAtomValue } from "@effect/atom-react";
+import { useAtomSet } from "@effect/atom-react";
 import { snippetKindForFileName } from "@plakk/shared";
-import type { ApiSnippet, AccountStatus } from "@plakk/shared/PlakkApi";
-import { emptySnippetsAtom, snippetReactivityKeys } from "@plakk/ui/atoms/snippets";
+import type { AccountStatus } from "@plakk/shared/PlakkApi";
 import type { UploadTask } from "@plakk/ui/atoms/upload";
 import { createPlakkRpc } from "@plakk/ui/atoms/rpc";
 import { useActiveUploadTasks, useUploadActions } from "@plakk/ui/hooks/useUploadFlow";
-import { AsyncResult } from "effect/unstable/reactivity";
 import { uploadStoredSnippet } from "../../lib/storedSnippetUpload.ts";
 import { encodeTextSnippet } from "../../lib/textSnippetContent.ts";
 import { useAuth } from "../../hooks/useAuth.ts";
 import type { ClipboardContent, TrayDroppedItem } from "../../../ipc/contracts.ts";
+import { useSnippetReplica } from "../../hooks/useSnippetReplica.ts";
 
 const plakkRpc = createPlakkRpc(window.ipc.runtimeConfig.plakkRpcUrl);
 const prepareUpload = plakkRpc.mutation("PrepareStoredSnippetUpload");
@@ -23,25 +22,13 @@ export function useTraySnippets(account: AccountStatus | null) {
     () => (auth.accessToken === null ? null : { authorization: `Bearer ${auth.accessToken}` }),
     [auth.accessToken],
   );
-  const snippetsAtom = useMemo(
-    () =>
-      headers === null
-        ? emptySnippetsAtom
-        : plakkRpc.query(
-            "ListSnippets",
-            { limit: 1 },
-            { headers, reactivityKeys: snippetReactivityKeys },
-          ),
-    [headers],
-  );
-  const result = useAtomValue(snippetsAtom);
-  const synced = AsyncResult.getOrElse(result, () => ({ items: [] as ReadonlyArray<ApiSnippet> }));
+  const { items } = useSnippetReplica();
   const uploads = useActiveUploadTasks();
   const actions = useUploadActions();
   const prepare = useAtomSet(prepareUpload, { mode: "promise" });
   const create = useAtomSet(createSnippet, { mode: "promise" });
   const update = useAtomSet(updateUpload, { mode: "promise" });
-  const latest: ApiSnippet | UploadTask | undefined = uploads.at(0) ?? synced.items.at(0);
+  const latest: UploadTask | (typeof items)[number] | undefined = uploads.at(0) ?? items.at(0);
   const provider = account?.storageProvider ?? null;
 
   const upload = (file: Pick<File, "name" | "size" | "type">, filePath?: string) => {
@@ -64,8 +51,7 @@ export function useTraySnippets(account: AccountStatus | null) {
       api: {
         prepare: (payload) => prepare({ headers, payload }),
         create: (payload) => create({ headers, payload }),
-        updateStatus: (payload) =>
-          update({ headers, payload, reactivityKeys: snippetReactivityKeys }),
+        updateStatus: (payload) => update({ headers, payload }),
       },
     }).catch(() => undefined);
   };
@@ -93,8 +79,7 @@ export function useTraySnippets(account: AccountStatus | null) {
       api: {
         prepare: (payload) => prepare({ headers, payload }),
         create: (payload) => create({ headers, payload }),
-        updateStatus: (payload) =>
-          update({ headers, payload, reactivityKeys: snippetReactivityKeys }),
+        updateStatus: (payload) => update({ headers, payload }),
       },
     }).catch(() => undefined);
   };

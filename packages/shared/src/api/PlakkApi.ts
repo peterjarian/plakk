@@ -204,15 +204,6 @@ export const SubscribeSnippetChangesRpc = Rpc.make("SubscribeSnippetChanges", {
 });
 
 export const SnippetRpcs = RpcGroup.make(
-  Rpc.make("ListSnippets", {
-    payload: {
-      limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 })),
-    },
-    success: Schema.Struct({
-      items: Schema.Array(ApiSnippetSchema),
-    }),
-    error: RpcError,
-  }),
   Rpc.make("CreateStoredSnippet", {
     payload: CreateStoredSnippetPayloadSchema,
     success: ApiSnippetSchema,
@@ -258,7 +249,7 @@ export const SnippetRpcs = RpcGroup.make(
   Rpc.make("GetSnippetCopyPayload", {
     payload: { id: SnippetIdSchema },
     success: Schema.Struct({
-      kind: Schema.Literals(["FILE", "IMAGE"] as const),
+      kind: Schema.Literals(["TEXT", "FILE", "IMAGE"] as const),
       storageProvider: StorageProviderLiteral,
       fileName: Schema.String,
       contentType: Schema.NullOr(Schema.String),

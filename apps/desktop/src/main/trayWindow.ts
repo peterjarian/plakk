@@ -3,7 +3,7 @@ import { app, BrowserWindow, nativeImage, screen, Tray } from "electron";
 import { getAnchoredWindowBounds } from "./trayPosition.ts";
 import type { Rectangle } from "electron";
 
-const trayWindowSize = { width: 360, height: 148 };
+const trayWindowSize = { width: 360, height: 172 };
 const accountStateMaxAgeMs = 5 * 60 * 1000;
 
 type TrayNativeEvent = {

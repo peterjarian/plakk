@@ -33,7 +33,7 @@ describe("desktop lifecycle", () => {
     ).toBe(false);
   });
 
-  it("creates the tray only for signed-in sessions and removes it on sign-out", () => {
+  it("keeps the tray for a known offline account and removes it on sign-out", () => {
     const controller = { setup: vi.fn(), disable: vi.fn() };
 
     reconcileTrayAuth({ accessToken: null, user: null }, controller);
@@ -42,6 +42,9 @@ describe("desktop lifecycle", () => {
 
     reconcileTrayAuth(signedIn, controller);
     expect(controller.setup).toHaveBeenCalledOnce();
+
+    reconcileTrayAuth({ accessToken: null, user: signedIn.user }, controller);
+    expect(controller.setup).toHaveBeenCalledTimes(2);
 
     reconcileTrayAuth({ accessToken: null, user: null }, controller);
     expect(controller.disable).toHaveBeenCalledTimes(2);

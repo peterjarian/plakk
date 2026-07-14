@@ -1,4 +1,4 @@
-import { and, desc, Drizzle, eq, isNull, sql, type DrizzleService } from "@plakk/db";
+import { and, Drizzle, eq, isNull, type DrizzleService } from "@plakk/db";
 import { snippets, type SnippetRow } from "@plakk/db/schema";
 import {
   STORAGE_PROVIDERS,
@@ -157,7 +157,7 @@ export const getSnippetCopyPayload = Effect.fn("@plakk/web/api/PlakkApiLive.getS
 
     if (
       snippet === undefined ||
-      (snippet.kind !== "FILE" && snippet.kind !== "IMAGE") ||
+      (snippet.kind !== "TEXT" && snippet.kind !== "FILE" && snippet.kind !== "IMAGE") ||
       snippet.storageProvider === null ||
       snippet.storageObjectId === null
     ) {
@@ -641,33 +641,6 @@ const StorageLive = StorageRpcs.of({
 });
 
 const SnippetsLive = SnippetRpcs.of({
-  ListSnippets: Effect.fn("rpc.ListSnippets")(function* (input) {
-    return yield* Effect.gen(function* () {
-      const drizzle = yield* Drizzle;
-      const currentUser = yield* CurrentUser;
-      const storage = yield* StorageProviderService;
-
-      yield* Effect.logInfo("Listing snippets", { limit: input.limit });
-      const rows = yield* drizzle.db
-        .select()
-        .from(snippets)
-        .where(and(eq(snippets.ownerWorkosUserId, currentUser.id), isNull(snippets.deletedAt)))
-        .orderBy(
-          desc(sql<boolean>`${snippets.kind} = 'TEXT' and ${snippets.storageProvider} is null`),
-          desc(snippets.createdAt),
-        )
-        .limit(input.limit)
-        .pipe(Effect.orDie);
-
-      return {
-        items: yield* Effect.forEach(rows, (snippet) =>
-          withContentUrls(storage, snippet, currentUser.id).pipe(
-            Effect.orElseSucceed(() => toApiSnippet(snippet)),
-          ),
-        ),
-      };
-    }).pipe(Effect.annotateSpans({ limit: input.limit }));
-  }),
   CreateStoredSnippet: Effect.fn("rpc.CreateStoredSnippet")(function* (input) {
     return yield* Effect.gen(function* () {
       const drizzle = yield* Drizzle;

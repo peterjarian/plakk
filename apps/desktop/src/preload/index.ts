@@ -8,6 +8,7 @@ import type {
   UserConfig,
   UserConfigPatch,
 } from "../ipc/contracts.ts";
+import type { ApiSnippet } from "@plakk/shared/PlakkApi";
 import { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
 import { invoke, on } from "../ipc/preload.ts";
 import type { RendererPreparedFileUploadPayload, StorageUploadResult } from "../storageUpload.ts";
@@ -41,6 +42,8 @@ export type DesktopApi = {
   };
   readonly snippets: {
     readonly copy: (id: string) => Promise<void>;
+    readonly list: () => Promise<ReadonlyArray<ApiSnippet>>;
+    readonly onChanged: (callback: (items: ReadonlyArray<ApiSnippet>) => void) => () => void;
     readonly read: (id: string) => Promise<Uint8Array>;
   };
   readonly tray: {
@@ -101,6 +104,8 @@ const desktopApi = {
   },
   snippets: {
     copy: (snippet) => invoke(ipcMethods.snippetCopy, snippet),
+    list: () => invoke(ipcMethods.snippetList, undefined),
+    onChanged: (callback) => on(ipcEvents.snippetReplicaChanged, callback),
     read: (snippet) => invoke(ipcMethods.snippetRead, snippet),
   },
   tray: {

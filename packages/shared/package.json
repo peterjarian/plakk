@@ -14,6 +14,10 @@
     "./RpcError": {
       "import": "./src/api/RpcError.ts",
       "types": "./src/api/RpcError.ts"
+    },
+    "./SnippetReplica": {
+      "import": "./src/SnippetReplica.ts",
+      "types": "./src/SnippetReplica.ts"
     }
   },
   "scripts": {

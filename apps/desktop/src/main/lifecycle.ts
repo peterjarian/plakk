@@ -6,7 +6,7 @@ type TrayAuthController = {
 };
 
 export function reconcileTrayAuth(status: AuthStatus, controller: TrayAuthController | undefined) {
-  if (status.user === null || status.accessToken === null) {
+  if (status.user === null) {
     controller?.disable();
     return;
   }
