@@ -92,6 +92,32 @@ export const ApiSnippetSchema = Schema.Struct({
 
 export type ApiSnippet = typeof ApiSnippetSchema.Type;
 
+export const SnippetChangeCursorSchema = Schema.String;
+
+export const ApiSnippetChangeSchema = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("UPSERT"),
+    snippet: ApiSnippetSchema,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("DELETE"),
+    snippetId: SnippetIdSchema,
+  }),
+]);
+
+export type ApiSnippetChange = typeof ApiSnippetChangeSchema.Type;
+
+export const SnippetChangePageSchema = Schema.Union([
+  Schema.Struct({
+    status: Schema.Literal("OK"),
+    changes: Schema.Array(ApiSnippetChangeSchema),
+    nextCursor: SnippetChangeCursorSchema,
+  }),
+  Schema.Struct({ status: Schema.Literal("RESNAPSHOT_REQUIRED") }),
+]);
+
+export type SnippetChangePage = typeof SnippetChangePageSchema.Type;
+
 export const CreateStoredSnippetPayloadSchema = Schema.Union([
   Schema.Struct({
     id: SnippetIdSchema,
@@ -183,8 +209,27 @@ export const SnippetRpcs = RpcGroup.make(
     success: ApiSnippetSchema,
     error: RpcError,
   }),
+  Rpc.make("GetSnippetSnapshot", {
+    success: Schema.Struct({
+      items: Schema.Array(ApiSnippetSchema),
+      cursor: SnippetChangeCursorSchema,
+    }),
+    error: RpcError,
+  }),
+  Rpc.make("PullSnippetChanges", {
+    payload: {
+      cursor: SnippetChangeCursorSchema,
+      limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 })),
+    },
+    success: SnippetChangePageSchema,
+    error: RpcError,
+  }),
   Rpc.make("UpdateStoredSnippetUploadStatus", {
     payload: Schema.Union([
+      Schema.Struct({
+        id: SnippetIdSchema,
+        uploadStatus: Schema.Literals(["UPLOADING", "INTERRUPTED"] as const),
+      }),
       Schema.Struct({
         id: SnippetIdSchema,
         uploadStatus: Schema.Literal("READY"),

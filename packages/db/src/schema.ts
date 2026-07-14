@@ -1,9 +1,14 @@
 import { SNIPPET_KINDS, SNIPPET_UPLOAD_STATUSES, STORAGE_PROVIDERS } from "@plakk/shared";
+import type { ApiSnippet } from "@plakk/shared/PlakkApi";
+import { sql } from "drizzle-orm";
 import {
   bigint,
+  check,
   index,
+  jsonb,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -12,6 +17,7 @@ import {
 
 export const snippetKind = pgEnum("snippet_kind", SNIPPET_KINDS);
 export const snippetUploadStatus = pgEnum("snippet_upload_status", SNIPPET_UPLOAD_STATUSES);
+export const snippetChangeType = pgEnum("snippet_change_type", ["UPSERT", "DELETE"]);
 export const storageProvider = pgEnum("storage_provider", STORAGE_PROVIDERS);
 
 const timestamps = {
@@ -47,3 +53,29 @@ export const snippets = pgTable(
 );
 
 export type SnippetRow = typeof snippets.$inferSelect;
+
+export const snippetChangeFeeds = pgTable("snippet_change_feeds", {
+  ownerWorkosUserId: text("owner_workos_user_id").primaryKey(),
+  latestSequence: bigint("latest_sequence", { mode: "bigint" }).default(0n).notNull(),
+});
+
+export const snippetChanges = pgTable(
+  "snippet_changes",
+  {
+    ownerWorkosUserId: text("owner_workos_user_id").notNull(),
+    sequence: bigint("sequence", { mode: "bigint" }).notNull(),
+    changeType: snippetChangeType("change_type").notNull(),
+    snippetId: uuid("snippet_id").notNull(),
+    snapshot: jsonb("snapshot").$type<ApiSnippet>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.ownerWorkosUserId, table.sequence] }),
+    check(
+      "snippet_changes_snapshot_type_check",
+      sql`(${table.changeType} = 'UPSERT') = (${table.snapshot} is not null)`,
+    ),
+  ],
+);
+
+export type SnippetChangeRow = typeof snippetChanges.$inferSelect;

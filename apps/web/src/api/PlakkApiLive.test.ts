@@ -1,9 +1,10 @@
 import type { DrizzleService } from "@plakk/db";
-import type { SnippetRow } from "@plakk/db/schema";
+import { snippetChangeFeeds, snippetChanges, snippets, type SnippetRow } from "@plakk/db/schema";
 import { CurrentUser } from "@plakk/shared/PlakkApi";
 import { describe, expect, it, vi } from "vite-plus/test";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 
 import { type StorageProviderService } from "./storage/StorageProvider.ts";
 import { StorageProviderError } from "./storage/types.ts";
@@ -13,6 +14,11 @@ import {
   prepareSnippetUpload,
   updateStoredSnippetUpload,
 } from "./PlakkApiLive.ts";
+
+class ChangeInsertError extends Schema.TaggedErrorClass<ChangeInsertError>()(
+  "ChangeInsertError",
+  {},
+) {}
 
 const row = (overrides: Partial<SnippetRow> = {}): SnippetRow => ({
   id: "0d1e2f3a-4567-4890-8abc-def012345678",
@@ -42,10 +48,26 @@ const queryDb = (rows: ReadonlyArray<SnippetRow>) =>
     }),
   }) as unknown as DrizzleService["db"];
 
-const statefulDb = (initial: SnippetRow, stale = false) => {
+const statefulDb = (initial: SnippetRow, stale = false, failChange = false) => {
   let stored = initial;
   let updateCount = 0;
+  let latestSequence = 0n;
+  const persistedChanges: Array<Record<string, unknown>> = [];
   const db = {
+    transaction: <A, E, R>(
+      body: (tx: DrizzleService["db"]) => Effect.Effect<A, E, R>,
+    ): Effect.Effect<A, E, R> => {
+      const before = stored;
+      const changesBefore = persistedChanges.length;
+      return body(db as unknown as DrizzleService["db"]).pipe(
+        Effect.tapCause(() =>
+          Effect.sync(() => {
+            stored = before;
+            persistedChanges.length = changesBefore;
+          }),
+        ),
+      );
+    },
     select: () => ({
       from: () => ({
         where: () => ({
@@ -56,34 +78,73 @@ const statefulDb = (initial: SnippetRow, stale = false) => {
     update: () => ({
       set: (values: Partial<SnippetRow>) => ({
         where: () => ({
-          returning: () => ({
-            pipe: () => {
+          returning: () =>
+            Effect.sync(() => {
               updateCount += 1;
-              if (stale) return Effect.succeed([]);
+              if (stale) return [];
               stored = { ...stored, ...values };
-              return Effect.succeed([stored]);
-            },
-          }),
+              return [stored];
+            }),
         }),
       }),
     }),
+    insert: (table: unknown) => ({
+      values: (values: Record<string, unknown>) => {
+        if (table === snippetChangeFeeds) {
+          return {
+            onConflictDoUpdate: () => ({
+              returning: () => Effect.sync(() => [{ latestSequence: (latestSequence += 1n) }]),
+            }),
+          };
+        }
+        if (table === snippetChanges) {
+          return failChange
+            ? Effect.fail(new ChangeInsertError())
+            : Effect.sync(() => void persistedChanges.push(values));
+        }
+        throw new Error("Unexpected insert table");
+      },
+    }),
+    delete: () => ({ where: () => Effect.void }),
   } as unknown as DrizzleService["db"];
-  return { db, stored: () => stored, updateCount: () => updateCount };
+  return {
+    db,
+    stored: () => stored,
+    updateCount: () => updateCount,
+    persistedChanges: () => persistedChanges,
+  };
 };
 
 describe("text snippet persistence and authorization", () => {
   it("persists metadata only in UPLOADING state", async () => {
     let inserted: Record<string, unknown> | undefined;
+    let latestSequence = 0n;
     const stored = row({ uploadStatus: "UPLOADING", storageObjectId: null });
-    const drizzle = {
-      db: {
-        insert: () => ({
-          values: (values: Record<string, unknown>) => {
+    const db = {
+      transaction: <A, E, R>(
+        body: (tx: DrizzleService["db"]) => Effect.Effect<A, E, R>,
+      ): Effect.Effect<A, E, R> => body(db as unknown as DrizzleService["db"]),
+      delete: () => ({ where: () => Effect.void }),
+      insert: (table: unknown) => ({
+        values: (values: Record<string, unknown>) => {
+          if (table === snippets) {
             inserted = values;
-            return { returning: () => ({ pipe: () => Effect.succeed([stored]) }) };
-          },
-        }),
-      } as unknown as DrizzleService["db"],
+            return { returning: () => Effect.succeed([stored]) };
+          }
+          if (table === snippetChangeFeeds) {
+            return {
+              onConflictDoUpdate: () => ({
+                returning: () => Effect.sync(() => [{ latestSequence: (latestSequence += 1n) }]),
+              }),
+            };
+          }
+          if (table === snippetChanges) return Effect.void;
+          throw new Error("Unexpected insert table");
+        },
+      }),
+    } as unknown as DrizzleService["db"];
+    const drizzle = {
+      db,
     } satisfies DrizzleService;
 
     await Effect.runPromise(
@@ -270,6 +331,30 @@ describe("prepared upload authorization", () => {
 });
 
 describe("stored text finalization persistence", () => {
+  it("publishes interrupted and resumed upload states", async () => {
+    const pending = row({ uploadStatus: "UPLOADING" });
+    const state = statefulDb(pending);
+    const storage = {} as StorageProviderService["Service"];
+
+    await Effect.runPromise(
+      updateStoredSnippetUpload({ db: state.db }, storage, "user-1", {
+        id: pending.id,
+        uploadStatus: "INTERRUPTED",
+      }),
+    );
+    await Effect.runPromise(
+      updateStoredSnippetUpload({ db: state.db }, storage, "user-1", {
+        id: pending.id,
+        uploadStatus: "UPLOADING",
+      }),
+    );
+
+    expect(state.persistedChanges()).toMatchObject([
+      { snapshot: { uploadStatus: "INTERRUPTED" } },
+      { snapshot: { uploadStatus: "UPLOADING" } },
+    ]);
+  });
+
   it("atomically replaces a legacy body only after exact provider confirmation", async () => {
     const body = "legacy 👋";
     const bytes = new TextEncoder().encode(body);
@@ -417,5 +502,25 @@ describe("stored text finalization persistence", () => {
     expect(failure).toMatchObject({ code: "NOT_FOUND" });
     expect(state.stored()).toEqual(legacy);
     expect(state.updateCount()).toBe(1);
+  });
+
+  it("rolls back the status change when its durable change cannot be appended", async () => {
+    const pending = row({ uploadStatus: "UPLOADING" });
+    const state = statefulDb(pending, false, true);
+    const storage = {
+      downloadObject: () => Effect.succeed(new Uint8Array(pending.byteSize)),
+    } as unknown as StorageProviderService["Service"];
+
+    await expect(
+      Effect.runPromise(
+        updateStoredSnippetUpload({ db: state.db }, storage, "user-1", {
+          id: pending.id,
+          uploadStatus: "FAILED",
+        }),
+      ),
+    ).rejects.toThrow();
+
+    expect(state.stored()).toEqual(pending);
+    expect(state.persistedChanges()).toEqual([]);
   });
 });

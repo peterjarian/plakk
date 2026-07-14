@@ -23,7 +23,7 @@ export const SnippetKindLiteral = Schema.Literals(SNIPPET_KINDS);
 
 export type SnippetKind = typeof SnippetKindLiteral.Type;
 
-export const SNIPPET_UPLOAD_STATUSES = ["UPLOADING", "READY", "FAILED"] as const;
+export const SNIPPET_UPLOAD_STATUSES = ["UPLOADING", "INTERRUPTED", "READY", "FAILED"] as const;
 export const MAX_TEXT_SNIPPET_BYTE_SIZE = 1024 * 1024;
 
 export const SnippetUploadStatusLiteral = Schema.Literals(SNIPPET_UPLOAD_STATUSES);

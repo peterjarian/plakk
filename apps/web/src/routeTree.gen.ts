@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiRpcRouteImport } from './routes/api/rpc'
+import { Route as ApiSnippetChangesEventsRouteImport } from './routes/api/snippet-changes/events'
 import { Route as ApiAuthSignInRouteImport } from './routes/api/auth/sign-in'
 import { Route as ApiAuthCallbackRouteImport } from './routes/api/auth/callback'
 
@@ -22,6 +23,11 @@ const IndexRoute = IndexRouteImport.update({
 const ApiRpcRoute = ApiRpcRouteImport.update({
   id: '/api/rpc',
   path: '/api/rpc',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiSnippetChangesEventsRoute = ApiSnippetChangesEventsRouteImport.update({
+  id: '/api/snippet-changes/events',
+  path: '/api/snippet-changes/events',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiAuthSignInRoute = ApiAuthSignInRouteImport.update({
@@ -40,12 +46,14 @@ export interface FileRoutesByFullPath {
   '/api/rpc': typeof ApiRpcRoute
   '/api/auth/callback': typeof ApiAuthCallbackRoute
   '/api/auth/sign-in': typeof ApiAuthSignInRoute
+  '/api/snippet-changes/events': typeof ApiSnippetChangesEventsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/api/rpc': typeof ApiRpcRoute
   '/api/auth/callback': typeof ApiAuthCallbackRoute
   '/api/auth/sign-in': typeof ApiAuthSignInRoute
+  '/api/snippet-changes/events': typeof ApiSnippetChangesEventsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -53,13 +61,30 @@ export interface FileRoutesById {
   '/api/rpc': typeof ApiRpcRoute
   '/api/auth/callback': typeof ApiAuthCallbackRoute
   '/api/auth/sign-in': typeof ApiAuthSignInRoute
+  '/api/snippet-changes/events': typeof ApiSnippetChangesEventsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/api/rpc' | '/api/auth/callback' | '/api/auth/sign-in'
+  fullPaths:
+    | '/'
+    | '/api/rpc'
+    | '/api/auth/callback'
+    | '/api/auth/sign-in'
+    | '/api/snippet-changes/events'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/api/rpc' | '/api/auth/callback' | '/api/auth/sign-in'
-  id: '__root__' | '/' | '/api/rpc' | '/api/auth/callback' | '/api/auth/sign-in'
+  to:
+    | '/'
+    | '/api/rpc'
+    | '/api/auth/callback'
+    | '/api/auth/sign-in'
+    | '/api/snippet-changes/events'
+  id:
+    | '__root__'
+    | '/'
+    | '/api/rpc'
+    | '/api/auth/callback'
+    | '/api/auth/sign-in'
+    | '/api/snippet-changes/events'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -67,6 +92,7 @@ export interface RootRouteChildren {
   ApiRpcRoute: typeof ApiRpcRoute
   ApiAuthCallbackRoute: typeof ApiAuthCallbackRoute
   ApiAuthSignInRoute: typeof ApiAuthSignInRoute
+  ApiSnippetChangesEventsRoute: typeof ApiSnippetChangesEventsRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -83,6 +109,13 @@ declare module '@tanstack/react-router' {
       path: '/api/rpc'
       fullPath: '/api/rpc'
       preLoaderRoute: typeof ApiRpcRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/snippet-changes/events': {
+      id: '/api/snippet-changes/events'
+      path: '/api/snippet-changes/events'
+      fullPath: '/api/snippet-changes/events'
+      preLoaderRoute: typeof ApiSnippetChangesEventsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/auth/sign-in': {
@@ -107,6 +140,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiRpcRoute: ApiRpcRoute,
   ApiAuthCallbackRoute: ApiAuthCallbackRoute,
   ApiAuthSignInRoute: ApiAuthSignInRoute,
+  ApiSnippetChangesEventsRoute: ApiSnippetChangesEventsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

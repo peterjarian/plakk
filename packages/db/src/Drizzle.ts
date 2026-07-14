@@ -8,7 +8,7 @@ const rawDateTimeTypeIds = new Set([1082, 1114, 1115, 1182, 1184, 1185, 1186, 11
 // Drizzle handles these PG date/time values; keep pg from eagerly parsing them.
 const preserveRawPgValue = (value: string) => value;
 
-const PgClientLive = Layer.unwrap(
+export const PgClientLive = Layer.unwrap(
   Config.redacted("DATABASE_URL").pipe(
     Effect.map((url) =>
       PgClient.layer({
