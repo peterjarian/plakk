@@ -1,12 +1,47 @@
-import type { ApiSnippet } from "@plakk/shared/PlakkApi";
+import { PgClient } from "@plakk/db";
+import type { User } from "@plakk/shared";
+import {
+  AuthMiddleware,
+  CurrentUser,
+  InternalServerErrorMiddleware,
+  SubscribeSnippetChangesRpc,
+  type ApiSnippet,
+} from "@plakk/shared/PlakkApi";
 import { describe, expect, it } from "vite-plus/test";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
+import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
+import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
+import * as RpcTest from "effect/unstable/rpc/RpcTest";
 
-import { snippetChangeRecoveryWakeStream, snippetChangeWakeStream } from "./SnippetChangeEvents.ts";
 import { encodeSnippetChangeCursor, makeSnippetChangePage } from "./SnippetChangeFeed.ts";
+import {
+  snippetChangeRecoveryWakeStream,
+  snippetChangeRpcStream,
+  snippetChangeWakeStream,
+} from "./SnippetChangeWakes.ts";
+
+const currentUser: User = {
+  id: "user-1",
+  firstName: null,
+  lastName: null,
+  email: null,
+  createdAt: null,
+  updatedAt: null,
+};
+
+const AuthTest = Layer.succeed(AuthMiddleware)(
+  AuthMiddleware.of((effect) => Effect.provideService(effect, CurrentUser, currentUser)),
+);
+const InternalServerErrorTest = Layer.succeed(InternalServerErrorMiddleware)(
+  InternalServerErrorMiddleware.of((effect) => effect),
+);
+const SnippetChangeTestRpcs = RpcGroup.make(SubscribeSnippetChangesRpc)
+  .middleware(AuthMiddleware)
+  .middleware(InternalServerErrorMiddleware);
 
 const snippet: ApiSnippet = {
   id: "0d1e2f3a-4567-4890-8abc-def012345678",
@@ -135,13 +170,44 @@ describe("durable snippet change pages", () => {
   });
 });
 
-describe("snippet change SSE wake-ups", () => {
+describe("snippet change RPC wake-ups", () => {
+  it("streams account-scoped wakes through RPC and cleans up on interruption", async () => {
+    const messages = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const disconnected = yield* Deferred.make<void>();
+          const notifications = Stream.make("user-2", "user-1").pipe(
+            Stream.concat(Stream.never),
+            Stream.ensuring(Deferred.succeed(disconnected, undefined)),
+          );
+          const PgTest = Layer.succeed(PgClient.PgClient)({
+            listen: () => notifications,
+          } as unknown as PgClient.PgClient);
+          const HandlerTest = SnippetChangeTestRpcs.toLayerHandler(
+            "SubscribeSnippetChanges",
+            () => snippetChangeRpcStream,
+          ).pipe(Layer.provide(PgTest));
+          const client = yield* RpcTest.makeClient(SnippetChangeTestRpcs).pipe(
+            Effect.provide([HandlerTest, AuthTest, InternalServerErrorTest]),
+          );
+          const wakes = yield* client
+            .SubscribeSnippetChanges()
+            .pipe(Stream.take(2), Stream.runCollect);
+          yield* Deferred.await(disconnected);
+          return wakes;
+        }),
+      ),
+    );
+
+    expect(Array.from(messages)).toEqual(["CHANGES_AVAILABLE", "CHANGES_AVAILABLE"]);
+  });
+
   it("wakes immediately so a missed signal is recovered through the feed", async () => {
     const messages = await Effect.runPromise(
       snippetChangeWakeStream(Stream.empty, "user-1").pipe(Stream.runCollect),
     );
 
-    expect(Array.from(messages)).toEqual(["event: changes-available\ndata:\n\n"]);
+    expect(Array.from(messages)).toEqual(["CHANGES_AVAILABLE"]);
   });
 
   it("only wakes for the authenticated account", async () => {
@@ -149,10 +215,7 @@ describe("snippet change SSE wake-ups", () => {
       snippetChangeWakeStream(Stream.make("user-2", "user-1"), "user-1").pipe(Stream.runCollect),
     );
 
-    expect(Array.from(messages)).toEqual([
-      "event: changes-available\ndata:\n\n",
-      "event: changes-available\ndata:\n\n",
-    ]);
+    expect(Array.from(messages)).toEqual(["CHANGES_AVAILABLE", "CHANGES_AVAILABLE"]);
   });
 
   it("recovers a missed notification while the connection stays open", async () => {
@@ -168,6 +231,6 @@ describe("snippet change SSE wake-ups", () => {
       }).pipe(Effect.provide(TestClock.layer())),
     );
 
-    expect(Array.from(messages)).toEqual(["event: changes-available\ndata:\n\n"]);
+    expect(Array.from(messages)).toEqual(["CHANGES_AVAILABLE"]);
   });
 });

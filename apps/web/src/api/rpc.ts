@@ -12,7 +12,7 @@ import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 
 import { authenticateRequest } from "./auth/authenticateRequest.ts";
 import { PlakkApiLive } from "./PlakkApiLive.ts";
-import { ServerMemoMap, ServerRuntimeLive } from "./ServerRuntime.ts";
+import { ServerRuntimeLive } from "./ServerRuntime.ts";
 
 const InternalServerErrorLive = Layer.succeed(InternalServerErrorMiddleware)(
   InternalServerErrorMiddleware.of((effect) =>
@@ -62,5 +62,4 @@ const RpcRoutes = RpcServer.layerHttp({
 
 export const { handler: handleRpcRequest } = HttpRouter.toWebHandler(RpcRoutes, {
   disableLogger: true,
-  memoMap: ServerMemoMap,
 });

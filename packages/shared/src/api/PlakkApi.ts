@@ -118,6 +118,9 @@ export const SnippetChangePageSchema = Schema.Union([
 
 export type SnippetChangePage = typeof SnippetChangePageSchema.Type;
 
+export const SNIPPET_CHANGES_AVAILABLE = "CHANGES_AVAILABLE" as const;
+export const SnippetChangeWakeSchema = Schema.Literal(SNIPPET_CHANGES_AVAILABLE);
+
 export const CreateStoredSnippetPayloadSchema = Schema.Union([
   Schema.Struct({
     id: SnippetIdSchema,
@@ -194,6 +197,12 @@ export const StorageRpcs = RpcGroup.make(
   }),
 );
 
+export const SubscribeSnippetChangesRpc = Rpc.make("SubscribeSnippetChanges", {
+  success: SnippetChangeWakeSchema,
+  error: RpcError,
+  stream: true,
+});
+
 export const SnippetRpcs = RpcGroup.make(
   Rpc.make("ListSnippets", {
     payload: {
@@ -224,6 +233,7 @@ export const SnippetRpcs = RpcGroup.make(
     success: SnippetChangePageSchema,
     error: RpcError,
   }),
+  SubscribeSnippetChangesRpc,
   Rpc.make("UpdateStoredSnippetUploadStatus", {
     payload: Schema.Union([
       Schema.Struct({

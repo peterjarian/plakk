@@ -31,6 +31,7 @@ import {
   getSnippetSnapshot,
   pullSnippetChanges,
 } from "./SnippetChangeFeed.ts";
+import { snippetChangeRpcStream } from "./SnippetChangeWakes.ts";
 import { toApiSnippet } from "./transformers/toApiSnippet.ts";
 
 const DEFAULT_STORAGE_PROVIDER = "GOOGLE_DRIVE" as const;
@@ -726,6 +727,7 @@ const SnippetsLive = SnippetRpcs.of({
       return yield* pullSnippetChanges(drizzle, currentUser.id, input.cursor, input.limit);
     }).pipe(Effect.annotateSpans({ limit: input.limit }));
   }),
+  SubscribeSnippetChanges: () => snippetChangeRpcStream,
   UpdateStoredSnippetUploadStatus: Effect.fn("rpc.UpdateStoredSnippetUploadStatus")(
     function* (input) {
       return yield* Effect.gen(function* () {
