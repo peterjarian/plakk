@@ -720,9 +720,11 @@ const SnippetsLive = SnippetRpcs.of({
     };
   }),
   PullSnippetChanges: Effect.fn("rpc.PullSnippetChanges")(function* (input) {
-    const drizzle = yield* Drizzle;
-    const currentUser = yield* CurrentUser;
-    return yield* pullSnippetChanges(drizzle, currentUser.id, input.cursor, input.limit);
+    return yield* Effect.gen(function* () {
+      const drizzle = yield* Drizzle;
+      const currentUser = yield* CurrentUser;
+      return yield* pullSnippetChanges(drizzle, currentUser.id, input.cursor, input.limit);
+    }).pipe(Effect.annotateSpans({ limit: input.limit }));
   }),
   UpdateStoredSnippetUploadStatus: Effect.fn("rpc.UpdateStoredSnippetUploadStatus")(
     function* (input) {

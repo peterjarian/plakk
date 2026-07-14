@@ -117,6 +117,7 @@ export const appendSnippetChange = Effect.fn("appendSnippetChange")(function* (
         readonly snippetId: string;
       },
 ) {
+  yield* Effect.annotateCurrentSpan({ changeType: change.type });
   const ownerWorkosUserId =
     change.type === "UPSERT" ? change.snippet.ownerWorkosUserId : change.ownerWorkosUserId;
   const snippetId = change.type === "UPSERT" ? change.snippet.id : change.snippetId;
@@ -141,7 +142,8 @@ export const appendSnippetChange = Effect.fn("appendSnippetChange")(function* (
     snapshot: change.type === "UPSERT" ? toApiSnippet(change.snippet) : null,
   });
 
-  if (feed.latestSequence > RETAINED_CHANGES_PER_ACCOUNT) {
+  const retentionPruned = feed.latestSequence > RETAINED_CHANGES_PER_ACCOUNT;
+  if (retentionPruned) {
     yield* db
       .delete(snippetChanges)
       .where(
@@ -151,13 +153,19 @@ export const appendSnippetChange = Effect.fn("appendSnippetChange")(function* (
         ),
       );
   }
+
+  yield* Effect.annotateCurrentSpan({ retentionPruned });
+  yield* Effect.logInfo("Staged snippet change in transaction", {
+    changeType: change.type,
+    retentionPruned,
+  });
 });
 
 export const getSnippetSnapshot = Effect.fn("getSnippetSnapshot")(function* (
   drizzle: DrizzleService,
   ownerWorkosUserId: string,
 ) {
-  return yield* drizzle.db
+  const snapshot = yield* drizzle.db
     .transaction((tx) =>
       Effect.gen(function* () {
         yield* tx
@@ -187,6 +195,10 @@ export const getSnippetSnapshot = Effect.fn("getSnippetSnapshot")(function* (
       }),
     )
     .pipe(Effect.orDie);
+
+  yield* Effect.annotateCurrentSpan({ itemCount: snapshot.rows.length });
+  yield* Effect.logInfo("Created snippet feed snapshot", { itemCount: snapshot.rows.length });
+  return snapshot;
 });
 
 export const pullSnippetChanges = Effect.fn("pullSnippetChanges")(function* (
@@ -195,8 +207,17 @@ export const pullSnippetChanges = Effect.fn("pullSnippetChanges")(function* (
   cursor: string,
   limit: number,
 ): Effect.fn.Return<SnippetChangePage> {
+  yield* Effect.annotateCurrentSpan({ limit });
   const decoded = yield* decodeAccountCursor(cursor, ownerWorkosUserId);
   if (Option.isNone(decoded)) {
+    yield* Effect.annotateCurrentSpan({
+      status: "RESNAPSHOT_REQUIRED",
+      reason: "invalid_cursor",
+    });
+    yield* Effect.logInfo("Snippet change pull requires a new snapshot", {
+      limit,
+      reason: "invalid_cursor",
+    });
     return { status: "RESNAPSHOT_REQUIRED" };
   }
 
@@ -234,9 +255,28 @@ export const pullSnippetChanges = Effect.fn("pullSnippetChanges")(function* (
     )
     .pipe(Effect.orDie);
 
-  return yield* makePage({
+  const page = yield* makePage({
     ownerWorkosUserId,
     sequence: decoded.value.sequence,
     ...data,
   });
+
+  if (page.status === "RESNAPSHOT_REQUIRED") {
+    yield* Effect.annotateCurrentSpan({
+      status: page.status,
+      reason: "cursor_out_of_range",
+    });
+    yield* Effect.logInfo("Snippet change pull requires a new snapshot", {
+      limit,
+      reason: "cursor_out_of_range",
+    });
+  } else {
+    yield* Effect.annotateCurrentSpan({ status: page.status, changeCount: page.changes.length });
+    yield* Effect.logInfo("Pulled snippet changes", {
+      limit,
+      changeCount: page.changes.length,
+    });
+  }
+
+  return page;
 });
