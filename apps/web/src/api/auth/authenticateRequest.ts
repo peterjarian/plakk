@@ -22,9 +22,7 @@ export const authenticateRequest = Effect.fn("authenticateRequest")(function* (
     redirectUri: Config.string("WORKOS_REDIRECT_URI"),
     cookiePassword: Config.string("WORKOS_COOKIE_PASSWORD"),
   }).pipe(Effect.orDie);
-  const cookieName = yield* Config.string("WORKOS_COOKIE_NAME").pipe(
-    Effect.orElseSucceed(() => "wos-session"),
-  );
+  const cookieName = "wos-session";
   const workos = yield* makeWorkOSClient(config.apiKey, config.clientId);
   const authKitCore = yield* makeAuthKitCoreClient(workos, { ...config, cookieName });
   const accessToken = bearerTokenFromHeader(headers.authorization);
