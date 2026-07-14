@@ -28,6 +28,16 @@ This project vendors external repositories under `.repos/` as read-only referenc
 - When writing Effect code, run `vp run effect-solutions list`, read the relevant `vp run effect-solutions show <topic>` output, then inspect `.repos/effect-smol/LLMS.md` and `.repos/effect-smol/` for idiomatic usage.
 - When comparing desktop/runtime patterns, inspect `.repos/t3code/` as a reference, but do not copy architecture wholesale.
 
+## Agent skills
+
+### Issue tracker
+
+Issues and PRDs are tracked in GitHub Issues. See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+This repo uses a single-context domain-doc layout. See `docs/agents/domain.md`.
+
 # Using Vite+, the Unified Toolchain for the Web
 
 This project is using Vite+, a unified toolchain built on top of Vite, Rolldown, Vitest, tsdown, Oxlint, Oxfmt, and Vite Task. Vite+ wraps runtime management, package management, and frontend tooling in a single global CLI called `vp`. Vite+ is distinct from Vite, and it invokes Vite through `vp dev` and `vp build`. Run `vp help` to print a list of commands and `vp <command> --help` for information about a specific command.

@@ -1,4 +1,0 @@
-interface:
-  display_name: "Issue to PR"
-  short_description: "Dispatch issues and shepherd PRs to merge"
-  default_prompt: "Use $issue-to-pr to turn assigned issues into worktree-backed pull requests and shepherd them through review."
