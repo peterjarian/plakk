@@ -14,10 +14,18 @@ import {
   Type,
   X,
 } from "lucide-react";
-import type { UploadTask } from "../atoms/upload.ts";
 import { Button } from "./primitives/button.tsx";
 
-export type SnippetRowItem = ApiSnippet | UploadTask;
+export type SnippetRowItem = Omit<ApiSnippet, "uploadStatus"> & {
+  readonly uploadStatus: ApiSnippet["uploadStatus"] | null;
+  readonly localState: null | {
+    readonly phase: "IMPORTING" | "QUEUED" | "UPLOADING" | "FAILED";
+    readonly progress: number;
+    readonly errorMessage: string | null;
+    readonly canRetry: boolean;
+  };
+  readonly contentAvailable: boolean;
+};
 
 export type TextSnippetContent =
   | { readonly state: "loading" }
@@ -30,8 +38,6 @@ const presentationMeta: Record<SnippetPresentation["type"], { Icon: typeof Type 
   file: { Icon: FileText },
   image: { Icon: ImageIcon },
 };
-
-const isUploadTask = (snippet: SnippetRowItem): snippet is UploadTask => "phase" in snippet;
 
 const fileSubtitle = (snippet: Pick<ApiSnippet, "byteSize" | "fileName">) =>
   `${snippet.fileName.split(".").pop()?.toUpperCase() ?? "FILE"} · ${formatFileSize(snippet.byteSize)}`;
@@ -95,6 +101,7 @@ export function SnippetRow(props: {
   onDelete: () => void;
   onOpenLink?: (url: string) => void;
   onRetryContent?: () => void;
+  onRetryUpload?: () => void;
   onStopUpload: () => void;
   textContent?: TextSnippetContent;
   thumbnailUrl?: string | null;
@@ -111,6 +118,7 @@ export function SnippetRow(props: {
     onDelete,
     onOpenLink,
     onRetryContent,
+    onRetryUpload,
     onStopUpload,
     textContent,
     thumbnailUrl,
@@ -121,26 +129,38 @@ export function SnippetRow(props: {
   } = props;
   const presentation = presentationFor(snippet, textContent);
   const { Icon } = presentationMeta[presentation.type];
-  const isUploading = isUploadTask(snippet) && snippet.phase !== "FAILED";
+  const localState = snippet.localState;
+  const isRemoteUploading = localState === null && snippet.uploadStatus === "UPLOADING";
+  const isRemoteFailed = localState === null && snippet.uploadStatus === "FAILED";
+  const isUploading = isRemoteUploading || (localState !== null && localState.phase !== "FAILED");
+  const canStopUpload = localState !== null && localState.phase !== "FAILED";
   const title = presentation.title;
   const isText = presentation.type === "text" || presentation.type === "hyperlink";
   const subtitle =
-    isUploadTask(snippet) && snippet.phase === "FAILED"
-      ? (snippet.errorMessage ?? "Upload failed. Choose the file again to retry.")
-      : isText && textContent?.state === "loading"
-        ? "Loading text…"
-        : isText && textContent?.state === "failed"
-          ? textContent.message
-          : presentation.type === "file" || presentation.type === "image"
-            ? fileSubtitle(snippet)
-            : isUploadTask(snippet)
-              ? ""
-              : formatFileSize(snippet.byteSize);
-  const time = isUploadTask(snippet)
-    ? snippet.phase === "FAILED"
-      ? "Failed"
-      : ""
-    : formatSnippetDate(snippet.createdAt, now);
+    copyError !== undefined
+      ? copyError
+      : isRemoteFailed
+        ? "Upload failed on the origin device."
+        : localState?.phase === "FAILED"
+          ? (localState.errorMessage ?? "Upload failed. Choose the file again to retry.")
+          : localState?.phase === "IMPORTING"
+            ? "Saving locally…"
+            : isText && textContent?.state === "loading"
+              ? "Loading text…"
+              : isText && textContent?.state === "failed"
+                ? textContent.message
+                : presentation.type === "file" || presentation.type === "image"
+                  ? fileSubtitle(snippet)
+                  : localState !== null
+                    ? ""
+                    : formatFileSize(snippet.byteSize);
+  const time = isRemoteFailed
+    ? "Failed"
+    : localState !== null
+      ? localState.phase === "FAILED"
+        ? "Failed"
+        : ""
+      : formatSnippetDate(snippet.createdAt, now);
 
   return (
     <li>
@@ -164,17 +184,21 @@ export function SnippetRow(props: {
 
         <div className="flex shrink-0 items-center justify-end">
           {isUploading ? (
-            <div className="flex items-center gap-1">
+            <div
+              className="flex items-center gap-1"
+              role="status"
+              aria-label={localState?.phase === "IMPORTING" ? "Saving locally" : "Syncing"}
+            >
               <LoaderCircle
                 className="size-4 animate-spin text-muted-foreground"
                 aria-hidden="true"
               />
-              {showActions && (
+              {showActions && canStopUpload && (
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon-sm"
-                  aria-label="Stop uploading"
+                  aria-label={localState.phase === "IMPORTING" ? "Stop saving" : "Stop uploading"}
                   className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                   onClick={onStopUpload}
                 >
@@ -197,6 +221,17 @@ export function SnippetRow(props: {
                     : "hidden"
                 }
               >
+                {localState?.phase === "FAILED" && localState.canRetry && onRetryUpload && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="Retry upload"
+                    onClick={onRetryUpload}
+                  >
+                    <RotateCw />
+                  </Button>
+                )}
                 {isText && textContent?.state === "failed" && onRetryContent && (
                   <Button
                     type="button"

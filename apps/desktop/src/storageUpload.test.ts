@@ -1,18 +1,25 @@
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { NodeFileSystem } from "@effect/platform-node";
+import { Effect, Fiber } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { uploadPreparedFile } from "./storageUpload.ts";
+import { type PreparedFileUploadPayload, uploadPreparedFile } from "./storageUpload.ts";
 
 const fetchMock = vi.fn<typeof fetch>();
 
-async function uploadFile(bytes: ReadonlyArray<number>) {
+async function uploadFile(bytes: ArrayLike<number>) {
   const directory = await mkdtemp(join(tmpdir(), "plakk-upload-"));
   const filePath = join(directory, "upload.bin");
   await writeFile(filePath, new Uint8Array(bytes));
   return filePath;
 }
+
+const runUpload = (payload: PreparedFileUploadPayload, onProgress?: (progress: number) => void) =>
+  Effect.runPromise(
+    uploadPreparedFile(payload, onProgress, fetchMock).pipe(Effect.provide(NodeFileSystem.layer)),
+  );
 
 beforeEach(() => {
   fetchMock.mockReset();
@@ -20,17 +27,18 @@ beforeEach(() => {
 });
 
 describe("uploadPreparedFile", () => {
-  it("uploads renderer-provided bytes without re-encoding them", async () => {
+  it("uploads managed file bytes without re-encoding them", async () => {
     const bytes = new TextEncoder().encode("héllo 👋\n");
+    const filePath = await uploadFile(bytes);
     let uploaded = new Uint8Array();
     fetchMock.mockImplementationOnce(async (_url, init) => {
       uploaded = new Uint8Array(await new Response(init?.body).arrayBuffer());
       return Response.json({ id: "drive-text-id" });
     });
 
-    const result = await uploadPreparedFile({
+    const result = await runUpload({
       id: "0d1e2f3a-4567-4890-8abc-def012345678",
-      bytes,
+      filePath,
       byteSize: bytes.byteLength,
       prepared: {
         storageProvider: "GOOGLE_DRIVE",
@@ -59,7 +67,7 @@ describe("uploadPreparedFile", () => {
       return Response.json({ id: "ignored-provider-id" });
     });
 
-    const result = await uploadPreparedFile({
+    const result = await runUpload({
       id: "0d1e2f3a-4567-4890-8abc-def012345678",
       filePath,
       byteSize: 3,
@@ -100,7 +108,7 @@ describe("uploadPreparedFile", () => {
       .mockResolvedValueOnce(Response.json({ id: "drive-file-id" }));
 
     await expect(
-      uploadPreparedFile(
+      runUpload(
         {
           id: "0d1e2f3a-4567-4890-8abc-def012345678",
           filePath,
@@ -139,7 +147,7 @@ describe("uploadPreparedFile", () => {
       .mockResolvedValueOnce(Response.json({ nextExpectedRanges: ["4-"] }, { status: 202 }))
       .mockResolvedValueOnce(Response.json({ id: "one-drive-item" }));
 
-    const result = await uploadPreparedFile({
+    const result = await runUpload({
       id: "0d1e2f3a-4567-4890-8abc-def012345678",
       filePath,
       byteSize: 5,
@@ -168,7 +176,7 @@ describe("uploadPreparedFile", () => {
     fetchMock.mockResolvedValueOnce(new Response("expired", { status: 410 }));
 
     await expect(
-      uploadPreparedFile({
+      runUpload({
         id: "0d1e2f3a-4567-4890-8abc-def012345678",
         filePath,
         byteSize: 1,
@@ -184,43 +192,48 @@ describe("uploadPreparedFile", () => {
           expiresAt: null,
         },
       }),
-    ).rejects.toThrow("Upload failed: 410 expired");
+    ).rejects.toThrow("The upload provider rejected the file (410).");
   });
 
-  it("reports cancellation while an upload request is in flight", async () => {
+  it("aborts an in-flight provider request when the upload Effect is interrupted", async () => {
     const filePath = await uploadFile([1, 2, 3]);
-    const controller = new AbortController();
+    let aborted = false;
     fetchMock.mockImplementationOnce(
       (_url, init) =>
         new Promise((_resolve, reject) => {
-          init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+          init?.signal?.addEventListener("abort", () => {
+            aborted = true;
+            reject(new Error("aborted"));
+          });
         }),
     );
 
-    const upload = uploadPreparedFile(
-      {
-        id: "0d1e2f3a-4567-4890-8abc-def012345678",
-        filePath,
-        byteSize: 3,
-        prepared: {
-          storageProvider: "GOOGLE_DRIVE",
-          storageObjectId: null,
-          upload: {
-            method: "PUT",
-            url: "https://upload.example/drive",
-            headers: [],
-            strategy: { type: "single_request" },
+    const upload = Effect.runFork(
+      uploadPreparedFile(
+        {
+          id: "0d1e2f3a-4567-4890-8abc-def012345678",
+          filePath,
+          byteSize: 3,
+          prepared: {
+            storageProvider: "GOOGLE_DRIVE",
+            storageObjectId: null,
+            upload: {
+              method: "PUT",
+              url: "https://upload.example/drive",
+              headers: [],
+              strategy: { type: "single_request" },
+            },
+            expiresAt: null,
           },
-          expiresAt: null,
         },
-      },
-      undefined,
-      controller.signal,
+        undefined,
+        fetchMock,
+      ).pipe(Effect.provide(NodeFileSystem.layer)),
     );
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
-    controller.abort();
+    await Effect.runPromise(Fiber.interrupt(upload));
 
-    await expect(upload).rejects.toThrow("Upload cancelled");
+    expect(aborted).toBe(true);
   });
 
   it("rejects a non-progressing OneDrive response", async () => {
@@ -228,7 +241,7 @@ describe("uploadPreparedFile", () => {
     fetchMock.mockResolvedValueOnce(Response.json({ nextExpectedRanges: ["0-"] }, { status: 202 }));
 
     await expect(
-      uploadPreparedFile({
+      runUpload({
         id: "0d1e2f3a-4567-4890-8abc-def012345678",
         filePath,
         byteSize: 2,
@@ -244,7 +257,7 @@ describe("uploadPreparedFile", () => {
           expiresAt: null,
         },
       }),
-    ).rejects.toThrow("Upload session stalled");
+    ).rejects.toThrow("The upload session stopped advancing.");
   });
 
   it("rejects a non-progressing Google Drive response", async () => {
@@ -254,7 +267,7 @@ describe("uploadPreparedFile", () => {
       .mockResolvedValueOnce(new Response(null, { status: 308, headers: { Range: "bytes=0-0" } }));
 
     await expect(
-      uploadPreparedFile({
+      runUpload({
         id: "0d1e2f3a-4567-4890-8abc-def012345678",
         filePath,
         byteSize: 2,
@@ -270,7 +283,7 @@ describe("uploadPreparedFile", () => {
           expiresAt: null,
         },
       }),
-    ).rejects.toThrow("Upload session stalled");
+    ).rejects.toThrow("The upload session stopped advancing.");
   });
 
   it("reports nested Electron network codes without exposing the upload link", async () => {
@@ -283,7 +296,7 @@ describe("uploadPreparedFile", () => {
     fetchMock.mockRejectedValueOnce(failure);
 
     await expect(
-      uploadPreparedFile({
+      runUpload({
         id: "0d1e2f3a-4567-4890-8abc-def012345678",
         filePath,
         byteSize: 1,

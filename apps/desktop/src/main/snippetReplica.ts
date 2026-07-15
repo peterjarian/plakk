@@ -1,16 +1,14 @@
 import { UserSchema, type User } from "@plakk/shared";
 import {
   ManagedSnippetContent,
-  ManagedSnippetContentError,
   SnippetRemoteTransport,
   SnippetReplica,
   SnippetReplicaError,
   SnippetReplicaStateSchema,
   type SnippetReplicaState,
 } from "@plakk/shared/SnippetReplica";
-import { app } from "electron";
 import ElectronStore from "electron-store";
-import { Context, Effect, FileSystem, Layer, Path, PubSub, Schema, Stream } from "effect";
+import { Context, Effect, Layer, PubSub, Schema, Stream } from "effect";
 import type { SnippetChangePage } from "@plakk/shared/PlakkApi";
 
 import { makePlakkClient, getSnippetCopyPayload } from "./accountStatus.ts";
@@ -145,85 +143,6 @@ export const ActiveSnippetAccountLive = Layer.effect(
   }),
 );
 
-export const ManagedSnippetContentLive = Layer.effect(
-  ManagedSnippetContent,
-  Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const contentDirectory = (accountId: string, snippetId: string) =>
-      path.join(
-        app.getPath("userData"),
-        "snippet-content",
-        Buffer.from(accountId).toString("base64url"),
-        snippetId,
-      );
-    const contentPath = (accountId: string, snippetId: string, revision: string) =>
-      path.join(
-        contentDirectory(accountId, snippetId),
-        Buffer.from(revision).toString("base64url"),
-      );
-
-    return ManagedSnippetContent.of({
-      get: Effect.fn("DesktopManagedSnippetContent.get")(
-        function* (accountId, snippetId, revision) {
-          return yield* fileSystem.readFile(contentPath(accountId, snippetId, revision)).pipe(
-            Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(null)),
-            Effect.mapError(
-              (cause) =>
-                new ManagedSnippetContentError({
-                  cause,
-                  reason: "Could not read managed snippet content.",
-                }),
-            ),
-          );
-        },
-      ),
-      put: Effect.fn("DesktopManagedSnippetContent.put")(
-        function* (accountId, snippetId, revision, bytes) {
-          const filePath = contentPath(accountId, snippetId, revision);
-          yield* fileSystem.makeDirectory(path.dirname(filePath), { recursive: true }).pipe(
-            Effect.mapError(
-              (cause) =>
-                new ManagedSnippetContentError({
-                  cause,
-                  reason: "Could not prepare managed snippet content.",
-                }),
-            ),
-          );
-          yield* fileSystem.writeFile(filePath, bytes).pipe(
-            Effect.mapError(
-              (cause) =>
-                new ManagedSnippetContentError({
-                  cause,
-                  reason: "Could not write managed snippet content.",
-                }),
-            ),
-          );
-        },
-      ),
-      invalidate: Effect.fn("DesktopManagedSnippetContent.invalidate")(
-        function* (accountId, snippetIds) {
-          yield* Effect.forEach(
-            snippetIds,
-            (snippetId) =>
-              fileSystem
-                .remove(contentDirectory(accountId, snippetId), { force: true, recursive: true })
-                .pipe(
-                  Effect.mapError(
-                    (cause) =>
-                      new ManagedSnippetContentError({
-                        cause,
-                        reason: "Could not invalidate managed snippet content.",
-                      }),
-                  ),
-                ),
-            { discard: true },
-          );
-        },
-      ),
-    });
-  }),
-);
 export const SnippetRemoteTransportLive = Layer.effect(
   SnippetRemoteTransport,
   Effect.gen(function* () {
@@ -273,18 +192,24 @@ export const getReplicaSnippet = Effect.fn("DesktopSnippetReplica.snippet")(func
 export const getManagedSnippetBytes = Effect.fn("DesktopSnippetReplica.content")(function* (
   account: { readonly id: string; readonly accessToken: string | null },
   snippetId: string,
+  knownSnippet?: {
+    readonly id: string;
+    readonly fileName: string;
+    readonly byteSize: number;
+    readonly uploadStatus: "UPLOADING" | "FAILED" | "UPLOADED" | null;
+  },
 ) {
   const content = yield* ManagedSnippetContent;
-  const snippet = yield* getReplicaSnippet(account.id, snippetId);
-  const cached = yield* content.get(account.id, snippetId, snippet.updatedAt);
+  const snippet = knownSnippet ?? (yield* getReplicaSnippet(account.id, snippetId));
+  const cached = yield* content.get(account.id, snippetId);
   if (cached?.byteLength === snippet.byteSize) return { bytes: cached, snippet };
   if (cached !== null) yield* content.invalidate(account.id, [snippetId]);
 
   const bytes =
-    account.accessToken === null
+    account.accessToken === null || snippet.uploadStatus !== "UPLOADED"
       ? yield* new SnippetReplicaError({
           cause: null,
-          reason: "Snippet content is not available offline yet.",
+          reason: "The local copy of this snippet is unavailable.",
         })
       : yield* downloadSnippetBytes(yield* getSnippetCopyPayload(account.accessToken, snippetId));
   if (bytes.byteLength !== snippet.byteSize) {
@@ -293,6 +218,6 @@ export const getManagedSnippetBytes = Effect.fn("DesktopSnippetReplica.content")
       reason: "Snippet content does not match its metadata.",
     });
   }
-  yield* content.put(account.id, snippetId, snippet.updatedAt, bytes);
+  yield* content.put(account.id, snippetId, bytes);
   return { bytes, snippet };
 });

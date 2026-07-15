@@ -1,12 +1,6 @@
-import { UserSchema } from "@plakk/shared";
-import {
-  AccountStatusSchema,
-  ApiSnippetSchema,
-  PreparedStorageUploadSchema,
-  SnippetIdSchema,
-} from "@plakk/shared/PlakkApi";
+import { SnippetUploadStatusLiteral, StorageProviderLiteral, UserSchema } from "@plakk/shared";
+import { AccountStatusSchema, SnippetIdSchema } from "@plakk/shared/PlakkApi";
 import { Schema } from "effect";
-import type { PreparedFileUploadPayload, StorageUploadResult } from "../storageUpload.ts";
 
 export type IpcSchema = Schema.ConstraintCodec<unknown, unknown, never, never>;
 
@@ -105,25 +99,48 @@ export const TrayAccountStateSchema = Schema.Union([
 
 export type TrayAccountState = typeof TrayAccountStateSchema.Type;
 
-const PreparedUploadBaseSchema = {
+const SnippetIngestBaseSchema = {
   id: SnippetIdSchema,
-  prepared: PreparedStorageUploadSchema,
+  fileName: Schema.String,
   byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  mediaType: Schema.NullOr(Schema.String),
+  storageProvider: StorageProviderLiteral,
 };
 
-export const PreparedFileUploadPayloadSchema = Schema.Union([
-  Schema.Struct({ ...PreparedUploadBaseSchema, filePath: Schema.String }),
-  Schema.Struct({ ...PreparedUploadBaseSchema, bytes: Schema.Uint8Array }),
-]) satisfies Schema.Schema<PreparedFileUploadPayload>;
+export const SnippetIngestPayloadSchema = Schema.Union([
+  Schema.Struct({ ...SnippetIngestBaseSchema, filePath: Schema.String }),
+  Schema.Struct({ ...SnippetIngestBaseSchema, bytes: Schema.Uint8Array }),
+]);
 
-export const StorageUploadProgressSchema = Schema.Struct({
-  id: SnippetIdSchema,
+export type SnippetIngestPayload = typeof SnippetIngestPayloadSchema.Type;
+
+const SnippetIngestResultSchema = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("ENQUEUED") }),
+  Schema.Struct({ status: Schema.Literal("FAILED"), message: Schema.String }),
+]);
+
+export const DesktopSnippetLocalStateSchema = Schema.Struct({
+  phase: Schema.Literals(["IMPORTING", "QUEUED", "UPLOADING", "FAILED"] as const),
   progress: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 100 })),
+  errorMessage: Schema.NullOr(Schema.String),
+  canRetry: Schema.Boolean,
 });
 
-export const StorageUploadResultSchema = Schema.Struct({
-  storageObjectId: Schema.String,
-}) satisfies Schema.Schema<StorageUploadResult>;
+export const DesktopSnippetSchema = Schema.Struct({
+  id: SnippetIdSchema,
+  fileName: Schema.String,
+  byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  storageProvider: StorageProviderLiteral,
+  storageObjectId: Schema.NullOr(Schema.String),
+  uploadStatus: Schema.NullOr(SnippetUploadStatusLiteral),
+  createdAt: Schema.String,
+  updatedAt: Schema.String,
+  localState: Schema.NullOr(DesktopSnippetLocalStateSchema),
+  localTextContent: Schema.NullOr(Schema.String),
+  contentAvailable: Schema.Boolean,
+});
+
+export type DesktopSnippet = typeof DesktopSnippetSchema.Type;
 
 export const ipcMethods = {
   authGet: method({
@@ -146,13 +163,28 @@ export const ipcMethods = {
     payload: Schema.String,
     result: Schema.Void,
   }),
-  storageUploadPreparedFile: method({
-    channel: "storage:upload-prepared-file",
-    payload: PreparedFileUploadPayloadSchema,
-    result: StorageUploadResultSchema,
+  snippetIngest: method({
+    channel: "snippet:ingest",
+    payload: SnippetIngestPayloadSchema,
+    result: SnippetIngestResultSchema,
   }),
-  storageCancelUpload: method({
-    channel: "storage:cancel-upload",
+  snippetDiscard: method({
+    channel: "snippet:discard",
+    payload: SnippetIdSchema,
+    result: Schema.Void,
+  }),
+  snippetCancel: method({
+    channel: "snippet:cancel",
+    payload: SnippetIdSchema,
+    result: Schema.Void,
+  }),
+  snippetRetry: method({
+    channel: "snippet:retry",
+    payload: SnippetIdSchema,
+    result: Schema.Void,
+  }),
+  snippetDelete: method({
+    channel: "snippet:delete",
     payload: SnippetIdSchema,
     result: Schema.Void,
   }),
@@ -169,7 +201,7 @@ export const ipcMethods = {
   snippetList: method({
     channel: "snippet:list",
     payload: Schema.Void,
-    result: Schema.Array(ApiSnippetSchema),
+    result: Schema.Array(DesktopSnippetSchema),
   }),
   clipboardRead: method({
     channel: "clipboard:read",
@@ -230,12 +262,8 @@ export const ipcEvents = {
     channel: "navigation:requested",
     payload: Schema.Literals(["home", "settings"] as const),
   }),
-  storageUploadProgress: event({
-    channel: "storage:upload-progress",
-    payload: StorageUploadProgressSchema,
-  }),
   snippetReplicaChanged: event({
     channel: "snippet:replica-changed",
-    payload: Schema.Array(ApiSnippetSchema),
+    payload: Schema.Array(DesktopSnippetSchema),
   }),
 } as const;

@@ -1,10 +1,9 @@
-import type { ApiSnippet } from "@plakk/shared/PlakkApi";
-import type { UploadTask } from "@plakk/ui/atoms/upload";
+import type { DesktopSnippet } from "../../../ipc/contracts.ts";
 import { SnippetRow } from "@plakk/ui/components/SnippetRow";
 
 const noop = () => undefined;
 
-export function TrayRecentItem({ snippet }: { snippet: ApiSnippet | UploadTask | undefined }) {
+export function TrayRecentItem({ snippet }: { snippet: DesktopSnippet | undefined }) {
   if (!snippet) {
     return (
       <section className="grid min-h-0 flex-1 place-content-center gap-1 px-6 text-center">
@@ -27,6 +26,9 @@ export function TrayRecentItem({ snippet }: { snippet: ApiSnippet | UploadTask |
           onCopy={noop}
           onDelete={noop}
           onStopUpload={noop}
+          {...(snippet.localTextContent === null
+            ? {}
+            : { textContent: { state: "ready" as const, text: snippet.localTextContent } })}
           showActions={false}
         />
       </ul>

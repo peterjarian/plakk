@@ -10,10 +10,12 @@ export function Tray() {
   const [isDragging, setIsDragging] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
   const [isCopying, setIsCopying] = useState(false);
+  const [copyError, setCopyError] = useState<string | null>(null);
   const [accountState, setAccountState] = useState<TrayAccountState>({ kind: "loading" });
   const ingestionAllowed = accountState.kind === "resolved" && accountCanSync(accountState.account);
   const account = accountState.kind === "resolved" ? accountState.account : null;
-  const { addClipboard, addDropped, addText, latest, upload } = useTraySnippets(account);
+  const { addClipboard, addDropped, addText, error, latest, reportError, upload } =
+    useTraySnippets(account);
   const pausedMessage =
     accountState.kind === "loading"
       ? "Checking account — adding is paused"
@@ -28,14 +30,22 @@ export function Tray() {
   useEffect(() => {
     let mounted = true;
     const unsubscribe = window.ipc.tray.onAccountStateChanged(setAccountState);
-    void window.ipc.tray.getAccountState().then((state) => {
-      if (mounted) setAccountState(state);
-    });
+    void window.ipc.tray.getAccountState().then(
+      (state) => {
+        if (mounted) setAccountState(state);
+      },
+      (cause) => {
+        if (mounted) {
+          setAccountState({ kind: "failed" });
+          reportError(cause instanceof Error ? cause.message : "Could not check the account.");
+        }
+      },
+    );
     return () => {
       mounted = false;
       unsubscribe();
     };
-  }, []);
+  }, [reportError]);
 
   useEffect(
     () =>
@@ -99,26 +109,62 @@ export function Tray() {
                 {pausedMessage}
               </p>
             )}
+            {(error ?? copyError) !== null && (
+              <p className="px-4 pb-2 text-[11px] text-destructive" role="alert">
+                {error ?? copyError}
+              </p>
+            )}
             <TrayActions
-              copyDisabled={latest === undefined || "phase" in latest}
+              copyDisabled={
+                latest === undefined ||
+                (!latest.contentAvailable && latest.uploadStatus !== "UPLOADED")
+              }
               copied={isCopied}
               copying={isCopying}
               ingestionDisabled={!ingestionAllowed}
               onCopy={() => {
-                if (latest === undefined || "phase" in latest) return;
+                if (
+                  latest === undefined ||
+                  (!latest.contentAvailable && latest.uploadStatus !== "UPLOADED")
+                ) {
+                  return;
+                }
                 setIsCopied(false);
                 setIsCopying(true);
+                setCopyError(null);
                 void window.ipc.snippets
                   .copy(latest.id)
                   .then(() => setIsCopied(true))
+                  .catch((cause) =>
+                    setCopyError(
+                      cause instanceof Error ? cause.message : "Could not copy this snippet.",
+                    ),
+                  )
                   .finally(() => setIsCopying(false));
               }}
-              onPaste={() => void window.ipc.clipboard.read().then(addClipboard)}
+              onPaste={() => {
+                reportError(null);
+                void window.ipc.clipboard
+                  .read()
+                  .then(addClipboard)
+                  .catch((cause) =>
+                    reportError(
+                      cause instanceof Error ? cause.message : "Could not read the clipboard.",
+                    ),
+                  );
+              }}
               onSelect={() =>
-                void window.ipc.tray.selectFiles().then((files) => {
-                  for (const file of files)
-                    upload({ name: file.name, size: file.size, type: "" }, file.path);
-                })
+                void window.ipc.tray
+                  .selectFiles()
+                  .then((files) => {
+                    for (const file of files)
+                      upload({ name: file.name, size: file.size, type: "" }, file.path);
+                  })
+                  .catch((cause) =>
+                    reportError(
+                      cause instanceof Error ? cause.message : "Could not choose a file.",
+                    ),
+                  )
               }
             />
           </>

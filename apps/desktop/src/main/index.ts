@@ -4,15 +4,19 @@ import { basename, join, resolve, sep } from "node:path";
 import { rm, stat } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { deriveSnippetPresentation, isHttpUrl } from "@plakk/shared";
-import { accountCanSync, type ApiSnippet } from "@plakk/shared/PlakkApi";
+import { accountCanSync } from "@plakk/shared/PlakkApi";
 import { SnippetReplica, runSnippetReplicaSync } from "@plakk/shared/SnippetReplica";
 import { app, BrowserWindow, dialog, Menu, net, protocol, shell } from "electron";
 import { Effect, Result, Stream } from "effect";
 import * as Fiber from "effect/Fiber";
-import type { AuthStatus, TrayAccountState, TrayDroppedItem } from "../ipc/contracts.ts";
+import type {
+  AuthStatus,
+  DesktopSnippet,
+  TrayAccountState,
+  TrayDroppedItem,
+} from "../ipc/contracts.ts";
 import { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
 import { handle, send } from "../ipc/main.ts";
-import { StorageUpload, type StorageUploadResult } from "../storageUpload.ts";
 import { getAccountStatus, isUnauthenticatedAccountError } from "./accountStatus.ts";
 import { AuthService } from "./auth/AuthService.ts";
 import {
@@ -25,16 +29,11 @@ import { createTrayWindowController } from "./trayWindow.ts";
 import { isReloadShortcut, reconcileTrayAuth } from "./lifecycle.ts";
 import { UserConfigStore } from "./UserConfigStore.ts";
 import { runEffect, runtime } from "./runtime.ts";
-import {
-  ActiveSnippetAccount,
-  getManagedSnippetBytes,
-  getReplicaItems,
-  getReplicaSnippet,
-} from "./snippetReplica.ts";
+import { ActiveSnippetAccount, getManagedSnippetBytes, getReplicaItems } from "./snippetReplica.ts";
+import { SnippetUploadEngine } from "./SnippetUploadEngine.ts";
 
 const rendererScheme = "plakk-app";
 const rendererHost = "renderer";
-const activeUploads = new Map<string, Fiber.Fiber<StorageUploadResult, unknown>>();
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -53,40 +52,68 @@ handle(ipcMethods.openExternal, (url) => {
   return shell.openExternal(url);
 });
 
-handle(ipcMethods.storageUploadPreparedFile, async (payload, event) => {
+const ingestionErrorMessage = (error: unknown) =>
+  typeof error === "object" &&
+  error !== null &&
+  "reason" in error &&
+  typeof error.reason === "string"
+    ? error.reason
+    : "Plakk couldn’t save this file locally. Make sure it is available on this Mac, then try again.";
+
+handle(ipcMethods.snippetIngest, async (payload, event) => {
   if (
     trayWindowController?.ownsWebContents(event.sender) === true &&
     !trayWindowController.isIngestionEnabled()
   ) {
-    throw new Error("Tray ingestion is unavailable until the account is ready.");
+    return { status: "FAILED", message: "Adding is paused until the account is ready." } as const;
   }
-  const upload = StorageUpload.use((storage) =>
-    storage.upload(payload, (progress) =>
-      send(event.sender, ipcEvents.storageUploadProgress, { id: payload.id, progress }),
-    ),
-  );
-  const fiber = runtime.runFork(upload);
-  activeUploads.set(payload.id, fiber);
+  const account = activeSnippetAccount();
+  if (account === null) {
+    return { status: "FAILED", message: "Sign in before adding snippets." } as const;
+  }
   try {
-    return await runEffect(Fiber.join(fiber));
+    await runEffect(SnippetUploadEngine.use((engine) => engine.ingest(account.id, payload)));
+    return { status: "ENQUEUED" } as const;
+  } catch (error) {
+    return { status: "FAILED", message: ingestionErrorMessage(error) } as const;
   } finally {
-    if (activeUploads.get(payload.id) === fiber) activeUploads.delete(payload.id);
     if ("filePath" in payload && consumeTemporaryClipboardFile(payload.filePath)) {
       void rm(payload.filePath, { force: true });
     }
   }
 });
 
-handle(ipcMethods.storageCancelUpload, (id) => {
-  const fiber = activeUploads.get(id);
-  if (fiber !== undefined) runtime.runFork(Fiber.interrupt(fiber));
+handle(ipcMethods.snippetDiscard, (id) => {
+  const account = activeSnippetAccount();
+  return account === null
+    ? undefined
+    : runEffect(SnippetUploadEngine.use((engine) => engine.discard(account.id, id)));
+});
+
+handle(ipcMethods.snippetCancel, (id) => {
+  const account = activeSnippetAccount();
+  if (account === null) return;
+  return runEffect(SnippetUploadEngine.use((engine) => engine.cancel(account, id)));
+});
+
+handle(ipcMethods.snippetRetry, (id) => {
+  const account = activeSnippetAccount();
+  if (account === null) return;
+  return runEffect(SnippetUploadEngine.use((engine) => engine.retry(account, id)));
+});
+
+handle(ipcMethods.snippetDelete, (id) => {
+  const account = activeSnippetAccount();
+  if (account === null) return;
+  return runEffect(SnippetUploadEngine.use((engine) => engine.delete(account, id)));
 });
 
 handle(ipcMethods.snippetCopy, async (id) => {
   const account = activeSnippetAccount();
   if (account === null) throw new Error("Sign in to load stored snippets.");
-  const snippet = await runEffect(getReplicaSnippet(account.id, id));
-  const { bytes } = await runEffect(Effect.scoped(getManagedSnippetBytes(account, id)));
+  const snippet = (await projectedSnippets(account.id)).find((item) => item.id === id);
+  if (snippet === undefined) throw new Error("Snippet was not found.");
+  const { bytes } = await runEffect(Effect.scoped(getManagedSnippetBytes(account, id, snippet)));
   const presentation = deriveSnippetPresentation({ fileName: snippet.fileName, content: bytes });
   if (presentation.type === "text" || presentation.type === "hyperlink") {
     await runEffect(writeClipboard({ type: "text", text: new TextDecoder().decode(bytes) }));
@@ -104,11 +131,15 @@ handle(ipcMethods.snippetCopy, async (id) => {
 handle(ipcMethods.snippetRead, async (id) => {
   const account = activeSnippetAccount();
   if (account === null) throw new Error("Sign in to load stored snippets.");
-  return runEffect(Effect.scoped(getManagedSnippetBytes(account, id))).then(({ bytes }) => bytes);
+  const snippet = (await projectedSnippets(account.id)).find((item) => item.id === id);
+  if (snippet === undefined) throw new Error("Snippet was not found.");
+  return runEffect(Effect.scoped(getManagedSnippetBytes(account, id, snippet))).then(
+    ({ bytes }) => bytes,
+  );
 });
 
 handle(ipcMethods.snippetList, () =>
-  activeSnippetAccountId === undefined ? [] : runEffect(getReplicaItems(activeSnippetAccountId)),
+  activeSnippetAccountId === undefined ? [] : projectedSnippets(activeSnippetAccountId),
 );
 
 handle(ipcMethods.clipboardRead, () => runEffect(readClipboard()));
@@ -281,6 +312,7 @@ function applyAuthStatus(status: AuthStatus) {
   if (changed) {
     trayRefreshGeneration += 1;
     if (snippetSyncFiber !== undefined) runtime.runFork(Fiber.interrupt(snippetSyncFiber));
+    runtime.runFork(SnippetUploadEngine.use((engine) => engine.pause));
     snippetSyncFiber =
       status.user === null || status.accessToken === null
         ? undefined
@@ -303,21 +335,26 @@ async function refreshTrayAccountState() {
   const status = currentAuthStatus;
   if (status.accessToken === null || status.user === null || trayWindowController === undefined)
     return;
+  const accessToken = status.accessToken;
+  const user = status.user;
 
   const generation = ++trayRefreshGeneration;
   trayWindowController.setAccountState(false, false);
   sendTrayAccountState({ kind: "loading" });
 
-  const result = await runEffect(
-    Effect.result(Effect.scoped(getAccountStatus(status.accessToken))),
-  );
-  if (generation !== trayRefreshGeneration || currentAuthStatus.accessToken !== status.accessToken)
-    return;
+  const result = await runEffect(Effect.result(Effect.scoped(getAccountStatus(accessToken))));
+  if (generation !== trayRefreshGeneration || currentAuthStatus.accessToken !== accessToken) return;
 
   if (Result.isSuccess(result)) {
     const account = result.success;
     trayWindowController.setAccountState(true, accountCanSync(account));
     sendTrayAccountState({ kind: "resolved", account });
+    const uploadAccount = accountCanSync(account)
+      ? SnippetUploadEngine.use((engine) => engine.resume({ id: user.id, accessToken }))
+      : SnippetUploadEngine.use((engine) => engine.pause);
+    void runEffect(uploadAccount).catch((error) =>
+      broadcastAuthError(authErrorMessage(error, "Could not resume queued uploads.")),
+    );
     return;
   }
 
@@ -494,11 +531,34 @@ function broadcastAuthStatus(status: AuthStatus): void {
   }
 }
 
-function broadcastSnippetReplica(items: ReadonlyArray<ApiSnippet>): void {
+const getProjectedSnippets = Effect.fn("DesktopSnippetProjection.list")(function* (
+  accountId: string,
+) {
+  const replicaItems = yield* getReplicaItems(accountId);
+  const engine = yield* SnippetUploadEngine;
+  yield* engine.reconcile(accountId, replicaItems);
+  return yield* engine.project(accountId, replicaItems);
+});
+
+const projectedSnippets = (accountId: string) => runEffect(getProjectedSnippets(accountId));
+
+function broadcastSnippetReplica(items: ReadonlyArray<DesktopSnippet>): void {
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed()) send(window.webContents, ipcEvents.snippetReplicaChanged, items);
   }
 }
+
+const refreshSnippetProjection = Effect.fn("DesktopSnippetProjection.refresh")(function* (
+  accountId: string,
+) {
+  const replicaItems = yield* getReplicaItems(accountId);
+  const engine = yield* SnippetUploadEngine;
+  yield* engine.reconcile(accountId, replicaItems);
+  const items = yield* engine.project(accountId, replicaItems);
+  yield* Effect.sync(() => {
+    if (accountId === activeSnippetAccountId) broadcastSnippetReplica(items);
+  });
+});
 
 function authStatusForSession(
   session: { accessToken: string; user: AuthStatus["user"] } | null,
@@ -626,15 +686,23 @@ if (!hasSingleInstanceLock) {
     }
 
     runtime.runFork(
-      SnippetReplica.use((replica) =>
-        replica.changes.pipe(
-          Stream.runForEach(({ accountId, items }) =>
-            Effect.sync(() => {
-              if (accountId === activeSnippetAccountId) broadcastSnippetReplica(items);
-            }),
-          ),
-        ),
-      ),
+      Effect.gen(function* () {
+        const replica = yield* SnippetReplica;
+        const uploads = yield* SnippetUploadEngine;
+        const refresh = (accountId: string) =>
+          refreshSnippetProjection(accountId).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logError("Could not refresh the desktop snippet projection", { cause }),
+            ),
+          );
+        yield* Effect.all(
+          [
+            replica.changes.pipe(Stream.runForEach(({ accountId }) => refresh(accountId))),
+            uploads.changes.pipe(Stream.runForEach(refresh)),
+          ],
+          { concurrency: "unbounded", discard: true },
+        );
+      }),
     );
 
     Menu.setApplicationMenu(

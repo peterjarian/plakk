@@ -23,8 +23,9 @@ export function on<T extends IpcEvent<IpcSchema>>(
   callback: (payload: IpcEventPayload<T>) => void,
 ) {
   const decodePayload = Schema.decodeUnknownPromise(event.payload);
+  let pending = Promise.resolve();
   const listener = (_event: IpcRendererEvent, raw: unknown) => {
-    void decodePayload(raw).then(callback, console.error);
+    pending = pending.then(() => decodePayload(raw).then(callback)).catch(console.error);
   };
 
   ipcRenderer.on(event.channel, listener);

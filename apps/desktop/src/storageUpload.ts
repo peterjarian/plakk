@@ -1,32 +1,17 @@
-import { open, stat } from "node:fs/promises";
 import type { PreparedStorageUpload } from "@plakk/shared/PlakkApi";
-import * as Context from "effect/Context";
-import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
-import * as Schema from "effect/Schema";
+import { Context, Effect, FileSystem, Layer, Option, Schema } from "effect";
 
-type PreparedUploadBase = {
+export type PreparedFileUploadPayload = {
   readonly id: string;
   readonly prepared: PreparedStorageUpload;
   readonly byteSize: number;
+  readonly filePath: string;
 };
-
-export type PreparedFileUploadPayload = PreparedUploadBase &
-  (
-    | { readonly filePath: string; readonly bytes?: never }
-    | { readonly bytes: Uint8Array; readonly filePath?: never }
-  );
-
-export type RendererPreparedFileUploadPayload = PreparedUploadBase &
-  (
-    | { readonly file: File; readonly filePath?: never; readonly bytes?: never }
-    | { readonly filePath: string; readonly file?: never; readonly bytes?: never }
-    | { readonly bytes: Uint8Array; readonly file?: never; readonly filePath?: never }
-  );
 
 export type StorageUploadResult = { readonly storageObjectId: string };
 
 type UploadFetch = (input: string, init?: RequestInit) => Promise<Response>;
+type ByteRange = { readonly start: number; readonly end: number };
 
 const uploadFailureDetail = (cause: unknown) => {
   const details: Array<string> = [];
@@ -55,168 +40,67 @@ export class StorageUploadError extends Schema.TaggedErrorClass<StorageUploadErr
   {
     cause: Schema.optionalKey(Schema.Defect()),
     message: Schema.String,
+    retryable: Schema.Boolean,
   },
 ) {}
 
-export class StorageUpload extends Context.Service<
-  StorageUpload,
-  {
-    readonly upload: (
-      payload: PreparedFileUploadPayload,
-      onProgress: (progress: number) => void,
-    ) => Effect.Effect<StorageUploadResult, StorageUploadError>;
-  }
->()("@plakk/desktop/storageUpload/StorageUpload") {
-  static layer(uploadFetch: UploadFetch = fetch) {
-    return Layer.succeed(
-      StorageUpload,
-      StorageUpload.of({
-        upload: Effect.fn("StorageUpload.upload")(function* (payload, onProgress) {
-          return yield* Effect.tryPromise({
-            try: (signal) => uploadPreparedFile(payload, onProgress, signal, uploadFetch),
-            catch: (cause) =>
-              new StorageUploadError({
-                cause,
-                message: cause instanceof Error ? cause.message : "Could not upload file.",
-              }),
-          });
-        }),
-      }),
-    );
-  }
-}
-
-type ByteRange = { readonly start: number; readonly end: number };
+const uploadError = (message: string, cause?: unknown, retryable = false) =>
+  new StorageUploadError({ ...(cause === undefined ? {} : { cause }), message, retryable });
 
 const uploadHeaders = (
   headers: PreparedStorageUpload["upload"]["headers"],
 ): Record<string, string> =>
   Object.fromEntries(headers.map((header) => [header.name, header.value]));
 
-async function assertUploadSource(payload: PreparedFileUploadPayload) {
-  if (payload.bytes !== undefined) {
-    if (payload.bytes.byteLength !== payload.byteSize)
-      throw new Error("Upload source size changed before upload.");
-    return;
-  }
-  const details = await stat(payload.filePath);
-  if (!details.isFile()) throw new Error("Upload source is not a file.");
-  if (details.size !== payload.byteSize)
-    throw new Error("Upload source size changed before upload.");
-}
-
-async function readUploadPart(input: {
-  readonly source: PreparedFileUploadPayload;
-  readonly start: number;
-  readonly byteSize: number;
-}) {
-  if (input.source.bytes !== undefined) {
-    return new Blob([
-      input.source.bytes.slice(
-        input.start,
-        input.start + input.byteSize,
-      ) as Uint8Array<ArrayBuffer>,
-    ]);
-  }
-  const file = await open(input.source.filePath);
-  const bytes = Buffer.allocUnsafe(input.byteSize);
-  let offset = 0;
-  try {
-    while (offset < bytes.length) {
-      const { bytesRead } = await file.read(
-        bytes,
-        offset,
-        bytes.length - offset,
-        input.start + offset,
-      );
-      if (bytesRead === 0) throw new Error("Upload source ended before the requested range.");
-      offset += bytesRead;
-    }
-  } finally {
-    await file.close();
-  }
-  return new Blob([bytes]);
-}
-
 const partByteSize = (
   strategy: Extract<PreparedStorageUpload["upload"]["strategy"], { type: "byte_range" }>,
 ) => {
   const size =
     Math.floor(strategy.maxPartByteSize / strategy.partByteMultiple) * strategy.partByteMultiple;
-  if (size < 1) throw new Error("Upload part size is invalid.");
-  return size;
+  return size < 1
+    ? Effect.fail(uploadError("The upload provider returned an invalid part size."))
+    : Effect.succeed(size);
 };
-
-async function uploadPart(input: {
-  readonly upload: PreparedStorageUpload["upload"];
-  readonly source: PreparedFileUploadPayload;
-  readonly byteSize: number;
-  readonly range: ByteRange | null;
-  readonly signal: AbortSignal | undefined;
-  readonly uploadFetch: UploadFetch;
-}) {
-  const { upload, source, byteSize, range, signal, uploadFetch } = input;
-  const partSize = range === null ? byteSize : range.end - range.start + 1;
-  const body = await readUploadPart({
-    source,
-    start: range?.start ?? 0,
-    byteSize: partSize,
-  });
-
-  let response: Response;
-  try {
-    response = await uploadFetch(upload.url, {
-      method: upload.method,
-      headers: {
-        ...uploadHeaders(upload.headers),
-        ...(range === null
-          ? {}
-          : { "Content-Range": `bytes ${range.start}-${range.end}/${byteSize}` }),
-      },
-      body,
-      ...(signal === undefined ? {} : { signal }),
-    });
-  } catch (cause) {
-    if (signal?.aborted) throw new Error("Upload cancelled. Choose the file again to retry.");
-    const detail = uploadFailureDetail(cause);
-    throw new Error(
-      `Could not reach the upload link${detail ? `: ${detail}` : ""}. Choose the file again to retry.`,
-    );
-  }
-
-  if (!response.ok && response.status !== 308) {
-    const body = await response.text().catch(() => "");
-    throw new Error(`Upload failed: ${response.status}${body ? ` ${body}` : ""}`);
-  }
-  return response;
-}
 
 const confirmedRangeEnd = (response: Response) => {
   const range = response.headers.get("range");
   const match = range === null ? null : /(?:bytes=|bytes )\d+-(\d+)/.exec(range);
-  if (match?.[1] === undefined)
-    throw new Error("Upload session did not confirm the uploaded range.");
-  return Number(match[1]);
+  return match?.[1] === undefined
+    ? Effect.fail(uploadError("The upload provider did not confirm the uploaded range."))
+    : Effect.succeed(Number(match[1]));
 };
 
-async function nextExpectedStart(response: Response) {
-  const body: unknown = await response.json().catch(() => null);
+const responseJson = (response: Response) =>
+  Effect.tryPromise({
+    try: () => response.json() as Promise<unknown>,
+    catch: () => null,
+  }).pipe(Effect.catch(() => Effect.succeed(null)));
+
+const nextExpectedStart = Effect.fn("StorageUpload.nextExpectedStart")(function* (
+  response: Response,
+) {
+  const body = yield* responseJson(response);
   const range =
     typeof body === "object" && body !== null && "nextExpectedRanges" in body
       ? body.nextExpectedRanges
       : null;
   if (!Array.isArray(range) || typeof range[0] !== "string") {
-    throw new Error("Upload session did not return the next expected range.");
+    return yield* uploadError("The upload provider did not return the next expected range.");
   }
   const start = /^\d+/.exec(range[0]);
-  if (start?.[0] === undefined) throw new Error("Upload session returned an invalid next range.");
+  if (start?.[0] === undefined) {
+    return yield* uploadError("The upload provider returned an invalid expected range.");
+  }
   return Number(start[0]);
-}
+});
 
-async function storageObjectIdFrom(response: Response, prepared: PreparedStorageUpload) {
+const storageObjectIdFrom = Effect.fn("StorageUpload.storageObjectId")(function* (
+  response: Response,
+  prepared: PreparedStorageUpload,
+) {
   if (prepared.storageObjectId !== null) return prepared.storageObjectId;
 
-  const body: unknown = await response.json().catch(() => null);
+  const body = yield* responseJson(response);
   if (
     typeof body === "object" &&
     body !== null &&
@@ -226,64 +110,204 @@ async function storageObjectIdFrom(response: Response, prepared: PreparedStorage
   ) {
     return body.id;
   }
-  throw new Error("Upload completed but the storage provider did not return an item ID.");
-}
+  return yield* uploadError("The upload completed, but the provider did not return the file ID.");
+});
 
-export async function uploadPreparedFile(
+const makeUploadPreparedFile = (fileSystem: FileSystem.FileSystem, uploadFetch: UploadFetch) => {
+  const assertUploadSource = Effect.fn("StorageUpload.assertSource")(function* (
+    payload: PreparedFileUploadPayload,
+  ) {
+    const details = yield* fileSystem
+      .stat(payload.filePath)
+      .pipe(
+        Effect.mapError((cause) =>
+          uploadError("The local copy of this snippet is unavailable.", cause),
+        ),
+      );
+    if (details.type !== "File") {
+      return yield* uploadError("The local copy of this snippet is not a file.");
+    }
+    if (Number(details.size) !== payload.byteSize) {
+      return yield* uploadError("The local copy of this snippet is incomplete.");
+    }
+  });
+
+  const readUploadPart = Effect.fn("StorageUpload.readPart")(function* (input: {
+    readonly source: PreparedFileUploadPayload;
+    readonly start: number;
+    readonly byteSize: number;
+  }) {
+    return yield* Effect.scoped(
+      Effect.gen(function* () {
+        const file = yield* fileSystem
+          .open(input.source.filePath)
+          .pipe(
+            Effect.mapError((cause) =>
+              uploadError("The local copy of this snippet could not be opened.", cause),
+            ),
+          );
+        yield* file.seek(input.start, "start");
+        const chunks: Array<Uint8Array<ArrayBuffer>> = [];
+        let remaining = input.byteSize;
+        while (remaining > 0) {
+          const chunk = yield* file
+            .readAlloc(remaining)
+            .pipe(
+              Effect.mapError((cause) =>
+                uploadError("The local copy of this snippet could not be read.", cause),
+              ),
+            );
+          if (Option.isNone(chunk)) {
+            return yield* uploadError("The local copy ended before the requested upload range.");
+          }
+          const bytes = Uint8Array.from(chunk.value);
+          chunks.push(bytes);
+          remaining -= bytes.byteLength;
+        }
+        return new Blob(chunks);
+      }),
+    );
+  });
+
+  const uploadPart = Effect.fn("StorageUpload.uploadPart")(function* (input: {
+    readonly upload: PreparedStorageUpload["upload"];
+    readonly source: PreparedFileUploadPayload;
+    readonly byteSize: number;
+    readonly range: ByteRange | null;
+  }) {
+    const partSize =
+      input.range === null ? input.byteSize : input.range.end - input.range.start + 1;
+    const body = yield* readUploadPart({
+      source: input.source,
+      start: input.range?.start ?? 0,
+      byteSize: partSize,
+    });
+
+    const response = yield* Effect.tryPromise({
+      try: (signal) =>
+        uploadFetch(input.upload.url, {
+          method: input.upload.method,
+          headers: {
+            ...uploadHeaders(input.upload.headers),
+            ...(input.range === null
+              ? {}
+              : {
+                  "Content-Range": `bytes ${input.range.start}-${input.range.end}/${input.byteSize}`,
+                }),
+          },
+          body,
+          signal,
+        }),
+      catch: (cause) => {
+        const detail = uploadFailureDetail(cause);
+        return uploadError(
+          `Could not reach the upload provider${detail ? ` (${detail})` : ""}.`,
+          cause,
+          true,
+        );
+      },
+    });
+
+    if (!response.ok && response.status !== 308) {
+      const retryable =
+        response.status === 401 ||
+        response.status === 404 ||
+        response.status === 408 ||
+        response.status === 410 ||
+        response.status === 429 ||
+        response.status >= 500;
+      return yield* uploadError(
+        `The upload provider rejected the file (${response.status}).`,
+        undefined,
+        retryable,
+      );
+    }
+    return response;
+  });
+
+  return Effect.fn("StorageUpload.upload")(function* (
+    payload: PreparedFileUploadPayload,
+    onProgress: (progress: number) => void,
+  ) {
+    yield* assertUploadSource(payload);
+    yield* Effect.sync(() => onProgress(0));
+
+    if (payload.prepared.upload.strategy.type === "single_request") {
+      const response = yield* uploadPart({
+        upload: payload.prepared.upload,
+        source: payload,
+        byteSize: payload.byteSize,
+        range: null,
+      });
+      const storageObjectId = yield* storageObjectIdFrom(response, payload.prepared);
+      yield* Effect.sync(() => onProgress(100));
+      return { storageObjectId };
+    }
+
+    const size = yield* partByteSize(payload.prepared.upload.strategy);
+    let start = 0;
+    while (start < payload.byteSize) {
+      const range = { start, end: Math.min(start + size, payload.byteSize) - 1 };
+      const response = yield* uploadPart({
+        upload: payload.prepared.upload,
+        source: payload,
+        byteSize: payload.byteSize,
+        range,
+      });
+      if (response.status === 308) {
+        const nextStart = (yield* confirmedRangeEnd(response)) + 1;
+        if (nextStart <= start) return yield* uploadError("The upload session stopped advancing.");
+        start = nextStart;
+        yield* Effect.sync(() =>
+          onProgress(Math.min(99, Math.floor((start / payload.byteSize) * 100))),
+        );
+        continue;
+      }
+      if (response.status === 202) {
+        const nextStart = yield* nextExpectedStart(response);
+        if (nextStart <= start) return yield* uploadError("The upload session stopped advancing.");
+        start = nextStart;
+        yield* Effect.sync(() =>
+          onProgress(Math.min(99, Math.floor((start / payload.byteSize) * 100))),
+        );
+        continue;
+      }
+      if (range.end !== payload.byteSize - 1) {
+        return yield* uploadError("The upload provider completed before receiving the whole file.");
+      }
+      const storageObjectId = yield* storageObjectIdFrom(response, payload.prepared);
+      yield* Effect.sync(() => onProgress(100));
+      return { storageObjectId };
+    }
+    return yield* uploadError("The upload session ended before completion.");
+  });
+};
+
+export const uploadPreparedFile = Effect.fn("StorageUpload.uploadPreparedFile")(function* (
   payload: PreparedFileUploadPayload,
   onProgress: (progress: number) => void = () => undefined,
-  signal?: AbortSignal,
   uploadFetch: UploadFetch = fetch,
-): Promise<StorageUploadResult> {
-  await assertUploadSource(payload);
-  onProgress(0);
+) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  return yield* makeUploadPreparedFile(fileSystem, uploadFetch)(payload, onProgress);
+});
 
-  if (payload.prepared.upload.strategy.type === "single_request") {
-    const response = await uploadPart({
-      upload: payload.prepared.upload,
-      source: payload,
-      byteSize: payload.byteSize,
-      range: null,
-      signal,
-      uploadFetch,
-    });
-    const storageObjectId = await storageObjectIdFrom(response, payload.prepared);
-    onProgress(100);
-    return { storageObjectId };
+export class StorageUpload extends Context.Service<
+  StorageUpload,
+  {
+    readonly upload: (
+      payload: PreparedFileUploadPayload,
+      onProgress: (progress: number) => void,
+    ) => Effect.Effect<StorageUploadResult, StorageUploadError>;
   }
-
-  const size = partByteSize(payload.prepared.upload.strategy);
-  let start = 0;
-  while (start < payload.byteSize) {
-    const range = { start, end: Math.min(start + size, payload.byteSize) - 1 };
-    const response = await uploadPart({
-      upload: payload.prepared.upload,
-      source: payload,
-      byteSize: payload.byteSize,
-      range,
-      signal,
-      uploadFetch,
-    });
-    if (response.status === 308) {
-      const nextStart = confirmedRangeEnd(response) + 1;
-      if (nextStart <= start) throw new Error("Upload session stalled; no progress confirmed.");
-      start = nextStart;
-      onProgress(Math.min(99, Math.floor((start / payload.byteSize) * 100)));
-      continue;
-    }
-    if (response.status === 202) {
-      const nextStart = await nextExpectedStart(response);
-      if (nextStart <= start) throw new Error("Upload session stalled; no progress confirmed.");
-      start = nextStart;
-      onProgress(Math.min(99, Math.floor((start / payload.byteSize) * 100)));
-      continue;
-    }
-    if (range.end !== payload.byteSize - 1) {
-      throw new Error("Upload session completed before the final range.");
-    }
-    const storageObjectId = await storageObjectIdFrom(response, payload.prepared);
-    onProgress(100);
-    return { storageObjectId };
+>()("plakk/desktop/storageUpload/StorageUpload") {
+  static layer(uploadFetch: UploadFetch = fetch) {
+    return Layer.effect(
+      StorageUpload,
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        return StorageUpload.of({ upload: makeUploadPreparedFile(fileSystem, uploadFetch) });
+      }),
+    );
   }
-  throw new Error("Upload session ended before the provider confirmed completion.");
 }

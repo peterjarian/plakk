@@ -1,9 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowUpRight, LoaderCircle, Plus, TriangleAlert } from "lucide-react";
-import { useAtomSet } from "@effect/atom-react";
 import { deriveSnippetPresentation } from "@plakk/shared";
-import type { ApiSnippet } from "@plakk/shared/PlakkApi";
-import { createPlakkRpc } from "@plakk/ui/atoms/rpc";
+import type { DesktopSnippet } from "../../ipc/contracts.ts";
 import { AppHeader } from "@plakk/ui/components/AppHeader";
 import { SnippetList } from "@plakk/ui/components/SnippetList";
 import { SnippetRow } from "@plakk/ui/components/SnippetRow";
@@ -18,7 +16,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@plakk/ui/components/primitives/dialog";
-import { useActiveUploadTasks, useUploadActions } from "@plakk/ui/hooks/useUploadFlow";
 import { SnippetComposer } from "../components/SnippetComposer.tsx";
 import { useAuth } from "../hooks/useAuth.ts";
 import { useSnippetReplica } from "../hooks/useSnippetReplica.ts";
@@ -29,16 +26,9 @@ import {
   useStorageStatus,
 } from "../hooks/useStorageStatus.tsx";
 import { navigate } from "../lib/navigate.ts";
-import { cancelStoredSnippetUpload, uploadStoredSnippet } from "../lib/storedSnippetUpload.ts";
 import { decodeTextSnippet, encodeTextSnippet } from "../lib/textSnippetContent.ts";
 
 const accountSetupUrl = "https://app.plakk.io/account/setup";
-const plakkRpc = createPlakkRpc(window.ipc.runtimeConfig.plakkRpcUrl);
-const deleteSnippetMutationAtom = plakkRpc.mutation("DeleteSnippet");
-const prepareStoredSnippetUploadMutationAtom = plakkRpc.mutation("PrepareStoredSnippetUpload");
-const createStoredSnippetMutationAtom = plakkRpc.mutation("CreateStoredSnippet");
-const failStoredSnippetUploadMutationAtom = plakkRpc.mutation("FailStoredSnippetUpload");
-const completeStoredSnippetUploadMutationAtom = plakkRpc.mutation("CompleteStoredSnippetUpload");
 export function Home({ active = true }: { active?: boolean }) {
   const auth = useAuth();
   const storageStatus = useStorageStatus();
@@ -52,6 +42,7 @@ export function Home({ active = true }: { active?: boolean }) {
   const [textContents, setTextContents] = useState<Record<string, TextSnippetContent>>({});
   const [thumbnailUrls, setThumbnailUrls] = useState<Record<string, string>>({});
   const [copyErrors, setCopyErrors] = useState<Record<string, string>>({});
+  const [ingestError, setIngestError] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now);
   const copiedTimerRef = useRef<number | undefined>(undefined);
   const thumbnailObjectUrlsRef = useRef(new Map<string, string>());
@@ -63,28 +54,8 @@ export function Home({ active = true }: { active?: boolean }) {
     return () => window.clearInterval(interval);
   }, []);
 
-  const snippetHeaders = useMemo(
-    () => (auth.accessToken === null ? null : { authorization: `Bearer ${auth.accessToken}` }),
-    [auth.accessToken],
-  );
   const { isLoading: replicaLoading, items: replicaItems } = useSnippetReplica();
-  const deleteSyncedSnippet = useAtomSet(deleteSnippetMutationAtom, { mode: "promise" });
-  const prepareStoredSnippetUpload = useAtomSet(prepareStoredSnippetUploadMutationAtom, {
-    mode: "promise",
-  });
-  const createStoredSnippet = useAtomSet(createStoredSnippetMutationAtom, { mode: "promise" });
-  const failStoredSnippetUpload = useAtomSet(failStoredSnippetUploadMutationAtom, {
-    mode: "promise",
-  });
-  const completeStoredSnippetUpload = useAtomSet(completeStoredSnippetUploadMutationAtom, {
-    mode: "promise",
-  });
-  const uploadActions = useUploadActions();
-  const uploadTasks = useActiveUploadTasks();
-  const snippets = [
-    ...uploadTasks,
-    ...replicaItems.filter((snippet) => !uploadTasks.some((task) => task.id === snippet.id)),
-  ];
+  const snippets = replicaItems;
   const accountBlocked = !storageStatus.canSync;
   const user = auth.user;
   const syncPausedMessage =
@@ -104,7 +75,7 @@ export function Home({ active = true }: { active?: boolean }) {
       : accountSetupUrl;
 
   function addTextSnippet(text: string) {
-    if (snippetHeaders === null || storageStatus.kind !== "connected" || !storageStatus.canSync) {
+    if (storageStatus.kind !== "connected" || !storageStatus.canSync) {
       return;
     }
     const id = crypto.randomUUID();
@@ -112,41 +83,24 @@ export function Home({ active = true }: { active?: boolean }) {
     if (bytes.byteLength === 0) return;
     const fileName = `${id}.txt`;
     const contentType = "text/plain; charset=utf-8";
-    const task = uploadActions.enqueue({
+    void ingestSnippet({
       id,
       fileName,
       byteSize: bytes.byteLength,
-      contentType,
+      mediaType: contentType,
       storageProvider: storageStatus.provider,
-    });
-    void uploadStoredSnippet({
-      file: { name: fileName, size: bytes.byteLength, type: contentType },
       bytes,
-      task,
-      actions: uploadActions,
-      uploader: window.ipc.storage,
-      api: {
-        prepare: (payload) =>
-          prepareStoredSnippetUpload({
-            headers: snippetHeaders,
-            payload,
-          }),
-        create: (payload) =>
-          createStoredSnippet({
-            headers: snippetHeaders,
-            payload,
-          }),
-        fail: (payload) =>
-          failStoredSnippetUpload({
-            headers: snippetHeaders,
-            payload,
-          }),
-        complete: (payload) => completeStoredSnippetUpload({ headers: snippetHeaders, payload }),
-      },
-    }).catch(() => undefined);
+    });
   }
 
-  const loadTextContent = useCallback(async (snippet: ApiSnippet) => {
+  function ingestSnippet(payload: Parameters<typeof window.ipc.snippets.ingest>[0]) {
+    setIngestError(null);
+    return window.ipc.snippets.ingest(payload).catch((error) => {
+      setIngestError(error instanceof Error ? error.message : "Plakk couldn’t save this snippet.");
+    });
+  }
+
+  const loadTextContent = useCallback(async (snippet: DesktopSnippet) => {
     setTextContents((contents) => ({ ...contents, [snippet.id]: { state: "loading" } }));
     try {
       const bytes = await window.ipc.snippets.read(snippet.id);
@@ -166,6 +120,16 @@ export function Home({ active = true }: { active?: boolean }) {
 
   useEffect(() => {
     for (const snippet of replicaItems) {
+      if (snippet.localTextContent !== null) {
+        const current = textContents[snippet.id];
+        if (current?.state !== "ready" || current.text !== snippet.localTextContent) {
+          setTextContents((contents) => ({
+            ...contents,
+            [snippet.id]: { state: "ready", text: snippet.localTextContent! },
+          }));
+        }
+        continue;
+      }
       if (
         deriveSnippetPresentation({ fileName: snippet.fileName }).type === "text" &&
         snippet.uploadStatus === "UPLOADED" &&
@@ -180,7 +144,7 @@ export function Home({ active = true }: { active?: boolean }) {
     const images = replicaItems.filter(
       (snippet) =>
         deriveSnippetPresentation({ fileName: snippet.fileName }).type === "image" &&
-        snippet.uploadStatus === "UPLOADED",
+        (snippet.contentAvailable || snippet.uploadStatus === "UPLOADED"),
     );
     const visibleIds = new Set(images.map((snippet) => snippet.id));
     visibleThumbnailIdsRef.current = visibleIds;
@@ -234,39 +198,15 @@ export function Home({ active = true }: { active?: boolean }) {
   function enqueueFileSnippet(file: Pick<File, "name" | "size" | "type">, filePath?: string) {
     if (storageStatus.kind !== "connected" || !storageStatus.canSync) return;
 
-    const task = uploadActions.enqueue({
+    const id = crypto.randomUUID();
+    void ingestSnippet({
+      id,
       byteSize: file.size,
-      contentType: file.type || null,
+      mediaType: file.type || null,
       fileName: file.name,
       storageProvider: storageStatus.provider,
+      ...(filePath === undefined ? { file: file as File } : { filePath }),
     });
-    if (snippetHeaders === null) return;
-
-    void uploadStoredSnippet({
-      file,
-      ...(filePath === undefined ? {} : { filePath }),
-      task,
-      actions: uploadActions,
-      uploader: window.ipc.storage,
-      api: {
-        prepare: (payload) =>
-          prepareStoredSnippetUpload({
-            headers: snippetHeaders,
-            payload,
-          }),
-        create: (payload) =>
-          createStoredSnippet({
-            headers: snippetHeaders,
-            payload,
-          }),
-        fail: (payload) =>
-          failStoredSnippetUpload({
-            headers: snippetHeaders,
-            payload,
-          }),
-        complete: (payload) => completeStoredSnippetUpload({ headers: snippetHeaders, payload }),
-      },
-    }).catch(() => undefined);
   }
 
   function handleClipboardPaste(
@@ -287,7 +227,12 @@ export function Home({ active = true }: { active?: boolean }) {
             new File([blob], "Pasted image.png", { type: blob.type }),
             content.path,
           ),
-        );
+        )
+        .catch((error) => {
+          setIngestError(
+            error instanceof Error ? error.message : "Plakk couldn’t read the pasted image.",
+          );
+        });
       return;
     }
 
@@ -297,8 +242,20 @@ export function Home({ active = true }: { active?: boolean }) {
   }
 
   function cancelUpload(id: string) {
-    cancelStoredSnippetUpload(id);
-    void window.ipc.storage.cancelUpload(id);
+    void runSnippetAction(id, () => window.ipc.snippets.cancel(id));
+  }
+
+  function runSnippetAction(id: string, action: () => Promise<void>) {
+    setCopyErrors((errors) => {
+      const { [id]: _error, ...remaining } = errors;
+      return remaining;
+    });
+    return action().catch((error) => {
+      setCopyErrors((errors) => ({
+        ...errors,
+        [id]: error instanceof Error ? error.message : "Plakk couldn’t update this snippet.",
+      }));
+    });
   }
 
   function showCopied(id: string) {
@@ -314,8 +271,6 @@ export function Home({ active = true }: { active?: boolean }) {
       deriveSnippetPresentation({ fileName: snippet.fileName }).type !== "text" &&
       !snippet.fileName.toLowerCase().endsWith(".txt");
     try {
-      if ("phase" in snippet) throw new Error("Finish uploading before copying this snippet.");
-
       if (needsCopySpinner) setCopyingId(snippet.id);
 
       await window.ipc.snippets.copy(snippet.id);
@@ -336,12 +291,6 @@ export function Home({ active = true }: { active?: boolean }) {
   }
 
   useEffect(() => {
-    return window.ipc.storage.onProgress(({ id, progress }) =>
-      uploadActions.setProgress(id, progress),
-    );
-  }, [uploadActions]);
-
-  useEffect(() => {
     return () => {
       if (copiedTimerRef.current !== undefined) window.clearTimeout(copiedTimerRef.current);
     };
@@ -357,7 +306,7 @@ export function Home({ active = true }: { active?: boolean }) {
   useEffect(() => {
     if (!active) return;
     return window.ipc.clipboard.onPaste((content) => handleClipboardPaste(content));
-  }, [accountBlocked, active, snippetHeaders, storageStatus, uploadActions]);
+  }, [accountBlocked, active, storageStatus]);
 
   function openLink(url: string) {
     if (!showExternalLinkWarning) {
@@ -503,6 +452,11 @@ export function Home({ active = true }: { active?: boolean }) {
               }
             }}
           />
+          {ingestError !== null && (
+            <p className="mt-2 text-xs text-destructive" role="alert">
+              {ingestError}
+            </p>
+          )}
         </div>
 
         {replicaLoading && snippets.length === 0 ? (
@@ -523,31 +477,22 @@ export function Home({ active = true }: { active?: boolean }) {
                 copied={copiedId === snippet.id}
                 copying={copyingId === snippet.id}
                 onCopy={() => void copySnippet(snippet)}
-                copyDisabled={"phase" in snippet}
+                copyDisabled={!snippet.contentAvailable && snippet.uploadStatus !== "UPLOADED"}
                 copyError={copyErrors[snippet.id]}
                 onDelete={() => {
-                  if ("phase" in snippet) {
-                    if (snippet.phase === "FAILED") uploadActions.remove(snippet.id);
-                    else cancelUpload(snippet.id);
-                    return;
-                  }
-                  if (snippetHeaders !== null) {
-                    void deleteSyncedSnippet({
-                      headers: snippetHeaders,
-                      payload: { id: snippet.id },
-                    });
-                  }
+                  void runSnippetAction(snippet.id, () => window.ipc.snippets.delete(snippet.id));
                 }}
+                onRetryUpload={() =>
+                  void runSnippetAction(snippet.id, () => window.ipc.snippets.retry(snippet.id))
+                }
                 onOpenLink={openLink}
-                {...(!("phase" in snippet) &&
-                deriveSnippetPresentation({ fileName: snippet.fileName }).type === "text"
+                {...(deriveSnippetPresentation({ fileName: snippet.fileName }).type === "text"
                   ? {
                       textContent: textContents[snippet.id],
                       onRetryContent: () => void loadTextContent(snippet),
                     }
                   : {})}
-                {...(!("phase" in snippet) &&
-                deriveSnippetPresentation({ fileName: snippet.fileName }).type === "image"
+                {...(deriveSnippetPresentation({ fileName: snippet.fileName }).type === "image"
                   ? {
                       thumbnailUrl: thumbnailUrls[snippet.id] ?? null,
                     }

@@ -1,95 +1,61 @@
-import { useMemo } from "react";
-import { useAtomSet } from "@effect/atom-react";
+import { useState } from "react";
 import type { AccountStatus } from "@plakk/shared/PlakkApi";
-import type { UploadTask } from "@plakk/ui/atoms/upload";
-import { createPlakkRpc } from "@plakk/ui/atoms/rpc";
-import { useActiveUploadTasks, useUploadActions } from "@plakk/ui/hooks/useUploadFlow";
-import { uploadStoredSnippet } from "../../lib/storedSnippetUpload.ts";
-import { encodeTextSnippet } from "../../lib/textSnippetContent.ts";
-import { useAuth } from "../../hooks/useAuth.ts";
+
 import type { ClipboardContent, TrayDroppedItem } from "../../../ipc/contracts.ts";
 import { useSnippetReplica } from "../../hooks/useSnippetReplica.ts";
-
-const plakkRpc = createPlakkRpc(window.ipc.runtimeConfig.plakkRpcUrl);
-const prepareUpload = plakkRpc.mutation("PrepareStoredSnippetUpload");
-const createSnippet = plakkRpc.mutation("CreateStoredSnippet");
-const failUpload = plakkRpc.mutation("FailStoredSnippetUpload");
-const completeUpload = plakkRpc.mutation("CompleteStoredSnippetUpload");
+import { encodeTextSnippet } from "../../lib/textSnippetContent.ts";
 
 export function useTraySnippets(account: AccountStatus | null) {
-  const auth = useAuth();
-  const headers = useMemo(
-    () => (auth.accessToken === null ? null : { authorization: `Bearer ${auth.accessToken}` }),
-    [auth.accessToken],
-  );
   const { items } = useSnippetReplica();
-  const uploads = useActiveUploadTasks();
-  const actions = useUploadActions();
-  const prepare = useAtomSet(prepareUpload, { mode: "promise" });
-  const create = useAtomSet(createSnippet, { mode: "promise" });
-  const fail = useAtomSet(failUpload, { mode: "promise" });
-  const complete = useAtomSet(completeUpload, { mode: "promise" });
-  const latest: UploadTask | (typeof items)[number] | undefined = uploads.at(0) ?? items.at(0);
+  const [error, setError] = useState<string | null>(null);
+  const latest = items.at(0);
   const provider = account?.storageProvider ?? null;
 
+  const ingest = (payload: Parameters<typeof window.ipc.snippets.ingest>[0]) => {
+    setError(null);
+    return window.ipc.snippets.ingest(payload).catch((cause) => {
+      setError(cause instanceof Error ? cause.message : "Plakk couldn’t save this snippet.");
+    });
+  };
+
   const upload = (file: Pick<File, "name" | "size" | "type">, filePath?: string) => {
-    if (provider === null || headers === null) return;
-    const task = actions.enqueue({
+    if (provider === null) return;
+    void ingest({
+      id: crypto.randomUUID(),
       fileName: file.name,
       byteSize: file.size,
-      contentType: file.type || null,
+      mediaType: file.type || null,
       storageProvider: provider,
+      ...(filePath === undefined ? { file: file as File } : { filePath }),
     });
-    void uploadStoredSnippet({
-      file,
-      ...(filePath === undefined ? {} : { filePath }),
-      task,
-      actions,
-      uploader: window.ipc.storage,
-      api: {
-        prepare: (payload) => prepare({ headers, payload }),
-        create: (payload) => create({ headers, payload }),
-        fail: (payload) => fail({ headers, payload }),
-        complete: (payload) => complete({ headers, payload }),
-      },
-    }).catch(() => undefined);
   };
 
   const addText = (text: string) => {
-    if (provider === null || headers === null) return;
+    if (provider === null) return;
     const bytes = encodeTextSnippet(text.trim());
     if (bytes.byteLength === 0) return;
     const id = crypto.randomUUID();
-    const fileName = `${id}.txt`;
-    const task = actions.enqueue({
+    void ingest({
       id,
-      fileName,
+      fileName: `${id}.txt`,
       byteSize: bytes.byteLength,
-      contentType: "text/plain; charset=utf-8",
+      mediaType: "text/plain; charset=utf-8",
       storageProvider: provider,
-    });
-    void uploadStoredSnippet({
-      file: { name: fileName, size: bytes.byteLength, type: "text/plain; charset=utf-8" },
       bytes,
-      task,
-      actions,
-      uploader: window.ipc.storage,
-      api: {
-        prepare: (payload) => prepare({ headers, payload }),
-        create: (payload) => create({ headers, payload }),
-        fail: (payload) => fail({ headers, payload }),
-        complete: (payload) => complete({ headers, payload }),
-      },
-    }).catch(() => undefined);
+    });
   };
 
   const addClipboard = async (content: ClipboardContent) => {
-    if (content.type === "text") addText(content.text);
-    else if (content.type === "image") {
-      const blob = await fetch(content.dataUrl).then((response) => response.blob());
-      upload({ name: "Pasted image.png", size: blob.size, type: blob.type }, content.path);
-    } else if (content.type === "file" && content.size !== undefined)
-      upload({ name: content.name, size: content.size, type: "" }, content.path);
+    try {
+      if (content.type === "text") addText(content.text);
+      else if (content.type === "image") {
+        const blob = await fetch(content.dataUrl).then((response) => response.blob());
+        upload({ name: "Pasted image.png", size: blob.size, type: blob.type }, content.path);
+      } else if (content.type === "file" && content.size !== undefined)
+        upload({ name: content.name, size: content.size, type: "" }, content.path);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Plakk couldn’t read the clipboard item.");
+    }
   };
 
   const addDropped = (item: TrayDroppedItem) => {
@@ -99,5 +65,5 @@ export function useTraySnippets(account: AccountStatus | null) {
         upload({ name: file.name, size: file.size, type: "" }, file.path);
   };
 
-  return { actions, addClipboard, addDropped, addText, latest, upload };
+  return { addClipboard, addDropped, addText, error, latest, reportError: setError, upload };
 }

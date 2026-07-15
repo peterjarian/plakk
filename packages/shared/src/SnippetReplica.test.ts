@@ -116,6 +116,24 @@ describe("snippet replica synchronization", () => {
     await Effect.runPromise(syncSnippetReplica(account).pipe(Effect.provide(test.layer)));
 
     expect(test.state()).toEqual({ cursor: "next", items: [snippet] });
+    expect(test.invalidated).toEqual([]);
+  });
+
+  it("invalidates managed content only when the snippet is deleted", async () => {
+    const test = harness({
+      initial: { cursor: "old", items: [snippet] },
+      pages: [
+        {
+          status: "OK",
+          changes: [{ type: "DELETE", snippetId: snippet.id }],
+          nextCursor: "next",
+        },
+      ],
+    });
+
+    await Effect.runPromise(syncSnippetReplica(account).pipe(Effect.provide(test.layer)));
+
+    expect(test.state()).toEqual({ cursor: "next", items: [] });
     expect(test.invalidated).toEqual([[snippet.id]]);
   });
 

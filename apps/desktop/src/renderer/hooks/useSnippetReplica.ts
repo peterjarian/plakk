@@ -1,8 +1,8 @@
-import type { ApiSnippet } from "@plakk/shared/PlakkApi";
+import type { DesktopSnippet } from "../../ipc/contracts.ts";
 import { useEffect, useState } from "react";
 
 export function useSnippetReplica() {
-  const [items, setItems] = useState<ReadonlyArray<ApiSnippet>>([]);
+  const [items, setItems] = useState<ReadonlyArray<DesktopSnippet>>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
