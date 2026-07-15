@@ -167,15 +167,13 @@ export const ManagedSnippetContentLive = Layer.effect(
       get: Effect.fn("DesktopManagedSnippetContent.get")(
         function* (accountId, snippetId, revision) {
           return yield* fileSystem.readFile(contentPath(accountId, snippetId, revision)).pipe(
-            Effect.catch((error) =>
-              error.reason._tag === "NotFound"
-                ? Effect.succeed(null)
-                : Effect.fail(
-                    new ManagedSnippetContentError({
-                      cause: error,
-                      reason: "Could not read managed snippet content.",
-                    }),
-                  ),
+            Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(null)),
+            Effect.mapError(
+              (cause) =>
+                new ManagedSnippetContentError({
+                  cause,
+                  reason: "Could not read managed snippet content.",
+                }),
             ),
           );
         },
