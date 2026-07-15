@@ -1,5 +1,8 @@
-import type { ApiSnippet, PreparedStorageUpload } from "@plakk/shared/PlakkApi";
-import type { StorageProvider } from "@plakk/shared";
+import type {
+  ApiSnippet,
+  CreateStoredSnippetPayload,
+  PreparedStorageUpload,
+} from "@plakk/shared/PlakkApi";
 import type { UploadTask } from "@plakk/ui/atoms/upload";
 import type {
   RendererPreparedFileUploadPayload,
@@ -9,23 +12,11 @@ import type {
 export type StoredSnippetUploadApi = {
   readonly prepare: (input: {
     snippetId: string;
-    storageProvider: StorageProvider;
+    mediaType: string | null;
   }) => Promise<PreparedStorageUpload>;
-  readonly create: (input: {
-    id: string;
-    kind: "FILE" | "IMAGE";
-    title: string;
-    fileName: string;
-    byteSize: number;
-    contentType: string | null;
-    storageProvider: StorageProvider;
-    storageObjectId: string | null;
-  }) => Promise<ApiSnippet>;
-  readonly updateStatus: (
-    input:
-      | { id: string; uploadStatus: "READY"; storageObjectId: string }
-      | { id: string; uploadStatus: "FAILED"; storageObjectId: string | null },
-  ) => Promise<ApiSnippet>;
+  readonly create: (input: CreateStoredSnippetPayload) => Promise<ApiSnippet>;
+  readonly fail: (input: { id: string }) => Promise<ApiSnippet>;
+  readonly complete: (input: { id: string; storageObjectId: string }) => Promise<ApiSnippet>;
 };
 
 export type StoredSnippetUploadActions = {
@@ -49,15 +40,11 @@ const throwIfCancelled = (id: string) => {
   }
 };
 
-async function markUploadFailed(
-  api: StoredSnippetUploadApi,
-  id: string,
-  storageObjectId: string | null,
-) {
+async function markUploadFailed(api: StoredSnippetUploadApi, id: string) {
   let failure: unknown;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      await api.updateStatus({ id, uploadStatus: "FAILED", storageObjectId });
+      await api.fail({ id });
       return;
     } catch (error) {
       failure = error;
@@ -66,7 +53,6 @@ async function markUploadFailed(
   }
   console.error("Could not mark stored snippet upload as failed.", {
     id,
-    storageObjectId,
     failure,
   });
 }
@@ -86,24 +72,17 @@ export async function uploadStoredSnippet(input: {
 
   try {
     actions.setPhase(task.id, "PREPARING");
-    const storedMetadata = {
+    await api.create({
       id: task.id,
+      fileName: file.name,
       byteSize: file.size,
       storageProvider: task.storageProvider,
-      storageObjectId,
-    };
-    await api.create({
-      ...storedMetadata,
-      kind: task.kind,
-      title: file.name,
-      fileName: file.name,
-      contentType: file.type || null,
     });
     created = true;
     throwIfCancelled(task.id);
     const prepared = await api.prepare({
       snippetId: task.id,
-      storageProvider: task.storageProvider,
+      mediaType: file.type || null,
     });
     throwIfCancelled(task.id);
     storageObjectId = prepared.storageObjectId;
@@ -122,16 +101,15 @@ export async function uploadStoredSnippet(input: {
     throwIfCancelled(task.id);
     storageObjectId = upload.storageObjectId;
     actions.setStorageObjectId(task.id, storageObjectId);
-    const snippet = await api.updateStatus({
+    const snippet = await api.complete({
       id: task.id,
-      uploadStatus: "READY",
       storageObjectId,
     });
-    actions.setPhase(task.id, "READY");
+    actions.setPhase(task.id, "UPLOADED");
     return snippet;
   } catch (error) {
     if (created) {
-      await markUploadFailed(api, task.id, storageObjectId);
+      await markUploadFailed(api, task.id);
     }
     const message = error instanceof Error ? error.message : "Could not upload file. Try again.";
     actions.setPhase(task.id, "FAILED", message);

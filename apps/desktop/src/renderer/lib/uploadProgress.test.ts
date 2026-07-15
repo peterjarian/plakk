@@ -15,13 +15,13 @@ describe("upload progress", () => {
     advanceUploadProgress({
       snapshot: () => [
         { id: "a", phase: "UPLOADING", progress: 92 },
-        { id: "b", phase: "READY", progress: 100 },
+        { id: "b", phase: "UPLOADED", progress: 100 },
       ],
       setProgress: (id, value) => progress.push([id, value]),
       setPhase: (id, phase) => phases.push([id, phase]),
     });
 
     expect(progress).toEqual([["a", 100]]);
-    expect(phases).toEqual([["a", "READY"]]);
+    expect(phases).toEqual([["a", "UPLOADED"]]);
   });
 });

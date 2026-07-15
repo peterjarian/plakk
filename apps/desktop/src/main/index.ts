@@ -3,21 +3,11 @@ import "dotenv/config";
 import { basename, join, resolve, sep } from "node:path";
 import { rm, stat } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
-import { isHttpUrl, MAX_TEXT_SNIPPET_BYTE_SIZE } from "@plakk/shared";
+import { deriveSnippetPresentation, isHttpUrl } from "@plakk/shared";
 import { accountCanSync, type ApiSnippet } from "@plakk/shared/PlakkApi";
-import {
-  discardTextSnippet,
-  enqueueTextSnippet,
-  retryTextSnippet,
-  runSnippetReplicaSync,
-  runTextSnippetOutbox,
-  SnippetReplica,
-  toLocalTextSnippet,
-  visibleSnippetItems,
-  type LocalTextSnippet,
-} from "@plakk/shared/SnippetReplica";
+import { SnippetReplica, runSnippetReplicaSync } from "@plakk/shared/SnippetReplica";
 import { app, BrowserWindow, dialog, Menu, net, protocol, shell } from "electron";
-import { DateTime, Effect, Result, Stream } from "effect";
+import { Effect, Result, Stream } from "effect";
 import * as Fiber from "effect/Fiber";
 import type { AuthStatus, TrayAccountState, TrayDroppedItem } from "../ipc/contracts.ts";
 import { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
@@ -38,7 +28,8 @@ import { runEffect, runtime } from "./runtime.ts";
 import {
   ActiveSnippetAccount,
   getManagedSnippetBytes,
-  getVisibleReplicaItems,
+  getReplicaItems,
+  getReplicaSnippet,
 } from "./snippetReplica.ts";
 
 const rendererScheme = "plakk-app";
@@ -94,26 +85,19 @@ handle(ipcMethods.storageCancelUpload, (id) => {
 handle(ipcMethods.snippetCopy, async (id) => {
   const account = activeSnippetAccount();
   if (account === null) throw new Error("Sign in to load stored snippets.");
-  const snippet = (await runEffect(getVisibleReplicaItems(account.id))).find(
-    (item) => item.id === id,
-  );
-  if (snippet === undefined) throw new Error("Snippet was not found.");
-  if (snippet.kind === "LINK") {
-    await runEffect(writeClipboard({ type: "text", text: snippet.title }));
-    return;
-  }
-
+  const snippet = await runEffect(getReplicaSnippet(account.id, id));
   const { bytes } = await runEffect(Effect.scoped(getManagedSnippetBytes(account, id)));
-  if (snippet.kind === "TEXT") {
+  const presentation = deriveSnippetPresentation({ fileName: snippet.fileName, content: bytes });
+  if (presentation.type === "text" || presentation.type === "hyperlink") {
     await runEffect(writeClipboard({ type: "text", text: new TextDecoder().decode(bytes) }));
     return;
   }
   await runEffect(
     writeSnippetToClipboard({
       bytes,
-      kind: snippet.kind,
+      presentationType: presentation.type,
       fileName: snippet.fileName,
-      contentType: snippet.contentType,
+      contentType: null,
     }),
   );
 });
@@ -125,43 +109,8 @@ handle(ipcMethods.snippetRead, async (id) => {
 });
 
 handle(ipcMethods.snippetList, () =>
-  activeSnippetAccountId === undefined
-    ? []
-    : runEffect(getVisibleReplicaItems(activeSnippetAccountId)),
+  activeSnippetAccountId === undefined ? [] : runEffect(getReplicaItems(activeSnippetAccountId)),
 );
-
-handle(ipcMethods.snippetEnqueueText, async (text) => {
-  const account = activeSnippetAccount();
-  if (account === null) throw new Error("Sign in to add a text snippet.");
-  const bytes = new TextEncoder().encode(text.trim());
-  if (bytes.byteLength === 0) throw new Error("Enter text before adding a snippet.");
-  if (bytes.byteLength > MAX_TEXT_SNIPPET_BYTE_SIZE) {
-    throw new Error("This text snippet is too large.");
-  }
-  const item = {
-    mutationId: crypto.randomUUID(),
-    snippetId: crypto.randomUUID(),
-    byteSize: bytes.byteLength,
-    storageProvider: null,
-    createdAt: DateTime.formatIso(await runEffect(DateTime.now)),
-    status: "QUEUED" as const,
-    errorMessage: null,
-  };
-  await runEffect(enqueueTextSnippet(account.id, item, bytes));
-  return toLocalTextSnippet(item);
-});
-
-handle(ipcMethods.snippetRetryText, (id) => {
-  const account = activeSnippetAccount();
-  if (account === null) throw new Error("Sign in to retry this snippet.");
-  return runEffect(retryTextSnippet(account.id, id));
-});
-
-handle(ipcMethods.snippetDiscardText, (id) => {
-  const account = activeSnippetAccount();
-  if (account === null) throw new Error("Sign in to remove this snippet.");
-  return runEffect(discardTextSnippet(account.id, id));
-});
 
 handle(ipcMethods.clipboardRead, () => runEffect(readClipboard()));
 
@@ -295,7 +244,6 @@ let currentTrayAccountState: TrayAccountState = { kind: "loading" };
 let trayRefreshGeneration = 0;
 let activeSnippetAccountId: string | undefined;
 let snippetSyncFiber: Fiber.Fiber<void, unknown> | undefined;
-let textOutboxFiber: Fiber.Fiber<void, unknown> | undefined;
 let snippetAccountPersistenceFiber: Fiber.Fiber<void, unknown> | undefined;
 
 handle(ipcMethods.trayGetAccountState, (_payload, event) =>
@@ -334,18 +282,11 @@ function applyAuthStatus(status: AuthStatus) {
   if (changed) {
     trayRefreshGeneration += 1;
     if (snippetSyncFiber !== undefined) runtime.runFork(Fiber.interrupt(snippetSyncFiber));
-    if (textOutboxFiber !== undefined) runtime.runFork(Fiber.interrupt(textOutboxFiber));
     snippetSyncFiber =
       status.user === null || status.accessToken === null
         ? undefined
         : runtime.runFork(
             runSnippetReplicaSync({ id: status.user.id, accessToken: status.accessToken }),
-          );
-    textOutboxFiber =
-      status.user === null || status.accessToken === null
-        ? undefined
-        : runtime.runFork(
-            runTextSnippetOutbox({ id: status.user.id, accessToken: status.accessToken }),
           );
   }
   reconcileTrayAuth(status, trayWindowController);
@@ -554,7 +495,7 @@ function broadcastAuthStatus(status: AuthStatus): void {
   }
 }
 
-function broadcastSnippetReplica(items: ReadonlyArray<ApiSnippet | LocalTextSnippet>): void {
+function broadcastSnippetReplica(items: ReadonlyArray<ApiSnippet>): void {
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed()) send(window.webContents, ipcEvents.snippetReplicaChanged, items);
   }
@@ -591,15 +532,9 @@ function broadcastAuthError(message: string): void {
 }
 
 function broadcastTrayDroppedItem(item: TrayDroppedItem): void {
-  const controller = trayWindowController;
-  if (
-    controller === undefined ||
-    currentAuthStatus.user === null ||
-    (item.type !== "text" && controller.isIngestionEnabled() !== true)
-  )
-    return;
+  if (trayWindowController?.isIngestionEnabled() !== true) return;
   for (const window of BrowserWindow.getAllWindows())
-    if (!window.isDestroyed() && controller.ownsWebContents(window.webContents))
+    if (!window.isDestroyed() && trayWindowController.ownsWebContents(window.webContents))
       send(window.webContents, ipcEvents.trayDroppedItem, item);
 }
 
@@ -646,14 +581,13 @@ async function handleAuthUrls(values: readonly string[]): Promise<boolean> {
 function pasteIntoFocusedWindow(): void {
   const window = BrowserWindow.getFocusedWindow();
   if (window === null) return;
+  if (
+    trayWindowController?.ownsWebContents(window.webContents) === true &&
+    !trayWindowController.isIngestionEnabled()
+  )
+    return;
 
   void runEffect(readClipboard()).then((content) => {
-    if (
-      trayWindowController?.ownsWebContents(window.webContents) === true &&
-      !trayWindowController.isIngestionEnabled() &&
-      content.type !== "text"
-    )
-      return;
     if (content.type !== "empty" && !window.isDestroyed()) {
       send(window.webContents, ipcEvents.clipboardPaste, content);
     }
@@ -695,11 +629,9 @@ if (!hasSingleInstanceLock) {
     runtime.runFork(
       SnippetReplica.use((replica) =>
         replica.changes.pipe(
-          Stream.runForEach(({ accountId, items, textOutbox }) =>
+          Stream.runForEach(({ accountId, items }) =>
             Effect.sync(() => {
-              if (accountId === activeSnippetAccountId) {
-                broadcastSnippetReplica(visibleSnippetItems({ cursor: "", items, textOutbox }));
-              }
+              if (accountId === activeSnippetAccountId) broadcastSnippetReplica(items);
             }),
           ),
         ),

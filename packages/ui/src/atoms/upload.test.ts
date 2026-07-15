@@ -15,7 +15,7 @@ const draft = {
   fileName: "photo.png",
   byteSize: 4,
   contentType: "image/png",
-  kind: "IMAGE",
+  presentationType: "image",
   storageProvider: "GOOGLE_DRIVE",
 } as const;
 
@@ -37,7 +37,7 @@ describe("upload atoms", () => {
     const uploading = makeUploadTask(draft);
     const ready = makeUploadTask({ ...draft, id: "upload-2" });
 
-    registry.set(uploadTasksAtom, [uploading, { ...ready, phase: "READY" }]);
+    registry.set(uploadTasksAtom, [uploading, { ...ready, phase: "UPLOADED" }]);
 
     expect(registry.get(activeUploadTasksAtom)).toEqual([uploading]);
   });

@@ -1,31 +1,10 @@
-import { useEffect, useState } from "react";
-import { SnippetRow, type SnippetRowItem } from "@plakk/ui/components/SnippetRow";
-import { decodeTextSnippet } from "../../lib/textSnippetContent.ts";
+import type { ApiSnippet } from "@plakk/shared/PlakkApi";
+import type { UploadTask } from "@plakk/ui/atoms/upload";
+import { SnippetRow } from "@plakk/ui/components/SnippetRow";
 
 const noop = () => undefined;
 
-export function TrayRecentItem({ snippet }: { snippet: SnippetRowItem | undefined }) {
-  const [textContent, setTextContent] = useState<string | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    setTextContent(null);
-    if (
-      snippet?.kind === "TEXT" &&
-      ("phase" in snippet ? "createdAt" in snippet : snippet.uploadStatus === "READY")
-    ) {
-      void window.ipc.snippets
-        .read(snippet.id)
-        .then((bytes) => {
-          if (active) setTextContent(decodeTextSnippet(bytes));
-        })
-        .catch(() => undefined);
-    }
-    return () => {
-      active = false;
-    };
-  }, [snippet]);
-
+export function TrayRecentItem({ snippet }: { snippet: ApiSnippet | UploadTask | undefined }) {
   if (!snippet) {
     return (
       <section className="grid min-h-0 flex-1 place-content-center gap-1 px-6 text-center">
@@ -49,11 +28,6 @@ export function TrayRecentItem({ snippet }: { snippet: SnippetRowItem | undefine
           onDelete={noop}
           onStopUpload={noop}
           showActions={false}
-          {...(snippet.kind === "TEXT" && textContent !== null
-            ? { textContent: { state: "ready" as const, text: textContent } }
-            : snippet.kind === "TEXT" && !("phase" in snippet) && snippet.textContent !== null
-              ? { textContent: { state: "ready" as const, text: snippet.textContent } }
-              : {})}
         />
       </ul>
     </section>

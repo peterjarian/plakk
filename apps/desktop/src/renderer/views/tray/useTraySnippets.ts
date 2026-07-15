@@ -1,11 +1,12 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useAtomSet } from "@effect/atom-react";
-import { snippetKindForFileName } from "@plakk/shared";
+import { deriveSnippetPresentation } from "@plakk/shared";
 import type { AccountStatus } from "@plakk/shared/PlakkApi";
 import type { UploadTask } from "@plakk/ui/atoms/upload";
 import { createPlakkRpc } from "@plakk/ui/atoms/rpc";
 import { useActiveUploadTasks, useUploadActions } from "@plakk/ui/hooks/useUploadFlow";
 import { uploadStoredSnippet } from "../../lib/storedSnippetUpload.ts";
+import { encodeTextSnippet } from "../../lib/textSnippetContent.ts";
 import { useAuth } from "../../hooks/useAuth.ts";
 import type { ClipboardContent, TrayDroppedItem } from "../../../ipc/contracts.ts";
 import { useSnippetReplica } from "../../hooks/useSnippetReplica.ts";
@@ -13,10 +14,10 @@ import { useSnippetReplica } from "../../hooks/useSnippetReplica.ts";
 const plakkRpc = createPlakkRpc(window.ipc.runtimeConfig.plakkRpcUrl);
 const prepareUpload = plakkRpc.mutation("PrepareStoredSnippetUpload");
 const createSnippet = plakkRpc.mutation("CreateStoredSnippet");
-const updateUpload = plakkRpc.mutation("UpdateStoredSnippetUploadStatus");
+const failUpload = plakkRpc.mutation("FailStoredSnippetUpload");
+const completeUpload = plakkRpc.mutation("CompleteStoredSnippetUpload");
 
 export function useTraySnippets(account: AccountStatus | null) {
-  const [textError, setTextError] = useState<string | null>(null);
   const auth = useAuth();
   const headers = useMemo(
     () => (auth.accessToken === null ? null : { authorization: `Bearer ${auth.accessToken}` }),
@@ -27,19 +28,20 @@ export function useTraySnippets(account: AccountStatus | null) {
   const actions = useUploadActions();
   const prepare = useAtomSet(prepareUpload, { mode: "promise" });
   const create = useAtomSet(createSnippet, { mode: "promise" });
-  const update = useAtomSet(updateUpload, { mode: "promise" });
+  const fail = useAtomSet(failUpload, { mode: "promise" });
+  const complete = useAtomSet(completeUpload, { mode: "promise" });
   const latest: UploadTask | (typeof items)[number] | undefined = uploads.at(0) ?? items.at(0);
   const provider = account?.storageProvider ?? null;
 
   const upload = (file: Pick<File, "name" | "size" | "type">, filePath?: string) => {
     if (provider === null || headers === null) return;
-    const kind = snippetKindForFileName(file.name);
-    if (kind !== "FILE" && kind !== "IMAGE") return;
+    const presentationType =
+      deriveSnippetPresentation({ fileName: file.name }).type === "image" ? "image" : "file";
     const task = actions.enqueue({
       fileName: file.name,
       byteSize: file.size,
       contentType: file.type || null,
-      kind,
+      presentationType,
       storageProvider: provider,
     });
     void uploadStoredSnippet({
@@ -51,17 +53,39 @@ export function useTraySnippets(account: AccountStatus | null) {
       api: {
         prepare: (payload) => prepare({ headers, payload }),
         create: (payload) => create({ headers, payload }),
-        updateStatus: (payload) => update({ headers, payload }),
+        fail: (payload) => fail({ headers, payload }),
+        complete: (payload) => complete({ headers, payload }),
       },
     }).catch(() => undefined);
   };
 
   const addText = (text: string) => {
-    if (!text.trim()) return;
-    setTextError(null);
-    void window.ipc.snippets.enqueueText(text.trim()).catch((error: unknown) => {
-      setTextError(error instanceof Error ? error.message : "Could not queue this text snippet.");
+    if (provider === null || headers === null) return;
+    const bytes = encodeTextSnippet(text.trim());
+    if (bytes.byteLength === 0) return;
+    const id = crypto.randomUUID();
+    const fileName = `${id}.txt`;
+    const task = actions.enqueue({
+      id,
+      fileName,
+      byteSize: bytes.byteLength,
+      contentType: "text/plain; charset=utf-8",
+      presentationType: "text",
+      storageProvider: provider,
     });
+    void uploadStoredSnippet({
+      file: { name: fileName, size: bytes.byteLength, type: "text/plain; charset=utf-8" },
+      bytes,
+      task,
+      actions,
+      uploader: window.ipc.storage,
+      api: {
+        prepare: (payload) => prepare({ headers, payload }),
+        create: (payload) => create({ headers, payload }),
+        fail: (payload) => fail({ headers, payload }),
+        complete: (payload) => complete({ headers, payload }),
+      },
+    }).catch(() => undefined);
   };
 
   const addClipboard = async (content: ClipboardContent) => {
@@ -80,5 +104,5 @@ export function useTraySnippets(account: AccountStatus | null) {
         upload({ name: file.name, size: file.size, type: "" }, file.path);
   };
 
-  return { actions, addClipboard, addDropped, addText, latest, textError, upload };
+  return { actions, addClipboard, addDropped, addText, latest, upload };
 }

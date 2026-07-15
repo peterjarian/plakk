@@ -6,16 +6,11 @@ import { formatSnippetDate, SnippetRow } from "./SnippetRow.tsx";
 
 const snippet = {
   id: "8c72d6f6-9a25-4633-b72f-d8f83cf1c8e0",
-  kind: "TEXT",
-  title: "A text snippet",
   fileName: "snippet.txt",
   byteSize: 14,
-  contentType: "text/plain",
-  contentUrl: null,
-  thumbnailUrl: null,
-  textContent: null,
-  storageProvider: null,
-  uploadStatus: "READY",
+  storageProvider: "GOOGLE_DRIVE",
+  storageObjectId: "drive-object",
+  uploadStatus: "UPLOADED",
   createdAt: "2026-07-11T00:00:00.000Z",
   updatedAt: "2026-07-11T00:00:00.000Z",
 } as const;
@@ -41,7 +36,6 @@ describe("SnippetRow", () => {
     expect(markup).toContain('data-snippet-row=""');
     expect(markup).toContain('tabindex="0"');
     expect(markup).toContain("select-none");
-    expect(markup).toContain("max-w-[36ch]");
   });
 
   it("shows a spinner while copying", () => {
@@ -60,84 +54,6 @@ describe("SnippetRow", () => {
 
     expect(markup).toContain('aria-label="Copying"');
     expect(markup).toContain("animate-spin");
-  });
-
-  it("presents durable offline text as safely saved for automatic sync", () => {
-    const markup = renderToStaticMarkup(
-      <SnippetRow
-        snippet={{
-          id: snippet.id,
-          kind: "TEXT",
-          fileName: `${snippet.id}.txt`,
-          byteSize: 14,
-          contentType: "text/plain; charset=utf-8",
-          storageProvider: null,
-          phase: "QUEUED",
-          progress: 0,
-          storageObjectId: null,
-          errorMessage: null,
-          createdAt: snippet.createdAt,
-        }}
-        now={now}
-        copied={false}
-        onCopy={() => undefined}
-        onDelete={() => undefined}
-        onStopUpload={() => undefined}
-        textContent={{ state: "ready", text: "Offline note" }}
-      />,
-    );
-
-    expect(markup).toContain('aria-label="Saved on this Mac; syncs automatically"');
-    expect(markup).toContain('title="Saved on this Mac — syncs automatically"');
-    expect(markup).toContain(">Saved</span>");
-    expect(markup).not.toContain("Saved on this Mac — syncs automatically</p>");
-    expect(markup).not.toContain("text-amber-600");
-  });
-
-  it("offers retry only for an actionable local failure", () => {
-    const markup = renderToStaticMarkup(
-      <SnippetRow
-        snippet={{
-          id: snippet.id,
-          kind: "TEXT",
-          fileName: `${snippet.id}.txt`,
-          byteSize: 14,
-          contentType: "text/plain; charset=utf-8",
-          storageProvider: "GOOGLE_DRIVE",
-          phase: "NEEDS_ACTION",
-          progress: 0,
-          storageObjectId: null,
-          errorMessage: "Reconnect storage to continue.",
-          createdAt: snippet.createdAt,
-        }}
-        now={now}
-        copied={false}
-        onCopy={() => undefined}
-        onDelete={() => undefined}
-        onRetryUpload={() => undefined}
-        onStopUpload={() => undefined}
-      />,
-    );
-
-    expect(markup).toContain("Reconnect storage to continue.");
-    expect(markup).toContain('aria-label="Retry upload"');
-  });
-
-  it("shows authoritative upload progress without offering a local stop action", () => {
-    const markup = renderToStaticMarkup(
-      <SnippetRow
-        snippet={{ ...snippet, storageProvider: "GOOGLE_DRIVE", uploadStatus: "UPLOADING" }}
-        now={now}
-        copied={false}
-        onCopy={() => undefined}
-        onDelete={() => undefined}
-        onStopUpload={() => undefined}
-      />,
-    );
-
-    expect(markup).toContain("Uploading to connected storage…");
-    expect(markup).toContain('aria-label="Uploading"');
-    expect(markup).not.toContain('aria-label="Stop uploading"');
   });
 });
 

@@ -1,14 +1,16 @@
-import type { SnippetKind, StorageProvider } from "@plakk/shared";
+import type { SnippetPresentation, StorageProvider } from "@plakk/shared";
 import { Atom } from "effect/unstable/reactivity";
 
-export type UploadPhase = "QUEUED" | "PREPARING" | "UPLOADING" | "READY" | "FAILED";
+export type UploadPresentationType = Exclude<SnippetPresentation["type"], "hyperlink">;
+
+export type UploadPhase = "QUEUED" | "PREPARING" | "UPLOADING" | "UPLOADED" | "FAILED";
 
 export type UploadDraft = {
   readonly id?: string;
   readonly fileName: string;
   readonly byteSize: number;
   readonly contentType: string | null;
-  readonly kind: Extract<SnippetKind, "FILE" | "IMAGE">;
+  readonly presentationType: UploadPresentationType;
   readonly storageProvider: StorageProvider;
 };
 
@@ -26,7 +28,7 @@ export const uploadTasksAtom = Atom.make<ReadonlyArray<UploadTask>>([]).pipe(
 );
 
 export const activeUploadTasksAtom = Atom.make((get) =>
-  get(uploadTasksAtom).filter((task) => task.phase !== "READY"),
+  get(uploadTasksAtom).filter((task) => task.phase !== "UPLOADED"),
 ).pipe(Atom.withLabel("plakk:active-storage-upload-tasks"));
 
 export const makeUploadTask = (draft: UploadDraft): UploadTask => ({

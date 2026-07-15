@@ -1,11 +1,9 @@
-import { formatFileSize, type SnippetKind } from "@plakk/shared";
+import { deriveSnippetPresentation, formatFileSize, type SnippetPresentation } from "@plakk/shared";
 import type { ApiSnippet } from "@plakk/shared/PlakkApi";
-import type { LocalTextSnippet } from "@plakk/shared/SnippetReplica";
 import * as DateTime from "effect/DateTime";
 import {
   ArrowUpRight,
   Check,
-  CloudUpload,
   Copy,
   FileText,
   ImageIcon,
@@ -19,28 +17,42 @@ import {
 import type { UploadTask } from "../atoms/upload.ts";
 import { Button } from "./primitives/button.tsx";
 
-export type SnippetRowItem = ApiSnippet | UploadTask | LocalTextSnippet;
+export type SnippetRowItem = ApiSnippet | UploadTask;
 
 export type TextSnippetContent =
   | { readonly state: "loading" }
   | { readonly state: "ready"; readonly text: string }
   | { readonly state: "failed"; readonly message: string };
 
-const kindMeta: Record<SnippetKind, { Icon: typeof Type }> = {
-  TEXT: { Icon: Type },
-  LINK: { Icon: LinkIcon },
-  FILE: { Icon: FileText },
-  IMAGE: { Icon: ImageIcon },
+const presentationMeta: Record<SnippetPresentation["type"], { Icon: typeof Type }> = {
+  text: { Icon: Type },
+  hyperlink: { Icon: LinkIcon },
+  file: { Icon: FileText },
+  image: { Icon: ImageIcon },
 };
 
-const isRendererUpload = (snippet: SnippetRowItem): snippet is UploadTask =>
-  "phase" in snippet && !("createdAt" in snippet);
+const isUploadTask = (snippet: SnippetRowItem): snippet is UploadTask => "phase" in snippet;
 
-const isLocalText = (snippet: SnippetRowItem): snippet is LocalTextSnippet =>
-  "phase" in snippet && "createdAt" in snippet;
+const fileSubtitle = (snippet: Pick<ApiSnippet, "byteSize" | "fileName">) =>
+  `${snippet.fileName.split(".").pop()?.toUpperCase() ?? "FILE"} · ${formatFileSize(snippet.byteSize)}`;
 
-const fileSubtitle = (snippet: Pick<ApiSnippet, "byteSize" | "fileName" | "kind">) =>
-  `${snippet.fileName.split(".").pop()?.toUpperCase() ?? snippet.kind} · ${formatFileSize(snippet.byteSize)}`;
+const presentationFor = (
+  snippet: SnippetRowItem,
+  textContent: TextSnippetContent | undefined,
+): SnippetPresentation => {
+  const content = textContent?.state === "ready" ? textContent.text : undefined;
+  if (!isUploadTask(snippet) || snippet.presentationType === "text") {
+    return deriveSnippetPresentation(
+      content === undefined
+        ? { fileName: snippet.fileName }
+        : { fileName: snippet.fileName, content },
+    );
+  }
+  return {
+    type: snippet.presentationType,
+    title: snippet.fileName,
+  };
+};
 
 const relativeDateUnits = [
   [30 * 24 * 60 * 60 * 1000, "month"],
@@ -89,7 +101,6 @@ export function SnippetRow(props: {
   onDelete: () => void;
   onOpenLink?: (url: string) => void;
   onRetryContent?: () => void;
-  onRetryUpload?: () => void;
   onStopUpload: () => void;
   textContent?: TextSnippetContent;
   thumbnailUrl?: string | null;
@@ -106,7 +117,6 @@ export function SnippetRow(props: {
     onDelete,
     onOpenLink,
     onRetryContent,
-    onRetryUpload,
     onStopUpload,
     textContent,
     thumbnailUrl,
@@ -115,52 +125,28 @@ export function SnippetRow(props: {
     copyError,
     showActions = true,
   } = props;
-  const { Icon } = kindMeta[snippet.kind];
-  const isQueued = isLocalText(snippet) && snippet.phase === "QUEUED";
-  const isUploading =
-    isQueued ||
-    (isRendererUpload(snippet) && snippet.phase !== "FAILED") ||
-    (!("phase" in snippet) && snippet.uploadStatus === "UPLOADING");
-  const title =
-    snippet.kind === "TEXT"
-      ? textContent?.state === "ready"
-        ? textContent.text
-        : "phase" in snippet
-          ? "Text snippet"
-          : snippet.title
-      : "phase" in snippet
-        ? snippet.fileName
-        : snippet.title;
+  const presentation = presentationFor(snippet, textContent);
+  const { Icon } = presentationMeta[presentation.type];
+  const isUploading = isUploadTask(snippet) && snippet.phase !== "FAILED";
+  const title = presentation.title;
+  const isText = presentation.type === "text" || presentation.type === "hyperlink";
   const subtitle =
-    isRendererUpload(snippet) && snippet.phase === "FAILED"
+    isUploadTask(snippet) && snippet.phase === "FAILED"
       ? (snippet.errorMessage ?? "Upload failed. Choose the file again to retry.")
-      : isLocalText(snippet) && snippet.phase === "NEEDS_ACTION"
-        ? (snippet.errorMessage ?? "This snippet needs attention before it can sync.")
-        : !("phase" in snippet) && snippet.uploadStatus === "UPLOADING"
-          ? "Uploading to connected storage…"
-          : !("phase" in snippet) && snippet.uploadStatus === "INTERRUPTED"
-            ? "Upload interrupted — waiting for the source device"
-            : !("phase" in snippet) && snippet.uploadStatus === "FAILED"
-              ? (snippet.uploadFailureMessage ?? "Upload needs attention on the source device.")
-              : snippet.kind === "TEXT" && textContent?.state === "loading"
-                ? "Loading text…"
-                : snippet.kind === "TEXT" && textContent?.state === "failed"
-                  ? textContent.message
-                  : snippet.kind === "FILE" || snippet.kind === "IMAGE"
-                    ? fileSubtitle(snippet)
-                    : "phase" in snippet
-                      ? ""
-                      : formatFileSize(snippet.byteSize);
-  const time =
-    "phase" in snippet
-      ? snippet.phase === "FAILED"
-        ? "Failed"
-        : snippet.phase === "NEEDS_ACTION"
-          ? "Needs attention"
-          : snippet.phase === "QUEUED"
-            ? "Queued"
-            : ""
-      : formatSnippetDate(snippet.createdAt, now);
+      : isText && textContent?.state === "loading"
+        ? "Loading text…"
+        : isText && textContent?.state === "failed"
+          ? textContent.message
+          : presentation.type === "file" || presentation.type === "image"
+            ? fileSubtitle(snippet)
+            : isUploadTask(snippet)
+              ? ""
+              : formatFileSize(snippet.byteSize);
+  const time = isUploadTask(snippet)
+    ? snippet.phase === "FAILED"
+      ? "Failed"
+      : ""
+    : formatSnippetDate(snippet.createdAt, now);
 
   return (
     <li>
@@ -170,7 +156,7 @@ export function SnippetRow(props: {
         className="group relative flex items-center gap-2.5 rounded-lg px-2 py-2 transition-colors outline-none select-none hover:bg-muted/60 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-offset-1 focus-visible:ring-offset-background focus-visible:outline-none focus-within:bg-muted/60"
       >
         <span className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted text-muted-foreground">
-          {snippet.kind === "IMAGE" && thumbnailUrl !== null && thumbnailUrl !== undefined ? (
+          {presentation.type === "image" && thumbnailUrl !== null && thumbnailUrl !== undefined ? (
             <img src={thumbnailUrl} alt="" className="size-full object-cover" />
           ) : (
             <Icon className="size-4" />
@@ -178,34 +164,23 @@ export function SnippetRow(props: {
         </span>
 
         <div className="min-w-0 flex-1">
-          <p className="max-w-[36ch] truncate text-sm font-medium">{title}</p>
+          <p className="truncate text-sm font-medium">{title}</p>
           {subtitle && <p className="truncate text-xs text-muted-foreground">{subtitle}</p>}
         </div>
 
         <div className="flex shrink-0 items-center justify-end">
           {isUploading ? (
             <div className="flex items-center gap-1">
-              {isQueued ? (
-                <span
-                  className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-[11px] font-medium text-muted-foreground"
-                  aria-label="Saved on this Mac; syncs automatically"
-                  title="Saved on this Mac — syncs automatically"
-                >
-                  <CloudUpload className="size-3.5" aria-hidden="true" />
-                  Saved
-                </span>
-              ) : (
-                <LoaderCircle
-                  className="size-4 animate-spin text-muted-foreground"
-                  aria-label="Uploading"
-                />
-              )}
-              {showActions && "phase" in snippet && (
+              <LoaderCircle
+                className="size-4 animate-spin text-muted-foreground"
+                aria-hidden="true"
+              />
+              {showActions && (
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon-sm"
-                  aria-label={isQueued ? "Remove queued snippet" : "Stop uploading"}
+                  aria-label="Stop uploading"
                   className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                   onClick={onStopUpload}
                 >
@@ -228,20 +203,7 @@ export function SnippetRow(props: {
                     : "hidden"
                 }
               >
-                {((isRendererUpload(snippet) && snippet.phase === "FAILED") ||
-                  (isLocalText(snippet) && snippet.phase === "NEEDS_ACTION")) &&
-                  onRetryUpload && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      aria-label="Retry upload"
-                      onClick={onRetryUpload}
-                    >
-                      <RotateCw />
-                    </Button>
-                  )}
-                {snippet.kind === "TEXT" && textContent?.state === "failed" && onRetryContent && (
+                {isText && textContent?.state === "failed" && onRetryContent && (
                   <Button
                     type="button"
                     variant="ghost"
@@ -257,11 +219,7 @@ export function SnippetRow(props: {
                   variant="ghost"
                   size="icon-sm"
                   aria-label={copying ? "Copying" : copied ? "Copied" : "Copy"}
-                  disabled={
-                    copying ||
-                    copyDisabled ||
-                    (snippet.kind === "TEXT" && textContent?.state !== "ready")
-                  }
+                  disabled={copying || copyDisabled || (isText && textContent?.state !== "ready")}
                   onClick={onCopy}
                 >
                   {copying ? (
@@ -272,7 +230,7 @@ export function SnippetRow(props: {
                     <Copy />
                   )}
                 </Button>
-                {snippet.kind === "LINK" && (
+                {presentation.type === "hyperlink" && (
                   <>
                     {onOpenLink ? (
                       <Button
@@ -280,13 +238,13 @@ export function SnippetRow(props: {
                         variant="ghost"
                         size="icon-sm"
                         aria-label="Open link"
-                        onClick={() => onOpenLink(title)}
+                        onClick={() => onOpenLink(presentation.url)}
                       >
                         <ArrowUpRight />
                       </Button>
                     ) : (
                       <Button
-                        render={<a href={title} target="_blank" rel="noreferrer" />}
+                        render={<a href={presentation.url} target="_blank" rel="noreferrer" />}
                         variant="ghost"
                         size="icon-sm"
                         aria-label="Open link"

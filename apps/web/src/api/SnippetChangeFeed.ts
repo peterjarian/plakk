@@ -184,10 +184,7 @@ export const getSnippetSnapshot = Effect.fn("getSnippetSnapshot")(function* (
           .select()
           .from(snippets)
           .where(and(eq(snippets.ownerWorkosUserId, ownerWorkosUserId), isNull(snippets.deletedAt)))
-          .orderBy(
-            desc(sql<boolean>`${snippets.kind} = 'TEXT' and ${snippets.storageProvider} is null`),
-            desc(snippets.createdAt),
-          );
+          .orderBy(desc(snippets.createdAt));
         return {
           rows,
           cursor: encodeSnippetChangeCursor(ownerWorkosUserId, feed.latestSequence),

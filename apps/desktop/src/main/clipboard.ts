@@ -8,7 +8,7 @@ import type { StorageProvider } from "@plakk/shared";
 
 type SnippetContent = {
   readonly bytes: Uint8Array;
-  readonly kind: "FILE" | "IMAGE";
+  readonly presentationType: "file" | "image";
   readonly fileName: string;
   readonly contentType: string | null;
 };
@@ -273,7 +273,7 @@ export const writeSnippetToClipboard = Effect.fn("writeSnippetToClipboard")(func
 ) {
   return yield* Effect.try({
     try: () => {
-      if (content.kind === "IMAGE") {
+      if (content.presentationType === "image") {
         const image = nativeImage.createFromBuffer(Buffer.from(content.bytes));
         if (image.isEmpty()) writeSnippetBytes(content);
         else clipboard.writeImage(image);
@@ -304,22 +304,20 @@ export const downloadSnippetToClipboard = Effect.fn("downloadSnippetToClipboard"
   });
 });
 
-export const downloadSnippetBytes = Effect.fn("downloadSnippetBytes")(function* (
-  snippet: Omit<SnippetContent, "bytes" | "kind"> & {
-    readonly kind: "TEXT" | "FILE" | "IMAGE";
-    readonly storageProvider: StorageProvider;
-    readonly byteSize: number;
-    readonly download: {
-      readonly url: string;
-      readonly headers: ReadonlyArray<{ readonly name: string; readonly value: string }>;
-    };
-  },
-) {
+export const downloadSnippetBytes = Effect.fn("downloadSnippetBytes")(function* (snippet: {
+  readonly storageProvider: StorageProvider;
+  readonly fileName: string;
+  readonly byteSize: number;
+  readonly download: {
+    readonly url: string;
+    readonly headers: ReadonlyArray<{ readonly name: string; readonly value: string }>;
+  };
+}) {
   if (!isSignedStorageUrl(snippet.storageProvider, snippet.download.url)) {
     return yield* new WriteClipboardError({ cause: new Error("Invalid storage download URL.") });
   }
   yield* Effect.logInfo("Copying stored snippet", {
-    kind: snippet.kind,
+    fileName: snippet.fileName,
     storageProvider: snippet.storageProvider,
     downloadHost: new URL(snippet.download.url).hostname,
   });

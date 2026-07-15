@@ -1,8 +1,8 @@
-import type { SnippetListItem } from "../../ipc/contracts.ts";
+import type { ApiSnippet } from "@plakk/shared/PlakkApi";
 import { useEffect, useState } from "react";
 
 export function useSnippetReplica() {
-  const [items, setItems] = useState<ReadonlyArray<SnippetListItem>>([]);
+  const [items, setItems] = useState<ReadonlyArray<ApiSnippet>>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {

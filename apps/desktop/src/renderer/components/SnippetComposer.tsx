@@ -6,11 +6,10 @@ import { cn } from "@plakk/ui/lib/utils";
 export function SnippetComposer(props: {
   className?: string;
   disabled?: boolean;
-  fileDisabled?: boolean;
-  onSubmit: (value: string) => boolean | Promise<boolean>;
+  onSubmit: (value: string) => void;
   onFiles: (files: FileList) => void;
 }) {
-  const { className, disabled = false, fileDisabled = disabled, onSubmit, onFiles } = props;
+  const { className, disabled = false, onSubmit, onFiles } = props;
   const [value, setValue] = useState("");
   const trimmed = value.trim();
 
@@ -21,10 +20,11 @@ export function SnippetComposer(props: {
         disabled && "opacity-60",
         className,
       )}
-      onSubmit={async (event) => {
+      onSubmit={(event) => {
         event.preventDefault();
         if (disabled || !trimmed) return;
-        if (await onSubmit(trimmed)) setValue("");
+        onSubmit(trimmed);
+        setValue("");
       }}
     >
       <label className="min-w-0 flex-1">
@@ -43,9 +43,9 @@ export function SnippetComposer(props: {
         render={<label />}
         variant="ghost"
         size="icon-sm"
-        className={cn("cursor-pointer", fileDisabled && "cursor-default")}
+        className={cn("cursor-pointer", disabled && "cursor-default")}
         toolTip="Attach files"
-        aria-disabled={fileDisabled}
+        aria-disabled={disabled}
       >
         <Paperclip className="size-4" aria-hidden="true" />
         <span className="sr-only">Choose file</span>
@@ -53,7 +53,7 @@ export function SnippetComposer(props: {
           className="sr-only"
           type="file"
           multiple
-          disabled={fileDisabled}
+          disabled={disabled}
           onChange={(event) => {
             if (event.currentTarget.files?.length) onFiles(event.currentTarget.files);
             event.currentTarget.value = "";

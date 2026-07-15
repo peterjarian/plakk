@@ -11,11 +11,11 @@ export const nextUploadProgress = (task: Pick<UploadTask, "progress">): number =
 
 export function advanceUploadProgress(actions: UploadProgressActions) {
   for (const task of actions.snapshot()) {
-    if (task.phase === "READY") continue;
+    if (task.phase === "UPLOADED") continue;
 
     const progress = nextUploadProgress(task);
     actions.setProgress(task.id, progress);
-    if (progress === 100) actions.setPhase(task.id, "READY");
+    if (progress === 100) actions.setPhase(task.id, "UPLOADED");
   }
 }
 
