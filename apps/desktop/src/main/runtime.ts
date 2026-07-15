@@ -10,7 +10,10 @@ import {
   ManagedSnippetContentLive,
   SnippetRemoteTransportLive,
   SnippetReplicaLive,
+  TextSnippetUploadTransportLive,
 } from "./snippetReplica.ts";
+
+const storageUploadLayer = StorageUpload.layer((input, init) => net.fetch(input, init));
 
 const MainLayer = Layer.mergeAll(
   UserConfigStore.Live,
@@ -21,7 +24,8 @@ const MainLayer = Layer.mergeAll(
     Layer.provide(Layer.mergeAll(NodeFileSystem.layer, NodePath.layer)),
   ),
   SnippetRemoteTransportLive,
-  StorageUpload.layer((input, init) => net.fetch(input, init)),
+  TextSnippetUploadTransportLive.pipe(Layer.provide(storageUploadLayer)),
+  storageUploadLayer,
 );
 
 export const runtime = ManagedRuntime.make(MainLayer);

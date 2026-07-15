@@ -60,6 +60,81 @@ describe("SnippetRow", () => {
     expect(markup).toContain('aria-label="Copying"');
     expect(markup).toContain("animate-spin");
   });
+
+  it("announces durable offline text as locally queued", () => {
+    const markup = renderToStaticMarkup(
+      <SnippetRow
+        snippet={{
+          id: snippet.id,
+          kind: "TEXT",
+          fileName: `${snippet.id}.txt`,
+          byteSize: 14,
+          contentType: "text/plain; charset=utf-8",
+          storageProvider: null,
+          phase: "QUEUED",
+          progress: 0,
+          storageObjectId: null,
+          errorMessage: null,
+          createdAt: snippet.createdAt,
+        }}
+        now={now}
+        copied={false}
+        onCopy={() => undefined}
+        onDelete={() => undefined}
+        onStopUpload={() => undefined}
+        textContent={{ state: "ready", text: "Offline note" }}
+      />,
+    );
+
+    expect(markup).toContain("Queued on this Mac — syncs when online");
+    expect(markup).toContain('aria-label="Queued"');
+  });
+
+  it("offers retry only for an actionable local failure", () => {
+    const markup = renderToStaticMarkup(
+      <SnippetRow
+        snippet={{
+          id: snippet.id,
+          kind: "TEXT",
+          fileName: `${snippet.id}.txt`,
+          byteSize: 14,
+          contentType: "text/plain; charset=utf-8",
+          storageProvider: "GOOGLE_DRIVE",
+          phase: "NEEDS_ACTION",
+          progress: 0,
+          storageObjectId: null,
+          errorMessage: "Reconnect storage to continue.",
+          createdAt: snippet.createdAt,
+        }}
+        now={now}
+        copied={false}
+        onCopy={() => undefined}
+        onDelete={() => undefined}
+        onRetryUpload={() => undefined}
+        onStopUpload={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain("Reconnect storage to continue.");
+    expect(markup).toContain('aria-label="Retry upload"');
+  });
+
+  it("shows authoritative upload progress without offering a local stop action", () => {
+    const markup = renderToStaticMarkup(
+      <SnippetRow
+        snippet={{ ...snippet, storageProvider: "GOOGLE_DRIVE", uploadStatus: "UPLOADING" }}
+        now={now}
+        copied={false}
+        onCopy={() => undefined}
+        onDelete={() => undefined}
+        onStopUpload={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain("Uploading to connected storage…");
+    expect(markup).toContain('aria-label="Uploading"');
+    expect(markup).not.toContain('aria-label="Stop uploading"');
+  });
 });
 
 describe("formatSnippetDate", () => {

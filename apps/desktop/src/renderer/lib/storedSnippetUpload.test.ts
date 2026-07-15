@@ -56,43 +56,6 @@ function uploadInput() {
 }
 
 describe("uploadStoredSnippet", () => {
-  it("creates text metadata without a body and uploads the already-encoded bytes", async () => {
-    const input = uploadInput();
-    const bytes = new TextEncoder().encode("héllo 👋\n");
-    const textTask = {
-      ...task,
-      kind: "TEXT" as const,
-      fileName: `${task.id}.txt`,
-      byteSize: bytes.byteLength,
-      contentType: "text/plain; charset=utf-8",
-    };
-    const textFile = {
-      name: textTask.fileName,
-      size: bytes.byteLength,
-      type: textTask.contentType,
-    } as File;
-
-    await uploadStoredSnippet({ ...input, task: textTask, file: textFile, bytes });
-
-    expect(input.api.create).toHaveBeenCalledWith({
-      id: textTask.id,
-      kind: "TEXT",
-      byteSize: bytes.byteLength,
-      storageProvider: "GOOGLE_DRIVE",
-      storageObjectId: null,
-    });
-    expect(input.api.prepare).toHaveBeenCalledWith({
-      snippetId: textTask.id,
-      storageProvider: "GOOGLE_DRIVE",
-    });
-    expect(input.uploader.uploadPreparedFile).toHaveBeenCalledWith({
-      id: textTask.id,
-      byteSize: bytes.byteLength,
-      prepared,
-      bytes,
-    });
-  });
-
   it("persists the confirmed Dropbox path when marking the task ready", async () => {
     const input = uploadInput();
     const storageObjectId = "/0d1e2f3a-4567-4890-8abc-def012345678/upload.txt";

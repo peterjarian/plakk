@@ -1,0 +1,1 @@
+ALTER TABLE "snippets" ADD COLUMN "upload_preparation" jsonb;

@@ -53,8 +53,10 @@ const uploadFailureDetail = (cause: unknown) => {
 export class StorageUploadError extends Schema.TaggedErrorClass<StorageUploadError>()(
   "StorageUploadError",
   {
+    actionable: Schema.Boolean,
     cause: Schema.optionalKey(Schema.Defect()),
     message: Schema.String,
+    stalePreparation: Schema.Boolean,
   },
 ) {}
 
@@ -76,8 +78,11 @@ export class StorageUpload extends Context.Service<
             try: (signal) => uploadPreparedFile(payload, onProgress, signal, uploadFetch),
             catch: (cause) =>
               new StorageUploadError({
+                actionable: cause instanceof ProviderUploadHttpError && cause.actionable,
                 cause,
                 message: cause instanceof Error ? cause.message : "Could not upload file.",
+                stalePreparation:
+                  cause instanceof ProviderUploadHttpError && cause.stalePreparation,
               }),
           });
         }),
@@ -87,6 +92,20 @@ export class StorageUpload extends Context.Service<
 }
 
 type ByteRange = { readonly start: number; readonly end: number };
+
+class ProviderUploadHttpError extends Error {
+  readonly actionable: boolean;
+  readonly stalePreparation: boolean;
+  readonly status: number;
+
+  constructor(status: number, body: string) {
+    super(`Upload failed: ${status}${body ? ` ${body}` : ""}`);
+    this.status = status;
+    const quotaFailure = status === 507 || (status === 403 && /quota|storage.+full/i.test(body));
+    this.stalePreparation = [401, 404, 410].includes(status) || (status === 403 && !quotaFailure);
+    this.actionable = quotaFailure;
+  }
+}
 
 const uploadHeaders = (
   headers: PreparedStorageUpload["upload"]["headers"],
@@ -186,7 +205,7 @@ async function uploadPart(input: {
 
   if (!response.ok && response.status !== 308) {
     const body = await response.text().catch(() => "");
-    throw new Error(`Upload failed: ${response.status}${body ? ` ${body}` : ""}`);
+    throw new ProviderUploadHttpError(response.status, body);
   }
   return response;
 }
@@ -229,6 +248,76 @@ async function storageObjectIdFrom(response: Response, prepared: PreparedStorage
   throw new Error("Upload completed but the storage provider did not return an item ID.");
 }
 
+async function resumeByteRangeUpload(
+  payload: PreparedFileUploadPayload,
+  signal: AbortSignal | undefined,
+  uploadFetch: UploadFetch,
+): Promise<{ readonly start: number; readonly completed: StorageUploadResult | null }> {
+  const { prepared } = payload;
+  let response: Response;
+  try {
+    response = await uploadFetch(
+      prepared.upload.url,
+      prepared.storageProvider === "GOOGLE_DRIVE"
+        ? {
+            method: "PUT",
+            headers: {
+              ...uploadHeaders(prepared.upload.headers),
+              "Content-Range": `bytes */${payload.byteSize}`,
+            },
+            body: new Blob([]),
+            ...(signal === undefined ? {} : { signal }),
+          }
+        : {
+            method: "GET",
+            ...(signal === undefined ? {} : { signal }),
+          },
+    );
+  } catch (cause) {
+    if (signal?.aborted) throw new Error("Upload cancelled. Choose the file again to retry.");
+    const detail = uploadFailureDetail(cause);
+    throw new Error(`Could not check upload progress${detail ? `: ${detail}` : ""}.`);
+  }
+
+  if (!response.ok && response.status !== 308) {
+    const body = await response.text().catch(() => "");
+    throw new ProviderUploadHttpError(response.status, body);
+  }
+  if (prepared.storageProvider === "GOOGLE_DRIVE") {
+    if (response.status !== 308) {
+      return {
+        start: payload.byteSize,
+        completed: { storageObjectId: await storageObjectIdFrom(response, prepared) },
+      };
+    }
+    const range = response.headers.get("range");
+    return {
+      start: range === null ? 0 : confirmedRangeEnd(response) + 1,
+      completed: null,
+    };
+  }
+
+  const body: unknown = await response.json().catch(() => null);
+  const nextRanges =
+    typeof body === "object" && body !== null && "nextExpectedRanges" in body
+      ? body.nextExpectedRanges
+      : null;
+  if (Array.isArray(nextRanges) && typeof nextRanges[0] === "string") {
+    const start = /^\d+/.exec(nextRanges[0]);
+    if (start?.[0] !== undefined) return { start: Number(start[0]), completed: null };
+  }
+  if (
+    typeof body === "object" &&
+    body !== null &&
+    "id" in body &&
+    typeof body.id === "string" &&
+    body.id !== ""
+  ) {
+    return { start: payload.byteSize, completed: { storageObjectId: body.id } };
+  }
+  throw new Error("Upload session did not report resumable progress.");
+}
+
 export async function uploadPreparedFile(
   payload: PreparedFileUploadPayload,
   onProgress: (progress: number) => void = () => undefined,
@@ -253,7 +342,16 @@ export async function uploadPreparedFile(
   }
 
   const size = partByteSize(payload.prepared.upload.strategy);
-  let start = 0;
+  const resumed =
+    payload.prepared.resume === true
+      ? await resumeByteRangeUpload(payload, signal, uploadFetch)
+      : { start: 0, completed: null };
+  if (resumed.completed !== null) {
+    onProgress(100);
+    return resumed.completed;
+  }
+  let { start } = resumed;
+  if (start > 0) onProgress(Math.min(99, Math.floor((start / payload.byteSize) * 100)));
   while (start < payload.byteSize) {
     const range = { start, end: Math.min(start + size, payload.byteSize) - 1 };
     const response = await uploadPart({

@@ -1,10 +1,11 @@
 import { SNIPPET_KINDS, SNIPPET_UPLOAD_STATUSES, STORAGE_PROVIDERS } from "@plakk/shared";
-import type { ApiSnippet } from "@plakk/shared/PlakkApi";
+import type { ApiSnippet, PreparedStorageUpload } from "@plakk/shared/PlakkApi";
 import { sql } from "drizzle-orm";
 import {
   bigint,
   check,
   index,
+  integer,
   jsonb,
   pgEnum,
   pgTable,
@@ -34,7 +35,13 @@ export const snippets = pgTable(
     title: text("title").notNull(),
     storageProvider: storageProvider("storage_provider"),
     storageObjectId: text("storage_object_id"),
+    clientMutationId: uuid("client_mutation_id"),
     uploadStatus: snippetUploadStatus("upload_status").default("READY").notNull(),
+    uploadLeaseId: uuid("upload_lease_id"),
+    uploadLeaseExpiresAt: timestamp("upload_lease_expires_at", { withTimezone: true }),
+    uploadPreparationGeneration: integer("upload_preparation_generation"),
+    uploadPreparation: jsonb("upload_preparation").$type<PreparedStorageUpload>(),
+    uploadFailureMessage: text("upload_failure_message"),
     fileName: text("file_name").notNull(),
     byteSize: bigint("byte_size", { mode: "number" }).notNull(),
     contentType: text("content_type"),
@@ -48,6 +55,10 @@ export const snippets = pgTable(
       table.ownerWorkosUserId,
       table.storageProvider,
       table.storageObjectId,
+    ),
+    uniqueIndex("snippets_owner_client_mutation_unique").on(
+      table.ownerWorkosUserId,
+      table.clientMutationId,
     ),
   ],
 );

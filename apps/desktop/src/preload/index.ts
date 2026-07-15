@@ -7,8 +7,8 @@ import type {
   TrayAccountState,
   UserConfig,
   UserConfigPatch,
+  SnippetListItem,
 } from "../ipc/contracts.ts";
-import type { ApiSnippet } from "@plakk/shared/PlakkApi";
 import { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
 import { invoke, on } from "../ipc/preload.ts";
 import type { RendererPreparedFileUploadPayload, StorageUploadResult } from "../storageUpload.ts";
@@ -42,9 +42,12 @@ export type DesktopApi = {
   };
   readonly snippets: {
     readonly copy: (id: string) => Promise<void>;
-    readonly list: () => Promise<ReadonlyArray<ApiSnippet>>;
-    readonly onChanged: (callback: (items: ReadonlyArray<ApiSnippet>) => void) => () => void;
+    readonly discardText: (id: string) => Promise<void>;
+    readonly enqueueText: (text: string) => Promise<Extract<SnippetListItem, { phase: string }>>;
+    readonly list: () => Promise<ReadonlyArray<SnippetListItem>>;
+    readonly onChanged: (callback: (items: ReadonlyArray<SnippetListItem>) => void) => () => void;
     readonly read: (id: string) => Promise<Uint8Array>;
+    readonly retryText: (id: string) => Promise<void>;
   };
   readonly tray: {
     readonly getAccountState: () => Promise<TrayAccountState>;
@@ -104,9 +107,12 @@ const desktopApi = {
   },
   snippets: {
     copy: (snippet) => invoke(ipcMethods.snippetCopy, snippet),
+    discardText: (snippet) => invoke(ipcMethods.snippetDiscardText, snippet),
+    enqueueText: (text) => invoke(ipcMethods.snippetEnqueueText, text),
     list: () => invoke(ipcMethods.snippetList, undefined),
     onChanged: (callback) => on(ipcEvents.snippetReplicaChanged, callback),
     read: (snippet) => invoke(ipcMethods.snippetRead, snippet),
+    retryText: (snippet) => invoke(ipcMethods.snippetRetryText, snippet),
   },
   tray: {
     getAccountState: () => invoke(ipcMethods.trayGetAccountState, undefined),

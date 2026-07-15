@@ -5,6 +5,7 @@ export const RpcErrorCodeSchema = Schema.Literals([
   "UNAUTHENTICATED",
   "FORBIDDEN",
   "NOT_FOUND",
+  "CONFLICT",
   "INTERNAL_SERVER_ERROR",
 ] as const);
 

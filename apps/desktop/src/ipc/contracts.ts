@@ -7,6 +7,7 @@ import {
 } from "@plakk/shared/PlakkApi";
 import { Schema } from "effect";
 import type { PreparedFileUploadPayload, StorageUploadResult } from "../storageUpload.ts";
+import { LocalTextSnippetSchema } from "@plakk/shared/SnippetReplica";
 
 export type IpcSchema = Schema.ConstraintCodec<unknown, unknown, never, never>;
 
@@ -125,6 +126,9 @@ export const StorageUploadResultSchema = Schema.Struct({
   storageObjectId: Schema.String,
 }) satisfies Schema.Schema<StorageUploadResult>;
 
+export const SnippetListItemSchema = Schema.Union([ApiSnippetSchema, LocalTextSnippetSchema]);
+export type SnippetListItem = typeof SnippetListItemSchema.Type;
+
 export const ipcMethods = {
   authGet: method({
     channel: "auth:get",
@@ -169,7 +173,22 @@ export const ipcMethods = {
   snippetList: method({
     channel: "snippet:list",
     payload: Schema.Void,
-    result: Schema.Array(ApiSnippetSchema),
+    result: Schema.Array(SnippetListItemSchema),
+  }),
+  snippetEnqueueText: method({
+    channel: "snippet:enqueue-text",
+    payload: Schema.String,
+    result: LocalTextSnippetSchema,
+  }),
+  snippetRetryText: method({
+    channel: "snippet:retry-text",
+    payload: SnippetIdSchema,
+    result: Schema.Void,
+  }),
+  snippetDiscardText: method({
+    channel: "snippet:discard-text",
+    payload: SnippetIdSchema,
+    result: Schema.Void,
   }),
   clipboardRead: method({
     channel: "clipboard:read",
@@ -236,6 +255,6 @@ export const ipcEvents = {
   }),
   snippetReplicaChanged: event({
     channel: "snippet:replica-changed",
-    payload: Schema.Array(ApiSnippetSchema),
+    payload: Schema.Array(SnippetListItemSchema),
   }),
 } as const;

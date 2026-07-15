@@ -19,6 +19,7 @@ export const toApiSnippet = (snippet: SnippetRow): ApiSnippet => ({
       : null,
   storageProvider: snippet.storageProvider,
   uploadStatus: snippet.uploadStatus,
+  uploadFailureMessage: snippet.uploadFailureMessage,
   createdAt: snippet.createdAt.toISOString(),
   updatedAt: snippet.updatedAt.toISOString(),
 });

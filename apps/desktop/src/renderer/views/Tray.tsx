@@ -13,13 +13,13 @@ export function Tray() {
   const [accountState, setAccountState] = useState<TrayAccountState>({ kind: "loading" });
   const ingestionAllowed = accountState.kind === "resolved" && accountCanSync(accountState.account);
   const account = accountState.kind === "resolved" ? accountState.account : null;
-  const { addClipboard, addDropped, addText, latest, upload } = useTraySnippets(account);
+  const { addClipboard, addDropped, addText, latest, textError, upload } = useTraySnippets(account);
   const pausedMessage =
     accountState.kind === "loading"
       ? "Checking account — adding is paused"
       : accountState.kind === "failed"
-        ? "Offline — cached snippets stay available"
-        : "Adding is paused — finish account setup on the web";
+        ? "Offline — text snippets queue on this Mac"
+        : "Files are paused — text snippets will queue";
 
   useEffect(() => {
     if (!ingestionAllowed) setIsDragging(false);
@@ -58,11 +58,10 @@ export function Tray() {
       <div
         className="flex min-h-0 flex-1 flex-col"
         onDragEnter={() => {
-          if (ingestionAllowed) setIsDragging(true);
+          setIsDragging(true);
         }}
         onDragOver={(event: DragEvent) => {
           event.preventDefault();
-          if (!ingestionAllowed) return;
           setIsDragging(true);
         }}
         onDragLeave={(event) => {
@@ -99,13 +98,19 @@ export function Tray() {
                 {pausedMessage}
               </p>
             )}
+            {textError !== null && (
+              <p className="px-4 pb-2 text-[11px] text-destructive" role="alert">
+                {textError}
+              </p>
+            )}
             <TrayActions
-              copyDisabled={latest === undefined || "phase" in latest}
+              copyDisabled={latest === undefined || ("phase" in latest && !("createdAt" in latest))}
               copied={isCopied}
               copying={isCopying}
               ingestionDisabled={!ingestionAllowed}
+              pasteDisabled={false}
               onCopy={() => {
-                if (latest === undefined || "phase" in latest) return;
+                if (latest === undefined || ("phase" in latest && !("createdAt" in latest))) return;
                 setIsCopied(false);
                 setIsCopying(true);
                 void window.ipc.snippets

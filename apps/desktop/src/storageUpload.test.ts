@@ -2,8 +2,9 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { Effect } from "effect";
 
-import { uploadPreparedFile } from "./storageUpload.ts";
+import { StorageUpload, uploadPreparedFile } from "./storageUpload.ts";
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -20,6 +21,43 @@ beforeEach(() => {
 });
 
 describe("uploadPreparedFile", () => {
+  it("marks rejected prepared links stale so the engine can prepare again", async () => {
+    const bytes = new Uint8Array([1]);
+    fetchMock.mockResolvedValueOnce(new Response("reauthorize", { status: 403 }));
+
+    const failure = await Effect.runPromise(
+      Effect.flip(
+        StorageUpload.use((storage) =>
+          storage.upload(
+            {
+              id: "0d1e2f3a-4567-4890-8abc-def012345678",
+              bytes,
+              byteSize: 1,
+              prepared: {
+                storageProvider: "GOOGLE_DRIVE",
+                storageObjectId: null,
+                upload: {
+                  method: "PUT",
+                  url: "https://upload.example/forbidden",
+                  headers: [],
+                  strategy: { type: "single_request" },
+                },
+                expiresAt: null,
+              },
+            },
+            () => undefined,
+          ),
+        ),
+      ).pipe(Effect.provide(StorageUpload.layer(fetchMock))),
+    );
+
+    expect(failure).toMatchObject({
+      _tag: "StorageUploadError",
+      actionable: false,
+      stalePreparation: true,
+    });
+  });
+
   it("uploads renderer-provided bytes without re-encoding them", async () => {
     const bytes = new TextEncoder().encode("héllo 👋\n");
     let uploaded = new Uint8Array();
@@ -133,6 +171,43 @@ describe("uploadPreparedFile", () => {
     expect(progress.mock.calls).toEqual([[0], [66], [100]]);
   });
 
+  it("resumes after the provider's last acknowledged byte range", async () => {
+    const filePath = await uploadFile([1, 2, 3]);
+    const progress = vi.fn();
+    fetchMock
+      .mockResolvedValueOnce(new Response(null, { status: 308, headers: { Range: "bytes=0-1" } }))
+      .mockResolvedValueOnce(Response.json({ id: "drive-file-id" }));
+
+    await expect(
+      uploadPreparedFile(
+        {
+          id: "0d1e2f3a-4567-4890-8abc-def012345678",
+          filePath,
+          byteSize: 3,
+          prepared: {
+            storageProvider: "GOOGLE_DRIVE",
+            storageObjectId: null,
+            upload: {
+              method: "PUT",
+              url: "https://upload.example/drive",
+              headers: [{ name: "Content-Type", value: "text/plain" }],
+              strategy: { type: "byte_range", maxPartByteSize: 2, partByteMultiple: 2 },
+            },
+            expiresAt: null,
+            resume: true,
+          },
+        },
+        progress,
+      ),
+    ).resolves.toEqual({ storageObjectId: "drive-file-id" });
+
+    expect(fetchMock.mock.calls.map(([, init]) => init?.headers)).toEqual([
+      { "Content-Type": "text/plain", "Content-Range": "bytes */3" },
+      { "Content-Type": "text/plain", "Content-Range": "bytes 2-2/3" },
+    ]);
+    expect(progress.mock.calls).toEqual([[0], [66], [100]]);
+  });
+
   it("uploads OneDrive byte ranges and reads the final item ID", async () => {
     const filePath = await uploadFile([1, 2, 3, 4, 5]);
     fetchMock
@@ -161,6 +236,38 @@ describe("uploadPreparedFile", () => {
       { "Content-Range": "bytes 0-3/5" },
       { "Content-Range": "bytes 4-4/5" },
     ]);
+  });
+
+  it("continues a reused OneDrive session from its next expected range", async () => {
+    const filePath = await uploadFile([1, 2, 3, 4, 5]);
+    fetchMock
+      .mockResolvedValueOnce(Response.json({ nextExpectedRanges: ["4-"] }))
+      .mockResolvedValueOnce(Response.json({ id: "one-drive-item" }));
+
+    await expect(
+      uploadPreparedFile({
+        id: "0d1e2f3a-4567-4890-8abc-def012345678",
+        filePath,
+        byteSize: 5,
+        prepared: {
+          storageProvider: "ONE_DRIVE",
+          storageObjectId: null,
+          upload: {
+            method: "PUT",
+            url: "https://upload.example/onedrive",
+            headers: [],
+            strategy: { type: "byte_range", maxPartByteSize: 4, partByteMultiple: 2 },
+          },
+          expiresAt: "2026-07-10T12:00:00.000Z",
+          resume: true,
+        },
+      }),
+    ).resolves.toEqual({ storageObjectId: "one-drive-item" });
+
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(["GET", "PUT"]);
+    expect(fetchMock.mock.calls[1]?.[1]?.headers).toEqual({
+      "Content-Range": "bytes 4-4/5",
+    });
   });
 
   it("reports expired links as retryable upload failures", async () => {

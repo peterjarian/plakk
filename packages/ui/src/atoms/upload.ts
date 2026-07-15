@@ -8,7 +8,7 @@ export type UploadDraft = {
   readonly fileName: string;
   readonly byteSize: number;
   readonly contentType: string | null;
-  readonly kind: Extract<SnippetKind, "TEXT" | "FILE" | "IMAGE">;
+  readonly kind: Extract<SnippetKind, "FILE" | "IMAGE">;
   readonly storageProvider: StorageProvider;
 };
 

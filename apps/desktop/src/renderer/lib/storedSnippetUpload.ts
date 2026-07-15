@@ -11,26 +11,16 @@ export type StoredSnippetUploadApi = {
     snippetId: string;
     storageProvider: StorageProvider;
   }) => Promise<PreparedStorageUpload>;
-  readonly create: (
-    input:
-      | {
-          id: string;
-          kind: "TEXT";
-          byteSize: number;
-          storageProvider: StorageProvider;
-          storageObjectId: string | null;
-        }
-      | {
-          id: string;
-          kind: "FILE" | "IMAGE";
-          title: string;
-          fileName: string;
-          byteSize: number;
-          contentType: string | null;
-          storageProvider: StorageProvider;
-          storageObjectId: string | null;
-        },
-  ) => Promise<ApiSnippet>;
+  readonly create: (input: {
+    id: string;
+    kind: "FILE" | "IMAGE";
+    title: string;
+    fileName: string;
+    byteSize: number;
+    contentType: string | null;
+    storageProvider: StorageProvider;
+    storageObjectId: string | null;
+  }) => Promise<ApiSnippet>;
   readonly updateStatus: (
     input:
       | { id: string; uploadStatus: "READY"; storageObjectId: string }
@@ -102,20 +92,13 @@ export async function uploadStoredSnippet(input: {
       storageProvider: task.storageProvider,
       storageObjectId,
     };
-    await api.create(
-      task.kind === "TEXT"
-        ? {
-            ...storedMetadata,
-            kind: "TEXT",
-          }
-        : {
-            ...storedMetadata,
-            kind: task.kind,
-            title: file.name,
-            fileName: file.name,
-            contentType: file.type || null,
-          },
-    );
+    await api.create({
+      ...storedMetadata,
+      kind: task.kind,
+      title: file.name,
+      fileName: file.name,
+      contentType: file.type || null,
+    });
     created = true;
     throwIfCancelled(task.id);
     const prepared = await api.prepare({

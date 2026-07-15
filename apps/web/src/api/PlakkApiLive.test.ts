@@ -9,7 +9,9 @@ import * as Schema from "effect/Schema";
 import { type StorageProviderService } from "./storage/StorageProvider.ts";
 import { StorageProviderError } from "./storage/types.ts";
 import {
+  acquireSnippetUploadLease,
   confirmTextSnippetUpload,
+  decideUploadLease,
   getSnippetCopyPayload,
   insertSnippet,
   prepareSnippetUpload,
@@ -28,7 +30,13 @@ const row = (overrides: Partial<SnippetRow> = {}): SnippetRow => ({
   title: "Text snippet",
   storageProvider: "GOOGLE_DRIVE",
   storageObjectId: "drive-id",
+  clientMutationId: null,
   uploadStatus: "READY",
+  uploadLeaseId: null,
+  uploadLeaseExpiresAt: null,
+  uploadPreparationGeneration: null,
+  uploadPreparation: null,
+  uploadFailureMessage: null,
   fileName: "0d1e2f3a-4567-4890-8abc-def012345678.txt",
   byteSize: 12,
   contentType: "text/plain; charset=utf-8",
@@ -36,6 +44,63 @@ const row = (overrides: Partial<SnippetRow> = {}): SnippetRow => ({
   createdAt: DateTime.toDateUtc(DateTime.makeUnsafe("2026-07-10T20:00:00Z")),
   updatedAt: DateTime.toDateUtc(DateTime.makeUnsafe("2026-07-10T20:00:00Z")),
   ...overrides,
+});
+
+describe("upload lease decisions", () => {
+  const mutationId = "1d1e2f3a-4567-4890-8abc-def012345678";
+  const otherMutationId = "2d1e2f3a-4567-4890-8abc-def012345678";
+  const now = DateTime.toDateUtc(DateTime.makeUnsafe("2026-07-15T08:00:00Z"));
+
+  it("renews the source device lease idempotently", () => {
+    expect(
+      decideUploadLease(
+        row({
+          uploadStatus: "UPLOADING",
+          clientMutationId: mutationId,
+          uploadLeaseId: mutationId,
+          uploadLeaseExpiresAt: DateTime.toDateUtc(
+            DateTime.addDuration(DateTime.makeUnsafe(now), 30_000),
+          ),
+        }),
+        mutationId,
+        now,
+      ),
+    ).toBe("RENEW");
+  });
+
+  it("interrupts an expired lease before the source reacquires it", () => {
+    expect(
+      decideUploadLease(
+        row({
+          uploadStatus: "UPLOADING",
+          clientMutationId: mutationId,
+          uploadLeaseId: mutationId,
+          uploadLeaseExpiresAt: DateTime.toDateUtc(
+            DateTime.addDuration(DateTime.makeUnsafe(now), -1),
+          ),
+        }),
+        mutationId,
+        now,
+      ),
+    ).toBe("INTERRUPT_AND_REACQUIRE");
+  });
+
+  it("does not let another mutation steal an active lease", () => {
+    expect(
+      decideUploadLease(
+        row({
+          uploadStatus: "UPLOADING",
+          clientMutationId: mutationId,
+          uploadLeaseId: mutationId,
+          uploadLeaseExpiresAt: DateTime.toDateUtc(
+            DateTime.addDuration(DateTime.makeUnsafe(now), 30_000),
+          ),
+        }),
+        otherMutationId,
+        now,
+      ),
+    ).toBe("NOT_OWNER");
+  });
 });
 
 const queryDb = (rows: ReadonlyArray<SnippetRow>) =>
@@ -116,11 +181,42 @@ const statefulDb = (initial: SnippetRow, stale = false, failChange = false) => {
   };
 };
 
+describe("upload lease persistence", () => {
+  it("publishes interruption before reacquiring an expired lease", async () => {
+    const mutationId = "1d1e2f3a-4567-4890-8abc-def012345678";
+    const expired = row({
+      uploadStatus: "UPLOADING",
+      clientMutationId: mutationId,
+      uploadLeaseId: mutationId,
+      uploadLeaseExpiresAt: DateTime.toDateUtc(DateTime.makeUnsafe(0)),
+    });
+    const state = statefulDb(expired);
+
+    const leaseExpiresAt = await Effect.runPromise(
+      acquireSnippetUploadLease({ db: state.db }, "user-1", expired, mutationId),
+    );
+
+    expect(Date.parse(leaseExpiresAt)).toBeGreaterThan(
+      DateTime.toEpochMillis(DateTime.nowUnsafe()),
+    );
+    expect(state.stored()).toMatchObject({
+      uploadStatus: "UPLOADING",
+      uploadLeaseId: mutationId,
+    });
+    expect(state.persistedChanges()).toHaveLength(2);
+  });
+});
+
 describe("text snippet persistence and authorization", () => {
   it("persists metadata only in UPLOADING state", async () => {
+    const mutationId = "1d1e2f3a-4567-4890-8abc-def012345678";
     let inserted: Record<string, unknown> | undefined;
     let latestSequence = 0n;
-    const stored = row({ uploadStatus: "UPLOADING", storageObjectId: null });
+    const stored = row({
+      uploadStatus: "UPLOADING",
+      storageObjectId: null,
+      clientMutationId: mutationId,
+    });
     const db = {
       transaction: <A, E, R>(
         body: (tx: DrizzleService["db"]) => Effect.Effect<A, E, R>,
@@ -130,7 +226,9 @@ describe("text snippet persistence and authorization", () => {
         values: (values: Record<string, unknown>) => {
           if (table === snippets) {
             inserted = values;
-            return { returning: () => Effect.succeed([stored]) };
+            return {
+              onConflictDoNothing: () => ({ returning: () => Effect.succeed([stored]) }),
+            };
           }
           if (table === snippetChangeFeeds) {
             return {
@@ -158,6 +256,7 @@ describe("text snippet persistence and authorization", () => {
         contentType: "text/plain; charset=utf-8",
         storageProvider: "GOOGLE_DRIVE",
         storageObjectId: null,
+        clientMutationId: mutationId,
       }).pipe(
         Effect.provideService(CurrentUser, {
           id: "user-1",
@@ -170,7 +269,7 @@ describe("text snippet persistence and authorization", () => {
       ),
     );
 
-    expect(inserted).toEqual({
+    expect(inserted).toMatchObject({
       id: stored.id,
       kind: "TEXT",
       title: "Text snippet",
@@ -179,9 +278,60 @@ describe("text snippet persistence and authorization", () => {
       contentType: "text/plain; charset=utf-8",
       storageProvider: "GOOGLE_DRIVE",
       storageObjectId: null,
+      clientMutationId: mutationId,
+      uploadLeaseId: mutationId,
       ownerWorkosUserId: "user-1",
       uploadStatus: "UPLOADING",
     });
+    expect(inserted?.uploadLeaseExpiresAt).toBeInstanceOf(Date);
+  });
+
+  it("returns the existing metadata when the same create mutation is replayed", async () => {
+    const mutationId = "1d1e2f3a-4567-4890-8abc-def012345678";
+    const existing = row({
+      uploadStatus: "UPLOADING",
+      storageObjectId: null,
+      clientMutationId: mutationId,
+    });
+    const db = {
+      transaction: <A, E, R>(
+        body: (tx: DrizzleService["db"]) => Effect.Effect<A, E, R>,
+      ): Effect.Effect<A, E, R> => body(db as unknown as DrizzleService["db"]),
+      insert: (table: unknown) => {
+        if (table !== snippets) throw new Error("Unexpected insert table");
+        return {
+          values: () => ({
+            onConflictDoNothing: () => ({ returning: () => Effect.succeed([]) }),
+          }),
+        };
+      },
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            limit: () => ({ pipe: () => Effect.succeed([existing]) }),
+          }),
+        }),
+      }),
+    } as unknown as DrizzleService["db"];
+
+    const result = await Effect.runPromise(
+      insertSnippet(
+        { db },
+        {
+          id: existing.id,
+          kind: "TEXT",
+          title: existing.title,
+          fileName: existing.fileName,
+          byteSize: existing.byteSize,
+          contentType: existing.contentType,
+          storageProvider: "GOOGLE_DRIVE",
+          storageObjectId: null,
+          clientMutationId: mutationId,
+        },
+      ).pipe(Effect.provideService(CurrentUser, { id: "user-1" } as never)),
+    );
+
+    expect(result).toMatchObject({ id: existing.id, uploadStatus: "UPLOADING" });
   });
 });
 
@@ -321,6 +471,78 @@ describe("prepared upload authorization", () => {
     });
   });
 
+  it("reuses the prepared provider session for the same durable mutation", async () => {
+    const mutationId = "1d1e2f3a-4567-4890-8abc-def012345678";
+    const preparationGeneration = 1;
+    const pending = row({
+      uploadStatus: "UPLOADING",
+      clientMutationId: mutationId,
+      uploadLeaseId: mutationId,
+      uploadLeaseExpiresAt: DateTime.toDateUtc(DateTime.addDuration(DateTime.nowUnsafe(), 30_000)),
+      uploadPreparation: prepared,
+      uploadPreparationGeneration: preparationGeneration,
+    });
+    const state = statefulDb(pending);
+    const prepareUpload = vi.fn();
+    const storage = { prepareUpload } as unknown as StorageProviderService["Service"];
+
+    const replayed = await Effect.runPromise(
+      prepareSnippetUpload({ db: state.db }, storage, "user-1", {
+        snippetId: pending.id,
+        storageProvider: "GOOGLE_DRIVE",
+        mutationId,
+      }),
+    );
+
+    expect(replayed).toMatchObject(prepared);
+    expect(replayed.leaseExpiresAt).toEqual(expect.any(String));
+    expect(replayed.resume).toBe(true);
+    expect(replayed.preparationGeneration).toBe(preparationGeneration);
+    expect(prepareUpload).not.toHaveBeenCalled();
+  });
+
+  it("replaces a stale prepared session without turning it into a failure", async () => {
+    const mutationId = "1d1e2f3a-4567-4890-8abc-def012345678";
+    const stalePreparationGeneration = 1;
+    const stalePreparation = { ...prepared, upload: { ...prepared.upload, url: "stale" } };
+    const pending = row({
+      uploadStatus: "UPLOADING",
+      clientMutationId: mutationId,
+      uploadLeaseId: mutationId,
+      uploadLeaseExpiresAt: DateTime.toDateUtc(DateTime.addDuration(DateTime.nowUnsafe(), 30_000)),
+      uploadPreparation: stalePreparation,
+      uploadPreparationGeneration: stalePreparationGeneration,
+    });
+    const state = statefulDb(pending);
+    const prepareUpload = vi.fn(() => Effect.succeed(prepared));
+    const storage = { prepareUpload } as unknown as StorageProviderService["Service"];
+
+    const refreshed = await Effect.runPromise(
+      prepareSnippetUpload({ db: state.db }, storage, "user-1", {
+        snippetId: pending.id,
+        storageProvider: "GOOGLE_DRIVE",
+        mutationId,
+        replacePreparationGeneration: stalePreparationGeneration,
+      }),
+    );
+
+    const replayed = await Effect.runPromise(
+      prepareSnippetUpload({ db: state.db }, storage, "user-1", {
+        snippetId: pending.id,
+        storageProvider: "GOOGLE_DRIVE",
+        mutationId,
+        replacePreparationGeneration: stalePreparationGeneration,
+      }),
+    );
+
+    expect(refreshed).toMatchObject(prepared);
+    expect(prepareUpload).toHaveBeenCalledOnce();
+    expect(state.stored().uploadPreparation).toEqual(prepared);
+    expect(refreshed.preparationGeneration).toBe(2);
+    expect(replayed.preparationGeneration).toBe(refreshed.preparationGeneration);
+    expect(replayed.resume).toBe(true);
+  });
+
   it("rejects another owner's row and a provider that differs from pending metadata", async () => {
     const pending = row({ uploadStatus: "UPLOADING" });
     const prepareUpload = vi.fn();
@@ -352,6 +574,55 @@ describe("prepared upload authorization", () => {
 });
 
 describe("stored text finalization persistence", () => {
+  it("returns an already finalized durable mutation idempotently", async () => {
+    const mutationId = "1d1e2f3a-4567-4890-8abc-def012345678";
+    const ready = row({ clientMutationId: mutationId });
+    const state = statefulDb(ready);
+    const storage = {
+      getDownloadUrl: () => Effect.succeed("https://storage.example/signed"),
+    } as unknown as StorageProviderService["Service"];
+
+    const result = await Effect.runPromise(
+      updateStoredSnippetUpload({ db: state.db }, storage, "user-1", {
+        id: ready.id,
+        uploadStatus: "READY",
+        mutationId,
+        storageObjectId: ready.storageObjectId!,
+      }),
+    );
+
+    expect(result).toMatchObject({ uploadStatus: "READY" });
+    expect(state.updateCount()).toBe(0);
+  });
+
+  it("rejects completion after the durable upload lease expires", async () => {
+    const mutationId = "1d1e2f3a-4567-4890-8abc-def012345678";
+    const expired = row({
+      uploadStatus: "UPLOADING",
+      clientMutationId: mutationId,
+      uploadLeaseId: mutationId,
+      uploadLeaseExpiresAt: DateTime.toDateUtc(DateTime.makeUnsafe(0)),
+    });
+    const state = statefulDb(expired);
+    const downloadObject = vi.fn();
+    const storage = { downloadObject } as unknown as StorageProviderService["Service"];
+
+    const failure = await Effect.runPromise(
+      Effect.flip(
+        updateStoredSnippetUpload({ db: state.db }, storage, "user-1", {
+          id: expired.id,
+          uploadStatus: "READY",
+          mutationId,
+          storageObjectId: "drive-id",
+        }),
+      ),
+    );
+
+    expect(failure).toMatchObject({ code: "CONFLICT", message: "Upload lease expired." });
+    expect(state.stored().uploadStatus).toBe("INTERRUPTED");
+    expect(downloadObject).not.toHaveBeenCalled();
+  });
+
   it("publishes interrupted and resumed upload states", async () => {
     const pending = row({ uploadStatus: "UPLOADING" });
     const state = statefulDb(pending);

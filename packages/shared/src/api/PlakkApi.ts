@@ -68,6 +68,9 @@ export const PreparedStorageUploadSchema = Schema.Struct({
     ]),
   }),
   expiresAt: Schema.NullOr(Schema.String),
+  leaseExpiresAt: Schema.optionalKey(Schema.String),
+  resume: Schema.optionalKey(Schema.Literal(true)),
+  preparationGeneration: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
 });
 
 export type PreparedStorageUpload = typeof PreparedStorageUploadSchema.Type;
@@ -86,6 +89,7 @@ export const ApiSnippetSchema = Schema.Struct({
   textContent: Schema.NullOr(Schema.String),
   storageProvider: Schema.NullOr(StorageProviderLiteral),
   uploadStatus: SnippetUploadStatusLiteral,
+  uploadFailureMessage: Schema.optionalKey(Schema.NullOr(Schema.String)),
   createdAt: Schema.String,
   updatedAt: Schema.String,
 });
@@ -124,6 +128,7 @@ export const SnippetChangeWakeSchema = Schema.Literal(SNIPPET_CHANGES_AVAILABLE)
 export const CreateStoredSnippetPayloadSchema = Schema.Union([
   Schema.Struct({
     id: SnippetIdSchema,
+    mutationId: SnippetIdSchema,
     kind: Schema.Literal("TEXT"),
     byteSize: Schema.Int.check(
       Schema.isBetween({ minimum: 1, maximum: MAX_TEXT_SNIPPET_BYTE_SIZE }),
@@ -191,6 +196,10 @@ export const StorageRpcs = RpcGroup.make(
     payload: {
       snippetId: SnippetIdSchema,
       storageProvider: StorageProviderLiteral,
+      mutationId: Schema.optionalKey(SnippetIdSchema),
+      replacePreparationGeneration: Schema.optionalKey(
+        Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+      ),
     },
     success: PreparedStorageUploadSchema,
     error: RpcError,
@@ -230,20 +239,32 @@ export const SnippetRpcs = RpcGroup.make(
       Schema.Struct({
         id: SnippetIdSchema,
         uploadStatus: Schema.Literals(["UPLOADING", "INTERRUPTED"] as const),
+        mutationId: Schema.optionalKey(SnippetIdSchema),
       }),
       Schema.Struct({
         id: SnippetIdSchema,
         uploadStatus: Schema.Literal("READY"),
         storageObjectId: Schema.String,
         storageProvider: Schema.optionalKey(StorageProviderLiteral),
+        mutationId: Schema.optionalKey(SnippetIdSchema),
       }),
       Schema.Struct({
         id: SnippetIdSchema,
         uploadStatus: Schema.Literal("FAILED"),
         storageObjectId: Schema.optionalKey(Schema.NullOr(Schema.String)),
+        mutationId: Schema.optionalKey(SnippetIdSchema),
+        errorMessage: Schema.optionalKey(Schema.String),
       }),
     ]),
     success: ApiSnippetSchema,
+    error: RpcError,
+  }),
+  Rpc.make("HeartbeatStoredSnippetUpload", {
+    payload: {
+      id: SnippetIdSchema,
+      mutationId: SnippetIdSchema,
+    },
+    success: Schema.Struct({ leaseExpiresAt: Schema.String }),
     error: RpcError,
   }),
   Rpc.make("GetSnippetCopyPayload", {
