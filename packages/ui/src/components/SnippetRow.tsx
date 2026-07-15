@@ -41,17 +41,11 @@ const presentationFor = (
   textContent: TextSnippetContent | undefined,
 ): SnippetPresentation => {
   const content = textContent?.state === "ready" ? textContent.text : undefined;
-  if (!isUploadTask(snippet) || snippet.presentationType === "text") {
-    return deriveSnippetPresentation(
-      content === undefined
-        ? { fileName: snippet.fileName }
-        : { fileName: snippet.fileName, content },
-    );
-  }
-  return {
-    type: snippet.presentationType,
-    title: snippet.fileName,
-  };
+  return deriveSnippetPresentation(
+    content === undefined
+      ? { fileName: snippet.fileName }
+      : { fileName: snippet.fileName, content },
+  );
 };
 
 const relativeDateUnits = [

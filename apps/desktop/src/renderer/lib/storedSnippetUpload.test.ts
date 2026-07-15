@@ -7,7 +7,6 @@ const task = {
   fileName: "upload.txt",
   byteSize: 3,
   contentType: "text/plain",
-  presentationType: "file" as const,
   storageProvider: "GOOGLE_DRIVE" as const,
   phase: "QUEUED" as const,
   progress: 0,
@@ -60,7 +59,6 @@ describe("uploadStoredSnippet", () => {
     const bytes = new TextEncoder().encode("héllo 👋\n");
     const textTask = {
       ...task,
-      presentationType: "text" as const,
       fileName: `${task.id}.txt`,
       byteSize: bytes.byteLength,
       contentType: "text/plain; charset=utf-8",

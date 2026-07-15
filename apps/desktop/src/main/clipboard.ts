@@ -4,11 +4,10 @@ import { basename, extname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { app, clipboard, nativeImage, net } from "electron";
 import { Data, Effect } from "effect";
-import type { StorageProvider } from "@plakk/shared";
+import { deriveSnippetPresentation, type StorageProvider } from "@plakk/shared";
 
 type SnippetContent = {
   readonly bytes: Uint8Array;
-  readonly presentationType: "file" | "image";
   readonly fileName: string;
   readonly contentType: string | null;
 };
@@ -273,7 +272,11 @@ export const writeSnippetToClipboard = Effect.fn("writeSnippetToClipboard")(func
 ) {
   return yield* Effect.try({
     try: () => {
-      if (content.presentationType === "image") {
+      const presentation = deriveSnippetPresentation({
+        fileName: content.fileName,
+        content: content.bytes,
+      });
+      if (presentation.type === "image") {
         const image = nativeImage.createFromBuffer(Buffer.from(content.bytes));
         if (image.isEmpty()) writeSnippetBytes(content);
         else clipboard.writeImage(image);

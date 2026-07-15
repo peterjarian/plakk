@@ -9,7 +9,7 @@ import { RpcError } from "@plakk/shared/RpcError";
 import { Context, DateTime, Effect, Layer } from "effect";
 
 import { StorageProviderService } from "./storage/StorageProvider.ts";
-import { toStorageRpcError } from "./storage/toRpcError.ts";
+import { mapStorageErrorsToRpc } from "./storage/mapStorageErrorsToRpc.ts";
 import { appendSnippetChange } from "./SnippetChangeFeed.ts";
 import { toApiSnippet } from "./transformers/toApiSnippet.ts";
 
@@ -167,7 +167,7 @@ export class SnippetUploads extends Context.Service<
             contentType: input.mediaType,
             workosUserId: ownerWorkosUserId,
           })
-          .pipe(Effect.mapError(toStorageRpcError));
+          .pipe(mapStorageErrorsToRpc);
       });
 
       const heartbeat = Effect.fn("SnippetUploads.heartbeat")(function* (

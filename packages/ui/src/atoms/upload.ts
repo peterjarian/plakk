@@ -1,7 +1,5 @@
-import type { SnippetPresentation, StorageProvider } from "@plakk/shared";
+import type { StorageProvider } from "@plakk/shared";
 import { Atom } from "effect/unstable/reactivity";
-
-export type UploadPresentationType = Exclude<SnippetPresentation["type"], "hyperlink">;
 
 export type UploadPhase = "QUEUED" | "PREPARING" | "UPLOADING" | "UPLOADED" | "FAILED";
 
@@ -10,7 +8,6 @@ export type UploadDraft = {
   readonly fileName: string;
   readonly byteSize: number;
   readonly contentType: string | null;
-  readonly presentationType: UploadPresentationType;
   readonly storageProvider: StorageProvider;
 };
 

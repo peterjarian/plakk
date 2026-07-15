@@ -1,6 +1,5 @@
 import { useMemo } from "react";
 import { useAtomSet } from "@effect/atom-react";
-import { deriveSnippetPresentation } from "@plakk/shared";
 import type { AccountStatus } from "@plakk/shared/PlakkApi";
 import type { UploadTask } from "@plakk/ui/atoms/upload";
 import { createPlakkRpc } from "@plakk/ui/atoms/rpc";
@@ -35,13 +34,10 @@ export function useTraySnippets(account: AccountStatus | null) {
 
   const upload = (file: Pick<File, "name" | "size" | "type">, filePath?: string) => {
     if (provider === null || headers === null) return;
-    const presentationType =
-      deriveSnippetPresentation({ fileName: file.name }).type === "image" ? "image" : "file";
     const task = actions.enqueue({
       fileName: file.name,
       byteSize: file.size,
       contentType: file.type || null,
-      presentationType,
       storageProvider: provider,
     });
     void uploadStoredSnippet({
@@ -70,7 +66,6 @@ export function useTraySnippets(account: AccountStatus | null) {
       fileName,
       byteSize: bytes.byteLength,
       contentType: "text/plain; charset=utf-8",
-      presentationType: "text",
       storageProvider: provider,
     });
     void uploadStoredSnippet({

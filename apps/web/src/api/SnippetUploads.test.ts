@@ -43,73 +43,62 @@ const inspectCondition = (condition: unknown) => {
     if ("value" in chunk && !Array.isArray(chunk.value)) values.push(chunk.value);
   };
   visit(condition);
-  return { columns, values };
+  return { columns: [...columns], values };
 };
 
-const expectColumns = (condition: unknown, expected: ReadonlyArray<string>) => {
-  const inspected = inspectCondition(condition);
-  for (const column of expected) expect(inspected.columns).toContain(column);
-  return inspected;
-};
+type SelectResult = ReadonlyArray<SnippetRow | { readonly id: string }>;
 
-const statefulDb = (initial: SnippetRow | null = null) => {
-  let stored = initial;
-  let latestSequence = 0n;
-  const changes: Array<{ readonly snapshot: unknown }> = [];
+const scriptedDb = (script: {
+  readonly selects?: Array<SelectResult>;
+  readonly snippetInserts?: Array<ReadonlyArray<SnippetRow>>;
+  readonly snippetUpdates?: Array<ReadonlyArray<SnippetRow>>;
+}) => {
+  const selects = [...(script.selects ?? [])];
+  const snippetInserts = [...(script.snippetInserts ?? [])];
+  const snippetUpdates = [...(script.snippetUpdates ?? [])];
+  const changes: Array<unknown> = [];
+  const conditions: Array<ReturnType<typeof inspectCondition>> = [];
   const updates: Array<{
     readonly set: Partial<SnippetRow>;
-    readonly columns: ReadonlyArray<string>;
-    readonly parameters: ReadonlyArray<unknown>;
+    readonly condition: ReturnType<typeof inspectCondition>;
   }> = [];
+  const locks: Array<{ readonly strength: string; readonly skipLocked: boolean }> = [];
+  const limits: Array<number> = [];
+  let transactionCount = 0;
+  let latestSequence = 0n;
+
+  const next = <A>(queue: Array<A>, operation: string): A => {
+    const result = queue.shift();
+    if (result === undefined) throw new Error(`Missing scripted result for ${operation}.`);
+    return result;
+  };
+
+  const selectResult = (condition: unknown) => {
+    conditions.push(inspectCondition(condition));
+    const complete = (limit: number) => {
+      limits.push(limit);
+      return Effect.sync(() => next(selects, "select"));
+    };
+    return {
+      limit: complete,
+      for: (strength: string, options: { readonly skipLocked?: boolean }) => {
+        locks.push({ strength, skipLocked: options.skipLocked === true });
+        return { limit: complete };
+      },
+    };
+  };
 
   const db = {
     transaction: <A, E, R>(
       body: (tx: DrizzleService["db"]) => Effect.Effect<A, E, R>,
     ): Effect.Effect<A, E, R> => {
-      const before = stored;
-      const changeCount = changes.length;
-      return body(db as unknown as DrizzleService["db"]).pipe(
-        Effect.tapCause(() =>
-          Effect.sync(() => {
-            stored = before;
-            changes.length = changeCount;
-          }),
-        ),
-      );
+      transactionCount += 1;
+      return body(db as unknown as DrizzleService["db"]);
     },
-    select: (selection?: unknown) => ({
+    select: () => ({
       from: (table: unknown) => {
-        if (table !== snippets) throw new Error("Unexpected select table");
-        return {
-          where: (condition: unknown) => {
-            const inspected =
-              selection === undefined
-                ? expectColumns(condition, ["id", "owner_workos_user_id", "deleted_at"])
-                : expectColumns(condition, [
-                    "upload_status",
-                    "upload_heartbeat_expires_at",
-                    "deleted_at",
-                  ]);
-            const result = () => {
-              if (selection === undefined) {
-                return stored === null || stored.deletedAt !== null ? [] : [stored];
-              }
-              const now = inspected.values.find((value): value is Date => value instanceof Date);
-              const expiresAt = stored?.uploadHeartbeatExpiresAt;
-              const isExpired =
-                stored?.uploadStatus === "UPLOADING" &&
-                stored.deletedAt === null &&
-                expiresAt instanceof Date &&
-                now !== undefined &&
-                expiresAt.getTime() <= now.getTime();
-              return isExpired && stored !== null ? [{ id: stored.id }] : [];
-            };
-            return {
-              limit: () => Effect.sync(result),
-              for: () => ({ limit: () => Effect.sync(result) }),
-            };
-          },
-        };
+        if (table !== snippets) throw new Error("Unexpected select table.");
+        return { where: selectResult };
       },
     }),
     insert: (table: unknown) => ({
@@ -117,12 +106,7 @@ const statefulDb = (initial: SnippetRow | null = null) => {
         if (table === snippets) {
           return {
             onConflictDoNothing: () => ({
-              returning: () =>
-                Effect.sync(() => {
-                  if (stored !== null) return [];
-                  stored = values as unknown as SnippetRow;
-                  return [stored];
-                }),
+              returning: () => Effect.sync(() => next(snippetInserts, "snippet insert returning")),
             }),
           };
         }
@@ -135,30 +119,22 @@ const statefulDb = (initial: SnippetRow | null = null) => {
         }
         if (table === snippetChanges) {
           return Effect.sync(() => {
-            changes.push({ snapshot: values.snapshot });
+            changes.push(values.snapshot);
           });
         }
-        throw new Error("Unexpected insert table");
+        throw new Error("Unexpected insert table.");
       },
     }),
     update: (table: unknown) => {
-      if (table !== snippets) throw new Error("Unexpected update table");
+      if (table !== snippets) throw new Error("Unexpected update table.");
       return {
         set: (values: Partial<SnippetRow>) => ({
           where: (condition: unknown) => {
             const inspected = inspectCondition(condition);
-            updates.push({
-              set: values,
-              columns: [...inspected.columns],
-              parameters: inspected.values,
-            });
+            conditions.push(inspected);
+            updates.push({ set: values, condition: inspected });
             return {
-              returning: () =>
-                Effect.sync(() => {
-                  if (stored === null || stored.deletedAt !== null) return [];
-                  stored = { ...stored, ...values };
-                  return [stored];
-                }),
+              returning: () => Effect.sync(() => next(snippetUpdates, "snippet update returning")),
             };
           },
         }),
@@ -169,12 +145,17 @@ const statefulDb = (initial: SnippetRow | null = null) => {
 
   return {
     db,
-    stored: () => stored,
-    changes: () => changes.map((change) => change.snapshot),
+    changes: () => changes,
+    conditions: () => conditions,
     updates: () => updates,
-    markDeleted: () => {
-      if (stored !== null) stored = { ...stored, deletedAt: baseTime };
-    },
+    locks: () => locks,
+    limits: () => limits,
+    remaining: () => ({
+      selects: selects.length,
+      snippetInserts: snippetInserts.length,
+      snippetUpdates: snippetUpdates.length,
+    }),
+    transactionCount: () => transactionCount,
   };
 };
 
@@ -206,7 +187,7 @@ const makeStorage = () => {
 };
 
 const runWith = <A, E>(
-  store: ReturnType<typeof statefulDb>,
+  store: ReturnType<typeof scriptedDb>,
   storage: ReturnType<typeof makeStorage>["service"],
   effect: Effect.Effect<A, E, SnippetUploads>,
 ) =>
@@ -226,9 +207,22 @@ const createInput = {
   storageProvider: "GOOGLE_DRIVE" as const,
 };
 
+const expectGuard = (
+  condition: ReturnType<typeof inspectCondition>,
+  columns: ReadonlyArray<string>,
+  values: ReadonlyArray<unknown>,
+) => {
+  expect(condition.columns).toEqual(expect.arrayContaining([...columns]));
+  expect(condition.values).toEqual(expect.arrayContaining([...values]));
+};
+
 describe("authoritative snippet uploads", () => {
   it("creates and replays one snippet idempotently", async () => {
-    const store = statefulDb();
+    const createdRow = row();
+    const store = scriptedDb({
+      snippetInserts: [[createdRow], [], []],
+      selects: [[createdRow], [createdRow]],
+    });
     const storage = makeStorage();
 
     const result = await runWith(
@@ -254,10 +248,12 @@ describe("authoritative snippet uploads", () => {
     });
     expect(result.conflict).toMatchObject({ code: "CONFLICT" });
     expect(store.changes()).toHaveLength(1);
+    expect(store.transactionCount()).toBe(3);
+    expect(store.remaining()).toEqual({ selects: 0, snippetInserts: 0, snippetUpdates: 0 });
   });
 
   it("prepares repeatedly without synchronizing the scoped destination", async () => {
-    const store = statefulDb(row());
+    const store = scriptedDb({ selects: [[row()], [row()]] });
     const storage = makeStorage();
 
     const results = await runWith(
@@ -276,17 +272,27 @@ describe("authoritative snippet uploads", () => {
     expect(results).toEqual([prepared, prepared]);
     expect(storage.prepareUpload).toHaveBeenCalledTimes(2);
     expect(store.changes()).toHaveLength(0);
+    expect(store.remaining()).toEqual({ selects: 0, snippetInserts: 0, snippetUpdates: 0 });
   });
 
-  it("extends heartbeats and expires an abandoned upload exactly once", async () => {
-    const store = statefulDb(row());
+  it("extends the heartbeat and publishes only rows returned by guarded expiry", async () => {
+    const heartbeatTime = baseTime.getTime() + 10_000;
+    const heartbeatExpiresAt = DateTime.toDateUtc(
+      DateTime.makeUnsafe(heartbeatTime + UPLOAD_HEARTBEAT_DURATION),
+    );
+    const heartbeatRow = row({ uploadHeartbeatExpiresAt: heartbeatExpiresAt });
+    const failedRow = row({ uploadStatus: "FAILED", uploadHeartbeatExpiresAt: null });
+    const store = scriptedDb({
+      selects: [[row()], [], [{ id: createInput.id }], []],
+      snippetUpdates: [[heartbeatRow], [failedRow]],
+    });
     const storage = makeStorage();
 
     const result = await runWith(
       store,
       storage.service,
       Effect.gen(function* () {
-        yield* TestClock.setTime(baseTime.getTime() + 10_000);
+        yield* TestClock.setTime(heartbeatTime);
         const uploads = yield* SnippetUploads;
         const heartbeat = yield* uploads.heartbeat("user-1", createInput.id);
         yield* TestClock.setTime(Date.parse(heartbeat.expiresAt) - 1);
@@ -298,41 +304,55 @@ describe("authoritative snippet uploads", () => {
       }),
     );
 
-    expect(Date.parse(result.heartbeat.expiresAt)).toBe(
-      baseTime.getTime() + 10_000 + UPLOAD_HEARTBEAT_DURATION,
-    );
+    expect(Date.parse(result.heartbeat.expiresAt)).toBe(heartbeatExpiresAt.getTime());
     expect(result).toMatchObject({ beforeDeadline: 0, expired: 1, replay: 0 });
-    expect(store.stored()).toMatchObject({
+    expect(store.changes()).toMatchObject([{ id: createInput.id, uploadStatus: "FAILED" }]);
+    expect(store.locks()).toEqual([
+      { strength: "update", skipLocked: true },
+      { strength: "update", skipLocked: true },
+      { strength: "update", skipLocked: true },
+    ]);
+    expect(store.limits()).toEqual([1, 100, 100, 100]);
+    expectGuard(
+      store.updates()[0]!.condition,
+      ["id", "owner_workos_user_id", "upload_status", "upload_heartbeat_expires_at", "deleted_at"],
+      ["UPLOADING", expect.any(Date)],
+    );
+    expect(store.updates()[1]!.set).toMatchObject({
       uploadStatus: "FAILED",
       uploadHeartbeatExpiresAt: null,
     });
-    expect(store.changes()).toHaveLength(1);
-    expect(store.updates()).toHaveLength(2);
-    expect(store.updates()[0]).toMatchObject({
-      columns: expect.arrayContaining([
-        "id",
-        "owner_workos_user_id",
-        "upload_status",
-        "upload_heartbeat_expires_at",
-        "deleted_at",
-      ]),
-      parameters: expect.arrayContaining(["UPLOADING", expect.any(Date)]),
-    });
-    expect(store.updates()[1]).toMatchObject({
-      set: { uploadStatus: "FAILED", uploadHeartbeatExpiresAt: null },
-      columns: expect.arrayContaining([
-        "id",
-        "upload_status",
-        "upload_heartbeat_expires_at",
-        "deleted_at",
-      ]),
-      parameters: expect.arrayContaining(["UPLOADING", expect.any(Date)]),
-    });
-    expect(store.updates()[1]?.columns).not.toContain("owner_workos_user_id");
+    expectGuard(
+      store.updates()[1]!.condition,
+      ["id", "upload_status", "upload_heartbeat_expires_at", "deleted_at"],
+      ["UPLOADING", expect.any(Date)],
+    );
+    expect(store.updates()[1]!.condition.columns).not.toContain("owner_workos_user_id");
+    expect(store.transactionCount()).toBe(3);
+    expect(store.remaining()).toEqual({ selects: 0, snippetInserts: 0, snippetUpdates: 0 });
   });
 
   it("keeps FAILED stable until explicit retry and completes idempotently", async () => {
-    const store = statefulDb(row());
+    const failedRow = row({ uploadStatus: "FAILED", uploadHeartbeatExpiresAt: null });
+    const retriedRow = row();
+    const uploadedRow = row({
+      uploadStatus: "UPLOADED",
+      uploadHeartbeatExpiresAt: null,
+      storageObjectId: "provider-object",
+    });
+    const store = scriptedDb({
+      selects: [
+        [row()],
+        [failedRow],
+        [failedRow],
+        [failedRow],
+        [retriedRow],
+        [retriedRow],
+        [uploadedRow],
+        [uploadedRow],
+      ],
+      snippetUpdates: [[failedRow], [retriedRow], [uploadedRow]],
+    });
     const storage = makeStorage();
 
     const result = await runWith(
@@ -344,10 +364,7 @@ describe("authoritative snippet uploads", () => {
         const failed = yield* uploads.fail("user-1", createInput.id);
         const replayedFailure = yield* uploads.fail("user-1", createInput.id);
         const lateCompletion = yield* Effect.flip(
-          uploads.complete("user-1", {
-            id: createInput.id,
-            storageObjectId: "provider-object",
-          }),
+          uploads.complete("user-1", { id: createInput.id, storageObjectId: "provider-object" }),
         );
         const retried = yield* uploads.retry("user-1", createInput.id);
         const replayedRetry = yield* uploads.retry("user-1", createInput.id);
@@ -388,47 +405,36 @@ describe("authoritative snippet uploads", () => {
       storageObjectId: "provider-object",
     });
     expect(store.changes()).toMatchObject([
-      { uploadStatus: "FAILED" },
-      { uploadStatus: "UPLOADING" },
-      { uploadStatus: "UPLOADED" },
-    ]);
-    expect(store.updates()).toMatchObject([
+      { id: createInput.id, uploadStatus: "FAILED" },
+      { id: createInput.id, uploadStatus: "UPLOADING" },
       {
-        set: { uploadStatus: "FAILED", uploadHeartbeatExpiresAt: null },
-        columns: expect.arrayContaining([
-          "id",
-          "owner_workos_user_id",
-          "upload_status",
-          "deleted_at",
-        ]),
-        parameters: expect.arrayContaining(["UPLOADING"]),
-      },
-      {
-        set: { uploadStatus: "UPLOADING" },
-        columns: expect.arrayContaining([
-          "id",
-          "owner_workos_user_id",
-          "upload_status",
-          "deleted_at",
-        ]),
-        parameters: expect.arrayContaining(["FAILED"]),
-      },
-      {
-        set: { uploadStatus: "UPLOADED", storageObjectId: "provider-object" },
-        columns: expect.arrayContaining([
-          "id",
-          "owner_workos_user_id",
-          "upload_status",
-          "upload_heartbeat_expires_at",
-          "deleted_at",
-        ]),
-        parameters: expect.arrayContaining(["UPLOADING", expect.any(Date)]),
+        id: createInput.id,
+        uploadStatus: "UPLOADED",
+        storageObjectId: "provider-object",
       },
     ]);
+    expect(store.updates()).toHaveLength(3);
+    expectGuard(
+      store.updates()[0]!.condition,
+      ["id", "owner_workos_user_id", "upload_status", "deleted_at"],
+      ["UPLOADING"],
+    );
+    expectGuard(
+      store.updates()[1]!.condition,
+      ["id", "owner_workos_user_id", "upload_status", "deleted_at"],
+      ["FAILED"],
+    );
+    expectGuard(
+      store.updates()[2]!.condition,
+      ["id", "owner_workos_user_id", "upload_status", "upload_heartbeat_expires_at", "deleted_at"],
+      ["UPLOADING", expect.any(Date)],
+    );
+    expect(store.remaining()).toEqual({ selects: 0, snippetInserts: 0, snippetUpdates: 0 });
   });
 
-  it("never completes a deleted or expired upload", async () => {
-    const store = statefulDb(row());
+  it("rejects expired or already-deleted completion before mutation", async () => {
+    const expiredRow = row({ uploadHeartbeatExpiresAt: baseTime });
+    const store = scriptedDb({ selects: [[expiredRow], []] });
     const storage = makeStorage();
 
     const result = await runWith(
@@ -436,19 +442,12 @@ describe("authoritative snippet uploads", () => {
       storage.service,
       Effect.gen(function* () {
         const uploads = yield* SnippetUploads;
-        yield* TestClock.setTime(baseTime.getTime() + UPLOAD_HEARTBEAT_DURATION + 1);
+        yield* TestClock.setTime(baseTime.getTime() + 1);
         const expired = yield* Effect.flip(
-          uploads.complete("user-1", {
-            id: createInput.id,
-            storageObjectId: "provider-object",
-          }),
+          uploads.complete("user-1", { id: createInput.id, storageObjectId: "provider-object" }),
         );
-        yield* Effect.sync(store.markDeleted);
         const deleted = yield* Effect.flip(
-          uploads.complete("user-1", {
-            id: createInput.id,
-            storageObjectId: "provider-object",
-          }),
+          uploads.complete("user-1", { id: createInput.id, storageObjectId: "provider-object" }),
         );
         return { expired, deleted };
       }),
@@ -458,5 +457,36 @@ describe("authoritative snippet uploads", () => {
     expect(result.deleted).toMatchObject({ code: "NOT_FOUND" });
     expect(store.changes()).toHaveLength(0);
     expect(store.updates()).toHaveLength(0);
+    expect(store.remaining()).toEqual({ selects: 0, snippetInserts: 0, snippetUpdates: 0 });
+  });
+
+  it("does not complete when deletion wins the guarded update race", async () => {
+    const store = scriptedDb({
+      selects: [[row()], []],
+      snippetUpdates: [[]],
+    });
+    const storage = makeStorage();
+
+    const error = await runWith(
+      store,
+      storage.service,
+      Effect.gen(function* () {
+        yield* TestClock.setTime(baseTime.getTime());
+        const uploads = yield* SnippetUploads;
+        return yield* Effect.flip(
+          uploads.complete("user-1", { id: createInput.id, storageObjectId: "provider-object" }),
+        );
+      }),
+    );
+
+    expect(error).toMatchObject({ code: "CONFLICT" });
+    expect(store.changes()).toHaveLength(0);
+    expect(store.updates()).toHaveLength(1);
+    expectGuard(
+      store.updates()[0]!.condition,
+      ["id", "owner_workos_user_id", "upload_status", "upload_heartbeat_expires_at", "deleted_at"],
+      ["UPLOADING", expect.any(Date)],
+    );
+    expect(store.remaining()).toEqual({ selects: 0, snippetInserts: 0, snippetUpdates: 0 });
   });
 });

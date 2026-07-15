@@ -95,7 +95,6 @@ handle(ipcMethods.snippetCopy, async (id) => {
   await runEffect(
     writeSnippetToClipboard({
       bytes,
-      presentationType: presentation.type,
       fileName: snippet.fileName,
       contentType: null,
     }),

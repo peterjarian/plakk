@@ -117,7 +117,6 @@ export function Home({ active = true }: { active?: boolean }) {
       fileName,
       byteSize: bytes.byteLength,
       contentType,
-      presentationType: "text",
       storageProvider: storageStatus.provider,
     });
     void uploadStoredSnippet({
@@ -235,14 +234,10 @@ export function Home({ active = true }: { active?: boolean }) {
   function enqueueFileSnippet(file: Pick<File, "name" | "size" | "type">, filePath?: string) {
     if (storageStatus.kind !== "connected" || !storageStatus.canSync) return;
 
-    const presentationType =
-      deriveSnippetPresentation({ fileName: file.name }).type === "image" ? "image" : "file";
-
     const task = uploadActions.enqueue({
       byteSize: file.size,
       contentType: file.type || null,
       fileName: file.name,
-      presentationType,
       storageProvider: storageStatus.provider,
     });
     if (snippetHeaders === null) return;
@@ -316,9 +311,7 @@ export function Home({ active = true }: { active?: boolean }) {
 
   async function copySnippet(snippet: (typeof snippets)[number]) {
     const needsCopySpinner =
-      ("phase" in snippet
-        ? snippet.presentationType !== "text"
-        : deriveSnippetPresentation({ fileName: snippet.fileName }).type !== "text") &&
+      deriveSnippetPresentation({ fileName: snippet.fileName }).type !== "text" &&
       !snippet.fileName.toLowerCase().endsWith(".txt");
     try {
       if ("phase" in snippet) throw new Error("Finish uploading before copying this snippet.");

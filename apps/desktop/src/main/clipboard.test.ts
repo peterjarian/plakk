@@ -40,7 +40,6 @@ describe("stored snippet clipboard writes", () => {
     await Effect.runPromise(
       writeSnippetToClipboard({
         bytes: new Uint8Array([1]),
-        presentationType: "image",
         fileName: "photo.png",
         contentType: "image/png",
       }),
@@ -56,7 +55,6 @@ describe("stored snippet clipboard writes", () => {
     await Effect.runPromise(
       writeSnippetToClipboard({
         bytes: new Uint8Array([1, 2]),
-        presentationType: "image",
         fileName: "photo.avif",
         contentType: "image/avif",
       }),
@@ -70,7 +68,6 @@ describe("stored snippet clipboard writes", () => {
     await Effect.runPromise(
       writeSnippetToClipboard({
         bytes: new Uint8Array([1, 2]),
-        presentationType: "file",
         fileName: "report.pdf",
         contentType: "application/pdf",
       }),
@@ -94,7 +91,6 @@ describe("stored snippet clipboard writes", () => {
 
     await Effect.runPromise(
       downloadSnippetToClipboard({
-        presentationType: "file",
         storageProvider: "DROPBOX",
         download: { url: "https://dl.dropboxusercontent.com/signed", headers: [] },
         fileName: "report.pdf",
@@ -118,7 +114,6 @@ describe("stored snippet clipboard writes", () => {
 
     await Effect.runPromise(
       downloadSnippetToClipboard({
-        presentationType: "image",
         storageProvider: "GOOGLE_DRIVE",
         download: {
           url: "https://www.googleapis.com/drive/v3/files/file-id?alt=media",
@@ -141,7 +136,6 @@ describe("stored snippet clipboard writes", () => {
     const result = await Effect.runPromise(
       Effect.exit(
         downloadSnippetToClipboard({
-          presentationType: "file",
           storageProvider: "DROPBOX",
           download: { url: "https://localhost/admin", headers: [] },
           fileName: "report.pdf",

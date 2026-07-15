@@ -15,7 +15,6 @@ const draft = {
   fileName: "photo.png",
   byteSize: 4,
   contentType: "image/png",
-  presentationType: "image",
   storageProvider: "GOOGLE_DRIVE",
 } as const;
 

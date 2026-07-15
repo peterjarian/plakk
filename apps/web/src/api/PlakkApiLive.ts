@@ -21,7 +21,7 @@ import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstab
 
 import { StorageProviderService } from "./storage/StorageProvider.ts";
 import { getProviderSlug } from "./storage/getProviderSlug.ts";
-import { toStorageRpcError } from "./storage/toRpcError.ts";
+import { mapStorageErrorsToRpc } from "./storage/mapStorageErrorsToRpc.ts";
 import {
   appendSnippetChange,
   getSnippetSnapshot,
@@ -73,7 +73,7 @@ export const getSnippetCopyPayload = Effect.fn("@plakk/web/api/PlakkApiLive.getS
         storageObjectId: snippet.storageObjectId,
         workosUserId,
       })
-      .pipe(Effect.mapError(toStorageRpcError));
+      .pipe(mapStorageErrorsToRpc);
 
     return {
       storageProvider: snippet.storageProvider,
