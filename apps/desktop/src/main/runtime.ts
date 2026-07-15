@@ -1,3 +1,4 @@
+import { NodeFileSystem, NodePath } from "@effect/platform-node";
 import { net } from "electron";
 import { Layer, ManagedRuntime } from "effect";
 import { StorageUpload } from "../storageUpload.ts";
@@ -16,7 +17,9 @@ const MainLayer = Layer.mergeAll(
   AuthService.layer.pipe(Layer.provideMerge(AuthStore.Live)),
   ActiveSnippetAccountLive,
   SnippetReplicaLive,
-  ManagedSnippetContentLive,
+  ManagedSnippetContentLive.pipe(
+    Layer.provide(Layer.mergeAll(NodeFileSystem.layer, NodePath.layer)),
+  ),
   SnippetRemoteTransportLive,
   StorageUpload.layer((input, init) => net.fetch(input, init)),
 );
