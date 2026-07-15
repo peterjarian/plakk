@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUpRight, LoaderCircle, Plus, TriangleAlert } from "lucide-react";
+import { ArrowUpRight, CloudUpload, LoaderCircle, Plus, TriangleAlert } from "lucide-react";
 import { useAtomSet } from "@effect/atom-react";
 import { snippetKindForFileName } from "@plakk/shared";
 import type { SnippetListItem } from "../../ipc/contracts.ts";
@@ -88,7 +88,7 @@ export function Home({ active = true }: { active?: boolean }) {
   const user = auth.user;
   const syncPausedMessage =
     storageStatus.kind === "failed"
-      ? "Offline — text snippets will queue on this Mac until sync returns."
+      ? "Offline — text is saved on this Mac and syncs automatically."
       : storageStatus.kind === "connected" &&
           storageStatus.account.blockedReasons.includes("billing")
         ? "Sync paused. Text will queue; finish billing to upload it."
@@ -455,7 +455,11 @@ export function Home({ active = true }: { active?: boolean }) {
         <div className="sticky top-0 z-20 bg-background pt-3 pb-5">
           {accountBlocked && storageStatus.kind !== "loading" && (
             <div className="mb-2 flex items-center gap-2 rounded-md bg-muted px-2.5 py-1.5 text-xs text-muted-foreground">
-              <TriangleAlert className="size-3.5 shrink-0 text-amber-600" aria-hidden="true" />
+              {storageStatus.kind === "failed" ? (
+                <CloudUpload className="size-3.5 shrink-0" aria-hidden="true" />
+              ) : (
+                <TriangleAlert className="size-3.5 shrink-0 text-amber-600" aria-hidden="true" />
+              )}
               <span className="min-w-0 flex-1 truncate">{syncPausedMessage}</span>
               {storageStatus.kind !== "failed" && (
                 <Button

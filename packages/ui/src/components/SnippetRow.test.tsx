@@ -61,7 +61,7 @@ describe("SnippetRow", () => {
     expect(markup).toContain("animate-spin");
   });
 
-  it("announces durable offline text as locally queued", () => {
+  it("presents durable offline text as safely saved for automatic sync", () => {
     const markup = renderToStaticMarkup(
       <SnippetRow
         snippet={{
@@ -86,8 +86,9 @@ describe("SnippetRow", () => {
       />,
     );
 
-    expect(markup).toContain("Queued on this Mac — syncs when online");
-    expect(markup).toContain('aria-label="Queued"');
+    expect(markup).toContain("Saved on this Mac — syncs automatically");
+    expect(markup).toContain('aria-label="Saved locally; syncs automatically"');
+    expect(markup).not.toContain("text-amber-600");
   });
 
   it("offers retry only for an actionable local failure", () => {

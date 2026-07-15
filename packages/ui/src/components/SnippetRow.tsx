@@ -5,7 +5,7 @@ import * as DateTime from "effect/DateTime";
 import {
   ArrowUpRight,
   Check,
-  Clock3,
+  CloudUpload,
   Copy,
   FileText,
   ImageIcon,
@@ -137,7 +137,7 @@ export function SnippetRow(props: {
       : isLocalText(snippet) && snippet.phase === "NEEDS_ACTION"
         ? (snippet.errorMessage ?? "This snippet needs attention before it can sync.")
         : isQueued
-          ? "Queued on this Mac — syncs when online"
+          ? "Saved on this Mac — syncs automatically"
           : !("phase" in snippet) && snippet.uploadStatus === "UPLOADING"
             ? "Uploading to connected storage…"
             : !("phase" in snippet) && snippet.uploadStatus === "INTERRUPTED"
@@ -188,7 +188,10 @@ export function SnippetRow(props: {
           {isUploading ? (
             <div className="flex items-center gap-1">
               {isQueued ? (
-                <Clock3 className="size-4 text-amber-600" aria-label="Queued" />
+                <CloudUpload
+                  className="size-4 text-muted-foreground"
+                  aria-label="Saved locally; syncs automatically"
+                />
               ) : (
                 <LoaderCircle
                   className="size-4 animate-spin text-muted-foreground"
