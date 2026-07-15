@@ -136,23 +136,21 @@ export function SnippetRow(props: {
       ? (snippet.errorMessage ?? "Upload failed. Choose the file again to retry.")
       : isLocalText(snippet) && snippet.phase === "NEEDS_ACTION"
         ? (snippet.errorMessage ?? "This snippet needs attention before it can sync.")
-        : isQueued
-          ? "Saved on this Mac — syncs automatically"
-          : !("phase" in snippet) && snippet.uploadStatus === "UPLOADING"
-            ? "Uploading to connected storage…"
-            : !("phase" in snippet) && snippet.uploadStatus === "INTERRUPTED"
-              ? "Upload interrupted — waiting for the source device"
-              : !("phase" in snippet) && snippet.uploadStatus === "FAILED"
-                ? (snippet.uploadFailureMessage ?? "Upload needs attention on the source device.")
-                : snippet.kind === "TEXT" && textContent?.state === "loading"
-                  ? "Loading text…"
-                  : snippet.kind === "TEXT" && textContent?.state === "failed"
-                    ? textContent.message
-                    : snippet.kind === "FILE" || snippet.kind === "IMAGE"
-                      ? fileSubtitle(snippet)
-                      : "phase" in snippet
-                        ? ""
-                        : formatFileSize(snippet.byteSize);
+        : !("phase" in snippet) && snippet.uploadStatus === "UPLOADING"
+          ? "Uploading to connected storage…"
+          : !("phase" in snippet) && snippet.uploadStatus === "INTERRUPTED"
+            ? "Upload interrupted — waiting for the source device"
+            : !("phase" in snippet) && snippet.uploadStatus === "FAILED"
+              ? (snippet.uploadFailureMessage ?? "Upload needs attention on the source device.")
+              : snippet.kind === "TEXT" && textContent?.state === "loading"
+                ? "Loading text…"
+                : snippet.kind === "TEXT" && textContent?.state === "failed"
+                  ? textContent.message
+                  : snippet.kind === "FILE" || snippet.kind === "IMAGE"
+                    ? fileSubtitle(snippet)
+                    : "phase" in snippet
+                      ? ""
+                      : formatFileSize(snippet.byteSize);
   const time =
     "phase" in snippet
       ? snippet.phase === "FAILED"
@@ -180,7 +178,7 @@ export function SnippetRow(props: {
         </span>
 
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium">{title}</p>
+          <p className="max-w-[36ch] truncate text-sm font-medium">{title}</p>
           {subtitle && <p className="truncate text-xs text-muted-foreground">{subtitle}</p>}
         </div>
 
@@ -188,10 +186,14 @@ export function SnippetRow(props: {
           {isUploading ? (
             <div className="flex items-center gap-1">
               {isQueued ? (
-                <CloudUpload
-                  className="size-4 text-muted-foreground"
-                  aria-label="Saved locally; syncs automatically"
-                />
+                <span
+                  className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-[11px] font-medium text-muted-foreground"
+                  aria-label="Saved on this Mac; syncs automatically"
+                  title="Saved on this Mac — syncs automatically"
+                >
+                  <CloudUpload className="size-3.5" aria-hidden="true" />
+                  Saved
+                </span>
               ) : (
                 <LoaderCircle
                   className="size-4 animate-spin text-muted-foreground"

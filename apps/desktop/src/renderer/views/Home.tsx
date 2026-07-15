@@ -88,7 +88,7 @@ export function Home({ active = true }: { active?: boolean }) {
   const user = auth.user;
   const syncPausedMessage =
     storageStatus.kind === "failed"
-      ? "Offline — text is saved on this Mac and syncs automatically."
+      ? "Offline · Saving locally · Auto-sync on"
       : storageStatus.kind === "connected" &&
           storageStatus.account.blockedReasons.includes("billing")
         ? "Sync paused. Text will queue; finish billing to upload it."

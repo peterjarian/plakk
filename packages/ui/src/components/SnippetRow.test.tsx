@@ -41,6 +41,7 @@ describe("SnippetRow", () => {
     expect(markup).toContain('data-snippet-row=""');
     expect(markup).toContain('tabindex="0"');
     expect(markup).toContain("select-none");
+    expect(markup).toContain("max-w-[36ch]");
   });
 
   it("shows a spinner while copying", () => {
@@ -86,8 +87,10 @@ describe("SnippetRow", () => {
       />,
     );
 
-    expect(markup).toContain("Saved on this Mac — syncs automatically");
-    expect(markup).toContain('aria-label="Saved locally; syncs automatically"');
+    expect(markup).toContain('aria-label="Saved on this Mac; syncs automatically"');
+    expect(markup).toContain('title="Saved on this Mac — syncs automatically"');
+    expect(markup).toContain(">Saved</span>");
+    expect(markup).not.toContain("Saved on this Mac — syncs automatically</p>");
     expect(markup).not.toContain("text-amber-600");
   });
 
