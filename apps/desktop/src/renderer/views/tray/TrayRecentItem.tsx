@@ -1,9 +1,27 @@
 import type { DesktopSnippet } from "../../../ipc/contracts.ts";
 import { SnippetRow } from "@plakk/ui/components/SnippetRow";
 
-const noop = () => undefined;
-
-export function TrayRecentItem({ snippet }: { snippet: DesktopSnippet | undefined }) {
+export function TrayRecentItem({
+  snippet,
+  copied,
+  copying,
+  copyDisabled,
+  copyError,
+  onCopy,
+  onDelete,
+  onRetryUpload,
+  onStopUpload,
+}: {
+  snippet: DesktopSnippet | undefined;
+  copied: boolean;
+  copying: boolean;
+  copyDisabled: boolean;
+  copyError?: string;
+  onCopy: () => void;
+  onDelete: () => void;
+  onRetryUpload: () => void;
+  onStopUpload: () => void;
+}) {
   if (!snippet) {
     return (
       <section className="grid min-h-0 flex-1 place-content-center gap-1 px-6 text-center">
@@ -22,14 +40,17 @@ export function TrayRecentItem({ snippet }: { snippet: DesktopSnippet | undefine
         <SnippetRow
           snippet={snippet}
           now={Date.now()}
-          copied={false}
-          onCopy={noop}
-          onDelete={noop}
-          onStopUpload={noop}
+          copied={copied}
+          copying={copying}
+          copyDisabled={copyDisabled}
+          {...(copyError === undefined ? {} : { copyError })}
+          onCopy={onCopy}
+          onDelete={onDelete}
+          onRetryUpload={onRetryUpload}
+          onStopUpload={onStopUpload}
           {...(snippet.localTextContent === null
             ? {}
             : { textContent: { state: "ready" as const, text: snippet.localTextContent } })}
-          showActions={false}
         />
       </ul>
     </section>

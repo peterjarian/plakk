@@ -90,6 +90,35 @@ describe("SnippetRow", () => {
     expect(markup).toContain("Upload failed on the origin device.");
     expect(markup).not.toContain('aria-label="Retry upload"');
   });
+
+  it("only exposes hyperlink navigation through an explicit surface owner", () => {
+    const withoutOwner = renderToStaticMarkup(
+      <SnippetRow
+        snippet={snippet}
+        now={now}
+        copied={false}
+        onCopy={() => undefined}
+        onDelete={() => undefined}
+        onStopUpload={() => undefined}
+        textContent={{ state: "ready", text: "https://example.com" }}
+      />,
+    );
+    const withOwner = renderToStaticMarkup(
+      <SnippetRow
+        snippet={snippet}
+        now={now}
+        copied={false}
+        onCopy={() => undefined}
+        onDelete={() => undefined}
+        onOpenLink={() => undefined}
+        onStopUpload={() => undefined}
+        textContent={{ state: "ready", text: "https://example.com" }}
+      />,
+    );
+
+    expect(withoutOwner).not.toContain('aria-label="Open link"');
+    expect(withOwner).toContain('aria-label="Open link"');
+  });
 });
 
 describe("formatSnippetDate", () => {

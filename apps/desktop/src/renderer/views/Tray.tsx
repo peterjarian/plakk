@@ -8,14 +8,20 @@ import { useTraySnippets } from "./tray/useTraySnippets.ts";
 
 export function Tray() {
   const [isDragging, setIsDragging] = useState(false);
-  const [isCopied, setIsCopied] = useState(false);
-  const [isCopying, setIsCopying] = useState(false);
-  const [copyError, setCopyError] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [copyingId, setCopyingId] = useState<string | null>(null);
+  const [copyError, setCopyError] = useState<{ id: string; message: string } | null>(null);
   const [accountState, setAccountState] = useState<TrayAccountState>({ kind: "loading" });
   const ingestionAllowed = accountState.kind === "resolved" && accountCanSync(accountState.account);
   const account = accountState.kind === "resolved" ? accountState.account : null;
   const { addClipboard, addDropped, addText, error, latest, reportError, upload } =
     useTraySnippets(account);
+  const copyDisabled =
+    latest === undefined || (!latest.contentAvailable && latest.uploadStatus !== "UPLOADED");
+  const isCopied = latest !== undefined && copiedId === latest.id;
+  const isCopying = latest !== undefined && copyingId === latest.id;
+  const currentCopyError =
+    latest !== undefined && copyError?.id === latest.id ? copyError.message : null;
   const pausedMessage =
     accountState.kind === "loading"
       ? "Checking account — adding is paused"
@@ -58,10 +64,39 @@ export function Tray() {
   useEffect(() => window.ipc.clipboard.onPaste(addClipboard), [addClipboard]);
 
   useEffect(() => {
-    if (!isCopied) return;
-    const timer = window.setTimeout(() => setIsCopied(false), 1200);
+    if (copiedId === null) return;
+    const timer = window.setTimeout(() => setCopiedId(null), 1200);
     return () => window.clearTimeout(timer);
-  }, [isCopied]);
+  }, [copiedId]);
+
+  const copyLatest = () => {
+    if (latest === undefined || copyDisabled) return;
+    const snippetId = latest.id;
+    setCopiedId(null);
+    setCopyingId(snippetId);
+    setCopyError(null);
+    void window.ipc.snippets
+      .copy(snippetId)
+      .then(() => setCopiedId(snippetId))
+      .catch((cause) =>
+        setCopyError({
+          id: snippetId,
+          message: cause instanceof Error ? cause.message : "Could not copy this snippet.",
+        }),
+      )
+      .finally(() => setCopyingId((id) => (id === snippetId ? null : id)));
+  };
+
+  const runLatestAction = (
+    action: (snippetId: string) => Promise<void>,
+    fallbackMessage: string,
+  ) => {
+    if (latest === undefined) return;
+    reportError(null);
+    void action(latest.id).catch((cause) =>
+      reportError(cause instanceof Error ? cause.message : fallbackMessage),
+    );
+  };
 
   return (
     <TrayShell>
@@ -99,7 +134,23 @@ export function Tray() {
           </section>
         ) : (
           <>
-            <TrayRecentItem snippet={latest} />
+            <TrayRecentItem
+              snippet={latest}
+              copied={isCopied}
+              copying={isCopying}
+              copyDisabled={copyDisabled}
+              {...(currentCopyError === null ? {} : { copyError: currentCopyError })}
+              onCopy={copyLatest}
+              onDelete={() =>
+                runLatestAction(window.ipc.snippets.delete, "Could not delete this snippet.")
+              }
+              onRetryUpload={() =>
+                runLatestAction(window.ipc.snippets.retry, "Could not retry this upload.")
+              }
+              onStopUpload={() =>
+                runLatestAction(window.ipc.snippets.cancel, "Could not stop this upload.")
+              }
+            />
             {!ingestionAllowed && (
               <p
                 className="px-4 pb-2 text-[11px] text-muted-foreground"
@@ -109,39 +160,17 @@ export function Tray() {
                 {pausedMessage}
               </p>
             )}
-            {(error ?? copyError) !== null && (
+            {error !== null && (
               <p className="px-4 pb-2 text-[11px] text-destructive" role="alert">
-                {error ?? copyError}
+                {error}
               </p>
             )}
             <TrayActions
-              copyDisabled={
-                latest === undefined ||
-                (!latest.contentAvailable && latest.uploadStatus !== "UPLOADED")
-              }
+              copyDisabled={copyDisabled}
               copied={isCopied}
               copying={isCopying}
               ingestionDisabled={!ingestionAllowed}
-              onCopy={() => {
-                if (
-                  latest === undefined ||
-                  (!latest.contentAvailable && latest.uploadStatus !== "UPLOADED")
-                ) {
-                  return;
-                }
-                setIsCopied(false);
-                setIsCopying(true);
-                setCopyError(null);
-                void window.ipc.snippets
-                  .copy(latest.id)
-                  .then(() => setIsCopied(true))
-                  .catch((cause) =>
-                    setCopyError(
-                      cause instanceof Error ? cause.message : "Could not copy this snippet.",
-                    ),
-                  )
-                  .finally(() => setIsCopying(false));
-              }}
+              onCopy={copyLatest}
               onPaste={() => {
                 reportError(null);
                 void window.ipc.clipboard

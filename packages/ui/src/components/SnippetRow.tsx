@@ -259,29 +259,16 @@ export function SnippetRow(props: {
                     <Copy />
                   )}
                 </Button>
-                {presentation.type === "hyperlink" && (
-                  <>
-                    {onOpenLink ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label="Open link"
-                        onClick={() => onOpenLink(presentation.url)}
-                      >
-                        <ArrowUpRight />
-                      </Button>
-                    ) : (
-                      <Button
-                        render={<a href={presentation.url} target="_blank" rel="noreferrer" />}
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label="Open link"
-                      >
-                        <ArrowUpRight />
-                      </Button>
-                    )}
-                  </>
+                {presentation.type === "hyperlink" && onOpenLink && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="Open link"
+                    onClick={() => onOpenLink(presentation.url)}
+                  >
+                    <ArrowUpRight />
+                  </Button>
                 )}
                 <Button
                   type="button"
