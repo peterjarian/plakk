@@ -1,5 +1,6 @@
 import { deriveSnippetPresentation } from "@plakk/shared";
 import type { ApiSnippet } from "@plakk/shared/PlakkApi";
+import { SnippetReplica } from "@plakk/shared/SnippetReplica";
 import {
   Context,
   DateTime,
@@ -164,6 +165,7 @@ export class SnippetUploadEngine extends Context.Service<
       const content = yield* DesktopManagedSnippetContent;
       const outbox = yield* SnippetUploadOutbox;
       const remote = yield* SnippetUploadRemote;
+      const replica = yield* SnippetReplica;
       const storage = yield* StorageUpload;
       const changes = yield* PubSub.unbounded<string>();
       const currentAccount = yield* Ref.make<UploadAccount | null>(null);
@@ -172,9 +174,12 @@ export class SnippetUploadEngine extends Context.Service<
       const importCancellations = new Map<string, Deferred.Deferred<void>>();
       const progressById = new Map<string, number>();
       const active = new Map<string, Fiber.Fiber<void, unknown> | null>();
+      const pendingDeletes = new Set<string>();
 
       const publish = (accountId: string) => PubSub.publish(changes, accountId);
       const publishFromCallback = (accountId: string) => Effect.runFork(publish(accountId));
+      const pendingDeleteKey = (accountId: string, snippetId: string) =>
+        `${accountId}/${snippetId}`;
 
       const put = Effect.fn("SnippetUploadEngine.put")(function* (
         accountId: string,
@@ -514,6 +519,14 @@ export class SnippetUploadEngine extends Context.Service<
         accountId: string,
         replicaItems: ReadonlyArray<ApiSnippet>,
       ) {
+        const durablePendingDeletes = new Set(
+          yield* replica
+            .pendingDeleteIds(accountId)
+            .pipe(Effect.mapError((cause) => engineError(cause, cause.reason, false))),
+        );
+        const isDeletePending = (snippetId: string) =>
+          durablePendingDeletes.has(snippetId) ||
+          pendingDeletes.has(pendingDeleteKey(accountId, snippetId));
         const entries = yield* outbox
           .list(accountId)
           .pipe(Effect.mapError((cause) => engineError(cause, cause.reason, false)));
@@ -529,6 +542,10 @@ export class SnippetUploadEngine extends Context.Service<
         }
         for (const entry of entries) {
           if (importingIds.has(entry.id)) continue;
+          if (isDeletePending(entry.id)) {
+            replicas.delete(entry.id);
+            continue;
+          }
           const replica = replicas.get(entry.id);
           replicas.delete(entry.id);
           const presentation = deriveSnippetPresentation({ fileName: entry.fileName });
@@ -564,6 +581,7 @@ export class SnippetUploadEngine extends Context.Service<
           });
         }
         for (const replica of replicas.values()) {
+          if (isDeletePending(replica.id)) continue;
           const presentation = deriveSnippetPresentation({ fileName: replica.fileName });
           const needsText = presentation.type === "text" || presentation.type === "hyperlink";
           const bytes = needsText
@@ -655,7 +673,7 @@ export class SnippetUploadEngine extends Context.Service<
         if (activeAccount?.id === account.id) yield* schedule(activeAccount, snippetId);
       });
 
-      const discard = Effect.fn("SnippetUploadEngine.discard")(function* (
+      const cleanupLocal = Effect.fn("SnippetUploadEngine.cleanupLocal")(function* (
         accountId: string,
         snippetId: string,
       ) {
@@ -669,6 +687,13 @@ export class SnippetUploadEngine extends Context.Service<
         yield* content
           .discard(accountId, snippetId)
           .pipe(Effect.mapError((cause) => engineError(cause, cause.reason, false)));
+      });
+
+      const discard = Effect.fn("SnippetUploadEngine.discard")(function* (
+        accountId: string,
+        snippetId: string,
+      ) {
+        yield* cleanupLocal(accountId, snippetId);
         yield* publish(accountId);
       });
 
@@ -681,28 +706,67 @@ export class SnippetUploadEngine extends Context.Service<
           .pipe(Effect.mapError((cause) => engineError(cause, cause.reason, false)));
         const safelyLocalOnly =
           entry !== null && entry.phase === "QUEUED" && entry.authoritativeStatus === null;
-        if (account.accessToken !== null) {
-          yield* remote
-            .delete(account.accessToken, snippetId)
-            .pipe(
-              Effect.mapError((cause) =>
-                engineError(cause, "Plakk could not delete this snippet.", true),
-              ),
-            );
-        } else if (!safelyLocalOnly) {
+        if (account.accessToken === null && !safelyLocalOnly) {
           return yield* new SnippetUploadEngineError({
             cause: null,
             reason: "Reconnect before deleting this snippet.",
             canRetry: true,
           });
         }
-        yield* discard(account.id, snippetId);
+        const deleteKey = pendingDeleteKey(account.id, snippetId);
+        if (pendingDeletes.has(deleteKey)) return;
+        pendingDeletes.add(deleteKey);
+        yield* publish(account.id);
+
+        const restore = Effect.sync(() => pendingDeletes.delete(deleteKey)).pipe(
+          Effect.andThen(publish(account.id)),
+        );
+        if (account.accessToken !== null) {
+          yield* remote.delete(account.accessToken, snippetId).pipe(
+            Effect.mapError((cause) =>
+              engineError(cause, "Plakk could not delete this snippet.", true),
+            ),
+            Effect.onError(() => restore),
+          );
+          yield* replica
+            .remove(account.id, snippetId)
+            .pipe(Effect.mapError((cause) => engineError(cause, cause.reason, false)));
+          yield* cleanupLocal(account.id, snippetId);
+          yield* replica
+            .completeDeleteCleanup(account.id, snippetId)
+            .pipe(Effect.mapError((cause) => engineError(cause, cause.reason, false)));
+          yield* publish(account.id);
+        } else {
+          yield* discard(account.id, snippetId).pipe(Effect.onError(() => restore));
+        }
       });
 
       const reconcile = Effect.fn("SnippetUploadEngine.reconcile")(function* (
         accountId: string,
         replicaItems: ReadonlyArray<ApiSnippet>,
       ) {
+        const durablePendingDeletes = yield* replica
+          .pendingDeleteIds(accountId)
+          .pipe(Effect.mapError((cause) => engineError(cause, cause.reason, false)));
+        yield* Effect.forEach(
+          durablePendingDeletes,
+          (snippetId) =>
+            cleanupLocal(accountId, snippetId).pipe(
+              Effect.andThen(
+                replica
+                  .completeDeleteCleanup(accountId, snippetId)
+                  .pipe(Effect.mapError((cause) => engineError(cause, cause.reason, false))),
+              ),
+              Effect.catchCause((cause) =>
+                Effect.logWarning("Could not finish local snippet deletion cleanup", {
+                  accountId,
+                  snippetId,
+                  cause,
+                }),
+              ),
+            ),
+          { discard: true },
+        );
         const uploaded = new Set(
           replicaItems
             .filter((snippet) => snippet.uploadStatus === "UPLOADED")
@@ -711,6 +775,16 @@ export class SnippetUploadEngine extends Context.Service<
         const entries = yield* outbox
           .list(accountId)
           .pipe(Effect.mapError((cause) => engineError(cause, cause.reason, false)));
+        const retainedIds = new Set([
+          ...entries.map((entry) => entry.id),
+          ...replicaItems.map((snippet) => snippet.id),
+        ]);
+        for (const deleteKey of pendingDeletes) {
+          const prefix = `${accountId}/`;
+          if (deleteKey.startsWith(prefix) && !retainedIds.has(deleteKey.slice(prefix.length))) {
+            pendingDeletes.delete(deleteKey);
+          }
+        }
         const adopted = entries.filter((entry) => uploaded.has(entry.id));
         yield* Effect.forEach(
           adopted,

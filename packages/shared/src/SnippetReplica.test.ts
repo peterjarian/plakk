@@ -59,6 +59,14 @@ const harness = (options: {
             state = next;
             return Effect.void;
           }),
+        remove: (_accountId, snippetId) =>
+          Effect.sync(() => {
+            if (state !== null) {
+              state = { ...state, items: state.items.filter((item) => item.id !== snippetId) };
+            }
+          }),
+        pendingDeleteIds: () => Effect.succeed([]),
+        completeDeleteCleanup: () => Effect.void,
       }),
     ),
     Layer.succeed(

@@ -29,6 +29,7 @@ const storageUploadLayer = StorageUpload.layer((input, init) => net.fetch(input,
 );
 const uploadEngineDependencies = Layer.mergeAll(
   desktopContentLayer,
+  SnippetReplicaLive,
   SnippetUploadOutbox.Live,
   SnippetUploadRemote.Live,
   storageUploadLayer,

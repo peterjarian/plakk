@@ -40,6 +40,12 @@ export class SnippetReplica extends Context.Service<
     }>;
     get(accountId: string): Effect.Effect<SnippetReplicaState | null, SnippetReplicaError>;
     commit(accountId: string, state: SnippetReplicaState): Effect.Effect<void, SnippetReplicaError>;
+    remove(accountId: string, snippetId: string): Effect.Effect<void, SnippetReplicaError>;
+    pendingDeleteIds(accountId: string): Effect.Effect<ReadonlyArray<string>, SnippetReplicaError>;
+    completeDeleteCleanup(
+      accountId: string,
+      snippetId: string,
+    ): Effect.Effect<void, SnippetReplicaError>;
   }
 >()("@plakk/shared/SnippetReplica") {}
 
