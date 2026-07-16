@@ -1,11 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowUpRight, LoaderCircle, Plus, TriangleAlert } from "lucide-react";
-import { deriveSnippetPresentation } from "@plakk/shared";
-import type { DesktopSnippet } from "../../ipc/contracts.ts";
 import { AppHeader } from "@plakk/ui/components/AppHeader";
 import { SnippetList } from "@plakk/ui/components/SnippetList";
 import { SnippetRow } from "@plakk/ui/components/SnippetRow";
-import type { TextSnippetContent } from "@plakk/ui/components/SnippetRow";
 import { Button } from "@plakk/ui/components/primitives/button";
 import { Checkbox } from "@plakk/ui/components/primitives/checkbox";
 import {
@@ -18,8 +15,7 @@ import {
 } from "@plakk/ui/components/primitives/dialog";
 import { SnippetComposer } from "../components/SnippetComposer.tsx";
 import { useAuth } from "../hooks/useAuth.ts";
-import { useSnippetReplica } from "../hooks/useSnippetReplica.ts";
-import { useSnippetThumbnails } from "../hooks/useSnippetThumbnails.ts";
+import { useSnippets } from "../hooks/useSnippets.ts";
 import {
   StorageProviderIcon,
   storageProviderLabel,
@@ -27,7 +23,7 @@ import {
   useStorageStatus,
 } from "../hooks/useStorageStatus.tsx";
 import { navigate } from "../lib/navigate.ts";
-import { decodeTextSnippet, encodeTextSnippet } from "../lib/textSnippetContent.ts";
+import { encodeTextSnippet } from "../lib/textSnippetContent.ts";
 
 const accountSetupUrl = "https://app.plakk.io/account/setup";
 export function Home({ active = true }: { active?: boolean }) {
@@ -40,9 +36,9 @@ export function Home({ active = true }: { active?: boolean }) {
   const [pendingExternalUrl, setPendingExternalUrl] = useState<string | null>(null);
   const [skipExternalLinkWarning, setSkipExternalLinkWarning] = useState(false);
   const [showExternalLinkWarning, setShowExternalLinkWarning] = useState(true);
-  const [textContents, setTextContents] = useState<Record<string, TextSnippetContent>>({});
   const [copyErrors, setCopyErrors] = useState<Record<string, string>>({});
-  const [ingestError, setIngestError] = useState<string | null>(null);
+  const [ingestionError, setIngestionError] = useState<string | null>(null);
+  const [externalActionError, setExternalActionError] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now);
   const copiedTimerRef = useRef<number | undefined>(undefined);
 
@@ -51,9 +47,13 @@ export function Home({ active = true }: { active?: boolean }) {
     return () => window.clearInterval(interval);
   }, []);
 
-  const { isLoading: replicaLoading, items: replicaItems } = useSnippetReplica();
-  const thumbnailUrls = useSnippetThumbnails(replicaItems);
-  const snippets = replicaItems;
+  const {
+    error: snippetReadError,
+    isLoading: replicaLoading,
+    items: snippets,
+    reload: reloadSnippets,
+    retryContent,
+  } = useSnippets();
   const accountBlocked = !storageStatus.canSync;
   const user = auth.user;
   const syncPausedMessage =
@@ -92,51 +92,14 @@ export function Home({ active = true }: { active?: boolean }) {
   }
 
   function ingestSnippet(payload: Parameters<typeof window.ipc.snippets.ingest>[0]) {
-    setIngestError(null);
-    return window.ipc.snippets.ingest(payload).catch((error) => {
-      setIngestError(error instanceof Error ? error.message : "Plakk couldn’t save this snippet.");
-    });
+    setIngestionError(null);
+    return window.ipc.snippets.ingest(payload).then(
+      (result) => {
+        if (result.status === "FAILED") setIngestionError(result.message);
+      },
+      () => setIngestionError("Plakk couldn’t save this snippet."),
+    );
   }
-
-  const loadTextContent = useCallback(async (snippet: DesktopSnippet) => {
-    setTextContents((contents) => ({ ...contents, [snippet.id]: { state: "loading" } }));
-    try {
-      const bytes = await window.ipc.snippets.read(snippet.id);
-      const text = decodeTextSnippet(bytes);
-      setTextContents((contents) => ({
-        ...contents,
-        [snippet.id]: { state: "ready", text },
-      }));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Could not load this text snippet.";
-      setTextContents((contents) => ({
-        ...contents,
-        [snippet.id]: { state: "failed", message },
-      }));
-    }
-  }, []);
-
-  useEffect(() => {
-    for (const snippet of replicaItems) {
-      if (snippet.localTextContent !== null) {
-        const current = textContents[snippet.id];
-        if (current?.state !== "ready" || current.text !== snippet.localTextContent) {
-          setTextContents((contents) => ({
-            ...contents,
-            [snippet.id]: { state: "ready", text: snippet.localTextContent! },
-          }));
-        }
-        continue;
-      }
-      if (
-        deriveSnippetPresentation({ fileName: snippet.fileName }).type === "text" &&
-        snippet.uploadStatus === "UPLOADED" &&
-        textContents[snippet.id] === undefined
-      ) {
-        void loadTextContent(snippet);
-      }
-    }
-  }, [loadTextContent, replicaItems, textContents]);
 
   function enqueueFileSnippet(file: Pick<File, "name" | "size" | "type">, filePath?: string) {
     if (storageStatus.kind !== "connected" || !storageStatus.canSync) return;
@@ -163,6 +126,7 @@ export function Home({ active = true }: { active?: boolean }) {
     }
 
     if (content.type === "image") {
+      setIngestionError(null);
       void fetch(content.dataUrl)
         .then((response) => response.blob())
         .then((blob) =>
@@ -171,11 +135,7 @@ export function Home({ active = true }: { active?: boolean }) {
             content.path,
           ),
         )
-        .catch((error) => {
-          setIngestError(
-            error instanceof Error ? error.message : "Plakk couldn’t read the pasted image.",
-          );
-        });
+        .catch(() => setIngestionError("Plakk couldn’t read the pasted image."));
       return;
     }
 
@@ -193,10 +153,10 @@ export function Home({ active = true }: { active?: boolean }) {
       const { [id]: _error, ...remaining } = errors;
       return remaining;
     });
-    return action().catch((error) => {
+    return action().catch(() => {
       setCopyErrors((errors) => ({
         ...errors,
-        [id]: error instanceof Error ? error.message : "Plakk couldn’t update this snippet.",
+        [id]: "Plakk couldn’t update this snippet.",
       }));
     });
   }
@@ -211,8 +171,7 @@ export function Home({ active = true }: { active?: boolean }) {
 
   async function copySnippet(snippet: (typeof snippets)[number]) {
     const needsCopySpinner =
-      deriveSnippetPresentation({ fileName: snippet.fileName }).type !== "text" &&
-      !snippet.fileName.toLowerCase().endsWith(".txt");
+      snippet.presentation.type !== "text" && snippet.presentation.type !== "hyperlink";
     try {
       if (needsCopySpinner) setCopyingId(snippet.id);
 
@@ -223,10 +182,10 @@ export function Home({ active = true }: { active?: boolean }) {
         return remaining;
       });
       showCopied(snippet.id);
-    } catch (error) {
+    } catch {
       setCopyErrors((errors) => ({
         ...errors,
-        [snippet.id]: error instanceof Error ? error.message : "Could not copy this snippet.",
+        [snippet.id]: "Could not copy this snippet.",
       }));
     } finally {
       if (needsCopySpinner) setCopyingId((id) => (id === snippet.id ? null : id));
@@ -252,8 +211,9 @@ export function Home({ active = true }: { active?: boolean }) {
   }, [accountBlocked, active, storageStatus]);
 
   function openLink(url: string) {
+    setExternalActionError(null);
     if (!showExternalLinkWarning) {
-      void window.ipc.openExternal(url);
+      void openExternal(url);
       return;
     }
 
@@ -266,18 +226,28 @@ export function Home({ active = true }: { active?: boolean }) {
     setSkipExternalLinkWarning(false);
   }
 
+  function openExternal(url: string) {
+    return window.ipc
+      .openExternal(url)
+      .catch(() => setExternalActionError("Plakk couldn’t open this link."));
+  }
+
   async function confirmExternalLink() {
     if (!pendingExternalUrl) return;
 
     const url = pendingExternalUrl;
+    const shouldSkipWarning = skipExternalLinkWarning;
     closeExternalLinkDialog();
+    setExternalActionError(null);
 
-    if (skipExternalLinkWarning) {
-      setShowExternalLinkWarning(false);
-      await window.ipc.userConfig.set({ showExternalLinkWarning: false });
+    if (shouldSkipWarning) {
+      await window.ipc.userConfig.set({ showExternalLinkWarning: false }).then(
+        () => setShowExternalLinkWarning(false),
+        () => setExternalActionError("Plakk couldn’t save that preference."),
+      );
     }
 
-    await window.ipc.openExternal(url);
+    await openExternal(url);
   }
 
   const pendingExternalHost = pendingExternalUrl ? new URL(pendingExternalUrl).host : "";
@@ -315,7 +285,10 @@ export function Home({ active = true }: { active?: boolean }) {
         size="sm"
         aria-label={`Open ${storageProviderLabel(storageStatus.provider)} in browser`}
         toolTip={`Open ${storageProviderLabel(storageStatus.provider)}`}
-        onClick={() => void window.ipc.openExternal(storageStatus.destinationUrl)}
+        onClick={() => {
+          setExternalActionError(null);
+          void openExternal(storageStatus.destinationUrl);
+        }}
       >
         <StorageProviderIcon provider={storageStatus.provider} className="size-4" />
         {storageProviderLabel(storageStatus.provider)}
@@ -395,12 +368,30 @@ export function Home({ active = true }: { active?: boolean }) {
               }
             }}
           />
-          {ingestError !== null && (
+          {ingestionError !== null && (
             <p className="mt-2 text-xs text-destructive" role="alert">
-              {ingestError}
+              {ingestionError}
             </p>
           )}
         </div>
+
+        {externalActionError !== null && (
+          <p className="mb-3 text-xs text-destructive" role="alert">
+            {externalActionError}
+          </p>
+        )}
+
+        {snippetReadError !== null && (
+          <div
+            className="mb-3 flex items-center justify-between gap-3 rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive"
+            role="alert"
+          >
+            <span>{snippetReadError}</span>
+            <Button type="button" variant="ghost" size="xs" onClick={reloadSnippets}>
+              Try again
+            </Button>
+          </div>
+        )}
 
         {replicaLoading && snippets.length === 0 ? (
           <div
@@ -410,12 +401,13 @@ export function Home({ active = true }: { active?: boolean }) {
             <LoaderCircle className="size-5 animate-spin" aria-hidden="true" />
             <span className="sr-only">Loading snippets</span>
           </div>
-        ) : (
+        ) : snippetReadError !== null && snippets.length === 0 ? null : (
           <SnippetList empty={snippets.length === 0}>
             {snippets.map((snippet) => (
               <SnippetRow
                 key={snippet.id}
                 snippet={snippet}
+                presentation={snippet.presentation}
                 now={now}
                 copied={copiedId === snippet.id}
                 copying={copyingId === snippet.id}
@@ -429,15 +421,17 @@ export function Home({ active = true }: { active?: boolean }) {
                   void runSnippetAction(snippet.id, () => window.ipc.snippets.retry(snippet.id))
                 }
                 onOpenLink={openLink}
-                {...(deriveSnippetPresentation({ fileName: snippet.fileName }).type === "text"
+                {...((snippet.presentation.type === "text" ||
+                  snippet.presentation.type === "hyperlink") &&
+                snippet.textContent !== undefined
                   ? {
-                      textContent: textContents[snippet.id],
-                      onRetryContent: () => void loadTextContent(snippet),
+                      textContent: snippet.textContent,
+                      onRetryContent: () => retryContent(snippet.id),
                     }
                   : {})}
-                {...(deriveSnippetPresentation({ fileName: snippet.fileName }).type === "image"
+                {...(snippet.presentation.type === "image"
                   ? {
-                      thumbnailUrl: thumbnailUrls[snippet.id] ?? null,
+                      thumbnailUrl: snippet.thumbnailUrl,
                     }
                   : {})}
                 onStopUpload={() => cancelUpload(snippet.id)}

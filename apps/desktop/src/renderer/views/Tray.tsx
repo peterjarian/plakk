@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useState, type DragEvent } from "react";
+import { useEffect, useState, type DragEvent } from "react";
 import { accountCanSync } from "@plakk/shared/PlakkApi";
 import type { TrayAccountState } from "../../ipc/contracts.ts";
-import { useSnippetThumbnails } from "../hooks/useSnippetThumbnails.ts";
 import { TrayActions } from "./tray/TrayActions.tsx";
 import { TrayRecentItem } from "./tray/TrayRecentItem.tsx";
 import { TrayShell } from "./tray/TrayShell.tsx";
@@ -15,10 +14,17 @@ export function Tray() {
   const [accountState, setAccountState] = useState<TrayAccountState>({ kind: "loading" });
   const ingestionAllowed = accountState.kind === "resolved" && accountCanSync(accountState.account);
   const account = accountState.kind === "resolved" ? accountState.account : null;
-  const { addClipboard, addDropped, addText, error, latest, reportError, upload } =
-    useTraySnippets(account);
-  const thumbnailSnippets = useMemo(() => (latest === undefined ? [] : [latest]), [latest]);
-  const thumbnailUrls = useSnippetThumbnails(thumbnailSnippets);
+  const {
+    addClipboard,
+    addDropped,
+    addText,
+    error,
+    latest,
+    reloadSnippets,
+    reportError,
+    snippetReadError,
+    upload,
+  } = useTraySnippets(account);
   const copyDisabled =
     latest === undefined || (!latest.contentAvailable && latest.uploadStatus !== "UPLOADED");
   const isCopied = latest !== undefined && copiedId === latest.id;
@@ -43,10 +49,10 @@ export function Tray() {
       (state) => {
         if (mounted) setAccountState(state);
       },
-      (cause) => {
+      () => {
         if (mounted) {
           setAccountState({ kind: "failed" });
-          reportError(cause instanceof Error ? cause.message : "Could not check the account.");
+          reportError("Could not check the account.");
         }
       },
     );
@@ -81,10 +87,10 @@ export function Tray() {
     void window.ipc.snippets
       .copy(snippetId)
       .then(() => setCopiedId(snippetId))
-      .catch((cause) =>
+      .catch(() =>
         setCopyError({
           id: snippetId,
-          message: cause instanceof Error ? cause.message : "Could not copy this snippet.",
+          message: "Could not copy this snippet.",
         }),
       )
       .finally(() => setCopyingId((id) => (id === snippetId ? null : id)));
@@ -96,9 +102,7 @@ export function Tray() {
   ) => {
     if (latest === undefined) return;
     reportError(null);
-    void action(latest.id).catch((cause) =>
-      reportError(cause instanceof Error ? cause.message : fallbackMessage),
-    );
+    void action(latest.id).catch(() => reportError(fallbackMessage));
   };
 
   return (
@@ -142,7 +146,8 @@ export function Tray() {
               copied={isCopied}
               copying={isCopying}
               copyDisabled={copyDisabled}
-              thumbnailUrl={latest === undefined ? null : (thumbnailUrls[latest.id] ?? null)}
+              readError={snippetReadError}
+              onReload={reloadSnippets}
               {...(currentCopyError === null ? {} : { copyError: currentCopyError })}
               onCopy={copyLatest}
               onDelete={() =>
@@ -180,11 +185,7 @@ export function Tray() {
                 void window.ipc.clipboard
                   .read()
                   .then(addClipboard)
-                  .catch((cause) =>
-                    reportError(
-                      cause instanceof Error ? cause.message : "Could not read the clipboard.",
-                    ),
-                  );
+                  .catch(() => reportError("Could not read the clipboard."));
               }}
               onSelect={() =>
                 void window.ipc.tray
@@ -193,11 +194,7 @@ export function Tray() {
                     for (const file of files)
                       upload({ name: file.name, size: file.size, type: "" }, file.path);
                   })
-                  .catch((cause) =>
-                    reportError(
-                      cause instanceof Error ? cause.message : "Could not choose a file.",
-                    ),
-                  )
+                  .catch(() => reportError("Could not choose a file."))
               }
             />
           </>

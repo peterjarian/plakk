@@ -13,11 +13,12 @@ import {
 } from "./snippetReplica.ts";
 import {
   DesktopManagedSnippetContent,
-  ManagedSnippetContentLive,
+  managedSnippetContentFromDesktopLayer,
 } from "./ManagedSnippetContent.ts";
 import { SnippetUploadEngine } from "./SnippetUploadEngine.ts";
 import { SnippetUploadOutbox } from "./SnippetUploadOutbox.ts";
 import { SnippetUploadRemote } from "./SnippetUploadRemote.ts";
+import { PlakkRpcClient, plakkRpcProtocolLayer } from "./PlakkRpcClient.ts";
 
 export const managedSnippetContentRoot = join(app.getPath("userData"), "snippet-content");
 const platformLayer = NodeFileSystem.layer;
@@ -27,11 +28,16 @@ const desktopContentLayer = DesktopManagedSnippetContent.layer(managedSnippetCon
 const storageUploadLayer = StorageUpload.layer((input, init) => net.fetch(input, init)).pipe(
   Layer.provide(platformLayer),
 );
+const plakkRpcClientLayer = PlakkRpcClient.layer.pipe(Layer.provide(plakkRpcProtocolLayer));
+const snippetRemoteTransportLayer = SnippetRemoteTransportLive.pipe(
+  Layer.provide(plakkRpcClientLayer),
+);
+const snippetUploadRemoteLayer = SnippetUploadRemote.Live.pipe(Layer.provide(plakkRpcClientLayer));
 const uploadEngineDependencies = Layer.mergeAll(
   desktopContentLayer,
   SnippetReplicaLive,
   SnippetUploadOutbox.Live,
-  SnippetUploadRemote.Live,
+  snippetUploadRemoteLayer,
   storageUploadLayer,
 );
 
@@ -40,10 +46,11 @@ const MainLayer = Layer.mergeAll(
   AuthService.layer.pipe(Layer.provideMerge(AuthStore.Live)),
   ActiveSnippetAccountLive,
   SnippetReplicaLive,
+  plakkRpcClientLayer,
   platformLayer,
   desktopContentLayer,
-  ManagedSnippetContentLive.pipe(Layer.provide(desktopContentLayer)),
-  SnippetRemoteTransportLive,
+  managedSnippetContentFromDesktopLayer.pipe(Layer.provide(desktopContentLayer)),
+  snippetRemoteTransportLayer,
   storageUploadLayer,
   SnippetUploadEngine.Live.pipe(Layer.provide(uploadEngineDependencies)),
 );

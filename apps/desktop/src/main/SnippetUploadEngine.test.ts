@@ -1,4 +1,5 @@
 import type { ApiSnippet, PreparedStorageUpload } from "@plakk/shared/PlakkApi";
+import { RpcError } from "@plakk/shared/RpcError";
 import {
   ManagedSnippetContentError,
   SnippetReplica,
@@ -7,6 +8,7 @@ import {
 import { describe, expect, it, vi } from "vite-plus/test";
 import { Effect, Fiber, Layer, Stream } from "effect";
 import { TestClock } from "effect/testing";
+import { RpcClientDefect, RpcClientError } from "effect/unstable/rpc/RpcClientError";
 
 import type { SnippetIngestPayload } from "../ipc/contracts.ts";
 import { StorageUpload, StorageUploadError } from "../storageUpload.ts";
@@ -62,7 +64,9 @@ const harness = (options?: {
   readonly uploadFailures?: number;
   readonly heartbeatFailures?: number;
   readonly completeFailures?: number;
+  readonly completeFailureType?: "transport" | "internal";
   readonly deleteFailures?: number;
+  readonly deleteRpcFailure?: RpcError;
   readonly discardFailures?: number;
   readonly outboxRemoveFailures?: number;
   readonly longDelete?: boolean;
@@ -256,10 +260,12 @@ const harness = (options?: {
             calls.heartbeat += 1;
             if (remainingHeartbeatFailures > 0) {
               remainingHeartbeatFailures -= 1;
-              return Effect.fail({
-                _tag: "RpcError",
-                message: "The upload heartbeat expired.",
-              } as never);
+              return Effect.fail(
+                new RpcError({
+                  code: "CONFLICT",
+                  message: "The upload heartbeat expired.",
+                }),
+              );
             }
             return Effect.succeed({ expiresAt: "2026-07-15T20:01:00.000Z" });
           }),
@@ -273,12 +279,24 @@ const harness = (options?: {
             calls.retry += 1;
             return apiSnippet("UPLOADING");
           }),
-        complete: () =>
+        complete: (): Effect.Effect<ApiSnippet, RpcError | RpcClientError> =>
           Effect.suspend(() => {
             calls.complete += 1;
             if (remainingCompleteFailures > 0) {
               remainingCompleteFailures -= 1;
-              return Effect.fail({ _tag: "RpcClientError" } as never);
+              const failure: RpcError | RpcClientError =
+                options?.completeFailureType === "internal"
+                  ? new RpcError({
+                      code: "INTERNAL_SERVER_ERROR",
+                      message: "The server could not acknowledge completion.",
+                    })
+                  : new RpcClientError({
+                      reason: new RpcClientDefect({
+                        cause: null,
+                        message: "The completion acknowledgement was lost.",
+                      }),
+                    });
+              return Effect.fail(failure);
             }
             return Effect.succeed(apiSnippet("UPLOADED"));
           }),
@@ -286,9 +304,17 @@ const harness = (options?: {
           Effect.gen(function* () {
             calls.delete += 1;
             if (options?.longDelete === true) yield* Effect.sleep("5 seconds");
+            if (options?.deleteRpcFailure !== undefined) {
+              return yield* Effect.fail(options.deleteRpcFailure);
+            }
             if (remainingDeleteFailures > 0) {
               remainingDeleteFailures -= 1;
-              return yield* Effect.fail({ _tag: "RpcClientError" } as never);
+              return yield* new RpcClientError({
+                reason: new RpcClientDefect({
+                  cause: null,
+                  message: "The deletion request failed in transit.",
+                }),
+              });
             }
           }),
       }),
@@ -462,6 +488,25 @@ describe("SnippetUploadEngine", () => {
 
   it("retries idempotent completion when its acknowledgement is lost", async () => {
     const test = harness({ completeFailures: 1 });
+    await test.run(SnippetUploadEngine.use((engine) => engine.ingest(account.id, input)));
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const engine = yield* SnippetUploadEngine;
+        yield* engine.resume(account);
+        yield* Effect.yieldNow;
+        yield* TestClock.adjust("2 seconds");
+        yield* Effect.yieldNow;
+      }).pipe(Effect.provide(test.layer), Effect.provide(TestClock.layer())),
+    );
+
+    await vi.waitFor(() => expect(test.outbox.get(account.id)?.[0]?.phase).toBe("UPLOADED"));
+    expect(test.calls.complete).toBe(2);
+    expect(test.calls.fail).toBe(0);
+  });
+
+  it("retries a declared transient server failure during completion", async () => {
+    const test = harness({ completeFailures: 1, completeFailureType: "internal" });
     await test.run(SnippetUploadEngine.use((engine) => engine.ingest(account.id, input)));
 
     await Effect.runPromise(
@@ -749,6 +794,22 @@ describe("SnippetUploadEngine", () => {
         expect(restored[0]?.id).toBe(snippetId);
       }).pipe(Effect.provide(test.layer)),
     );
+  });
+
+  it("uses the caller fallback instead of exposing a declared remote error message", async () => {
+    const test = harness({
+      deleteRpcFailure: new RpcError({
+        code: "CONFLICT",
+        message: "sensitive provider deletion detail",
+      }),
+    });
+
+    await expect(
+      test.run(SnippetUploadEngine.use((engine) => engine.delete(account, snippetId))),
+    ).rejects.toMatchObject({
+      _tag: "SnippetUploadEngineError",
+      reason: "Plakk could not delete this snippet.",
+    });
   });
 
   it("keeps a server-deleted snippet hidden when local cleanup fails", async () => {

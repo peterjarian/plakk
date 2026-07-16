@@ -1,10 +1,10 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 
-import type { DesktopSnippet } from "../../../ipc/contracts.ts";
+import type { SnippetReadModel } from "../../hooks/useSnippets.ts";
 import { TrayRecentItem } from "./TrayRecentItem.tsx";
 
-const snippet: DesktopSnippet = {
+const snippet: SnippetReadModel = {
   id: "8c72d6f6-9a25-4633-b72f-d8f83cf1c8e0",
   fileName: "snippet.txt",
   byteSize: 14,
@@ -21,16 +21,38 @@ const snippet: DesktopSnippet = {
   },
   localTextContent: "A text snippet",
   contentAvailable: true,
+  presentation: { type: "text", title: "A text snippet" },
+  textContent: { state: "ready", text: "A text snippet" },
+  thumbnailUrl: null,
 };
 
 const handlers = {
   onCopy: () => undefined,
   onDelete: () => undefined,
+  onReload: () => undefined,
   onRetryUpload: () => undefined,
   onStopUpload: () => undefined,
 };
 
 describe("TrayRecentItem", () => {
+  it("shows a controlled retry instead of an empty state when snippet loading fails", () => {
+    const markup = renderToStaticMarkup(
+      <TrayRecentItem
+        snippet={undefined}
+        copied={false}
+        copying={false}
+        copyDisabled
+        readError="Couldn’t load snippets. Try again."
+        {...handlers}
+      />,
+    );
+
+    expect(markup).toContain('role="alert"');
+    expect(markup).toContain("Couldn’t load snippets. Try again.");
+    expect(markup).toContain("Try again");
+    expect(markup).not.toContain("Nothing added yet");
+  });
+
   it("keeps origin upload failures actionable in the widget", () => {
     const markup = renderToStaticMarkup(
       <TrayRecentItem
@@ -38,7 +60,7 @@ describe("TrayRecentItem", () => {
         copied={false}
         copying={false}
         copyDisabled={false}
-        thumbnailUrl={null}
+        readError={null}
         {...handlers}
       />,
     );
@@ -58,7 +80,7 @@ describe("TrayRecentItem", () => {
         copied={false}
         copying={false}
         copyDisabled={false}
-        thumbnailUrl={null}
+        readError={null}
         {...handlers}
       />,
     );

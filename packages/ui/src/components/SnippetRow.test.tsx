@@ -26,6 +26,7 @@ describe("SnippetRow", () => {
     const markup = renderToStaticMarkup(
       <SnippetRow
         snippet={snippet}
+        presentation={{ type: "text", title: "A text snippet" }}
         now={now}
         copied={false}
         onCopy={() => undefined}
@@ -44,6 +45,7 @@ describe("SnippetRow", () => {
     const markup = renderToStaticMarkup(
       <SnippetRow
         snippet={snippet}
+        presentation={{ type: "text", title: "A text snippet" }}
         now={now}
         copied={false}
         copying
@@ -62,6 +64,7 @@ describe("SnippetRow", () => {
     const markup = renderToStaticMarkup(
       <SnippetRow
         snippet={{ ...snippet, uploadStatus: "UPLOADING", contentAvailable: false }}
+        presentation={{ type: "text", title: "Text snippet" }}
         now={now}
         copied={false}
         onCopy={() => undefined}
@@ -78,6 +81,7 @@ describe("SnippetRow", () => {
     const markup = renderToStaticMarkup(
       <SnippetRow
         snippet={{ ...snippet, uploadStatus: "FAILED", contentAvailable: false }}
+        presentation={{ type: "text", title: "Text snippet" }}
         now={now}
         copied={false}
         onCopy={() => undefined}
@@ -95,6 +99,11 @@ describe("SnippetRow", () => {
     const withoutOwner = renderToStaticMarkup(
       <SnippetRow
         snippet={snippet}
+        presentation={{
+          type: "hyperlink",
+          title: "https://example.com",
+          url: "https://example.com",
+        }}
         now={now}
         copied={false}
         onCopy={() => undefined}
@@ -106,6 +115,11 @@ describe("SnippetRow", () => {
     const withOwner = renderToStaticMarkup(
       <SnippetRow
         snippet={snippet}
+        presentation={{
+          type: "hyperlink",
+          title: "https://example.com",
+          url: "https://example.com",
+        }}
         now={now}
         copied={false}
         onCopy={() => undefined}
@@ -118,6 +132,27 @@ describe("SnippetRow", () => {
 
     expect(withoutOwner).not.toContain('aria-label="Open link"');
     expect(withOwner).toContain('aria-label="Open link"');
+  });
+
+  it("renders the projected presentation without deriving a loading title", () => {
+    const markup = renderToStaticMarkup(
+      <SnippetRow
+        snippet={snippet}
+        presentation={{ type: "text", title: "Text unavailable" }}
+        now={now}
+        copied={false}
+        onCopy={() => undefined}
+        onDelete={() => undefined}
+        onRetryContent={() => undefined}
+        onStopUpload={() => undefined}
+        textContent={{ state: "failed", message: "Couldn’t load this text. Try again." }}
+      />,
+    );
+
+    expect(markup).toContain("Text unavailable");
+    expect(markup).toContain("Couldn’t load this text. Try again.");
+    expect(markup).not.toContain("Loading text");
+    expect(markup).toContain('aria-label="Retry loading text"');
   });
 });
 

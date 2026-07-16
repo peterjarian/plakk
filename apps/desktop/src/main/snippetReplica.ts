@@ -11,8 +11,9 @@ import ElectronStore from "electron-store";
 import { Context, Effect, Layer, PubSub, Schema, Semaphore, Stream } from "effect";
 import { SnippetIdSchema, type SnippetChangePage } from "@plakk/shared/PlakkApi";
 
-import { makePlakkClient, getSnippetCopyPayload } from "./accountStatus.ts";
+import { getSnippetCopyPayload } from "./accountStatus.ts";
 import { downloadSnippetBytes } from "./clipboard.ts";
+import { PlakkRpcClient } from "./PlakkRpcClient.ts";
 
 const StoredReplicaCodec = Schema.fromJsonString(SnippetReplicaStateSchema);
 const PendingReplicaDeleteSchema = Schema.Struct({
@@ -283,7 +284,7 @@ export const ActiveSnippetAccountLive = Layer.effect(
 export const SnippetRemoteTransportLive = Layer.effect(
   SnippetRemoteTransport,
   Effect.gen(function* () {
-    const client = yield* makePlakkClient;
+    const client = yield* PlakkRpcClient;
     return SnippetRemoteTransport.of({
       snapshot: Effect.fn("DesktopSnippetRemote.snapshot")(function* (account) {
         const snapshot = yield* client.GetSnippetSnapshot(undefined, {

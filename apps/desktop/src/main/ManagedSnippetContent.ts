@@ -1,5 +1,5 @@
 import { ManagedSnippetContent, ManagedSnippetContentError } from "@plakk/shared/SnippetReplica";
-import { Context, Effect, FileSystem, Layer } from "effect";
+import { Context, Effect, FileSystem, Layer, PlatformError } from "effect";
 import { join } from "node:path";
 
 import type { SnippetIngestPayload } from "../ipc/contracts.ts";
@@ -10,51 +10,53 @@ const contentDirectory = (root: string, accountId: string, snippetId: string) =>
 export const managedSnippetContentPath = (root: string, accountId: string, snippetId: string) =>
   join(contentDirectory(root, accountId, snippetId), "content");
 
-const nestedErrorCode = (cause: unknown): string | number | null => {
-  let current = cause;
-  for (let depth = 0; depth < 4 && typeof current === "object" && current !== null; depth += 1) {
-    if (
-      "code" in current &&
-      (typeof current.code === "string" || typeof current.code === "number")
-    ) {
-      return current.code;
+const nodeErrorCode = (cause: unknown): string | null =>
+  cause instanceof Error && "code" in cause && typeof cause.code === "string" ? cause.code : null;
+
+const importError = (cause: PlatformError.PlatformError) => {
+  switch (cause.reason._tag) {
+    case "TimedOut":
+      return new ManagedSnippetContentError({
+        cause,
+        reason:
+          "This file isn’t available on this Mac yet. Check its cloud download, then try again.",
+      });
+    case "NotFound":
+      return new ManagedSnippetContentError({
+        cause,
+        reason: "This file is no longer available. Choose it again.",
+      });
+    case "PermissionDenied":
+      return new ManagedSnippetContentError({
+        cause,
+        reason: "Plakk can’t read this file. Check its permissions, then choose it again.",
+      });
+    case "Unknown": {
+      const code = nodeErrorCode(cause.reason.cause);
+      if (code === "ETIMEDOUT") {
+        return new ManagedSnippetContentError({
+          cause,
+          reason:
+            "This file isn’t available on this Mac yet. Check its cloud download, then try again.",
+        });
+      }
+      if (code === "ENOSPC") {
+        return new ManagedSnippetContentError({
+          cause,
+          reason:
+            "There isn’t enough space on this Mac to save this file. Free some space, then try again.",
+        });
+      }
+      break;
     }
-    current = "cause" in current ? current.cause : null;
   }
-  return null;
-};
 
-const importError = (cause: unknown) => {
-  const code = nestedErrorCode(cause);
-  const platformReason =
-    typeof cause === "object" &&
-    cause !== null &&
-    "_tag" in cause &&
-    cause._tag === "PlatformError" &&
-    "reason" in cause &&
-    typeof cause.reason === "object" &&
-    cause.reason !== null &&
-    "_tag" in cause.reason
-      ? cause.reason._tag
-      : null;
-  const reason =
-    code === "ETIMEDOUT" || platformReason === "TimedOut"
-      ? "This file isn’t available on this Mac yet. Check its cloud download, then try again."
-      : code === "ENOSPC"
-        ? "There isn’t enough space on this Mac to save this file. Free some space, then try again."
-        : platformReason === "NotFound"
-          ? "This file is no longer available. Choose it again."
-          : platformReason === "PermissionDenied"
-            ? "Plakk can’t read this file. Check its permissions, then choose it again."
-            : "Plakk couldn’t save this file locally. Make sure it is available on this Mac, then try again.";
-  return new ManagedSnippetContentError({ cause, reason });
+  return new ManagedSnippetContentError({
+    cause,
+    reason:
+      "Plakk couldn’t save this file locally. Make sure it is available on this Mac, then try again.",
+  });
 };
-
-const isManagedContentError = (cause: unknown): cause is ManagedSnippetContentError =>
-  typeof cause === "object" &&
-  cause !== null &&
-  "_tag" in cause &&
-  cause._tag === "ManagedSnippetContentError";
 
 const validFile = (info: FileSystem.File.Info, byteSize: number) =>
   info.type === "File" && Number(info.size) === byteSize;
@@ -165,7 +167,7 @@ export class DesktopManagedSnippetContent extends Context.Service<
                 .remove(directory, { force: true, recursive: true })
                 .pipe(Effect.catch(() => Effect.void)),
             ),
-            Effect.mapError((cause) => (isManagedContentError(cause) ? cause : importError(cause))),
+            Effect.catchTag("PlatformError", (cause) => Effect.fail(importError(cause))),
           );
         });
 
@@ -259,7 +261,7 @@ export class DesktopManagedSnippetContent extends Context.Service<
   }
 }
 
-export const ManagedSnippetContentLive = Layer.effect(
+export const managedSnippetContentFromDesktopLayer = Layer.effect(
   ManagedSnippetContent,
   DesktopManagedSnippetContent.use((content) =>
     Effect.succeed(

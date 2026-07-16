@@ -119,6 +119,8 @@ const SnippetIngestResultSchema = Schema.Union([
   Schema.Struct({ status: Schema.Literal("FAILED"), message: Schema.String }),
 ]);
 
+export type SnippetIngestResult = typeof SnippetIngestResultSchema.Type;
+
 export const DesktopSnippetLocalStateSchema = Schema.Struct({
   phase: Schema.Literals(["IMPORTING", "QUEUED", "UPLOADING", "FAILED"] as const),
   progress: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 100 })),

@@ -1,5 +1,7 @@
-import type { DesktopSnippet } from "../../../ipc/contracts.ts";
 import { SnippetRow } from "@plakk/ui/components/SnippetRow";
+import { Button } from "@plakk/ui/components/primitives/button";
+
+import type { SnippetReadModel } from "../../hooks/useSnippets.ts";
 
 export function TrayRecentItem({
   snippet,
@@ -7,24 +9,38 @@ export function TrayRecentItem({
   copying,
   copyDisabled,
   copyError,
-  thumbnailUrl,
+  readError,
+  onReload,
   onCopy,
   onDelete,
   onRetryUpload,
   onStopUpload,
 }: {
-  snippet: DesktopSnippet | undefined;
+  snippet: SnippetReadModel | undefined;
   copied: boolean;
   copying: boolean;
   copyDisabled: boolean;
   copyError?: string;
-  thumbnailUrl: string | null;
+  readError: string | null;
+  onReload: () => void;
   onCopy: () => void;
   onDelete: () => void;
   onRetryUpload: () => void;
   onStopUpload: () => void;
 }) {
   if (!snippet) {
+    if (readError !== null) {
+      return (
+        <section className="grid min-h-0 flex-1 place-content-center gap-2 px-6 text-center">
+          <p className="text-xs text-destructive" role="alert">
+            {readError}
+          </p>
+          <Button type="button" variant="outline" size="sm" onClick={onReload}>
+            Try again
+          </Button>
+        </section>
+      );
+    }
     return (
       <section className="grid min-h-0 flex-1 place-content-center gap-1 px-6 text-center">
         <p className="text-sm font-medium">Nothing added yet</p>
@@ -41,19 +57,18 @@ export function TrayRecentItem({
       <ul className="rounded-lg border bg-card px-1 py-1">
         <SnippetRow
           snippet={snippet}
+          presentation={snippet.presentation}
           now={Date.now()}
           copied={copied}
           copying={copying}
           copyDisabled={copyDisabled}
-          thumbnailUrl={thumbnailUrl}
+          thumbnailUrl={snippet.thumbnailUrl}
           {...(copyError === undefined ? {} : { copyError })}
           onCopy={onCopy}
           onDelete={onDelete}
           onRetryUpload={onRetryUpload}
           onStopUpload={onStopUpload}
-          {...(snippet.localTextContent === null
-            ? {}
-            : { textContent: { state: "ready" as const, text: snippet.localTextContent } })}
+          {...(snippet.textContent === undefined ? {} : { textContent: snippet.textContent })}
         />
       </ul>
     </section>

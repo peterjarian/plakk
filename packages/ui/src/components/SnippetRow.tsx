@@ -1,4 +1,4 @@
-import { deriveSnippetPresentation, formatFileSize, type SnippetPresentation } from "@plakk/shared";
+import { formatFileSize, type SnippetPresentation } from "@plakk/shared";
 import type { ApiSnippet } from "@plakk/shared/PlakkApi";
 import * as DateTime from "effect/DateTime";
 import {
@@ -28,7 +28,6 @@ export type SnippetRowItem = Omit<ApiSnippet, "uploadStatus"> & {
 };
 
 export type TextSnippetContent =
-  | { readonly state: "loading" }
   | { readonly state: "ready"; readonly text: string }
   | { readonly state: "failed"; readonly message: string };
 
@@ -41,18 +40,6 @@ const presentationMeta: Record<SnippetPresentation["type"], { Icon: typeof Type 
 
 const fileSubtitle = (snippet: Pick<ApiSnippet, "byteSize" | "fileName">) =>
   `${snippet.fileName.split(".").pop()?.toUpperCase() ?? "FILE"} · ${formatFileSize(snippet.byteSize)}`;
-
-const presentationFor = (
-  snippet: SnippetRowItem,
-  textContent: TextSnippetContent | undefined,
-): SnippetPresentation => {
-  const content = textContent?.state === "ready" ? textContent.text : undefined;
-  return deriveSnippetPresentation(
-    content === undefined
-      ? { fileName: snippet.fileName }
-      : { fileName: snippet.fileName, content },
-  );
-};
 
 const relativeDateUnits = [
   [30 * 24 * 60 * 60 * 1000, "month"],
@@ -95,6 +82,7 @@ export function formatSnippetDate(
 
 export function SnippetRow(props: {
   snippet: SnippetRowItem;
+  presentation: SnippetPresentation;
   now: number;
   copied: boolean;
   onCopy: () => void;
@@ -112,6 +100,7 @@ export function SnippetRow(props: {
 }) {
   const {
     snippet,
+    presentation,
     now,
     copied,
     onCopy,
@@ -127,7 +116,6 @@ export function SnippetRow(props: {
     copyError,
     showActions = true,
   } = props;
-  const presentation = presentationFor(snippet, textContent);
   const { Icon } = presentationMeta[presentation.type];
   const localState = snippet.localState;
   const isRemoteUploading = localState === null && snippet.uploadStatus === "UPLOADING";
@@ -145,15 +133,13 @@ export function SnippetRow(props: {
           ? (localState.errorMessage ?? "Upload failed. Choose the file again to retry.")
           : localState?.phase === "IMPORTING"
             ? "Saving locally…"
-            : isText && textContent?.state === "loading"
-              ? "Loading text…"
-              : isText && textContent?.state === "failed"
-                ? textContent.message
-                : presentation.type === "file" || presentation.type === "image"
-                  ? fileSubtitle(snippet)
-                  : localState !== null
-                    ? ""
-                    : formatFileSize(snippet.byteSize);
+            : isText && textContent?.state === "failed"
+              ? textContent.message
+              : presentation.type === "file" || presentation.type === "image"
+                ? fileSubtitle(snippet)
+                : localState !== null
+                  ? ""
+                  : formatFileSize(snippet.byteSize);
   const time = isRemoteFailed
     ? "Failed"
     : localState !== null

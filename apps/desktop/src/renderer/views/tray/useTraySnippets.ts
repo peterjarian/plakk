@@ -2,20 +2,23 @@ import { useState } from "react";
 import type { AccountStatus } from "@plakk/shared/PlakkApi";
 
 import type { ClipboardContent, TrayDroppedItem } from "../../../ipc/contracts.ts";
-import { useSnippetReplica } from "../../hooks/useSnippetReplica.ts";
+import { useSnippets } from "../../hooks/useSnippets.ts";
 import { encodeTextSnippet } from "../../lib/textSnippetContent.ts";
 
 export function useTraySnippets(account: AccountStatus | null) {
-  const { items } = useSnippetReplica();
+  const { error: snippetReadError, items, reload: reloadSnippets } = useSnippets();
   const [error, setError] = useState<string | null>(null);
   const latest = items.at(0);
   const provider = account?.storageProvider ?? null;
 
   const ingest = (payload: Parameters<typeof window.ipc.snippets.ingest>[0]) => {
     setError(null);
-    return window.ipc.snippets.ingest(payload).catch((cause) => {
-      setError(cause instanceof Error ? cause.message : "Plakk couldn’t save this snippet.");
-    });
+    return window.ipc.snippets.ingest(payload).then(
+      (result) => {
+        if (result.status === "FAILED") setError(result.message);
+      },
+      () => setError("Plakk couldn’t save this snippet."),
+    );
   };
 
   const upload = (file: Pick<File, "name" | "size" | "type">, filePath?: string) => {
@@ -53,8 +56,8 @@ export function useTraySnippets(account: AccountStatus | null) {
         upload({ name: "Pasted image.png", size: blob.size, type: blob.type }, content.path);
       } else if (content.type === "file" && content.size !== undefined)
         upload({ name: content.name, size: content.size, type: "" }, content.path);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Plakk couldn’t read the clipboard item.");
+    } catch {
+      setError("Plakk couldn’t read the clipboard item.");
     }
   };
 
@@ -65,5 +68,15 @@ export function useTraySnippets(account: AccountStatus | null) {
         upload({ name: file.name, size: file.size, type: "" }, file.path);
   };
 
-  return { addClipboard, addDropped, addText, error, latest, reportError: setError, upload };
+  return {
+    addClipboard,
+    addDropped,
+    addText,
+    error,
+    latest,
+    reloadSnippets,
+    reportError: setError,
+    snippetReadError,
+    upload,
+  };
 }

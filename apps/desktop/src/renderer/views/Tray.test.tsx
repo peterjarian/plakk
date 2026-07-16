@@ -16,13 +16,12 @@ const state = vi.hoisted(() => {
     localState: null,
     localTextContent: null,
     contentAvailable: true,
+    presentation: { type: "image", title: "Alfa Romeo.png" },
+    textContent: undefined,
+    thumbnailUrl: "blob:tray-preview",
   } as const;
-  return { latest, thumbnails: vi.fn(() => ({ [latest.id]: "blob:tray-preview" })) };
+  return { latest };
 });
-
-vi.mock("../hooks/useSnippetThumbnails.ts", () => ({
-  useSnippetThumbnails: state.thumbnails,
-}));
 
 vi.mock("./tray/useTraySnippets.ts", () => ({
   useTraySnippets: () => ({
@@ -31,7 +30,9 @@ vi.mock("./tray/useTraySnippets.ts", () => ({
     addText: vi.fn(),
     error: null,
     latest: state.latest,
+    reloadSnippets: vi.fn(),
     reportError: vi.fn(),
+    snippetReadError: null,
     upload: vi.fn(),
   }),
 }));
@@ -40,7 +41,6 @@ describe("Tray", () => {
   it("projects the shared image thumbnail into its recent item", () => {
     const markup = renderToStaticMarkup(<Tray />);
 
-    expect(state.thumbnails).toHaveBeenCalledWith([state.latest]);
     expect(markup).toContain('<img src="blob:tray-preview"');
   });
 });

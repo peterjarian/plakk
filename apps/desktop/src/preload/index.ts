@@ -5,6 +5,7 @@ import type {
   ClipboardContent,
   DesktopSnippet,
   SnippetIngestPayload,
+  SnippetIngestResult,
   TrayDroppedItem,
   TrayAccountState,
   UserConfig,
@@ -46,7 +47,7 @@ export type DesktopApi = {
     readonly copy: (id: string) => Promise<void>;
     readonly delete: (id: string) => Promise<void>;
     readonly discard: (id: string) => Promise<void>;
-    readonly ingest: (payload: RendererSnippetIngestPayload) => Promise<void>;
+    readonly ingest: (payload: RendererSnippetIngestPayload) => Promise<SnippetIngestResult>;
     readonly list: () => Promise<ReadonlyArray<DesktopSnippet>>;
     readonly onChanged: (callback: (items: ReadonlyArray<DesktopSnippet>) => void) => () => void;
     readonly read: (id: string) => Promise<Uint8Array>;
@@ -109,9 +110,7 @@ const desktopApi = {
               if (!filePath) return Promise.reject(new Error("Choose a file to add."));
               return invoke(ipcMethods.snippetIngest, { ...payload, filePath });
             })();
-      return invocation.then((result) => {
-        if (result.status === "FAILED") throw new Error(result.message);
-      });
+      return invocation;
     },
     list: () => invoke(ipcMethods.snippetList, undefined),
     onChanged: (callback) => on(ipcEvents.snippetReplicaChanged, callback),

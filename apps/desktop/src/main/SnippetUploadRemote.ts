@@ -7,7 +7,7 @@ import type { RpcError } from "@plakk/shared/RpcError";
 import { Context, Effect, Layer } from "effect";
 import type { RpcClientError } from "effect/unstable/rpc/RpcClientError";
 
-import { makePlakkClient } from "./accountStatus.ts";
+import { PlakkRpcClient } from "./PlakkRpcClient.ts";
 
 const headers = (accessToken: string) => ({ authorization: `Bearer ${accessToken}` });
 type SnippetUploadRemoteError = RpcError | RpcClientError;
@@ -39,7 +39,7 @@ export class SnippetUploadRemote extends Context.Service<
   static readonly Live = Layer.effect(
     SnippetUploadRemote,
     Effect.gen(function* () {
-      const client = yield* makePlakkClient;
+      const client = yield* PlakkRpcClient;
       return SnippetUploadRemote.of({
         create: Effect.fn("SnippetUploadRemote.create")((accessToken, input) =>
           client.CreateStoredSnippet(input, { headers: headers(accessToken) }),

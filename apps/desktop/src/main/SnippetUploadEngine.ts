@@ -1,6 +1,11 @@
 import { deriveSnippetPresentation } from "@plakk/shared";
 import type { ApiSnippet } from "@plakk/shared/PlakkApi";
-import { SnippetReplica } from "@plakk/shared/SnippetReplica";
+import { RpcError } from "@plakk/shared/RpcError";
+import {
+  ManagedSnippetContentError,
+  SnippetReplica,
+  SnippetReplicaError,
+} from "@plakk/shared/SnippetReplica";
 import {
   Context,
   DateTime,
@@ -15,11 +20,16 @@ import {
   Semaphore,
   Stream,
 } from "effect";
+import { RpcClientError } from "effect/unstable/rpc/RpcClientError";
 
 import type { DesktopSnippet, SnippetIngestPayload } from "../ipc/contracts.ts";
-import { StorageUpload } from "../storageUpload.ts";
+import { StorageUpload, StorageUploadError } from "../storageUpload.ts";
 import { DesktopManagedSnippetContent } from "./ManagedSnippetContent.ts";
-import { SnippetUploadOutbox, type SnippetUploadOutboxEntry } from "./SnippetUploadOutbox.ts";
+import {
+  SnippetUploadOutbox,
+  SnippetUploadOutboxError,
+  type SnippetUploadOutboxEntry,
+} from "./SnippetUploadOutbox.ts";
 import { SnippetUploadRemote } from "./SnippetUploadRemote.ts";
 
 type UploadAccount = { readonly id: string; readonly accessToken: string };
@@ -40,25 +50,14 @@ export class SnippetUploadEngineError extends Schema.TaggedErrorClass<SnippetUpl
   },
 ) {}
 
-const errorReason = (cause: unknown, fallback: string) => {
-  if (
-    typeof cause === "object" &&
-    cause !== null &&
-    "reason" in cause &&
-    typeof cause.reason === "string"
-  ) {
-    return cause.reason;
-  }
-  if (
-    typeof cause === "object" &&
-    cause !== null &&
-    "message" in cause &&
-    typeof cause.message === "string"
-  ) {
-    return cause.message;
-  }
-  return fallback;
-};
+const errorReason = (cause: unknown, fallback: string) =>
+  cause instanceof ManagedSnippetContentError ||
+  cause instanceof SnippetReplicaError ||
+  cause instanceof SnippetUploadOutboxError
+    ? cause.reason
+    : cause instanceof StorageUploadError
+      ? cause.message
+      : fallback;
 
 const engineError = (cause: unknown, fallback: string, canRetry: boolean) =>
   cause instanceof SnippetUploadEngineError
@@ -69,26 +68,20 @@ const engineError = (cause: unknown, fallback: string, canRetry: boolean) =>
         canRetry,
       });
 
-const nestedFailure = (cause: unknown, predicate: (value: object) => boolean): boolean => {
-  let current = cause;
-  for (let depth = 0; depth < 5 && typeof current === "object" && current !== null; depth += 1) {
-    if (predicate(current)) return true;
-    current = "cause" in current ? current.cause : null;
-  }
-  return false;
-};
+const isTransientRemoteFailure = (cause: unknown) =>
+  cause instanceof RpcClientError ||
+  (cause instanceof RpcError && cause.code === "INTERNAL_SERVER_ERROR");
 
-const isTransientUploadFailure = (cause: unknown) =>
-  nestedFailure(
-    cause,
-    (value) =>
-      ("code" in value && value.code === "INTERNAL_SERVER_ERROR") ||
-      ("_tag" in value && value._tag === "RpcClientError") ||
-      ("_tag" in value &&
-        value._tag === "StorageUploadError" &&
-        "retryable" in value &&
-        value.retryable === true),
-  );
+const isTransientStorageFailure = (cause: unknown) =>
+  cause instanceof StorageUploadError && cause.retryable;
+
+const isTransientEngineFailure = (cause: SnippetUploadEngineError) =>
+  isTransientRemoteFailure(cause.cause) || isTransientStorageFailure(cause.cause);
+
+const unexpectedLocalFailure = "Plakk could not update local snippet data.";
+const mapUnexpectedLocalFailure = Effect.mapError((cause: unknown) =>
+  engineError(cause, unexpectedLocalFailure, false),
+);
 
 const localTextFrom = (input: SnippetIngestPayload): string | null => {
   if (!("bytes" in input)) return null;
@@ -185,9 +178,7 @@ export class SnippetUploadEngine extends Context.Service<
         accountId: string,
         entry: SnippetUploadOutboxEntry,
       ) {
-        yield* outbox
-          .put(accountId, entry)
-          .pipe(Effect.mapError((cause) => engineError(cause, cause.reason, false)));
+        yield* outbox.put(accountId, entry).pipe(mapUnexpectedLocalFailure);
         yield* publish(accountId);
       });
 
@@ -196,9 +187,7 @@ export class SnippetUploadEngine extends Context.Service<
         snippetId: string,
         failure: SnippetUploadEngineError,
       ) {
-        const entry = yield* outbox
-          .get(account.id, snippetId)
-          .pipe(Effect.mapError((cause) => engineError(cause, cause.reason, false)));
+        const entry = yield* outbox.get(account.id, snippetId).pipe(mapUnexpectedLocalFailure);
         if (entry === null || entry.phase === "UPLOADED") return;
 
         let authoritativeStatus = entry.authoritativeStatus;
@@ -224,9 +213,7 @@ export class SnippetUploadEngine extends Context.Service<
         account: UploadAccount,
         snippetId: string,
       ) {
-        let entry = yield* outbox
-          .get(account.id, snippetId)
-          .pipe(Effect.mapError((cause) => engineError(cause, cause.reason, false)));
+        let entry = yield* outbox.get(account.id, snippetId).pipe(mapUnexpectedLocalFailure);
         if (entry === null || entry.phase !== "QUEUED") return;
 
         const startedAt = DateTime.formatIso(yield* DateTime.now);
@@ -242,7 +229,7 @@ export class SnippetUploadEngine extends Context.Service<
 
         const filePath = yield* content
           .path(account.id, entry.id, entry.byteSize)
-          .pipe(Effect.mapError((cause) => engineError(cause, cause.reason, false)));
+          .pipe(mapUnexpectedLocalFailure);
 
         if (entry.authoritativeStatus === null) {
           const created = yield* remote
@@ -322,7 +309,7 @@ export class SnippetUploadEngine extends Context.Service<
           Effect.retry({
             schedule: Schedule.exponential("1 second"),
             times: 2,
-            while: isTransientUploadFailure,
+            while: isTransientEngineFailure,
           }),
         );
         const uploaded = yield* transfer;
@@ -338,7 +325,7 @@ export class SnippetUploadEngine extends Context.Service<
             Effect.retry({
               schedule: Schedule.exponential("1 second"),
               times: 2,
-              while: isTransientUploadFailure,
+              while: isTransientEngineFailure,
             }),
           );
         yield* put(account.id, {
@@ -386,9 +373,7 @@ export class SnippetUploadEngine extends Context.Service<
       const scheduleQueued = Effect.fn("SnippetUploadEngine.scheduleQueued")(function* (
         account: UploadAccount,
       ) {
-        const entries = yield* outbox
-          .list(account.id)
-          .pipe(Effect.mapError((cause) => engineError(cause, cause.reason, false)));
+        const entries = yield* outbox.list(account.id).pipe(mapUnexpectedLocalFailure);
         yield* Effect.forEach(
           entries.filter((entry) => entry.phase === "QUEUED"),
           (entry) => schedule(account, entry.id),
@@ -419,7 +404,7 @@ export class SnippetUploadEngine extends Context.Service<
         yield* publish(accountId);
 
         const imported = content.ingest(accountId, input).pipe(
-          Effect.mapError((cause) => engineError(cause, cause.reason, false)),
+          mapUnexpectedLocalFailure,
           Effect.flatMap(() =>
             put(accountId, {
               id: input.id,
@@ -472,9 +457,7 @@ export class SnippetUploadEngine extends Context.Service<
           yield* scheduleQueued(account);
           return;
         }
-        const entries = yield* outbox
-          .list(account.id)
-          .pipe(Effect.mapError((cause) => engineError(cause, cause.reason, false)));
+        const entries = yield* outbox.list(account.id).pipe(mapUnexpectedLocalFailure);
         yield* Effect.forEach(
           entries.filter((entry) => entry.phase === "UPLOADING"),
           (entry) =>
@@ -483,7 +466,7 @@ export class SnippetUploadEngine extends Context.Service<
                 Effect.retry({
                   schedule: Schedule.exponential("1 second"),
                   times: 2,
-                  while: isTransientUploadFailure,
+                  while: isTransientRemoteFailure,
                 }),
               );
               const updatedAt = DateTime.formatIso(yield* DateTime.now);
@@ -520,16 +503,12 @@ export class SnippetUploadEngine extends Context.Service<
         replicaItems: ReadonlyArray<ApiSnippet>,
       ) {
         const durablePendingDeletes = new Set(
-          yield* replica
-            .pendingDeleteIds(accountId)
-            .pipe(Effect.mapError((cause) => engineError(cause, cause.reason, false))),
+          yield* replica.pendingDeleteIds(accountId).pipe(mapUnexpectedLocalFailure),
         );
         const isDeletePending = (snippetId: string) =>
           durablePendingDeletes.has(snippetId) ||
           pendingDeletes.has(pendingDeleteKey(accountId, snippetId));
-        const entries = yield* outbox
-          .list(accountId)
-          .pipe(Effect.mapError((cause) => engineError(cause, cause.reason, false)));
+        const entries = yield* outbox.list(accountId).pipe(mapUnexpectedLocalFailure);
         const replicas = new Map(replicaItems.map((snippet) => [snippet.id, snippet]));
         const projected: Array<DesktopSnippet> = [];
         const importingIds = new Set<string>();
@@ -551,15 +530,13 @@ export class SnippetUploadEngine extends Context.Service<
           const presentation = deriveSnippetPresentation({ fileName: entry.fileName });
           const needsText = presentation.type === "text" || presentation.type === "hyperlink";
           const bytes = needsText
-            ? yield* content
-                .get(accountId, entry.id)
-                .pipe(Effect.mapError((cause) => engineError(cause, cause.reason, false)))
+            ? yield* content.get(accountId, entry.id).pipe(mapUnexpectedLocalFailure)
             : null;
           const contentAvailable = needsText
             ? bytes?.byteLength === entry.byteSize
             : yield* content
                 .available(accountId, entry.id, entry.byteSize)
-                .pipe(Effect.mapError((cause) => engineError(cause, cause.reason, false)));
+                .pipe(mapUnexpectedLocalFailure);
           const localTextContent =
             contentAvailable && bytes !== null ? new TextDecoder().decode(bytes) : null;
           const projectedEntry = {
@@ -585,15 +562,13 @@ export class SnippetUploadEngine extends Context.Service<
           const presentation = deriveSnippetPresentation({ fileName: replica.fileName });
           const needsText = presentation.type === "text" || presentation.type === "hyperlink";
           const bytes = needsText
-            ? yield* content
-                .get(accountId, replica.id)
-                .pipe(Effect.mapError((cause) => engineError(cause, cause.reason, false)))
+            ? yield* content.get(accountId, replica.id).pipe(mapUnexpectedLocalFailure)
             : null;
           const contentAvailable = needsText
             ? bytes?.byteLength === replica.byteSize
             : yield* content
                 .available(accountId, replica.id, replica.byteSize)
-                .pipe(Effect.mapError((cause) => engineError(cause, cause.reason, false)));
+                .pipe(mapUnexpectedLocalFailure);
           const localTextContent =
             contentAvailable && bytes !== null ? new TextDecoder().decode(bytes) : null;
           projected.push({
@@ -633,9 +608,7 @@ export class SnippetUploadEngine extends Context.Service<
         account: UploadOwner,
         snippetId: string,
       ) {
-        const entry = yield* outbox
-          .get(account.id, snippetId)
-          .pipe(Effect.mapError((cause) => engineError(cause, cause.reason, false)));
+        const entry = yield* outbox.get(account.id, snippetId).pipe(mapUnexpectedLocalFailure);
         if (entry === null || entry.phase !== "FAILED" || !entry.canRetry) return;
         let authoritativeStatus = entry.authoritativeStatus;
         if (authoritativeStatus !== null) {
@@ -681,12 +654,8 @@ export class SnippetUploadEngine extends Context.Service<
         if (fiber !== undefined && fiber !== null) yield* Fiber.interrupt(fiber);
         active.delete(snippetId);
         progressById.delete(snippetId);
-        yield* outbox
-          .remove(accountId, snippetId)
-          .pipe(Effect.mapError((cause) => engineError(cause, cause.reason, false)));
-        yield* content
-          .discard(accountId, snippetId)
-          .pipe(Effect.mapError((cause) => engineError(cause, cause.reason, false)));
+        yield* outbox.remove(accountId, snippetId).pipe(mapUnexpectedLocalFailure);
+        yield* content.discard(accountId, snippetId).pipe(mapUnexpectedLocalFailure);
       });
 
       const discard = Effect.fn("SnippetUploadEngine.discard")(function* (
@@ -701,9 +670,7 @@ export class SnippetUploadEngine extends Context.Service<
         account: UploadOwner,
         snippetId: string,
       ) {
-        const entry = yield* outbox
-          .get(account.id, snippetId)
-          .pipe(Effect.mapError((cause) => engineError(cause, cause.reason, false)));
+        const entry = yield* outbox.get(account.id, snippetId).pipe(mapUnexpectedLocalFailure);
         const safelyLocalOnly =
           entry !== null && entry.phase === "QUEUED" && entry.authoritativeStatus === null;
         if (account.accessToken === null && !safelyLocalOnly) {
@@ -728,13 +695,11 @@ export class SnippetUploadEngine extends Context.Service<
             ),
             Effect.onError(() => restore),
           );
-          yield* replica
-            .remove(account.id, snippetId)
-            .pipe(Effect.mapError((cause) => engineError(cause, cause.reason, false)));
+          yield* replica.remove(account.id, snippetId).pipe(mapUnexpectedLocalFailure);
           yield* cleanupLocal(account.id, snippetId);
           yield* replica
             .completeDeleteCleanup(account.id, snippetId)
-            .pipe(Effect.mapError((cause) => engineError(cause, cause.reason, false)));
+            .pipe(mapUnexpectedLocalFailure);
           yield* publish(account.id);
         } else {
           yield* discard(account.id, snippetId).pipe(Effect.onError(() => restore));
@@ -747,15 +712,13 @@ export class SnippetUploadEngine extends Context.Service<
       ) {
         const durablePendingDeletes = yield* replica
           .pendingDeleteIds(accountId)
-          .pipe(Effect.mapError((cause) => engineError(cause, cause.reason, false)));
+          .pipe(mapUnexpectedLocalFailure);
         yield* Effect.forEach(
           durablePendingDeletes,
           (snippetId) =>
             cleanupLocal(accountId, snippetId).pipe(
               Effect.andThen(
-                replica
-                  .completeDeleteCleanup(accountId, snippetId)
-                  .pipe(Effect.mapError((cause) => engineError(cause, cause.reason, false))),
+                replica.completeDeleteCleanup(accountId, snippetId).pipe(mapUnexpectedLocalFailure),
               ),
               Effect.catchCause((cause) =>
                 Effect.logWarning("Could not finish local snippet deletion cleanup", {
@@ -772,9 +735,7 @@ export class SnippetUploadEngine extends Context.Service<
             .filter((snippet) => snippet.uploadStatus === "UPLOADED")
             .map((snippet) => snippet.id),
         );
-        const entries = yield* outbox
-          .list(accountId)
-          .pipe(Effect.mapError((cause) => engineError(cause, cause.reason, false)));
+        const entries = yield* outbox.list(accountId).pipe(mapUnexpectedLocalFailure);
         const retainedIds = new Set([
           ...entries.map((entry) => entry.id),
           ...replicaItems.map((snippet) => snippet.id),
@@ -795,11 +756,7 @@ export class SnippetUploadEngine extends Context.Service<
             return (
               fiber === undefined || fiber === null ? Effect.void : Fiber.interrupt(fiber)
             ).pipe(
-              Effect.andThen(
-                outbox
-                  .remove(accountId, entry.id)
-                  .pipe(Effect.mapError((cause) => engineError(cause, cause.reason, false))),
-              ),
+              Effect.andThen(outbox.remove(accountId, entry.id).pipe(mapUnexpectedLocalFailure)),
             );
           },
           { discard: true },

@@ -117,25 +117,69 @@ describe("managed snippet content ingestion", () => {
     });
   });
 
-  it("maps a File Provider timeout and removes partial managed content", async () => {
+  it.each([
+    {
+      name: "File Provider timeout",
+      error: PlatformError.systemError({
+        _tag: "Unknown",
+        module: "FileSystem",
+        method: "copyFile",
+        cause: Object.assign(new Error("connection timed out, read"), {
+          code: "ETIMEDOUT",
+        }),
+      }),
+      reason:
+        "This file isn’t available on this Mac yet. Check its cloud download, then try again.",
+    },
+    {
+      name: "insufficient local storage",
+      error: PlatformError.systemError({
+        _tag: "Unknown",
+        module: "FileSystem",
+        method: "copyFile",
+        cause: Object.assign(new Error("no space left on device"), { code: "ENOSPC" }),
+      }),
+      reason:
+        "There isn’t enough space on this Mac to save this file. Free some space, then try again.",
+    },
+    {
+      name: "missing source file",
+      error: PlatformError.systemError({
+        _tag: "NotFound",
+        module: "FileSystem",
+        method: "copyFile",
+      }),
+      reason: "This file is no longer available. Choose it again.",
+    },
+    {
+      name: "unreadable source file",
+      error: PlatformError.systemError({
+        _tag: "PermissionDenied",
+        module: "FileSystem",
+        method: "copyFile",
+      }),
+      reason: "Plakk can’t read this file. Check its permissions, then choose it again.",
+    },
+    {
+      name: "an unclassified filesystem failure",
+      error: PlatformError.systemError({
+        _tag: "Unknown",
+        module: "FileSystem",
+        method: "copyFile",
+        cause: Object.assign(new Error("input/output error"), { code: "EIO" }),
+      }),
+      reason:
+        "Plakk couldn’t save this file locally. Make sure it is available on this Mac, then try again.",
+    },
+  ])("maps $name and removes partial managed content", async ({ error, reason }) => {
     await withDirectory(async (root) => {
       const contentRoot = join(root, "content");
       const fileSystem = await Effect.runPromise(
         FileSystem.FileSystem.pipe(Effect.provide(NodeFileSystem.layer)),
       );
-      const timedOutFileSystem = Layer.succeed(FileSystem.FileSystem, {
+      const failingFileSystem = Layer.succeed(FileSystem.FileSystem, {
         ...fileSystem,
-        copyFile: () =>
-          Effect.fail(
-            PlatformError.systemError({
-              _tag: "Unknown",
-              module: "FileSystem",
-              method: "copyFile",
-              cause: Object.assign(new Error("connection timed out, read"), {
-                code: "ETIMEDOUT",
-              }),
-            }),
-          ),
+        copyFile: () => Effect.fail(error),
       });
 
       await expect(
@@ -150,15 +194,14 @@ describe("managed snippet content ingestion", () => {
           ).pipe(
             Effect.provide(
               DesktopManagedSnippetContent.layer(contentRoot).pipe(
-                Layer.provide(timedOutFileSystem),
+                Layer.provide(failingFileSystem),
               ),
             ),
           ),
         ),
       ).rejects.toMatchObject({
         _tag: "ManagedSnippetContentError",
-        reason:
-          "This file isn’t available on this Mac yet. Check its cloud download, then try again.",
+        reason,
       });
 
       const accountDirectory = join(contentRoot, Buffer.from(accountId).toString("base64url"));

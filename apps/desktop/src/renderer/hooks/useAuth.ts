@@ -7,11 +7,11 @@ import {
   useMemo,
   useState,
 } from "react";
-import type { AuthStatus } from "../../ipc/contracts.ts";
+import type { AuthError, AuthStatus } from "../../ipc/contracts.ts";
 import type { ReactNode } from "react";
 
 type AuthState = {
-  issue: { message: string } | null;
+  issue: AuthError | null;
   isLoading: boolean;
   signIn: () => Promise<void>;
   signOut: () => Promise<void>;
@@ -22,31 +22,58 @@ type AuthState = {
 const AuthContext = createContext<AuthState | null>(null);
 const AUTH_REFRESH_INTERVAL_MS = 30 * 1000;
 
+type AuthIssueEvent =
+  | { readonly _tag: "Clear" }
+  | { readonly _tag: "StructuredError"; readonly error: AuthError }
+  | {
+      readonly _tag: "Rejected";
+      readonly operation: "get" | "signIn" | "signOut";
+      readonly cause: unknown;
+    };
+
+export function authIssueAfter(event: AuthIssueEvent): AuthError | null {
+  switch (event._tag) {
+    case "Clear":
+      return null;
+    case "StructuredError":
+      return event.error;
+    case "Rejected":
+      switch (event.operation) {
+        case "get":
+          return { message: "Could not check session." };
+        case "signIn":
+          return { message: "Could not start sign-in." };
+        case "signOut":
+          return { message: "Could not sign out." };
+      }
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus | null>(null);
-  const [issue, setIssue] = useState<{ message: string } | null>(null);
+  const [issue, setIssue] = useState<AuthError | null>(null);
 
   useEffect(() => {
     let isMounted = true;
     const applyStatus = (nextStatus: AuthStatus) => {
       if (!isMounted) return;
-      setIssue(null);
+      setIssue(authIssueAfter({ _tag: "Clear" }));
       setStatus(nextStatus);
     };
-    const reportError = (error: unknown) => {
+    const reportError = (cause: unknown) => {
       if (!isMounted) return;
-      setIssue({ message: error instanceof Error ? error.message : "Could not check session." });
+      setIssue(authIssueAfter({ _tag: "Rejected", operation: "get", cause }));
     };
     const refresh = () => void window.ipc.auth.getAuth().then(applyStatus, reportError);
     const unsubscribeError = window.ipc.auth.onError((error) => {
       if (!isMounted) return;
-      setIssue(error);
+      setIssue(authIssueAfter({ _tag: "StructuredError", error }));
     });
     const unsubscribe = window.ipc.auth.onStatusChanged(applyStatus);
 
-    void window.ipc.auth.getAuth().then(applyStatus, (error) => {
+    void window.ipc.auth.getAuth().then(applyStatus, (cause) => {
       if (!isMounted) return;
-      reportError(error);
+      reportError(cause);
       setStatus({ accessToken: null, user: null });
     });
     const refreshInterval = window.setInterval(refresh, AUTH_REFRESH_INTERVAL_MS);
@@ -62,20 +89,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signIn = useCallback(async () => {
-    setIssue(null);
+    setIssue(authIssueAfter({ _tag: "Clear" }));
     try {
       await window.ipc.auth.signIn();
-    } catch (error) {
-      setIssue({ message: error instanceof Error ? error.message : "Could not start sign-in." });
+    } catch (cause) {
+      setIssue(authIssueAfter({ _tag: "Rejected", operation: "signIn", cause }));
     }
   }, []);
 
   const signOut = useCallback(async () => {
-    setIssue(null);
+    setIssue(authIssueAfter({ _tag: "Clear" }));
     try {
       await window.ipc.auth.signOut();
-    } catch (error) {
-      setIssue({ message: error instanceof Error ? error.message : "Could not sign out." });
+    } catch (cause) {
+      setIssue(authIssueAfter({ _tag: "Rejected", operation: "signOut", cause }));
     }
   }, []);
 
