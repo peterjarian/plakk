@@ -13,7 +13,11 @@ import { RpcClientDefect, RpcClientError } from "effect/unstable/rpc/RpcClientEr
 import type { SnippetIngestPayload } from "../ipc/contracts.ts";
 import { StorageUpload, StorageUploadError } from "../storageUpload.ts";
 import { DesktopManagedSnippetContent } from "./ManagedSnippetContent.ts";
-import { SnippetUploadEngine } from "./SnippetUploadEngine.ts";
+import {
+  SnippetUploadEngine,
+  SnippetUploadEngineError,
+  snippetUploadFailureMessage,
+} from "./SnippetUploadEngine.ts";
 import {
   SnippetUploadOutbox,
   SnippetUploadOutboxError,
@@ -362,6 +366,18 @@ const harness = (options?: {
 };
 
 describe("SnippetUploadEngine", () => {
+  it("keeps intentional engine failure messages at the IPC boundary", () => {
+    expect(
+      snippetUploadFailureMessage(
+        new SnippetUploadEngineError({
+          cause: null,
+          reason: "This snippet is already being saved locally.",
+          canRetry: false,
+        }),
+      ),
+    ).toBe("This snippet is already being saved locally.");
+  });
+
   it("durably queues offline, restarts with the same id and local text, then completes", async () => {
     const test = harness();
 
@@ -567,7 +583,7 @@ describe("SnippetUploadEngine", () => {
     await expect(
       test.run(SnippetUploadEngine.use((engine) => engine.ingest(account.id, input))),
     ).rejects.toMatchObject({
-      _tag: "SnippetUploadEngineError",
+      _tag: "ManagedSnippetContentError",
       reason:
         "This file isn’t available on this Mac yet. Check its cloud download, then try again.",
     });
@@ -796,7 +812,7 @@ describe("SnippetUploadEngine", () => {
     );
   });
 
-  it("uses the caller fallback instead of exposing a declared remote error message", async () => {
+  it("preserves a declared remote error until the caller boundary", async () => {
     const test = harness({
       deleteRpcFailure: new RpcError({
         code: "CONFLICT",
@@ -807,8 +823,8 @@ describe("SnippetUploadEngine", () => {
     await expect(
       test.run(SnippetUploadEngine.use((engine) => engine.delete(account, snippetId))),
     ).rejects.toMatchObject({
-      _tag: "SnippetUploadEngineError",
-      reason: "Plakk could not delete this snippet.",
+      _tag: "RpcError",
+      message: "sensitive provider deletion detail",
     });
   });
 

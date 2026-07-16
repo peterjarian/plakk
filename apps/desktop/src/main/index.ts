@@ -30,7 +30,7 @@ import { isReloadShortcut, reconcileTrayAuth } from "./lifecycle.ts";
 import { UserConfigStore } from "./UserConfigStore.ts";
 import { runEffect, runtime } from "./runtime.ts";
 import { ActiveSnippetAccount, getManagedSnippetBytes, getReplicaItems } from "./snippetReplica.ts";
-import { SnippetUploadEngine } from "./SnippetUploadEngine.ts";
+import { SnippetUploadEngine, snippetUploadFailureMessage } from "./SnippetUploadEngine.ts";
 
 const handle = makeHandle(runtime);
 
@@ -87,8 +87,8 @@ handle(ipcMethods.snippetIngest, (payload, event) => {
     const engine = yield* SnippetUploadEngine;
     return yield* engine.ingest(account.id, payload).pipe(
       Effect.as({ status: "ENQUEUED" } as const),
-      Effect.catchTag("SnippetUploadEngineError", (error) =>
-        Effect.succeed({ status: "FAILED", message: error.reason } as const),
+      Effect.catch((error) =>
+        Effect.succeed({ status: "FAILED", message: snippetUploadFailureMessage(error) } as const),
       ),
     );
   }).pipe(Effect.ensuring(cleanup));
@@ -612,10 +612,7 @@ function broadcastSnippetReplica(items: ReadonlyArray<DesktopSnippet>): void {
 const refreshSnippetProjection = Effect.fn("DesktopSnippetProjection.refresh")(function* (
   accountId: string,
 ) {
-  const replicaItems = yield* getReplicaItems(accountId);
-  const engine = yield* SnippetUploadEngine;
-  yield* engine.reconcile(accountId, replicaItems);
-  const items = yield* engine.project(accountId, replicaItems);
+  const items = yield* getProjectedSnippets(accountId);
   yield* Effect.sync(() => {
     if (accountId === activeSnippetAccountId) broadcastSnippetReplica(items);
   });
@@ -838,5 +835,5 @@ app.on("before-quit", () => {
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+  // Keep the tray and durable upload outbox running until the user explicitly quits.
 });
