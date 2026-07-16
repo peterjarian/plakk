@@ -7,6 +7,7 @@ export function TrayRecentItem({
   copying,
   copyDisabled,
   copyError,
+  thumbnailUrl,
   onCopy,
   onDelete,
   onRetryUpload,
@@ -17,6 +18,7 @@ export function TrayRecentItem({
   copying: boolean;
   copyDisabled: boolean;
   copyError?: string;
+  thumbnailUrl: string | null;
   onCopy: () => void;
   onDelete: () => void;
   onRetryUpload: () => void;
@@ -43,6 +45,7 @@ export function TrayRecentItem({
           copied={copied}
           copying={copying}
           copyDisabled={copyDisabled}
+          thumbnailUrl={thumbnailUrl}
           {...(copyError === undefined ? {} : { copyError })}
           onCopy={onCopy}
           onDelete={onDelete}

@@ -38,6 +38,7 @@ describe("TrayRecentItem", () => {
         copied={false}
         copying={false}
         copyDisabled={false}
+        thumbnailUrl={null}
         {...handlers}
       />,
     );
@@ -57,6 +58,7 @@ describe("TrayRecentItem", () => {
         copied={false}
         copying={false}
         copyDisabled={false}
+        thumbnailUrl={null}
         {...handlers}
       />,
     );

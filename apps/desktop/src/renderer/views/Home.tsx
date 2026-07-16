@@ -19,6 +19,7 @@ import {
 import { SnippetComposer } from "../components/SnippetComposer.tsx";
 import { useAuth } from "../hooks/useAuth.ts";
 import { useSnippetReplica } from "../hooks/useSnippetReplica.ts";
+import { useSnippetThumbnails } from "../hooks/useSnippetThumbnails.ts";
 import {
   StorageProviderIcon,
   storageProviderLabel,
@@ -40,14 +41,10 @@ export function Home({ active = true }: { active?: boolean }) {
   const [skipExternalLinkWarning, setSkipExternalLinkWarning] = useState(false);
   const [showExternalLinkWarning, setShowExternalLinkWarning] = useState(true);
   const [textContents, setTextContents] = useState<Record<string, TextSnippetContent>>({});
-  const [thumbnailUrls, setThumbnailUrls] = useState<Record<string, string>>({});
   const [copyErrors, setCopyErrors] = useState<Record<string, string>>({});
   const [ingestError, setIngestError] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now);
   const copiedTimerRef = useRef<number | undefined>(undefined);
-  const thumbnailObjectUrlsRef = useRef(new Map<string, string>());
-  const loadingThumbnailIdsRef = useRef(new Set<string>());
-  const visibleThumbnailIdsRef = useRef(new Set<string>());
 
   useEffect(() => {
     const interval = window.setInterval(() => setNow(Date.now()), 60 * 1000);
@@ -55,6 +52,7 @@ export function Home({ active = true }: { active?: boolean }) {
   }, []);
 
   const { isLoading: replicaLoading, items: replicaItems } = useSnippetReplica();
+  const thumbnailUrls = useSnippetThumbnails(replicaItems);
   const snippets = replicaItems;
   const accountBlocked = !storageStatus.canSync;
   const user = auth.user;
@@ -139,61 +137,6 @@ export function Home({ active = true }: { active?: boolean }) {
       }
     }
   }, [loadTextContent, replicaItems, textContents]);
-
-  useEffect(() => {
-    const images = replicaItems.filter(
-      (snippet) =>
-        deriveSnippetPresentation({ fileName: snippet.fileName }).type === "image" &&
-        (snippet.contentAvailable || snippet.uploadStatus === "UPLOADED"),
-    );
-    const visibleIds = new Set(images.map((snippet) => snippet.id));
-    visibleThumbnailIdsRef.current = visibleIds;
-
-    for (const [id, url] of thumbnailObjectUrlsRef.current) {
-      if (visibleIds.has(id)) continue;
-      URL.revokeObjectURL(url);
-      thumbnailObjectUrlsRef.current.delete(id);
-      setThumbnailUrls((current) => {
-        const { [id]: _removed, ...remaining } = current;
-        return remaining;
-      });
-    }
-
-    for (const snippet of images) {
-      if (
-        thumbnailObjectUrlsRef.current.has(snippet.id) ||
-        loadingThumbnailIdsRef.current.has(snippet.id)
-      ) {
-        continue;
-      }
-      loadingThumbnailIdsRef.current.add(snippet.id);
-      void window.ipc.snippets
-        .read(snippet.id)
-        .then((bytes) => {
-          if (!visibleThumbnailIdsRef.current.has(snippet.id)) return;
-          const url = URL.createObjectURL(
-            new Blob([Uint8Array.from(bytes)], {
-              type: "application/octet-stream",
-            }),
-          );
-          thumbnailObjectUrlsRef.current.set(snippet.id, url);
-          setThumbnailUrls((current) => ({ ...current, [snippet.id]: url }));
-        })
-        .catch(() => {
-          // The image icon remains visible when preview loading fails.
-        })
-        .finally(() => loadingThumbnailIdsRef.current.delete(snippet.id));
-    }
-  }, [replicaItems]);
-
-  useEffect(
-    () => () => {
-      visibleThumbnailIdsRef.current.clear();
-      for (const url of thumbnailObjectUrlsRef.current.values()) URL.revokeObjectURL(url);
-      thumbnailObjectUrlsRef.current.clear();
-    },
-    [],
-  );
 
   function enqueueFileSnippet(file: Pick<File, "name" | "size" | "type">, filePath?: string) {
     if (storageStatus.kind !== "connected" || !storageStatus.canSync) return;

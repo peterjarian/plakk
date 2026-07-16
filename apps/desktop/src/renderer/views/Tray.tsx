@@ -1,6 +1,7 @@
-import { useEffect, useState, type DragEvent } from "react";
+import { useEffect, useMemo, useState, type DragEvent } from "react";
 import { accountCanSync } from "@plakk/shared/PlakkApi";
 import type { TrayAccountState } from "../../ipc/contracts.ts";
+import { useSnippetThumbnails } from "../hooks/useSnippetThumbnails.ts";
 import { TrayActions } from "./tray/TrayActions.tsx";
 import { TrayRecentItem } from "./tray/TrayRecentItem.tsx";
 import { TrayShell } from "./tray/TrayShell.tsx";
@@ -16,6 +17,8 @@ export function Tray() {
   const account = accountState.kind === "resolved" ? accountState.account : null;
   const { addClipboard, addDropped, addText, error, latest, reportError, upload } =
     useTraySnippets(account);
+  const thumbnailSnippets = useMemo(() => (latest === undefined ? [] : [latest]), [latest]);
+  const thumbnailUrls = useSnippetThumbnails(thumbnailSnippets);
   const copyDisabled =
     latest === undefined || (!latest.contentAvailable && latest.uploadStatus !== "UPLOADED");
   const isCopied = latest !== undefined && copiedId === latest.id;
@@ -139,6 +142,7 @@ export function Tray() {
               copied={isCopied}
               copying={isCopying}
               copyDisabled={copyDisabled}
+              thumbnailUrl={latest === undefined ? null : (thumbnailUrls[latest.id] ?? null)}
               {...(currentCopyError === null ? {} : { copyError: currentCopyError })}
               onCopy={copyLatest}
               onDelete={() =>
