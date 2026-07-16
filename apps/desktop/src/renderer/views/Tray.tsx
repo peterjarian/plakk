@@ -1,30 +1,24 @@
 import { useEffect, useState, type DragEvent } from "react";
 import { accountCanSync } from "@plakk/shared/PlakkApi";
-import type { TrayAccountState } from "../../ipc/contracts.ts";
+import type { ClipboardContent, TrayAccountState, TrayDroppedItem } from "../../ipc/contracts.ts";
+import { useSnippets } from "../hooks/useSnippets.ts";
+import { ingestFileSnippet, ingestTextSnippet } from "../lib/snippetIngestion.ts";
 import { TrayActions } from "./tray/TrayActions.tsx";
 import { TrayRecentItem } from "./tray/TrayRecentItem.tsx";
 import { TrayShell } from "./tray/TrayShell.tsx";
-import { useTraySnippets } from "./tray/useTraySnippets.ts";
 
 export function Tray() {
   const [isDragging, setIsDragging] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copyingId, setCopyingId] = useState<string | null>(null);
   const [copyError, setCopyError] = useState<{ id: string; message: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [accountState, setAccountState] = useState<TrayAccountState>({ kind: "loading" });
   const ingestionAllowed = accountState.kind === "resolved" && accountCanSync(accountState.account);
   const account = accountState.kind === "resolved" ? accountState.account : null;
-  const {
-    addClipboard,
-    addDropped,
-    addText,
-    error,
-    latest,
-    reloadSnippets,
-    reportError,
-    snippetReadError,
-    upload,
-  } = useTraySnippets(account);
+  const provider = account?.storageProvider ?? null;
+  const { error: snippetReadError, items, reload: reloadSnippets } = useSnippets();
+  const latest = items.at(0);
   const copyDisabled =
     latest === undefined || (!latest.contentAvailable && latest.uploadStatus !== "UPLOADED");
   const isCopied = latest !== undefined && copiedId === latest.id;
@@ -37,6 +31,47 @@ export function Tray() {
       : accountState.kind === "failed"
         ? "Offline — cached snippets stay available"
         : "Adding is paused — finish account setup on the web";
+
+  const handleIngestion = (ingestion: ReturnType<typeof ingestFileSnippet>) => {
+    setError(null);
+    void ingestion.then(
+      (result) => {
+        if (result.status === "FAILED") setError(result.message);
+      },
+      () => setError("Plakk couldn’t save this snippet."),
+    );
+  };
+
+  const upload = (file: Pick<File, "name" | "size" | "type">, filePath?: string) => {
+    if (provider === null) return;
+    handleIngestion(ingestFileSnippet(provider, file, filePath));
+  };
+
+  const addText = (text: string) => {
+    if (provider === null) return;
+    const ingestion = ingestTextSnippet(provider, text.trim());
+    if (ingestion !== null) handleIngestion(ingestion);
+  };
+
+  const addClipboard = async (content: ClipboardContent) => {
+    try {
+      if (content.type === "text") addText(content.text);
+      else if (content.type === "image") {
+        const blob = await fetch(content.dataUrl).then((response) => response.blob());
+        upload({ name: "Pasted image.png", size: blob.size, type: blob.type }, content.path);
+      } else if (content.type === "file" && content.size !== undefined)
+        upload({ name: content.name, size: content.size, type: "" }, content.path);
+    } catch {
+      setError("Plakk couldn’t read the clipboard item.");
+    }
+  };
+
+  const addDropped = (item: TrayDroppedItem) => {
+    if (item.type === "text") addText(item.text);
+    else
+      for (const file of item.files)
+        upload({ name: file.name, size: file.size, type: "" }, file.path);
+  };
 
   useEffect(() => {
     if (!ingestionAllowed) setIsDragging(false);
@@ -52,7 +87,7 @@ export function Tray() {
       () => {
         if (mounted) {
           setAccountState({ kind: "failed" });
-          reportError("Could not check the account.");
+          setError("Could not check the account.");
         }
       },
     );
@@ -60,7 +95,7 @@ export function Tray() {
       mounted = false;
       unsubscribe();
     };
-  }, [reportError]);
+  }, []);
 
   useEffect(
     () =>
@@ -101,8 +136,8 @@ export function Tray() {
     fallbackMessage: string,
   ) => {
     if (latest === undefined) return;
-    reportError(null);
-    void action(latest.id).catch(() => reportError(fallbackMessage));
+    setError(null);
+    void action(latest.id).catch(() => setError(fallbackMessage));
   };
 
   return (
@@ -181,11 +216,11 @@ export function Tray() {
               ingestionDisabled={!ingestionAllowed}
               onCopy={copyLatest}
               onPaste={() => {
-                reportError(null);
+                setError(null);
                 void window.ipc.clipboard
                   .read()
                   .then(addClipboard)
-                  .catch(() => reportError("Could not read the clipboard."));
+                  .catch(() => setError("Could not read the clipboard."));
               }}
               onSelect={() =>
                 void window.ipc.tray
@@ -194,7 +229,7 @@ export function Tray() {
                     for (const file of files)
                       upload({ name: file.name, size: file.size, type: "" }, file.path);
                   })
-                  .catch(() => reportError("Could not choose a file."))
+                  .catch(() => setError("Could not choose a file."))
               }
             />
           </>

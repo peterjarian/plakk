@@ -15,6 +15,7 @@ export class PlakkRpcClient extends Context.Service<
 export const plakkRpcProtocolLayer = Layer.unwrap(
   Config.string("PLAKK_RPC_URL").pipe(
     Config.withDefault("https://app.plakk.io/api/rpc"),
+    Effect.orDie,
     Effect.map((configuredRpcUrl) => {
       const url = configuredRpcUrl.startsWith("/")
         ? new URL(configuredRpcUrl, "http://localhost:3000").toString()

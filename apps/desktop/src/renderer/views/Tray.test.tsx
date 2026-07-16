@@ -23,17 +23,13 @@ const state = vi.hoisted(() => {
   return { latest };
 });
 
-vi.mock("./tray/useTraySnippets.ts", () => ({
-  useTraySnippets: () => ({
-    addClipboard: vi.fn(),
-    addDropped: vi.fn(),
-    addText: vi.fn(),
+vi.mock("../hooks/useSnippets.ts", () => ({
+  useSnippets: () => ({
     error: null,
-    latest: state.latest,
-    reloadSnippets: vi.fn(),
-    reportError: vi.fn(),
-    snippetReadError: null,
-    upload: vi.fn(),
+    isLoading: false,
+    items: [state.latest],
+    reload: vi.fn(),
+    retryContent: vi.fn(),
   }),
 }));
 

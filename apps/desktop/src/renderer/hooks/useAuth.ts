@@ -22,33 +22,6 @@ type AuthState = {
 const AuthContext = createContext<AuthState | null>(null);
 const AUTH_REFRESH_INTERVAL_MS = 30 * 1000;
 
-type AuthIssueEvent =
-  | { readonly _tag: "Clear" }
-  | { readonly _tag: "StructuredError"; readonly error: AuthError }
-  | {
-      readonly _tag: "Rejected";
-      readonly operation: "get" | "signIn" | "signOut";
-      readonly cause: unknown;
-    };
-
-export function authIssueAfter(event: AuthIssueEvent): AuthError | null {
-  switch (event._tag) {
-    case "Clear":
-      return null;
-    case "StructuredError":
-      return event.error;
-    case "Rejected":
-      switch (event.operation) {
-        case "get":
-          return { message: "Could not check session." };
-        case "signIn":
-          return { message: "Could not start sign-in." };
-        case "signOut":
-          return { message: "Could not sign out." };
-      }
-  }
-}
-
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus | null>(null);
   const [issue, setIssue] = useState<AuthError | null>(null);
@@ -57,23 +30,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let isMounted = true;
     const applyStatus = (nextStatus: AuthStatus) => {
       if (!isMounted) return;
-      setIssue(authIssueAfter({ _tag: "Clear" }));
+      setIssue(null);
       setStatus(nextStatus);
     };
-    const reportError = (cause: unknown) => {
+    const reportError = () => {
       if (!isMounted) return;
-      setIssue(authIssueAfter({ _tag: "Rejected", operation: "get", cause }));
+      setIssue({ message: "Could not check session." });
     };
     const refresh = () => void window.ipc.auth.getAuth().then(applyStatus, reportError);
     const unsubscribeError = window.ipc.auth.onError((error) => {
       if (!isMounted) return;
-      setIssue(authIssueAfter({ _tag: "StructuredError", error }));
+      setIssue(error);
     });
     const unsubscribe = window.ipc.auth.onStatusChanged(applyStatus);
 
-    void window.ipc.auth.getAuth().then(applyStatus, (cause) => {
+    void window.ipc.auth.getAuth().then(applyStatus, () => {
       if (!isMounted) return;
-      reportError(cause);
+      reportError();
       setStatus({ accessToken: null, user: null });
     });
     const refreshInterval = window.setInterval(refresh, AUTH_REFRESH_INTERVAL_MS);
@@ -89,20 +62,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signIn = useCallback(async () => {
-    setIssue(authIssueAfter({ _tag: "Clear" }));
+    setIssue(null);
     try {
       await window.ipc.auth.signIn();
-    } catch (cause) {
-      setIssue(authIssueAfter({ _tag: "Rejected", operation: "signIn", cause }));
+    } catch {
+      setIssue({ message: "Could not start sign-in." });
     }
   }, []);
 
   const signOut = useCallback(async () => {
-    setIssue(authIssueAfter({ _tag: "Clear" }));
+    setIssue(null);
     try {
       await window.ipc.auth.signOut();
-    } catch (cause) {
-      setIssue(authIssueAfter({ _tag: "Rejected", operation: "signOut", cause }));
+    } catch {
+      setIssue({ message: "Could not sign out." });
     }
   }, []);
 

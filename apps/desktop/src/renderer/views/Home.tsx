@@ -23,7 +23,7 @@ import {
   useStorageStatus,
 } from "../hooks/useStorageStatus.tsx";
 import { navigate } from "../lib/navigate.ts";
-import { encodeTextSnippet } from "../lib/textSnippetContent.ts";
+import { ingestFileSnippet, ingestTextSnippet } from "../lib/snippetIngestion.ts";
 
 const accountSetupUrl = "https://app.plakk.io/account/setup";
 export function Home({ active = true }: { active?: boolean }) {
@@ -76,24 +76,13 @@ export function Home({ active = true }: { active?: boolean }) {
     if (storageStatus.kind !== "connected" || !storageStatus.canSync) {
       return;
     }
-    const id = crypto.randomUUID();
-    const bytes = encodeTextSnippet(text);
-    if (bytes.byteLength === 0) return;
-    const fileName = `${id}.txt`;
-    const contentType = "text/plain; charset=utf-8";
-    void ingestSnippet({
-      id,
-      fileName,
-      byteSize: bytes.byteLength,
-      mediaType: contentType,
-      storageProvider: storageStatus.provider,
-      bytes,
-    });
+    const ingestion = ingestTextSnippet(storageStatus.provider, text);
+    if (ingestion !== null) handleIngestion(ingestion);
   }
 
-  function ingestSnippet(payload: Parameters<typeof window.ipc.snippets.ingest>[0]) {
+  function handleIngestion(ingestion: ReturnType<typeof ingestFileSnippet>) {
     setIngestionError(null);
-    return window.ipc.snippets.ingest(payload).then(
+    void ingestion.then(
       (result) => {
         if (result.status === "FAILED") setIngestionError(result.message);
       },
@@ -104,15 +93,7 @@ export function Home({ active = true }: { active?: boolean }) {
   function enqueueFileSnippet(file: Pick<File, "name" | "size" | "type">, filePath?: string) {
     if (storageStatus.kind !== "connected" || !storageStatus.canSync) return;
 
-    const id = crypto.randomUUID();
-    void ingestSnippet({
-      id,
-      byteSize: file.size,
-      mediaType: file.type || null,
-      fileName: file.name,
-      storageProvider: storageStatus.provider,
-      ...(filePath === undefined ? { file: file as File } : { filePath }),
-    });
+    handleIngestion(ingestFileSnippet(storageStatus.provider, file, filePath));
   }
 
   function handleClipboardPaste(
