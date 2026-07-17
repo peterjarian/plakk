@@ -126,6 +126,8 @@ export function SnippetRow(props: {
     snippet.uploadStatus === "UPLOADED" &&
     (snippet.localContentAvailability.status === "NOT_AVAILABLE" ||
       snippet.localContentAvailability.status === "FAILED");
+  const isAvailableOffline =
+    snippet.uploadStatus === "UPLOADED" && snippet.localContentAvailability.status === "AVAILABLE";
   const canStopUpload = localState !== null && localState.phase !== "FAILED";
   const title = presentation.title;
   const isText = presentation.type === "text" || presentation.type === "hyperlink";
@@ -139,26 +141,26 @@ export function SnippetRow(props: {
           : snippet.localContentAvailability.status === "FAILED"
             ? snippet.localContentAvailability.message
             : isDownloading
-              ? "Saving on this device…"
+              ? "Downloading for offline access…"
               : localState?.phase === "IMPORTING"
                 ? "Saving locally…"
                 : presentation.type === "file" || presentation.type === "image"
-                  ? `${fileSubtitle(snippet)}${snippet.localContentAvailability.status === "NOT_AVAILABLE" ? " · Not on this device" : ""}`
+                  ? `${fileSubtitle(snippet)}${isAvailableOffline ? " · Available offline" : snippet.localContentAvailability.status === "NOT_AVAILABLE" ? " · Not on this device" : ""}`
                   : snippet.localContentAvailability.status === "NOT_AVAILABLE" &&
                       snippet.uploadStatus === "UPLOADED"
                     ? "Not on this device"
-                    : localState !== null
-                      ? ""
-                      : formatFileSize(snippet.byteSize);
+                    : isAvailableOffline
+                      ? `Available offline · ${formatFileSize(snippet.byteSize)}`
+                      : localState !== null
+                        ? ""
+                        : formatFileSize(snippet.byteSize);
   const time = isRemoteFailed
     ? "Failed"
     : localState !== null
       ? localState.phase === "FAILED"
         ? "Failed"
         : ""
-      : isDownloading
-        ? "Saving…"
-        : formatSnippetDate(snippet.createdAt, now);
+      : formatSnippetDate(snippet.createdAt, now);
 
   return (
     <li>
@@ -181,11 +183,17 @@ export function SnippetRow(props: {
         </div>
 
         <div className="flex shrink-0 items-center justify-end">
-          {isUploading ? (
+          {isUploading || isDownloading ? (
             <div
               className="flex items-center gap-1"
               role="status"
-              aria-label={localState?.phase === "IMPORTING" ? "Saving locally" : "Syncing"}
+              aria-label={
+                isDownloading
+                  ? "Downloading for offline access"
+                  : localState?.phase === "IMPORTING"
+                    ? "Saving locally"
+                    : "Syncing"
+              }
             >
               <LoaderCircle
                 className="size-4 animate-spin text-muted-foreground"

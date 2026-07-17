@@ -167,6 +167,46 @@ describe("SnippetRow", () => {
     expect(markup).not.toContain("Loading text");
     expect(markup).toContain('aria-label="Retry download"');
   });
+
+  it("presents automatic and manual hydration as an explicit offline download", () => {
+    const markup = renderToStaticMarkup(
+      <SnippetRow
+        snippet={{
+          ...snippet,
+          localContentAvailability: { status: "DOWNLOADING" },
+        }}
+        presentation={{ type: "text", title: "Text snippet" }}
+        now={now}
+        copied={false}
+        onCopy={() => undefined}
+        onDelete={() => undefined}
+        onStopUpload={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain('role="status"');
+    expect(markup).toContain('aria-label="Downloading for offline access"');
+    expect(markup).toContain("Downloading for offline access…");
+    expect(markup).toContain("animate-spin");
+    expect(markup).not.toContain("Saving on this device");
+  });
+
+  it("identifies uploaded managed content as available offline", () => {
+    const markup = renderToStaticMarkup(
+      <SnippetRow
+        snippet={snippet}
+        presentation={{ type: "text", title: "A text snippet" }}
+        now={now}
+        copied={false}
+        onCopy={() => undefined}
+        onDelete={() => undefined}
+        onStopUpload={() => undefined}
+        textContent={{ state: "ready", text: "A text snippet" }}
+      />,
+    );
+
+    expect(markup).toContain("Available offline");
+  });
 });
 
 describe("formatSnippetDate", () => {

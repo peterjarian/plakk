@@ -115,6 +115,30 @@ describe("TrayRecentItem", () => {
     expect(markup).not.toContain("Loading text");
   });
 
+  it("shows the same explicit offline-download status as the main window", () => {
+    const markup = renderToStaticMarkup(
+      <TrayRecentItem
+        snippet={{
+          ...snippet,
+          uploadStatus: "UPLOADED",
+          localState: null,
+          localTextContent: null,
+          localContentAvailability: { status: "DOWNLOADING" },
+          presentation: { type: "text", title: "Text snippet" },
+          textContent: undefined,
+        }}
+        copied={false}
+        copying={false}
+        copyDisabled
+        readError={null}
+        {...handlers}
+      />,
+    );
+
+    expect(markup).toContain('aria-label="Downloading for offline access"');
+    expect(markup).toContain("Downloading for offline access…");
+  });
+
   it("offers the same hydrated hyperlink action as the main snippet row", () => {
     const markup = renderToStaticMarkup(
       <TrayRecentItem
