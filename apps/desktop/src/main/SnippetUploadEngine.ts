@@ -51,6 +51,7 @@ export class SnippetUploadEngineError extends Schema.TaggedErrorClass<SnippetUpl
 ) {}
 
 const errorReason = (cause: unknown, fallback: string) =>
+  cause instanceof SnippetUploadEngineError ||
   cause instanceof ManagedSnippetContentError ||
   cause instanceof SnippetReplicaError ||
   cause instanceof SnippetUploadOutboxError
@@ -59,14 +60,16 @@ const errorReason = (cause: unknown, fallback: string) =>
       ? cause.message
       : fallback;
 
-const engineError = (cause: unknown, fallback: string, canRetry: boolean) =>
+const canRetry = (cause: unknown, fallback: boolean) =>
   cause instanceof SnippetUploadEngineError
-    ? cause
-    : new SnippetUploadEngineError({
-        cause,
-        reason: errorReason(cause, fallback),
-        canRetry,
-      });
+    ? cause.canRetry
+    : cause instanceof StorageUploadError
+      ? cause.retryable
+      : cause instanceof ManagedSnippetContentError ||
+          cause instanceof SnippetReplicaError ||
+          cause instanceof SnippetUploadOutboxError
+        ? false
+        : fallback;
 
 const isTransientRemoteFailure = (cause: unknown) =>
   cause instanceof RpcClientError ||
@@ -75,13 +78,20 @@ const isTransientRemoteFailure = (cause: unknown) =>
 const isTransientStorageFailure = (cause: unknown) =>
   cause instanceof StorageUploadError && cause.retryable;
 
-const isTransientEngineFailure = (cause: SnippetUploadEngineError) =>
-  isTransientRemoteFailure(cause.cause) || isTransientStorageFailure(cause.cause);
+const isTransientFailure = (cause: unknown) =>
+  isTransientRemoteFailure(cause) || isTransientStorageFailure(cause);
 
-const unexpectedLocalFailure = "Plakk could not update local snippet data.";
-const mapUnexpectedLocalFailure = Effect.mapError((cause: unknown) =>
-  engineError(cause, unexpectedLocalFailure, false),
-);
+export type SnippetUploadEngineFailure =
+  | SnippetUploadEngineError
+  | ManagedSnippetContentError
+  | SnippetReplicaError
+  | SnippetUploadOutboxError
+  | StorageUploadError
+  | RpcError
+  | RpcClientError;
+
+export const snippetUploadFailureMessage = (cause: SnippetUploadEngineFailure) =>
+  errorReason(cause, "Plakk couldn’t save this snippet locally.");
 
 const localTextFrom = (input: SnippetIngestPayload): string | null => {
   if (!("bytes" in input)) return null;
@@ -135,21 +145,27 @@ export class SnippetUploadEngine extends Context.Service<
     ingest(
       accountId: string,
       input: SnippetIngestPayload,
-    ): Effect.Effect<void, SnippetUploadEngineError>;
-    resume(account: UploadAccount): Effect.Effect<void, SnippetUploadEngineError>;
+    ): Effect.Effect<void, SnippetUploadEngineFailure>;
+    resume(account: UploadAccount): Effect.Effect<void, SnippetUploadEngineFailure>;
     pause: Effect.Effect<void>;
     project(
       accountId: string,
       replicaItems: ReadonlyArray<ApiSnippet>,
-    ): Effect.Effect<ReadonlyArray<DesktopSnippet>, SnippetUploadEngineError>;
-    cancel(account: UploadOwner, snippetId: string): Effect.Effect<void, SnippetUploadEngineError>;
-    retry(account: UploadOwner, snippetId: string): Effect.Effect<void, SnippetUploadEngineError>;
-    discard(accountId: string, snippetId: string): Effect.Effect<void, SnippetUploadEngineError>;
-    delete(account: UploadOwner, snippetId: string): Effect.Effect<void, SnippetUploadEngineError>;
+    ): Effect.Effect<ReadonlyArray<DesktopSnippet>, SnippetUploadEngineFailure>;
+    cancel(
+      account: UploadOwner,
+      snippetId: string,
+    ): Effect.Effect<void, SnippetUploadEngineFailure>;
+    retry(account: UploadOwner, snippetId: string): Effect.Effect<void, SnippetUploadEngineFailure>;
+    discard(accountId: string, snippetId: string): Effect.Effect<void, SnippetUploadEngineFailure>;
+    delete(
+      account: UploadOwner,
+      snippetId: string,
+    ): Effect.Effect<void, SnippetUploadEngineFailure>;
     reconcile(
       accountId: string,
       replicaItems: ReadonlyArray<ApiSnippet>,
-    ): Effect.Effect<void, SnippetUploadEngineError>;
+    ): Effect.Effect<void, SnippetUploadEngineFailure>;
   }
 >()("plakk/main/SnippetUploadEngine") {
   static readonly Live = Layer.effect(
@@ -178,16 +194,18 @@ export class SnippetUploadEngine extends Context.Service<
         accountId: string,
         entry: SnippetUploadOutboxEntry,
       ) {
-        yield* outbox.put(accountId, entry).pipe(mapUnexpectedLocalFailure);
+        yield* outbox.put(accountId, entry);
         yield* publish(accountId);
       });
 
       const markFailed = Effect.fn("SnippetUploadEngine.markFailed")(function* (
         account: UploadOwner,
         snippetId: string,
-        failure: SnippetUploadEngineError,
+        failure: unknown,
+        fallback: string,
+        retryable: boolean,
       ) {
-        const entry = yield* outbox.get(account.id, snippetId).pipe(mapUnexpectedLocalFailure);
+        const entry = yield* outbox.get(account.id, snippetId);
         if (entry === null || entry.phase === "UPLOADED") return;
 
         let authoritativeStatus = entry.authoritativeStatus;
@@ -203,8 +221,8 @@ export class SnippetUploadEngine extends Context.Service<
           phase: "FAILED",
           progress,
           authoritativeStatus,
-          errorMessage: failure.reason,
-          canRetry: failure.canRetry,
+          errorMessage: errorReason(failure, fallback),
+          canRetry: canRetry(failure, retryable),
           updatedAt: now,
         });
       });
@@ -213,7 +231,7 @@ export class SnippetUploadEngine extends Context.Service<
         account: UploadAccount,
         snippetId: string,
       ) {
-        let entry = yield* outbox.get(account.id, snippetId).pipe(mapUnexpectedLocalFailure);
+        let entry = yield* outbox.get(account.id, snippetId);
         if (entry === null || entry.phase !== "QUEUED") return;
 
         const startedAt = DateTime.formatIso(yield* DateTime.now);
@@ -227,23 +245,15 @@ export class SnippetUploadEngine extends Context.Service<
         };
         yield* put(account.id, entry);
 
-        const filePath = yield* content
-          .path(account.id, entry.id, entry.byteSize)
-          .pipe(mapUnexpectedLocalFailure);
+        const filePath = yield* content.path(account.id, entry.id, entry.byteSize);
 
         if (entry.authoritativeStatus === null) {
-          const created = yield* remote
-            .create(account.accessToken, {
-              id: entry.id,
-              fileName: entry.fileName,
-              byteSize: entry.byteSize,
-              storageProvider: entry.storageProvider,
-            })
-            .pipe(
-              Effect.mapError((cause) =>
-                engineError(cause, "Plakk could not start this upload.", true),
-              ),
-            );
+          const created = yield* remote.create(account.accessToken, {
+            id: entry.id,
+            fileName: entry.fileName,
+            byteSize: entry.byteSize,
+            storageProvider: entry.storageProvider,
+          });
           entry = {
             ...entry,
             authoritativeStatus: created.uploadStatus,
@@ -255,61 +265,35 @@ export class SnippetUploadEngine extends Context.Service<
 
         const uploadEntry = entry;
         const transfer = Effect.gen(function* () {
-          yield* remote
-            .heartbeat(account.accessToken, uploadEntry.id)
-            .pipe(
-              Effect.mapError((cause) =>
-                engineError(cause, "Plakk could not keep this upload active.", true),
-              ),
-            );
-          const prepared = yield* remote
-            .prepare(account.accessToken, {
-              snippetId: uploadEntry.id,
-              mediaType: uploadEntry.mediaType,
-            })
-            .pipe(
-              Effect.mapError((cause) =>
-                engineError(cause, "Plakk could not prepare the storage upload.", true),
-              ),
-            );
+          yield* remote.heartbeat(account.accessToken, uploadEntry.id);
+          const prepared = yield* remote.prepare(account.accessToken, {
+            snippetId: uploadEntry.id,
+            mediaType: uploadEntry.mediaType,
+          });
           const heartbeatLoop = Effect.sleep("20 seconds").pipe(
-            Effect.andThen(
-              remote
-                .heartbeat(account.accessToken, uploadEntry.id)
-                .pipe(
-                  Effect.mapError((cause) =>
-                    engineError(cause, "Plakk could not keep this upload active.", true),
-                  ),
-                ),
-            ),
+            Effect.andThen(remote.heartbeat(account.accessToken, uploadEntry.id)),
             Effect.forever,
           );
           return yield* Effect.raceFirst(
-            storage
-              .upload(
-                {
-                  id: uploadEntry.id,
-                  byteSize: uploadEntry.byteSize,
-                  prepared,
-                  filePath,
-                },
-                (progress) => {
-                  progressById.set(uploadEntry.id, progress);
-                  publishFromCallback(account.id);
-                },
-              )
-              .pipe(
-                Effect.mapError((cause) =>
-                  engineError(cause, "The storage upload did not complete.", true),
-                ),
-              ),
+            storage.upload(
+              {
+                id: uploadEntry.id,
+                byteSize: uploadEntry.byteSize,
+                prepared,
+                filePath,
+              },
+              (progress) => {
+                progressById.set(uploadEntry.id, progress);
+                publishFromCallback(account.id);
+              },
+            ),
             heartbeatLoop,
           );
         }).pipe(
           Effect.retry({
             schedule: Schedule.exponential("1 second"),
             times: 2,
-            while: isTransientEngineFailure,
+            while: isTransientFailure,
           }),
         );
         const uploaded = yield* transfer;
@@ -319,13 +303,10 @@ export class SnippetUploadEngine extends Context.Service<
             storageObjectId: uploaded.storageObjectId,
           })
           .pipe(
-            Effect.mapError((cause) =>
-              engineError(cause, "Plakk could not confirm the completed upload.", true),
-            ),
             Effect.retry({
               schedule: Schedule.exponential("1 second"),
               times: 2,
-              while: isTransientEngineFailure,
+              while: isTransientFailure,
             }),
           );
         yield* put(account.id, {
@@ -351,11 +332,7 @@ export class SnippetUploadEngine extends Context.Service<
           .withPermit(
             runEntry(account, snippetId).pipe(
               Effect.catch((cause) =>
-                markFailed(
-                  account,
-                  snippetId,
-                  engineError(cause, "This snippet could not be uploaded.", true),
-                ),
+                markFailed(account, snippetId, cause, "This snippet could not be uploaded.", true),
               ),
             ),
           )
@@ -373,7 +350,7 @@ export class SnippetUploadEngine extends Context.Service<
       const scheduleQueued = Effect.fn("SnippetUploadEngine.scheduleQueued")(function* (
         account: UploadAccount,
       ) {
-        const entries = yield* outbox.list(account.id).pipe(mapUnexpectedLocalFailure);
+        const entries = yield* outbox.list(account.id);
         yield* Effect.forEach(
           entries.filter((entry) => entry.phase === "QUEUED"),
           (entry) => schedule(account, entry.id),
@@ -404,7 +381,6 @@ export class SnippetUploadEngine extends Context.Service<
         yield* publish(accountId);
 
         const imported = content.ingest(accountId, input).pipe(
-          mapUnexpectedLocalFailure,
           Effect.flatMap(() =>
             put(accountId, {
               id: input.id,
@@ -457,7 +433,7 @@ export class SnippetUploadEngine extends Context.Service<
           yield* scheduleQueued(account);
           return;
         }
-        const entries = yield* outbox.list(account.id).pipe(mapUnexpectedLocalFailure);
+        const entries = yield* outbox.list(account.id);
         yield* Effect.forEach(
           entries.filter((entry) => entry.phase === "UPLOADING"),
           (entry) =>
@@ -482,7 +458,9 @@ export class SnippetUploadEngine extends Context.Service<
                 markFailed(
                   account,
                   entry.id,
-                  engineError(cause, "This upload was interrupted. Retry when you’re ready.", true),
+                  cause,
+                  "This upload was interrupted. Retry when you’re ready.",
+                  true,
                 ),
               ),
             ),
@@ -502,13 +480,11 @@ export class SnippetUploadEngine extends Context.Service<
         accountId: string,
         replicaItems: ReadonlyArray<ApiSnippet>,
       ) {
-        const durablePendingDeletes = new Set(
-          yield* replica.pendingDeleteIds(accountId).pipe(mapUnexpectedLocalFailure),
-        );
+        const durablePendingDeletes = new Set(yield* replica.pendingDeleteIds(accountId));
         const isDeletePending = (snippetId: string) =>
           durablePendingDeletes.has(snippetId) ||
           pendingDeletes.has(pendingDeleteKey(accountId, snippetId));
-        const entries = yield* outbox.list(accountId).pipe(mapUnexpectedLocalFailure);
+        const entries = yield* outbox.list(accountId);
         const replicas = new Map(replicaItems.map((snippet) => [snippet.id, snippet]));
         const projected: Array<DesktopSnippet> = [];
         const importingIds = new Set<string>();
@@ -529,14 +505,10 @@ export class SnippetUploadEngine extends Context.Service<
           replicas.delete(entry.id);
           const presentation = deriveSnippetPresentation({ fileName: entry.fileName });
           const needsText = presentation.type === "text" || presentation.type === "hyperlink";
-          const bytes = needsText
-            ? yield* content.get(accountId, entry.id).pipe(mapUnexpectedLocalFailure)
-            : null;
+          const bytes = needsText ? yield* content.get(accountId, entry.id) : null;
           const contentAvailable = needsText
             ? bytes?.byteLength === entry.byteSize
-            : yield* content
-                .available(accountId, entry.id, entry.byteSize)
-                .pipe(mapUnexpectedLocalFailure);
+            : yield* content.available(accountId, entry.id, entry.byteSize);
           const localTextContent =
             contentAvailable && bytes !== null ? new TextDecoder().decode(bytes) : null;
           const projectedEntry = {
@@ -561,14 +533,10 @@ export class SnippetUploadEngine extends Context.Service<
           if (isDeletePending(replica.id)) continue;
           const presentation = deriveSnippetPresentation({ fileName: replica.fileName });
           const needsText = presentation.type === "text" || presentation.type === "hyperlink";
-          const bytes = needsText
-            ? yield* content.get(accountId, replica.id).pipe(mapUnexpectedLocalFailure)
-            : null;
+          const bytes = needsText ? yield* content.get(accountId, replica.id) : null;
           const contentAvailable = needsText
             ? bytes?.byteLength === replica.byteSize
-            : yield* content
-                .available(accountId, replica.id, replica.byteSize)
-                .pipe(mapUnexpectedLocalFailure);
+            : yield* content.available(accountId, replica.id, replica.byteSize);
           const localTextContent =
             contentAvailable && bytes !== null ? new TextDecoder().decode(bytes) : null;
           projected.push({
@@ -601,6 +569,8 @@ export class SnippetUploadEngine extends Context.Service<
             reason: "Upload stopped. Retry when you’re ready.",
             canRetry: true,
           }),
+          "Upload stopped. Retry when you’re ready.",
+          true,
         );
       });
 
@@ -608,28 +578,16 @@ export class SnippetUploadEngine extends Context.Service<
         account: UploadOwner,
         snippetId: string,
       ) {
-        const entry = yield* outbox.get(account.id, snippetId).pipe(mapUnexpectedLocalFailure);
+        const entry = yield* outbox.get(account.id, snippetId);
         if (entry === null || entry.phase !== "FAILED" || !entry.canRetry) return;
         let authoritativeStatus = entry.authoritativeStatus;
         if (authoritativeStatus !== null) {
           if (account.accessToken === null) return;
           if (authoritativeStatus === "UPLOADING") {
-            const failed = yield* remote
-              .fail(account.accessToken, snippetId)
-              .pipe(
-                Effect.mapError((cause) =>
-                  engineError(cause, "Plakk could not reconcile the interrupted upload.", true),
-                ),
-              );
+            const failed = yield* remote.fail(account.accessToken, snippetId);
             authoritativeStatus = failed.uploadStatus;
           }
-          const retried = yield* remote
-            .retry(account.accessToken, snippetId)
-            .pipe(
-              Effect.mapError((cause) =>
-                engineError(cause, "Plakk could not restart this upload.", true),
-              ),
-            );
+          const retried = yield* remote.retry(account.accessToken, snippetId);
           authoritativeStatus = retried.uploadStatus;
         }
         const now = DateTime.formatIso(yield* DateTime.now);
@@ -654,8 +612,8 @@ export class SnippetUploadEngine extends Context.Service<
         if (fiber !== undefined && fiber !== null) yield* Fiber.interrupt(fiber);
         active.delete(snippetId);
         progressById.delete(snippetId);
-        yield* outbox.remove(accountId, snippetId).pipe(mapUnexpectedLocalFailure);
-        yield* content.discard(accountId, snippetId).pipe(mapUnexpectedLocalFailure);
+        yield* outbox.remove(accountId, snippetId);
+        yield* content.discard(accountId, snippetId);
       });
 
       const discard = Effect.fn("SnippetUploadEngine.discard")(function* (
@@ -670,7 +628,7 @@ export class SnippetUploadEngine extends Context.Service<
         account: UploadOwner,
         snippetId: string,
       ) {
-        const entry = yield* outbox.get(account.id, snippetId).pipe(mapUnexpectedLocalFailure);
+        const entry = yield* outbox.get(account.id, snippetId);
         const safelyLocalOnly =
           entry !== null && entry.phase === "QUEUED" && entry.authoritativeStatus === null;
         if (account.accessToken === null && !safelyLocalOnly) {
@@ -689,17 +647,10 @@ export class SnippetUploadEngine extends Context.Service<
           Effect.andThen(publish(account.id)),
         );
         if (account.accessToken !== null) {
-          yield* remote.delete(account.accessToken, snippetId).pipe(
-            Effect.mapError((cause) =>
-              engineError(cause, "Plakk could not delete this snippet.", true),
-            ),
-            Effect.onError(() => restore),
-          );
-          yield* replica.remove(account.id, snippetId).pipe(mapUnexpectedLocalFailure);
+          yield* remote.delete(account.accessToken, snippetId).pipe(Effect.onError(() => restore));
+          yield* replica.remove(account.id, snippetId);
           yield* cleanupLocal(account.id, snippetId);
-          yield* replica
-            .completeDeleteCleanup(account.id, snippetId)
-            .pipe(mapUnexpectedLocalFailure);
+          yield* replica.completeDeleteCleanup(account.id, snippetId);
           yield* publish(account.id);
         } else {
           yield* discard(account.id, snippetId).pipe(Effect.onError(() => restore));
@@ -710,16 +661,12 @@ export class SnippetUploadEngine extends Context.Service<
         accountId: string,
         replicaItems: ReadonlyArray<ApiSnippet>,
       ) {
-        const durablePendingDeletes = yield* replica
-          .pendingDeleteIds(accountId)
-          .pipe(mapUnexpectedLocalFailure);
+        const durablePendingDeletes = yield* replica.pendingDeleteIds(accountId);
         yield* Effect.forEach(
           durablePendingDeletes,
           (snippetId) =>
             cleanupLocal(accountId, snippetId).pipe(
-              Effect.andThen(
-                replica.completeDeleteCleanup(accountId, snippetId).pipe(mapUnexpectedLocalFailure),
-              ),
+              Effect.andThen(replica.completeDeleteCleanup(accountId, snippetId)),
               Effect.catchCause((cause) =>
                 Effect.logWarning("Could not finish local snippet deletion cleanup", {
                   accountId,
@@ -735,7 +682,7 @@ export class SnippetUploadEngine extends Context.Service<
             .filter((snippet) => snippet.uploadStatus === "UPLOADED")
             .map((snippet) => snippet.id),
         );
-        const entries = yield* outbox.list(accountId).pipe(mapUnexpectedLocalFailure);
+        const entries = yield* outbox.list(accountId);
         const retainedIds = new Set([
           ...entries.map((entry) => entry.id),
           ...replicaItems.map((snippet) => snippet.id),
@@ -755,9 +702,7 @@ export class SnippetUploadEngine extends Context.Service<
             progressById.delete(entry.id);
             return (
               fiber === undefined || fiber === null ? Effect.void : Fiber.interrupt(fiber)
-            ).pipe(
-              Effect.andThen(outbox.remove(accountId, entry.id).pipe(mapUnexpectedLocalFailure)),
-            );
+            ).pipe(Effect.andThen(outbox.remove(accountId, entry.id)));
           },
           { discard: true },
         );
