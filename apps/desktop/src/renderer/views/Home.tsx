@@ -23,6 +23,7 @@ import {
   useStorageStatus,
 } from "../hooks/useStorageStatus.tsx";
 import { navigate } from "../lib/navigate.ts";
+import { ipcActionErrorMessage } from "../lib/ipcActionErrorMessage.ts";
 import { ingestFileSnippet, ingestTextSnippet } from "../lib/snippetIngestion.ts";
 
 const accountSetupUrl = "https://app.plakk.io/account/setup";
@@ -52,7 +53,6 @@ export function Home({ active = true }: { active?: boolean }) {
     isLoading: replicaLoading,
     items: snippets,
     reload: reloadSnippets,
-    retryContent,
   } = useSnippets();
   const accountBlocked = !storageStatus.canSync;
   const user = auth.user;
@@ -134,10 +134,10 @@ export function Home({ active = true }: { active?: boolean }) {
       const { [id]: _error, ...remaining } = errors;
       return remaining;
     });
-    return action().catch(() => {
+    return action().catch((cause) => {
       setCopyErrors((errors) => ({
         ...errors,
-        [id]: "Plakk couldn’t update this snippet.",
+        [id]: ipcActionErrorMessage(cause, "Plakk couldn’t update this snippet."),
       }));
     });
   }
@@ -393,7 +393,7 @@ export function Home({ active = true }: { active?: boolean }) {
                 copied={copiedId === snippet.id}
                 copying={copyingId === snippet.id}
                 onCopy={() => void copySnippet(snippet)}
-                copyDisabled={!snippet.contentAvailable && snippet.uploadStatus !== "UPLOADED"}
+                copyDisabled={snippet.localContentAvailability.status !== "AVAILABLE"}
                 copyError={copyErrors[snippet.id]}
                 onDelete={() => {
                   void runSnippetAction(snippet.id, () => window.ipc.snippets.delete(snippet.id));
@@ -401,15 +401,10 @@ export function Home({ active = true }: { active?: boolean }) {
                 onRetryUpload={() =>
                   void runSnippetAction(snippet.id, () => window.ipc.snippets.retry(snippet.id))
                 }
+                onDownload={() =>
+                  void runSnippetAction(snippet.id, () => window.ipc.snippets.download(snippet.id))
+                }
                 onOpenLink={openLink}
-                {...((snippet.presentation.type === "text" ||
-                  snippet.presentation.type === "hyperlink") &&
-                snippet.textContent !== undefined
-                  ? {
-                      textContent: snippet.textContent,
-                      onRetryContent: () => retryContent(snippet.id),
-                    }
-                  : {})}
                 {...(snippet.presentation.type === "image"
                   ? {
                       thumbnailUrl: snippet.thumbnailUrl,

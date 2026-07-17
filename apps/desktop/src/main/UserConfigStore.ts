@@ -1,20 +1,15 @@
 import ElectronStore from "electron-store";
 import { Context, Data, Effect, Layer, Schema } from "effect";
 
+import { UserConfigSchema, type UserConfig, type UserConfigPatch } from "../ipc/contracts.ts";
+
 export class UserConfigStoreError extends Data.TaggedError("UserConfigStoreError")<{
   readonly cause: unknown;
 }> {}
 
-const UserConfigSchema = Schema.Struct({
-  showExternalLinkWarning: Schema.Boolean,
-});
-
-type UserConfig = typeof UserConfigSchema.Type;
-
-type UserConfigPatch = Partial<UserConfig>;
-
 const defaultUserConfig: UserConfig = {
   showExternalLinkWarning: true,
+  keepAllFilesOffline: false,
 };
 
 const decodeUserConfig = (input: unknown) =>

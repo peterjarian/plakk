@@ -14,10 +14,9 @@ const state = vi.hoisted(() => {
     createdAt: "2026-07-11T00:00:00.000Z",
     updatedAt: "2026-07-11T00:00:00.000Z",
     localState: null,
-    localTextContent: null,
-    contentAvailable: true,
+    localTextPreview: null,
+    localContentAvailability: { status: "AVAILABLE" },
     presentation: { type: "image", title: "Alfa Romeo.png" },
-    textContent: undefined,
     thumbnailUrl: "blob:tray-preview",
   } as const;
   return { latest };
@@ -29,7 +28,6 @@ vi.mock("../hooks/useSnippets.ts", () => ({
     isLoading: false,
     items: [state.latest],
     reload: vi.fn(),
-    retryContent: vi.fn(),
   }),
 }));
 

@@ -39,6 +39,7 @@ const harness = (options: {
   let pulls = 0;
   let connections = 0;
   const invalidated: Array<ReadonlyArray<string>> = [];
+  const statesAtInvalidation: Array<SnippetReplicaState | null> = [];
   const pages = [...(options.pages ?? [])];
   const snapshot = options.snapshot ?? { cursor: "snapshot", items: [] };
 
@@ -73,10 +74,12 @@ const harness = (options: {
       ManagedSnippetContent,
       ManagedSnippetContent.of({
         get: () => Effect.succeed(null),
-        put: () => Effect.void,
+        putStream: () => Effect.void,
+        available: () => Effect.succeed(false),
         invalidate: (_accountId, ids) =>
           Effect.sync(() => {
             invalidated.push(ids);
+            statesAtInvalidation.push(state);
           }),
       }),
     ),
@@ -102,6 +105,7 @@ const harness = (options: {
 
   return {
     invalidated,
+    statesAtInvalidation,
     layer,
     state: () => state,
     pulls: () => pulls,
@@ -143,6 +147,7 @@ describe("snippet replica synchronization", () => {
 
     expect(test.state()).toEqual({ cursor: "next", items: [] });
     expect(test.invalidated).toEqual([[snippet.id]]);
+    expect(test.statesAtInvalidation).toEqual([{ cursor: "next", items: [] }]);
   });
 
   it("re-pulls the same page after a crash before the cursor commit", async () => {

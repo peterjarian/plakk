@@ -18,6 +18,10 @@
     "./SnippetReplica": {
       "import": "./src/SnippetReplica.ts",
       "types": "./src/SnippetReplica.ts"
+    },
+    "./SnippetHydration": {
+      "import": "./src/SnippetHydration.ts",
+      "types": "./src/SnippetHydration.ts"
     }
   },
   "scripts": {

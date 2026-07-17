@@ -19,16 +19,17 @@ const snippet: SnippetReadModel = {
     errorMessage: "The storage upload did not complete.",
     canRetry: true,
   },
-  localTextContent: "A text snippet",
-  contentAvailable: true,
+  localTextPreview: "A text snippet",
+  localContentAvailability: { status: "AVAILABLE" },
   presentation: { type: "text", title: "A text snippet" },
-  textContent: { state: "ready", text: "A text snippet" },
   thumbnailUrl: null,
 };
 
 const handlers = {
   onCopy: () => undefined,
   onDelete: () => undefined,
+  onDownload: () => undefined,
+  onOpenLink: () => undefined,
   onReload: () => undefined,
   onRetryUpload: () => undefined,
   onStopUpload: () => undefined,
@@ -86,5 +87,77 @@ describe("TrayRecentItem", () => {
     );
 
     expect(markup).toContain('aria-label="Stop uploading"');
+  });
+
+  it("offers the same local download action as the main snippet row", () => {
+    const markup = renderToStaticMarkup(
+      <TrayRecentItem
+        snippet={{
+          ...snippet,
+          uploadStatus: "UPLOADED",
+          localState: null,
+          localTextPreview: null,
+          localContentAvailability: { status: "NOT_AVAILABLE" },
+          presentation: { type: "text", title: "Text snippet" },
+        }}
+        copied={false}
+        copying={false}
+        copyDisabled
+        readError={null}
+        {...handlers}
+      />,
+    );
+
+    expect(markup).toContain('aria-label="Download to this device"');
+    expect(markup).not.toContain(snippet.id);
+    expect(markup).not.toContain("Loading text");
+  });
+
+  it("shows the same explicit offline-download status as the main window", () => {
+    const markup = renderToStaticMarkup(
+      <TrayRecentItem
+        snippet={{
+          ...snippet,
+          uploadStatus: "UPLOADED",
+          localState: null,
+          localTextPreview: null,
+          localContentAvailability: { status: "DOWNLOADING" },
+          presentation: { type: "text", title: "Text snippet" },
+        }}
+        copied={false}
+        copying={false}
+        copyDisabled
+        readError={null}
+        {...handlers}
+      />,
+    );
+
+    expect(markup).toContain('aria-label="Downloading for offline access"');
+    expect(markup).toContain("Downloading for offline access…");
+  });
+
+  it("offers the same hydrated hyperlink action as the main snippet row", () => {
+    const markup = renderToStaticMarkup(
+      <TrayRecentItem
+        snippet={{
+          ...snippet,
+          uploadStatus: "UPLOADED",
+          localState: null,
+          localTextPreview: "https://plakk.app/notes",
+          presentation: {
+            type: "hyperlink",
+            title: "plakk.app/notes",
+            url: "https://plakk.app/notes",
+          },
+        }}
+        copied={false}
+        copying={false}
+        copyDisabled={false}
+        readError={null}
+        {...handlers}
+      />,
+    );
+
+    expect(markup).toContain('aria-label="Open link"');
   });
 });

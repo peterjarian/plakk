@@ -1,4 +1,4 @@
-import { deriveSnippetPresentation } from "@plakk/shared";
+import { decodeSnippetTextPreview, isTextSnippetFileName, isValidSnippetText } from "@plakk/shared";
 import type { ApiSnippet } from "@plakk/shared/PlakkApi";
 import { RpcError } from "@plakk/shared/RpcError";
 import {
@@ -38,7 +38,14 @@ type ImportProjection = {
   readonly accountId: string;
   readonly input: SnippetIngestPayload;
   readonly createdAt: string;
-  readonly localTextContent: string | null;
+  readonly localTextPreview: string | null;
+};
+
+export type UploadProjectedSnippet = Omit<
+  DesktopSnippet,
+  "localTextPreview" | "localContentAvailability"
+> & {
+  readonly importingContent?: Pick<DesktopSnippet, "localTextPreview" | "localContentAvailability">;
 };
 
 export class SnippetUploadEngineError extends Schema.TaggedErrorClass<SnippetUploadEngineError>()(
@@ -95,13 +102,12 @@ export const snippetUploadFailureMessage = (cause: SnippetUploadEngineFailure) =
 
 const localTextFrom = (input: SnippetIngestPayload): string | null => {
   if (!("bytes" in input)) return null;
-  const presentation = deriveSnippetPresentation({ fileName: input.fileName });
-  return presentation.type === "text" || presentation.type === "hyperlink"
-    ? new TextDecoder().decode(input.bytes)
+  return isTextSnippetFileName(input.fileName) && isValidSnippetText(input.bytes)
+    ? decodeSnippetTextPreview(input.bytes)
     : null;
 };
 
-const importProjection = (value: ImportProjection): DesktopSnippet => ({
+const importProjection = (value: ImportProjection): UploadProjectedSnippet => ({
   id: value.input.id,
   fileName: value.input.fileName,
   byteSize: value.input.byteSize,
@@ -116,8 +122,13 @@ const importProjection = (value: ImportProjection): DesktopSnippet => ({
     errorMessage: null,
     canRetry: false,
   },
-  localTextContent: value.localTextContent,
-  contentAvailable: value.localTextContent !== null,
+  importingContent: {
+    localTextPreview: value.localTextPreview,
+    localContentAvailability:
+      value.localTextPreview === null
+        ? ({ status: "NOT_AVAILABLE" } as const)
+        : ({ status: "AVAILABLE" } as const),
+  },
 });
 
 const localState = (entry: SnippetUploadOutboxEntry): DesktopSnippet["localState"] => {
@@ -151,7 +162,7 @@ export class SnippetUploadEngine extends Context.Service<
     project(
       accountId: string,
       replicaItems: ReadonlyArray<ApiSnippet>,
-    ): Effect.Effect<ReadonlyArray<DesktopSnippet>, SnippetUploadEngineFailure>;
+    ): Effect.Effect<ReadonlyArray<UploadProjectedSnippet>, SnippetUploadEngineFailure>;
     cancel(
       account: UploadOwner,
       snippetId: string,
@@ -375,7 +386,7 @@ export class SnippetUploadEngine extends Context.Service<
           accountId,
           input,
           createdAt,
-          localTextContent: localTextFrom(input),
+          localTextPreview: localTextFrom(input),
         });
         importCancellations.set(input.id, cancellation);
         yield* publish(accountId);
@@ -486,7 +497,7 @@ export class SnippetUploadEngine extends Context.Service<
           pendingDeletes.has(pendingDeleteKey(accountId, snippetId));
         const entries = yield* outbox.list(accountId);
         const replicas = new Map(replicaItems.map((snippet) => [snippet.id, snippet]));
-        const projected: Array<DesktopSnippet> = [];
+        const projected: Array<UploadProjectedSnippet> = [];
         const importingIds = new Set<string>();
 
         for (const value of imports.values()) {
@@ -503,14 +514,6 @@ export class SnippetUploadEngine extends Context.Service<
           }
           const replica = replicas.get(entry.id);
           replicas.delete(entry.id);
-          const presentation = deriveSnippetPresentation({ fileName: entry.fileName });
-          const needsText = presentation.type === "text" || presentation.type === "hyperlink";
-          const bytes = needsText ? yield* content.get(accountId, entry.id) : null;
-          const contentAvailable = needsText
-            ? bytes?.byteLength === entry.byteSize
-            : yield* content.available(accountId, entry.id, entry.byteSize);
-          const localTextContent =
-            contentAvailable && bytes !== null ? new TextDecoder().decode(bytes) : null;
           const projectedEntry = {
             ...entry,
             progress: progressById.get(entry.id) ?? entry.progress,
@@ -525,25 +528,13 @@ export class SnippetUploadEngine extends Context.Service<
             createdAt: replica?.createdAt ?? entry.createdAt,
             updatedAt: replica?.updatedAt ?? entry.updatedAt,
             localState: localState(projectedEntry),
-            localTextContent,
-            contentAvailable,
           });
         }
         for (const replica of replicas.values()) {
           if (isDeletePending(replica.id)) continue;
-          const presentation = deriveSnippetPresentation({ fileName: replica.fileName });
-          const needsText = presentation.type === "text" || presentation.type === "hyperlink";
-          const bytes = needsText ? yield* content.get(accountId, replica.id) : null;
-          const contentAvailable = needsText
-            ? bytes?.byteLength === replica.byteSize
-            : yield* content.available(accountId, replica.id, replica.byteSize);
-          const localTextContent =
-            contentAvailable && bytes !== null ? new TextDecoder().decode(bytes) : null;
           projected.push({
             ...replica,
             localState: null,
-            localTextContent,
-            contentAvailable,
           });
         }
         return projected.sort((left, right) => right.createdAt.localeCompare(left.createdAt));

@@ -1,5 +1,6 @@
 import { SnippetUploadStatusLiteral, StorageProviderLiteral, UserSchema } from "@plakk/shared";
 import { AccountStatusSchema, SnippetIdSchema } from "@plakk/shared/PlakkApi";
+import { LocalContentAvailabilitySchema } from "@plakk/shared/SnippetHydration";
 import { Schema } from "effect";
 
 export type IpcSchema = Schema.ConstraintCodec<unknown, unknown, never, never>;
@@ -64,16 +65,18 @@ export const ClipboardContentSchema = Schema.Union([
 
 export type ClipboardContent = typeof ClipboardContentSchema.Type;
 
-const UserConfigSchema = Schema.Struct({
+export const UserConfigSchema = Schema.Struct({
   showExternalLinkWarning: Schema.Boolean,
+  keepAllFilesOffline: Schema.Boolean,
 });
 
 export type UserConfig = typeof UserConfigSchema.Type;
 
 export type UserConfigPatch = Partial<UserConfig>;
 
-const UserConfigPatchSchema = Schema.Struct({
+export const UserConfigPatchSchema = Schema.Struct({
   showExternalLinkWarning: Schema.optionalKey(Schema.Boolean),
+  keepAllFilesOffline: Schema.optionalKey(Schema.Boolean),
 });
 
 export const TrayDroppedItemSchema = Schema.Union([
@@ -138,8 +141,8 @@ export const DesktopSnippetSchema = Schema.Struct({
   createdAt: Schema.String,
   updatedAt: Schema.String,
   localState: Schema.NullOr(DesktopSnippetLocalStateSchema),
-  localTextContent: Schema.NullOr(Schema.String),
-  contentAvailable: Schema.Boolean,
+  localTextPreview: Schema.NullOr(Schema.String),
+  localContentAvailability: LocalContentAvailabilitySchema,
 });
 
 export type DesktopSnippet = typeof DesktopSnippetSchema.Type;
@@ -199,6 +202,11 @@ export const ipcMethods = {
     channel: "snippet:read",
     payload: SnippetIdSchema,
     result: Schema.Uint8Array,
+  }),
+  snippetDownload: method({
+    channel: "snippet:download",
+    payload: SnippetIdSchema,
+    result: Schema.Void,
   }),
   snippetList: method({
     channel: "snippet:list",

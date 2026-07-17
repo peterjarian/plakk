@@ -1,14 +1,9 @@
 import { deriveSnippetPresentation, type SnippetPresentation } from "@plakk/shared";
-import type { TextSnippetContent } from "@plakk/ui/components/SnippetRow";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { DesktopSnippet } from "../../ipc/contracts.ts";
-import { decodeTextSnippet } from "../lib/textSnippetContent.ts";
 
 const snippetListErrorMessage = "Couldn’t load snippets. Try again.";
-const textContentErrorMessage = "Couldn’t load this text. Try again.";
-
-type TextHydration = { readonly state: "loading" } | TextSnippetContent;
 
 type SnippetSubscriptionState = {
   readonly items: ReadonlyArray<DesktopSnippet>;
@@ -29,12 +24,8 @@ type SnippetSubscriptionAction =
 
 export type SnippetReadModel = DesktopSnippet & {
   readonly presentation: SnippetPresentation;
-  readonly textContent: TextSnippetContent | undefined;
   readonly thumbnailUrl: string | null;
 };
-
-const hasGeneratedTextFileName = (snippet: DesktopSnippet): boolean =>
-  snippet.fileName.toLowerCase() === `${snippet.id}.txt`.toLowerCase();
 
 export const initialSnippetSubscriptionState: SnippetSubscriptionState = {
   items: [],
@@ -74,67 +65,20 @@ export const updateSnippetSubscription = (
   }
 };
 
-const textPresentationWithoutContent = (
-  snippet: DesktopSnippet,
-  unavailable: boolean,
-): SnippetPresentation => {
-  if (!hasGeneratedTextFileName(snippet)) {
-    return deriveSnippetPresentation({ fileName: snippet.fileName });
-  }
-  return { type: "text", title: unavailable ? "Text unavailable" : "Text snippet" };
-};
-
-const textPresentationWithContent = (
-  snippet: DesktopSnippet,
-  content: string,
-): SnippetPresentation => {
-  const presentation = deriveSnippetPresentation({ fileName: snippet.fileName, content });
-  return presentation.type === "text" && hasGeneratedTextFileName(snippet)
-    ? {
-        ...presentation,
-        title: presentation.title === snippet.fileName ? "Text snippet" : presentation.title,
-      }
-    : presentation;
-};
-
 export const projectSnippetReadModels = (
   replicaItems: ReadonlyArray<DesktopSnippet>,
-  textContents: Readonly<Record<string, TextHydration>>,
   thumbnailUrls: Readonly<Record<string, string>>,
 ): ReadonlyArray<SnippetReadModel> =>
-  replicaItems.flatMap((snippet) => {
-    const filePresentation = deriveSnippetPresentation({ fileName: snippet.fileName });
-    const isText = filePresentation.type === "text" || filePresentation.type === "hyperlink";
-    const textContent = isText
-      ? snippet.localTextContent === null
-        ? textContents[snippet.id]
-        : ({ state: "ready", text: snippet.localTextContent } as const)
-      : undefined;
-
-    if (
-      isText &&
-      snippet.localTextContent === null &&
-      snippet.uploadStatus === "UPLOADED" &&
-      (textContent === undefined || textContent.state === "loading")
-    ) {
-      return [];
-    }
-
-    const presentation =
-      textContent?.state === "ready"
-        ? textPresentationWithContent(snippet, textContent.text)
-        : isText
-          ? textPresentationWithoutContent(snippet, textContent?.state === "failed")
-          : filePresentation;
-
-    return [
-      {
-        ...snippet,
-        presentation,
-        textContent: textContent?.state === "loading" ? undefined : textContent,
-        thumbnailUrl: thumbnailUrls[snippet.id] ?? null,
-      },
-    ];
+  replicaItems.map((snippet) => {
+    const presentation = deriveSnippetPresentation({
+      fileName: snippet.fileName,
+      ...(snippet.localTextPreview === null ? {} : { content: snippet.localTextPreview }),
+    });
+    return {
+      ...snippet,
+      presentation,
+      thumbnailUrl: thumbnailUrls[snippet.id] ?? null,
+    };
   });
 
 export const createImageUrlRegistry = () => {
@@ -214,88 +158,6 @@ const useSnippetSubscription = () => {
   return { ...state, reload };
 };
 
-const useTextHydration = (snippets: ReadonlyArray<DesktopSnippet>) => {
-  const [contents, setContents] = useState<Record<string, TextHydration>>({});
-  const loadingIdsRef = useRef(new Set<string>());
-  const mountedRef = useRef(true);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-      loadingIdsRef.current.clear();
-    };
-  }, []);
-
-  const load = useCallback((snippet: DesktopSnippet) => {
-    if (loadingIdsRef.current.has(snippet.id)) return;
-    loadingIdsRef.current.add(snippet.id);
-    setContents((current) =>
-      current[snippet.id]?.state === "failed"
-        ? current
-        : { ...current, [snippet.id]: { state: "loading" } },
-    );
-    void window.ipc.snippets
-      .read(snippet.id)
-      .then((bytes) => {
-        if (!mountedRef.current) return;
-        const text = decodeTextSnippet(bytes);
-        setContents((current) => ({ ...current, [snippet.id]: { state: "ready", text } }));
-      })
-      .catch(() => {
-        if (!mountedRef.current) return;
-        setContents((current) => ({
-          ...current,
-          [snippet.id]: { state: "failed", message: textContentErrorMessage },
-        }));
-      })
-      .finally(() => loadingIdsRef.current.delete(snippet.id));
-  }, []);
-
-  useEffect(() => {
-    const visibleIds = new Set(snippets.map(({ id }) => id));
-    setContents((current) => {
-      let changed = false;
-      const next = { ...current };
-      for (const id of Object.keys(next)) {
-        if (visibleIds.has(id)) continue;
-        delete next[id];
-        changed = true;
-      }
-      for (const snippet of snippets) {
-        if (snippet.localTextContent === null) continue;
-        const existing = next[snippet.id];
-        if (existing?.state === "ready" && existing.text === snippet.localTextContent) continue;
-        next[snippet.id] = { state: "ready", text: snippet.localTextContent };
-        changed = true;
-      }
-      return changed ? next : current;
-    });
-
-    for (const snippet of snippets) {
-      const type = deriveSnippetPresentation({ fileName: snippet.fileName }).type;
-      if (
-        (type === "text" || type === "hyperlink") &&
-        snippet.localTextContent === null &&
-        snippet.uploadStatus === "UPLOADED" &&
-        contents[snippet.id] === undefined
-      ) {
-        load(snippet);
-      }
-    }
-  }, [contents, load, snippets]);
-
-  const retry = useCallback(
-    (id: string) => {
-      const snippet = snippets.find((item) => item.id === id);
-      if (snippet !== undefined) load(snippet);
-    },
-    [load, snippets],
-  );
-
-  return { contents, retry };
-};
-
 const useSnippetImageUrls = (snippets: ReadonlyArray<DesktopSnippet>) => {
   const [thumbnailUrls, setThumbnailUrls] = useState<Record<string, string>>({});
   const registryRef = useRef<ReturnType<typeof createImageUrlRegistry> | null>(null);
@@ -307,7 +169,7 @@ const useSnippetImageUrls = (snippets: ReadonlyArray<DesktopSnippet>) => {
     const images = snippets.filter(
       (snippet) =>
         deriveSnippetPresentation({ fileName: snippet.fileName }).type === "image" &&
-        (snippet.contentAvailable || snippet.uploadStatus === "UPLOADED"),
+        snippet.localContentAvailability.status === "AVAILABLE",
     );
     const visibleIds = new Set(images.map(({ id }) => id));
     visibleIdsRef.current = visibleIds;
@@ -354,12 +216,11 @@ const useSnippetImageUrls = (snippets: ReadonlyArray<DesktopSnippet>) => {
 
 export function useSnippets() {
   const { items: replicaItems, isLoading, error, reload } = useSnippetSubscription();
-  const { contents: textContents, retry: retryContent } = useTextHydration(replicaItems);
   const thumbnailUrls = useSnippetImageUrls(replicaItems);
   const items = useMemo(
-    () => projectSnippetReadModels(replicaItems, textContents, thumbnailUrls),
-    [replicaItems, textContents, thumbnailUrls],
+    () => projectSnippetReadModels(replicaItems, thumbnailUrls),
+    [replicaItems, thumbnailUrls],
   );
 
-  return { error, isLoading, items, reload, retryContent };
+  return { error, isLoading, items, reload };
 }

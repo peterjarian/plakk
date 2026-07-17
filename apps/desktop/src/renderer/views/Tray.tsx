@@ -2,6 +2,7 @@ import { useEffect, useState, type DragEvent } from "react";
 import { accountCanSync } from "@plakk/shared/PlakkApi";
 import type { ClipboardContent, TrayAccountState, TrayDroppedItem } from "../../ipc/contracts.ts";
 import { useSnippets } from "../hooks/useSnippets.ts";
+import { ipcActionErrorMessage } from "../lib/ipcActionErrorMessage.ts";
 import { ingestFileSnippet, ingestTextSnippet } from "../lib/snippetIngestion.ts";
 import { TrayActions } from "./tray/TrayActions.tsx";
 import { TrayRecentItem } from "./tray/TrayRecentItem.tsx";
@@ -20,7 +21,7 @@ export function Tray() {
   const { error: snippetReadError, items, reload: reloadSnippets } = useSnippets();
   const latest = items.at(0);
   const copyDisabled =
-    latest === undefined || (!latest.contentAvailable && latest.uploadStatus !== "UPLOADED");
+    latest === undefined || latest.localContentAvailability.status !== "AVAILABLE";
   const isCopied = latest !== undefined && copiedId === latest.id;
   const isCopying = latest !== undefined && copyingId === latest.id;
   const currentCopyError =
@@ -137,7 +138,9 @@ export function Tray() {
   ) => {
     if (latest === undefined) return;
     setError(null);
-    void action(latest.id).catch(() => setError(fallbackMessage));
+    void action(latest.id).catch((cause) =>
+      setError(ipcActionErrorMessage(cause, fallbackMessage)),
+    );
   };
 
   return (
@@ -191,6 +194,15 @@ export function Tray() {
               onRetryUpload={() =>
                 runLatestAction(window.ipc.snippets.retry, "Could not retry this upload.")
               }
+              onDownload={() =>
+                runLatestAction(window.ipc.snippets.download, "Could not download this snippet.")
+              }
+              onOpenLink={(url) => {
+                setError(null);
+                void window.ipc
+                  .openExternal(url)
+                  .catch(() => setError("Plakk couldn’t open this link."));
+              }}
               onStopUpload={() =>
                 runLatestAction(window.ipc.snippets.cancel, "Could not stop this upload.")
               }

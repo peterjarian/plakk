@@ -43,6 +43,18 @@ _Avoid_: Sync status, local upload state
 Origin-local information explaining why an upload is currently failing and how that origin may recover or retry it. Other clients synchronize only the authoritative `FAILED` status.
 _Avoid_: Authoritative failure message, synchronized provider error
 
+**Local content availability**:
+The device-owned state of a snippet's managed bytes: `AVAILABLE`, `NOT_AVAILABLE`, `DOWNLOADING`, or locally `FAILED`. It is projected separately from authoritative upload status, is never synchronized to other devices, and never changes `UPLOADING`, `FAILED`, or `UPLOADED`.
+_Avoid_: Download upload status, local sync status
+
+**Snippet hydration**:
+The presentation-agnostic process that streams an `UPLOADED` snippet's provider file into atomic managed local content. Electron main owns the desktop transport and shared hydration engine; renderer surfaces observe local availability and request manual downloads through local IPC.
+_Avoid_: Copy download, text hydration, renderer fetch
+
+**Smart offline retention**:
+The per-device default that automatically hydrates snippets from the last seven days up to 1 GB and older snippets up to 20 MB. A user may download any other `UPLOADED` snippet manually or enable keep-all offline for that device.
+_Avoid_: Global retention, synchronized download preference
+
 **Snippet deletion**:
 Removal of a snippet regardless of whether it is queued, uploading, failed, or uploaded. Deletion wins over unfinished work and late completion; cancellation is not a separate snippet state.
 _Avoid_: Canceled upload status

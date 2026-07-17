@@ -183,6 +183,7 @@ const harness = (options?: {
                   new ManagedSnippetContentError({
                     cause: null,
                     reason: "The local copy of this snippet is unavailable.",
+                    retryable: true,
                   }),
                 );
           }),
@@ -191,15 +192,15 @@ const harness = (options?: {
             calls.get += 1;
             return content.get(key(accountId, id)) ?? null;
           }),
+        getPrefix: (accountId, id, maxBytes) =>
+          Effect.sync(() => content.get(key(accountId, id))?.subarray(0, maxBytes) ?? null),
+        validateText: () => Effect.succeed("VALID"),
         available: (accountId, id, byteSize) =>
           Effect.sync(() => {
             calls.available += 1;
             return content.get(key(accountId, id))?.byteLength === byteSize;
           }),
-        put: (accountId, id, value) =>
-          Effect.sync(() => {
-            content.set(key(accountId, id), value);
-          }),
+        putStream: () => Effect.void,
         discard: (accountId, id) =>
           Effect.gen(function* () {
             calls.discard += 1;
@@ -208,9 +209,14 @@ const harness = (options?: {
               return yield* new ManagedSnippetContentError({
                 cause: null,
                 reason: "Could not remove managed snippet content.",
+                retryable: true,
               });
             }
             content.delete(key(accountId, id));
+          }),
+        invalidate: (accountId, ids) =>
+          Effect.sync(() => {
+            for (const id of ids) content.delete(key(accountId, id));
           }),
       }),
     ),
@@ -378,7 +384,7 @@ describe("SnippetUploadEngine", () => {
     ).toBe("This snippet is already being saved locally.");
   });
 
-  it("durably queues offline, restarts with the same id and local text, then completes", async () => {
+  it("durably queues offline, restarts with the same id, then completes", async () => {
     const test = harness();
 
     await test.run(SnippetUploadEngine.use((engine) => engine.ingest(account.id, input)));
@@ -393,8 +399,6 @@ describe("SnippetUploadEngine", () => {
       {
         id: snippetId,
         fileName: input.fileName,
-        localTextContent: text,
-        contentAvailable: true,
         localState: { phase: "QUEUED" },
       },
     ]);
@@ -540,7 +544,7 @@ describe("SnippetUploadEngine", () => {
     expect(test.calls.fail).toBe(0);
   });
 
-  it("checks binary content availability without loading the file into memory", async () => {
+  it("leaves managed-content availability to the desktop projection owner", async () => {
     const test = harness();
     const fileId = "1d1e2f3a-4567-4890-8abc-def012345679";
     test.content.set(`${account.id}/${fileId}`, new Uint8Array([1, 2, 3]));
@@ -566,9 +570,10 @@ describe("SnippetUploadEngine", () => {
       SnippetUploadEngine.use((engine) => engine.project(account.id, [])),
     );
 
-    expect(projection[0]?.contentAvailable).toBe(true);
+    expect(projection[0]).not.toHaveProperty("localContentAvailability");
+    expect(projection[0]).not.toHaveProperty("localTextPreview");
     expect(test.calls.get).toBe(0);
-    expect(test.calls.available).toBe(1);
+    expect(test.calls.available).toBe(0);
   });
 
   it("does not create authoritative metadata when local import times out", async () => {
@@ -577,6 +582,7 @@ describe("SnippetUploadEngine", () => {
         cause: Object.assign(new Error("connection timed out"), { code: "ETIMEDOUT" }),
         reason:
           "This file isn’t available on this Mac yet. Check its cloud download, then try again.",
+        retryable: true,
       }),
     });
 
@@ -601,6 +607,17 @@ describe("SnippetUploadEngine", () => {
         const engine = yield* SnippetUploadEngine;
         const importing = yield* engine.ingest(account.id, input).pipe(Effect.forkChild);
         yield* Effect.yieldNow;
+        const projection = yield* engine.project(account.id, []);
+        expect(projection).toMatchObject([
+          {
+            id: snippetId,
+            localState: { phase: "IMPORTING" },
+            importingContent: {
+              localTextPreview: text,
+              localContentAvailability: { status: "AVAILABLE" },
+            },
+          },
+        ]);
         yield* engine.cancel({ id: account.id, accessToken: null }, snippetId);
         yield* Fiber.await(importing);
       }).pipe(Effect.provide(test.layer)),
@@ -700,7 +717,7 @@ describe("SnippetUploadEngine", () => {
     expect(test.calls).toMatchObject({ create: 0, prepare: 0, upload: 0, fail: 1 });
   });
 
-  it("keeps origin-managed text available after the replica adopts the upload", async () => {
+  it("adopts the authoritative replica after upload without retaining duplicate outbox state", async () => {
     const test = harness();
     await test.run(SnippetUploadEngine.use((engine) => engine.ingest(account.id, input)));
     await test.run(SnippetUploadEngine.use((engine) => engine.resume(account)));
@@ -720,8 +737,6 @@ describe("SnippetUploadEngine", () => {
       {
         id: snippetId,
         uploadStatus: "UPLOADED",
-        localTextContent: text,
-        contentAvailable: true,
       },
     ]);
   });

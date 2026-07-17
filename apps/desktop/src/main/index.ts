@@ -3,8 +3,9 @@ import "dotenv/config";
 import { basename, join, resolve, sep } from "node:path";
 import { rm, stat } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
-import { deriveSnippetPresentation, isHttpUrl } from "@plakk/shared";
+import { decodeSnippetText, deriveSnippetPresentation, isHttpUrl } from "@plakk/shared";
 import { accountCanSync } from "@plakk/shared/PlakkApi";
+import { SnippetHydrationEngine } from "@plakk/shared/SnippetHydration";
 import { SnippetReplica, runSnippetReplicaSync } from "@plakk/shared/SnippetReplica";
 import { app, BrowserWindow, dialog, Menu, net, protocol, shell } from "electron";
 import { Effect, Result, Stream } from "effect";
@@ -30,6 +31,7 @@ import { isReloadShortcut, reconcileTrayAuth } from "./lifecycle.ts";
 import { UserConfigStore } from "./UserConfigStore.ts";
 import { runEffect, runtime } from "./runtime.ts";
 import { ActiveSnippetAccount, getManagedSnippetBytes, getReplicaItems } from "./snippetReplica.ts";
+import { projectDesktopManagedContent } from "./SnippetProjection.ts";
 import { SnippetUploadEngine, snippetUploadFailureMessage } from "./SnippetUploadEngine.ts";
 
 const handle = makeHandle(runtime);
@@ -130,6 +132,22 @@ handle(ipcMethods.snippetDelete, (id) => {
       );
 });
 
+handle(ipcMethods.snippetDownload, (id) => {
+  const account = activeSnippetAccount();
+  if (account === null || account.accessToken === null) {
+    return Effect.fail(
+      new IpcHandlerError({
+        cause: null,
+        message: "Reconnect storage before downloading this snippet.",
+      }),
+    );
+  }
+  const hydrationAccount = { id: account.id, accessToken: account.accessToken };
+  return SnippetHydrationEngine.use((engine) => engine.download(hydrationAccount, id)).pipe(
+    Effect.mapError((cause) => new IpcHandlerError({ cause, message: cause.reason })),
+  );
+});
+
 const findSnippet = Effect.fn("DesktopSnippetProjection.find")(function* (id: string) {
   const account = activeSnippetAccount();
   if (account === null) {
@@ -156,10 +174,12 @@ handle(ipcMethods.snippetCopy, (id) =>
     );
     const presentation = deriveSnippetPresentation({ fileName: snippet.fileName, content: bytes });
     if (presentation.type === "text" || presentation.type === "hyperlink") {
-      return yield* writeClipboard({
-        type: "text",
-        text: new TextDecoder().decode(bytes),
-      }).pipe(asIpcFailure("Could not copy this snippet."));
+      const text = decodeSnippetText(bytes);
+      if (text !== null) {
+        return yield* writeClipboard({ type: "text", text }).pipe(
+          asIpcFailure("Could not copy this snippet."),
+        );
+      }
     }
     return yield* writeSnippetToClipboard({
       bytes,
@@ -305,14 +325,28 @@ handle(ipcMethods.userConfigGet, () =>
   ),
 );
 
+const applyOfflineContentPreference = Effect.fn("DesktopSettings.applyOfflineContentPreference")(
+  function* (keepAllFilesOffline: boolean) {
+    yield* SnippetHydrationEngine.use((engine) =>
+      engine.updateSettings({ keepAllFilesOffline }),
+    ).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Could not apply offline content preference", { cause }),
+      ),
+    );
+  },
+);
+
 handle(ipcMethods.userConfigSet, (patch) =>
   UserConfigStore.use((store) => store.set(patch)).pipe(
+    Effect.tap((config) => applyOfflineContentPreference(config.keepAllFilesOffline)),
     asIpcFailure("Could not save desktop preferences."),
   ),
 );
 
 handle(ipcMethods.userConfigReset, () =>
   UserConfigStore.use((store) => store.reset).pipe(
+    Effect.tap((config) => applyOfflineContentPreference(config.keepAllFilesOffline)),
     asIpcFailure("Could not reset desktop preferences."),
   ),
 );
@@ -328,6 +362,7 @@ let trayRefreshGeneration = 0;
 let activeSnippetAccountId: string | undefined;
 let snippetSyncFiber: Fiber.Fiber<void, unknown> | undefined;
 let snippetAccountPersistenceFiber: Fiber.Fiber<void, unknown> | undefined;
+let accountRecoveryTimer: ReturnType<typeof setTimeout> | undefined;
 
 handle(ipcMethods.trayGetAccountState, (_payload, event) =>
   Effect.succeed(
@@ -365,9 +400,12 @@ function applyAuthStatus(status: AuthStatus) {
     }
   }
   if (changed) {
+    if (accountRecoveryTimer !== undefined) clearTimeout(accountRecoveryTimer);
+    accountRecoveryTimer = undefined;
     trayRefreshGeneration += 1;
     if (snippetSyncFiber !== undefined) runtime.runFork(Fiber.interrupt(snippetSyncFiber));
     runtime.runFork(SnippetUploadEngine.use((engine) => engine.pause));
+    runtime.runFork(SnippetHydrationEngine.use((engine) => engine.pause));
     snippetSyncFiber =
       status.user === null || status.accessToken === null
         ? undefined
@@ -386,6 +424,14 @@ function applyAuthStatus(status: AuthStatus) {
   }
 }
 
+function scheduleAccountRecovery(): void {
+  if (accountRecoveryTimer !== undefined) return;
+  accountRecoveryTimer = setTimeout(() => {
+    accountRecoveryTimer = undefined;
+    void refreshTrayAccountState();
+  }, 30_000);
+}
+
 async function refreshTrayAccountState() {
   const status = currentAuthStatus;
   if (status.accessToken === null || status.user === null || trayWindowController === undefined)
@@ -402,17 +448,62 @@ async function refreshTrayAccountState() {
 
   if (Result.isSuccess(result)) {
     const account = result.success;
+    if (accountCanSync(account)) {
+      if (accountRecoveryTimer !== undefined) clearTimeout(accountRecoveryTimer);
+      accountRecoveryTimer = undefined;
+    } else {
+      scheduleAccountRecovery();
+    }
     trayWindowController.setAccountState(true, accountCanSync(account));
     sendTrayAccountState({ kind: "resolved", account });
-    const uploadAccount = accountCanSync(account)
-      ? SnippetUploadEngine.use((engine) => engine.resume({ id: user.id, accessToken }))
-      : SnippetUploadEngine.use((engine) => engine.pause);
+    const resumeBackgroundWork = accountCanSync(account)
+      ? Effect.gen(function* () {
+          yield* SnippetUploadEngine.use((engine) =>
+            engine
+              .resume({ id: user.id, accessToken })
+              .pipe(
+                Effect.catchCause((cause) =>
+                  Effect.logError("Could not resume queued uploads", { cause }).pipe(
+                    Effect.andThen(
+                      Effect.sync(() => broadcastAuthError("Could not resume queued uploads.")),
+                    ),
+                  ),
+                ),
+              ),
+          );
+          const config = yield* UserConfigStore.use((store) => store.get);
+          yield* SnippetHydrationEngine.use((engine) =>
+            engine
+              .resume(
+                { id: user.id, accessToken },
+                { keepAllFilesOffline: config.keepAllFilesOffline },
+              )
+              .pipe(
+                Effect.catchCause((cause) =>
+                  Effect.logError("Could not resume offline snippet downloads", { cause }).pipe(
+                    Effect.andThen(
+                      Effect.sync(() =>
+                        broadcastAuthError("Could not resume offline snippet downloads."),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          );
+        })
+      : Effect.all(
+          [
+            SnippetUploadEngine.use((engine) => engine.pause),
+            SnippetHydrationEngine.use((engine) => engine.pause),
+          ],
+          { discard: true },
+        );
     void runEffect(
-      uploadAccount.pipe(
+      resumeBackgroundWork.pipe(
         Effect.catchCause((cause) =>
-          Effect.logError("Could not resume queued uploads", { cause }).pipe(
+          Effect.logError("Could not resume background snippet work", { cause }).pipe(
             Effect.andThen(
-              Effect.sync(() => broadcastAuthError("Could not resume queued uploads.")),
+              Effect.sync(() => broadcastAuthError("Could not resume background snippet work.")),
             ),
           ),
         ),
@@ -430,6 +521,7 @@ async function refreshTrayAccountState() {
 
   trayWindowController.setAccountState(true, false);
   sendTrayAccountState({ kind: "failed" });
+  scheduleAccountRecovery();
 }
 
 app.setName(app.isPackaged ? "Plakk" : "Plakk (Dev)");
@@ -600,7 +692,27 @@ const getProjectedSnippets = Effect.fn("DesktopSnippetProjection.list")(function
   const replicaItems = yield* getReplicaItems(accountId);
   const engine = yield* SnippetUploadEngine;
   yield* engine.reconcile(accountId, replicaItems);
-  return yield* engine.project(accountId, replicaItems);
+  const items = yield* engine.project(accountId, replicaItems);
+  const hydration = yield* SnippetHydrationEngine;
+  const reconciledAvailability = yield* hydration.reconcile(accountId);
+  return yield* Effect.forEach(items, (item) => {
+    const reconciled = reconciledAvailability.get(item.id);
+    const availability =
+      reconciled === undefined
+        ? hydration.state(accountId, item.id, item.byteSize)
+        : Effect.succeed(reconciled);
+    return availability.pipe(
+      Effect.flatMap((hydrationState) =>
+        projectDesktopManagedContent(accountId, item, hydrationState),
+      ),
+      Effect.catch((error) =>
+        projectDesktopManagedContent(accountId, item, {
+          status: "FAILED",
+          message: error.reason,
+        }),
+      ),
+    );
+  });
 });
 
 function broadcastSnippetReplica(items: ReadonlyArray<DesktopSnippet>): void {
@@ -747,6 +859,7 @@ if (!hasSingleInstanceLock) {
       Effect.gen(function* () {
         const replica = yield* SnippetReplica;
         const uploads = yield* SnippetUploadEngine;
+        const hydration = yield* SnippetHydrationEngine;
         const refresh = (accountId: string) =>
           refreshSnippetProjection(accountId).pipe(
             Effect.catchCause((cause) =>
@@ -757,6 +870,7 @@ if (!hasSingleInstanceLock) {
           [
             replica.changes.pipe(Stream.runForEach(({ accountId }) => refresh(accountId))),
             uploads.changes.pipe(Stream.runForEach(refresh)),
+            hydration.changes.pipe(Stream.runForEach(refresh)),
           ],
           { concurrency: "unbounded", discard: true },
         );
