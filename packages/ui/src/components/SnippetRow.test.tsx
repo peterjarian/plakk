@@ -32,7 +32,6 @@ describe("SnippetRow", () => {
         onCopy={() => undefined}
         onDelete={() => undefined}
         onStopUpload={() => undefined}
-        textContent={{ state: "ready", text: "A text snippet" }}
       />,
     );
 
@@ -52,7 +51,6 @@ describe("SnippetRow", () => {
         onCopy={() => undefined}
         onDelete={() => undefined}
         onStopUpload={() => undefined}
-        textContent={{ state: "ready", text: "A text snippet" }}
       />,
     );
 
@@ -117,7 +115,6 @@ describe("SnippetRow", () => {
         onCopy={() => undefined}
         onDelete={() => undefined}
         onStopUpload={() => undefined}
-        textContent={{ state: "ready", text: "https://example.com" }}
       />,
     );
     const withOwner = renderToStaticMarkup(
@@ -134,7 +131,6 @@ describe("SnippetRow", () => {
         onDelete={() => undefined}
         onOpenLink={() => undefined}
         onStopUpload={() => undefined}
-        textContent={{ state: "ready", text: "https://example.com" }}
       />,
     );
 
@@ -201,7 +197,6 @@ describe("SnippetRow", () => {
         onCopy={() => undefined}
         onDelete={() => undefined}
         onStopUpload={() => undefined}
-        textContent={{ state: "ready", text: "A text snippet" }}
       />,
     );
 

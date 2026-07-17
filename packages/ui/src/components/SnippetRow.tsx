@@ -29,8 +29,6 @@ export type SnippetRowItem = Omit<ApiSnippet, "uploadStatus"> & {
   readonly localContentAvailability: LocalContentAvailability;
 };
 
-export type TextSnippetContent = { readonly state: "ready"; readonly text: string };
-
 const presentationMeta: Record<SnippetPresentation["type"], { Icon: typeof Type }> = {
   text: { Icon: Type },
   hyperlink: { Icon: LinkIcon },
@@ -91,7 +89,6 @@ export function SnippetRow(props: {
   onOpenLink?: (url: string) => void;
   onRetryUpload?: () => void;
   onStopUpload: () => void;
-  textContent?: TextSnippetContent;
   thumbnailUrl?: string | null;
   copyDisabled?: boolean;
   copying?: boolean;
@@ -109,7 +106,6 @@ export function SnippetRow(props: {
     onOpenLink,
     onRetryUpload,
     onStopUpload,
-    textContent,
     thumbnailUrl,
     copyDisabled = false,
     copying = false,
@@ -130,7 +126,6 @@ export function SnippetRow(props: {
     snippet.uploadStatus === "UPLOADED" && snippet.localContentAvailability.status === "AVAILABLE";
   const canStopUpload = localState !== null && localState.phase !== "FAILED";
   const title = presentation.title;
-  const isText = presentation.type === "text" || presentation.type === "hyperlink";
   const subtitle =
     copyError !== undefined
       ? copyError
@@ -262,7 +257,7 @@ export function SnippetRow(props: {
                   variant="ghost"
                   size="icon-sm"
                   aria-label={copying ? "Copying" : copied ? "Copied" : "Copy"}
-                  disabled={copying || copyDisabled || (isText && textContent === undefined)}
+                  disabled={copying || copyDisabled}
                   onClick={onCopy}
                 >
                   {copying ? (

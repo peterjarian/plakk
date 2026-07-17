@@ -1,11 +1,13 @@
-import { decodeSnippetText, isTextSnippetFileName } from "@plakk/shared";
+import {
+  decodeSnippetTextPreview,
+  isTextSnippetFileName,
+  SNIPPET_TEXT_PREVIEW_MAX_BYTES,
+} from "@plakk/shared";
 import type { LocalContentAvailability } from "@plakk/shared/SnippetHydration";
-import { ManagedSnippetContent } from "@plakk/shared/SnippetReplica";
 import { Effect } from "effect";
 
+import { DesktopManagedSnippetContent } from "./ManagedSnippetContent.ts";
 import type { UploadProjectedSnippet } from "./SnippetUploadEngine.ts";
-
-const invalidTextContentMessage = "This text file is not valid UTF-8. Download it again.";
 
 export const projectDesktopManagedContent = Effect.fn(
   "DesktopSnippetProjection.projectManagedContent",
@@ -17,23 +19,25 @@ export const projectDesktopManagedContent = Effect.fn(
   const { importingContent, ...metadata } = snippet;
   if (importingContent !== undefined) return { ...metadata, ...importingContent };
   if (localContentAvailability.status !== "AVAILABLE") {
-    return { ...metadata, localTextContent: null, localContentAvailability };
+    return { ...metadata, localTextPreview: null, localContentAvailability };
   }
   if (!isTextSnippetFileName(metadata.fileName)) {
-    return { ...metadata, localTextContent: null, localContentAvailability };
+    return { ...metadata, localTextPreview: null, localContentAvailability };
   }
 
-  const content = yield* ManagedSnippetContent;
-  const contentResult = yield* content.get(accountId, metadata.id).pipe(
-    Effect.match({
-      onFailure: (error) => ({ error }) as const,
-      onSuccess: (bytes) => ({ bytes }) as const,
-    }),
-  );
+  const content = yield* DesktopManagedSnippetContent;
+  const contentResult = yield* content
+    .getPrefix(accountId, metadata.id, SNIPPET_TEXT_PREVIEW_MAX_BYTES)
+    .pipe(
+      Effect.match({
+        onFailure: (error) => ({ error }) as const,
+        onSuccess: (bytes) => ({ bytes }) as const,
+      }),
+    );
   if ("error" in contentResult) {
     return {
       ...metadata,
-      localTextContent: null,
+      localTextPreview: null,
       localContentAvailability: {
         status: "FAILED",
         message: contentResult.error.reason,
@@ -41,24 +45,48 @@ export const projectDesktopManagedContent = Effect.fn(
     };
   }
   const { bytes } = contentResult;
-  if (bytes === null || bytes.byteLength !== metadata.byteSize) {
+  const previewByteSize = Math.min(metadata.byteSize, SNIPPET_TEXT_PREVIEW_MAX_BYTES);
+  if (bytes === null || bytes.byteLength !== previewByteSize) {
     return {
       ...metadata,
-      localTextContent: null,
+      localTextPreview: null,
       localContentAvailability: { status: "NOT_AVAILABLE" } as const,
     };
   }
 
-  const localTextContent = decodeSnippetText(bytes);
-  return localTextContent === null
+  const validation = yield* content
+    .validateText(accountId, metadata.id)
+    .pipe(
+      Effect.catch((error) => Effect.succeed({ status: "ERROR" as const, message: error.reason })),
+    );
+  if (typeof validation !== "string") {
+    return {
+      ...metadata,
+      localTextPreview: null,
+      localContentAvailability: { status: "FAILED", message: validation.message } as const,
+    };
+  }
+  if (validation === "NOT_FOUND") {
+    return {
+      ...metadata,
+      localTextPreview: null,
+      localContentAvailability: { status: "NOT_AVAILABLE" } as const,
+    };
+  }
+  if (validation === "INVALID") {
+    return { ...metadata, localTextPreview: null, localContentAvailability };
+  }
+
+  const localTextPreview = decodeSnippetTextPreview(bytes, metadata.byteSize > bytes.byteLength);
+  return localTextPreview === null
     ? {
         ...metadata,
-        localTextContent: null,
-        localContentAvailability: { status: "FAILED", message: invalidTextContentMessage } as const,
+        localTextPreview: null,
+        localContentAvailability,
       }
     : {
         ...metadata,
-        localTextContent,
+        localTextPreview,
         localContentAvailability,
       };
 });

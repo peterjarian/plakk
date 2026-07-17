@@ -141,7 +141,7 @@ export const DesktopSnippetSchema = Schema.Struct({
   createdAt: Schema.String,
   updatedAt: Schema.String,
   localState: Schema.NullOr(DesktopSnippetLocalStateSchema),
-  localTextContent: Schema.NullOr(Schema.String),
+  localTextPreview: Schema.NullOr(Schema.String),
   localContentAvailability: LocalContentAvailabilitySchema,
 });
 

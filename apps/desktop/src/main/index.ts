@@ -5,10 +5,7 @@ import { rm, stat } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { decodeSnippetText, deriveSnippetPresentation, isHttpUrl } from "@plakk/shared";
 import { accountCanSync } from "@plakk/shared/PlakkApi";
-import {
-  SnippetHydrationEngine,
-  snippetHydrationFailureMessage,
-} from "@plakk/shared/SnippetHydration";
+import { SnippetHydrationEngine } from "@plakk/shared/SnippetHydration";
 import { SnippetReplica, runSnippetReplicaSync } from "@plakk/shared/SnippetReplica";
 import { app, BrowserWindow, dialog, Menu, net, protocol, shell } from "electron";
 import { Effect, Result, Stream } from "effect";
@@ -147,9 +144,7 @@ handle(ipcMethods.snippetDownload, (id) => {
   }
   const hydrationAccount = { id: account.id, accessToken: account.accessToken };
   return SnippetHydrationEngine.use((engine) => engine.download(hydrationAccount, id)).pipe(
-    Effect.mapError(
-      (cause) => new IpcHandlerError({ cause, message: snippetHydrationFailureMessage(cause) }),
-    ),
+    Effect.mapError((cause) => new IpcHandlerError({ cause, message: cause.reason })),
   );
 });
 
@@ -875,7 +870,7 @@ if (!hasSingleInstanceLock) {
           [
             replica.changes.pipe(Stream.runForEach(({ accountId }) => refresh(accountId))),
             uploads.changes.pipe(Stream.runForEach(refresh)),
-            hydration.changes.pipe(Stream.runForEach(({ accountId }) => refresh(accountId))),
+            hydration.changes.pipe(Stream.runForEach(refresh)),
           ],
           { concurrency: "unbounded", discard: true },
         );

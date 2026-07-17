@@ -1,6 +1,7 @@
-import { mkdtemp, readFile, readdir, rm, unlink, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, readFile, readdir, rm, unlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { NodeFileSystem } from "@effect/platform-node";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { Effect, Fiber, FileSystem, Layer, PlatformError, Stream } from "effect";
@@ -141,6 +142,66 @@ describe("managed snippet content ingestion", () => {
     });
   });
 
+  it("reads only the requested managed-content prefix for presentation", async () => {
+    await withDirectory(async (root) => {
+      const contentRoot = join(root, "content");
+      const bytes = new Uint8Array(128 * 1024).map((_, index) => index % 251);
+      const layer = DesktopManagedSnippetContent.layer(contentRoot).pipe(
+        Layer.provide(platformLayer),
+      );
+
+      const preview = await Effect.runPromise(
+        DesktopManagedSnippetContent.use((content) =>
+          Effect.gen(function* () {
+            yield* content.putStream(accountId, snippetId, bytes.byteLength, Stream.succeed(bytes));
+            return yield* content.getPrefix(accountId, snippetId, 4096);
+          }),
+        ).pipe(Effect.provide(layer)),
+      );
+
+      expect(preview === null ? null : Uint8Array.from(preview)).toEqual(bytes.slice(0, 4096));
+    });
+  });
+
+  it("verifies hydrated integrity once and keeps later availability checks cheap", async () => {
+    await withDirectory(async (root) => {
+      const contentRoot = join(root, "content");
+      const contentPath = managedSnippetContentPath(contentRoot, accountId, snippetId);
+      const bytes = new Uint8Array([1, 2, 3, 4]);
+      await mkdir(dirname(contentPath), { recursive: true });
+      await writeFile(contentPath, bytes);
+      await writeFile(
+        join(dirname(contentPath), "content.sha256"),
+        createHash("sha256").update(bytes).digest("hex"),
+      );
+
+      const fileSystem = await Effect.runPromise(
+        FileSystem.FileSystem.pipe(Effect.provide(NodeFileSystem.layer)),
+      );
+      const stream = vi.fn(fileSystem.stream);
+      const countingFileSystem = Layer.succeed(FileSystem.FileSystem, {
+        ...fileSystem,
+        stream,
+      });
+      const layer = DesktopManagedSnippetContent.layer(contentRoot).pipe(
+        Layer.provide(countingFileSystem),
+      );
+
+      const availability = await Effect.runPromise(
+        DesktopManagedSnippetContent.use((content) =>
+          Effect.gen(function* () {
+            const first = yield* content.available(accountId, snippetId, bytes.byteLength);
+            const second = yield* content.available(accountId, snippetId, bytes.byteLength);
+            return [first, second];
+          }),
+        ).pipe(Effect.provide(layer)),
+      );
+
+      expect(availability).toEqual([true, true]);
+      expect(stream).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it("reconciles same-size corruption of hydrated content as unavailable", async () => {
     await withDirectory(async (root) => {
       const contentRoot = join(root, "content");
@@ -165,6 +226,140 @@ describe("managed snippet content ingestion", () => {
           ).pipe(Effect.provide(layer)),
         ),
       ).resolves.toBe(false);
+    });
+  });
+
+  it("rechecks integrity when a verified file changes during the same runtime", async () => {
+    await withDirectory(async (root) => {
+      const contentRoot = join(root, "content");
+      const contentPath = managedSnippetContentPath(contentRoot, accountId, snippetId);
+      const layer = DesktopManagedSnippetContent.layer(contentRoot).pipe(
+        Layer.provide(platformLayer),
+      );
+
+      const availability = await Effect.runPromise(
+        DesktopManagedSnippetContent.use((content) =>
+          Effect.gen(function* () {
+            yield* content.putStream(
+              accountId,
+              snippetId,
+              4,
+              Stream.make(new Uint8Array([1, 2, 3, 4])),
+            );
+            const before = yield* content.available(accountId, snippetId, 4);
+            yield* Effect.promise(() => writeFile(contentPath, new Uint8Array([4, 3, 2, 1])));
+            const changedAt = new Date(Date.now() + 1_000);
+            yield* Effect.promise(() => utimes(contentPath, changedAt, changedAt));
+            const after = yield* content.available(accountId, snippetId, 4);
+            return [before, after];
+          }),
+        ).pipe(Effect.provide(layer)),
+      );
+
+      expect(availability).toEqual([true, false]);
+    });
+  });
+
+  it("validates UTF-8 beyond the bounded presentation prefix", async () => {
+    await withDirectory(async (root) => {
+      const contentRoot = join(root, "content");
+      const bytes = new Uint8Array(64 * 1024 + 1).fill(0x61);
+      bytes[bytes.byteLength - 1] = 0xff;
+      const layer = DesktopManagedSnippetContent.layer(contentRoot).pipe(
+        Layer.provide(platformLayer),
+      );
+
+      const validation = await Effect.runPromise(
+        DesktopManagedSnippetContent.use((content) =>
+          Effect.gen(function* () {
+            yield* content.putStream(accountId, snippetId, bytes.byteLength, Stream.make(bytes));
+            return yield* content.validateText(accountId, snippetId);
+          }),
+        ).pipe(Effect.provide(layer)),
+      );
+
+      expect(validation).toBe("INVALID");
+    });
+  });
+
+  it("stops reading managed text after the first invalid UTF-8 chunk", async () => {
+    await withDirectory(async (root) => {
+      const contentRoot = join(root, "content");
+      const contentPath = managedSnippetContentPath(contentRoot, accountId, snippetId);
+      await mkdir(dirname(contentPath), { recursive: true });
+      await writeFile(contentPath, new Uint8Array([0xff, 0x61]));
+
+      const fileSystem = await Effect.runPromise(
+        FileSystem.FileSystem.pipe(Effect.provide(NodeFileSystem.layer)),
+      );
+      let laterChunksRead = 0;
+      const countingFileSystem = Layer.succeed(FileSystem.FileSystem, {
+        ...fileSystem,
+        stream: (path, options) =>
+          path === contentPath && options === undefined
+            ? Stream.make(new Uint8Array([0xff])).pipe(
+                Stream.concat(
+                  Stream.fromEffect(
+                    Effect.sync(() => {
+                      laterChunksRead += 1;
+                      return new Uint8Array([0x61]);
+                    }),
+                  ),
+                ),
+              )
+            : fileSystem.stream(path, options),
+      });
+
+      const validation = await Effect.runPromise(
+        DesktopManagedSnippetContent.use((content) =>
+          content.validateText(accountId, snippetId),
+        ).pipe(
+          Effect.provide(
+            DesktopManagedSnippetContent.layer(contentRoot).pipe(Layer.provide(countingFileSystem)),
+          ),
+        ),
+      );
+
+      expect(validation).toBe("INVALID");
+      expect(laterChunksRead).toBe(0);
+    });
+  });
+
+  it("replaces same-size corrupt hydrated content", async () => {
+    await withDirectory(async (root) => {
+      const contentRoot = join(root, "content");
+      const contentPath = managedSnippetContentPath(contentRoot, accountId, snippetId);
+      const expected = new Uint8Array([1, 2, 3, 4]);
+      await mkdir(dirname(contentPath), { recursive: true });
+      await writeFile(contentPath, new Uint8Array([4, 3, 2, 1]));
+      await writeFile(
+        join(dirname(contentPath), "content.sha256"),
+        createHash("sha256").update(expected).digest("hex"),
+      );
+
+      const layer = DesktopManagedSnippetContent.layer(contentRoot).pipe(
+        Layer.provide(platformLayer),
+      );
+      const result = await Effect.runPromise(
+        DesktopManagedSnippetContent.use((content) =>
+          Effect.gen(function* () {
+            const before = yield* content.available(accountId, snippetId, expected.byteLength);
+            yield* content.putStream(
+              accountId,
+              snippetId,
+              expected.byteLength,
+              Stream.succeed(expected),
+            );
+            const after = yield* content.available(accountId, snippetId, expected.byteLength);
+            const bytes = yield* content.get(accountId, snippetId);
+            return { after, before, bytes };
+          }),
+        ).pipe(Effect.provide(layer)),
+      );
+
+      expect(result.before).toBe(false);
+      expect(result.after).toBe(true);
+      expect(result.bytes === null ? null : Uint8Array.from(result.bytes)).toEqual(expected);
     });
   });
 

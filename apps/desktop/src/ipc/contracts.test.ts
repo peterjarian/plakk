@@ -24,7 +24,7 @@ describe("DesktopSnippetSchema", () => {
             errorMessage: null,
             canRetry: false,
           },
-          localTextContent: "text",
+          localTextPreview: "text",
           localContentAvailability: { status: "AVAILABLE" },
         },
       ]),

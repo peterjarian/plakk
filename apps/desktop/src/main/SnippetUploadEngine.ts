@@ -1,4 +1,4 @@
-import { decodeSnippetText, isTextSnippetFileName } from "@plakk/shared";
+import { decodeSnippetTextPreview, isTextSnippetFileName, isValidSnippetText } from "@plakk/shared";
 import type { ApiSnippet } from "@plakk/shared/PlakkApi";
 import { RpcError } from "@plakk/shared/RpcError";
 import {
@@ -38,14 +38,14 @@ type ImportProjection = {
   readonly accountId: string;
   readonly input: SnippetIngestPayload;
   readonly createdAt: string;
-  readonly localTextContent: string | null;
+  readonly localTextPreview: string | null;
 };
 
 export type UploadProjectedSnippet = Omit<
   DesktopSnippet,
-  "localTextContent" | "localContentAvailability"
+  "localTextPreview" | "localContentAvailability"
 > & {
-  readonly importingContent?: Pick<DesktopSnippet, "localTextContent" | "localContentAvailability">;
+  readonly importingContent?: Pick<DesktopSnippet, "localTextPreview" | "localContentAvailability">;
 };
 
 export class SnippetUploadEngineError extends Schema.TaggedErrorClass<SnippetUploadEngineError>()(
@@ -102,7 +102,9 @@ export const snippetUploadFailureMessage = (cause: SnippetUploadEngineFailure) =
 
 const localTextFrom = (input: SnippetIngestPayload): string | null => {
   if (!("bytes" in input)) return null;
-  return isTextSnippetFileName(input.fileName) ? decodeSnippetText(input.bytes) : null;
+  return isTextSnippetFileName(input.fileName) && isValidSnippetText(input.bytes)
+    ? decodeSnippetTextPreview(input.bytes)
+    : null;
 };
 
 const importProjection = (value: ImportProjection): UploadProjectedSnippet => ({
@@ -121,9 +123,9 @@ const importProjection = (value: ImportProjection): UploadProjectedSnippet => ({
     canRetry: false,
   },
   importingContent: {
-    localTextContent: value.localTextContent,
+    localTextPreview: value.localTextPreview,
     localContentAvailability:
-      value.localTextContent === null
+      value.localTextPreview === null
         ? ({ status: "NOT_AVAILABLE" } as const)
         : ({ status: "AVAILABLE" } as const),
   },
@@ -384,7 +386,7 @@ export class SnippetUploadEngine extends Context.Service<
           accountId,
           input,
           createdAt,
-          localTextContent: localTextFrom(input),
+          localTextPreview: localTextFrom(input),
         });
         importCancellations.set(input.id, cancellation);
         yield* publish(accountId);

@@ -27,6 +27,36 @@ export const decodeSnippetText = (content: string | Uint8Array | undefined): str
   }
 };
 
+export const SNIPPET_TEXT_PREVIEW_MAX_BYTES = 64 * 1024;
+
+export const isValidSnippetText = (content: Uint8Array): boolean => {
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  try {
+    for (let offset = 0; offset < content.byteLength; offset += SNIPPET_TEXT_PREVIEW_MAX_BYTES) {
+      decoder.decode(content.subarray(offset, offset + SNIPPET_TEXT_PREVIEW_MAX_BYTES), {
+        stream: true,
+      });
+    }
+    decoder.decode();
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+export const decodeSnippetTextPreview = (
+  content: string | Uint8Array,
+  truncated = typeof content !== "string" && content.byteLength > SNIPPET_TEXT_PREVIEW_MAX_BYTES,
+): string | null => {
+  if (typeof content === "string") return content.slice(0, SNIPPET_TEXT_PREVIEW_MAX_BYTES);
+  const preview = content.subarray(0, SNIPPET_TEXT_PREVIEW_MAX_BYTES);
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(preview, { stream: truncated });
+  } catch {
+    return null;
+  }
+};
+
 export const deriveSnippetPresentation = (input: {
   readonly fileName: string;
   readonly content?: string | Uint8Array;

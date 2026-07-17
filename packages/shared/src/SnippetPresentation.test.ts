@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { decodeSnippetText, deriveSnippetPresentation } from "./SnippetPresentation.ts";
+import {
+  decodeSnippetText,
+  decodeSnippetTextPreview,
+  deriveSnippetPresentation,
+  isValidSnippetText,
+  SNIPPET_TEXT_PREVIEW_MAX_BYTES,
+} from "./SnippetPresentation.ts";
 
 const utf8 = (value: string) => new TextEncoder().encode(value);
 
@@ -57,5 +63,18 @@ describe("snippet presentation", () => {
   it("decodes only valid UTF-8 for content-derived presentation", () => {
     expect(decodeSnippetText(utf8("valid text"))).toBe("valid text");
     expect(decodeSnippetText(new Uint8Array([0xc3, 0x28]))).toBeNull();
+  });
+
+  it("bounds presentation text without rejecting a split trailing code point", () => {
+    const bytes = utf8(`${"a".repeat(SNIPPET_TEXT_PREVIEW_MAX_BYTES - 1)}€rest`);
+
+    expect(decodeSnippetTextPreview(bytes)).toBe("a".repeat(SNIPPET_TEXT_PREVIEW_MAX_BYTES - 1));
+  });
+
+  it("validates text beyond the bounded preview without building a full projection", () => {
+    const bytes = new Uint8Array(SNIPPET_TEXT_PREVIEW_MAX_BYTES + 1).fill(0x61);
+    bytes[bytes.byteLength - 1] = 0xff;
+
+    expect(isValidSnippetText(bytes)).toBe(false);
   });
 });

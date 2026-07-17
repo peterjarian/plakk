@@ -74,7 +74,6 @@ export function TrayRecentItem({
           onOpenLink={onOpenLink}
           onRetryUpload={onRetryUpload}
           onStopUpload={onStopUpload}
-          {...(snippet.textContent === undefined ? {} : { textContent: snippet.textContent })}
         />
       </ul>
     </section>

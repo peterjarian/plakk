@@ -2,7 +2,7 @@ import {
   Context,
   DateTime,
   Effect,
-  Fiber,
+  FiberMap,
   Layer,
   Option,
   PubSub,
@@ -70,21 +70,12 @@ export const LocalContentAvailabilitySchema = Schema.Union([
 
 export type LocalContentAvailability = typeof LocalContentAvailabilitySchema.Type;
 
-export type SnippetHydrationChange = { readonly accountId: string };
-
 type HydrationSettings = { readonly keepAllFilesOffline: boolean };
-type ActiveHydration = {
-  readonly generation: symbol;
-  readonly fiber: Fiber.Fiber<void, unknown> | null;
-};
 
 export type SnippetHydrationEngineFailure =
   | SnippetHydrationError
   | ManagedSnippetContentError
   | SnippetReplicaError;
-
-export const snippetHydrationFailureMessage = (cause: SnippetHydrationEngineFailure) =>
-  cause.reason;
 
 const presentHydrationFailure = (cause: SnippetHydrationEngineFailure): SnippetHydrationError =>
   cause._tag === "SnippetHydrationError"
@@ -98,7 +89,7 @@ const presentHydrationFailure = (cause: SnippetHydrationEngineFailure): SnippetH
 export class SnippetHydrationEngine extends Context.Service<
   SnippetHydrationEngine,
   {
-    readonly changes: Stream.Stream<SnippetHydrationChange>;
+    readonly changes: Stream.Stream<string>;
     resume(
       account: SnippetSyncAccount,
       settings: HydrationSettings,
@@ -125,16 +116,17 @@ export class SnippetHydrationEngine extends Context.Service<
       const content = yield* ManagedSnippetContent;
       const replica = yield* SnippetReplica;
       const transport = yield* SnippetHydrationTransport;
-      const changes = yield* PubSub.unbounded<SnippetHydrationChange>();
+      const changes = yield* PubSub.unbounded<string>();
       const currentAccount = yield* Ref.make<SnippetSyncAccount | null>(null);
       const settings = yield* Ref.make<HydrationSettings>({ keepAllFilesOffline: false });
       const concurrency = yield* Semaphore.make(2);
-      const active = new Map<string, ActiveHydration>();
+      const fibers = yield* FiberMap.make<string>();
+      const active = new Set<string>();
       const failures = new Map<string, SnippetHydrationError>();
-      let retryFiber: Fiber.Fiber<void, unknown> | null = null;
+      const retryKey = "@plakk/snippet-hydration/retry";
 
       const key = (accountId: string, snippetId: string) => `${accountId}/${snippetId}`;
-      const publish = (accountId: string) => PubSub.publish(changes, { accountId });
+      const publish = (accountId: string) => PubSub.publish(changes, accountId);
       const stateWithoutValidation = (hydrationKey: string): LocalContentAvailability => {
         if (active.has(hydrationKey)) return { status: "DOWNLOADING" };
         const failure = failures.get(hydrationKey);
@@ -178,51 +170,35 @@ export class SnippetHydrationEngine extends Context.Service<
         failures.delete(hydrationKey);
       });
 
-      const launchHydration = Effect.fn("SnippetHydrationEngine.launchHydration")(function* (
-        account: SnippetSyncAccount,
-        snippet: ApiSnippet,
-        generation: symbol,
-      ) {
-        const hydrationKey = key(account.id, snippet.id);
-        failures.delete(hydrationKey);
-        yield* publish(account.id);
-
-        const work = concurrency
-          .withPermit(
-            hydrate(account, snippet).pipe(
-              Effect.catch((error) =>
-                Effect.sync(() => {
-                  failures.set(hydrationKey, presentHydrationFailure(error));
-                }),
-              ),
-            ),
-          )
-          .pipe(
-            Effect.ensuring(
-              Effect.sync(() => {
-                if (active.get(hydrationKey)?.generation === generation) {
-                  active.delete(hydrationKey);
-                }
-              }).pipe(Effect.andThen(publish(account.id))),
-            ),
-          );
-        const fiber = yield* Effect.forkDetach(work);
-        if (active.get(hydrationKey)?.generation === generation) {
-          active.set(hydrationKey, { generation, fiber });
-        } else {
-          yield* Fiber.interrupt(fiber);
-        }
-      });
-
       const startHydration = Effect.fn("SnippetHydrationEngine.startHydration")(function* (
         account: SnippetSyncAccount,
         snippet: ApiSnippet,
+        invalidateFirst = false,
       ) {
         const hydrationKey = key(account.id, snippet.id);
         if (active.has(hydrationKey)) return;
-        const generation = Symbol(hydrationKey);
-        active.set(hydrationKey, { generation, fiber: null });
-        yield* launchHydration(account, snippet, generation);
+        active.add(hydrationKey);
+        failures.delete(hydrationKey);
+
+        const work = Effect.gen(function* () {
+          yield* Effect.yieldNow;
+          yield* publish(account.id);
+          if (invalidateFirst) yield* content.invalidate(account.id, [snippet.id]);
+          yield* concurrency.withPermit(hydrate(account, snippet)).pipe(
+            Effect.catch((error) =>
+              Effect.sync(() => {
+                failures.set(hydrationKey, presentHydrationFailure(error));
+              }),
+            ),
+          );
+        }).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              active.delete(hydrationKey);
+            }).pipe(Effect.andThen(publish(account.id))),
+          ),
+        );
+        yield* FiberMap.run(fibers, hydrationKey, work);
       });
 
       const reconcile = Effect.fn("SnippetHydrationEngine.reconcile")(function* (
@@ -238,15 +214,12 @@ export class SnippetHydrationEngine extends Context.Service<
         const uploadedKeys = new Set(uploaded.map((snippet) => key(accountId, snippet.id)));
 
         yield* Effect.forEach(
-          [...active.entries()].filter(
-            ([hydrationKey]) =>
+          [...active].filter(
+            (hydrationKey) =>
               hydrationKey.startsWith(`${accountId}/`) && !uploadedKeys.has(hydrationKey),
           ),
-          ([hydrationKey, activeHydration]) =>
-            (activeHydration.fiber === null
-              ? Effect.void
-              : Fiber.interrupt(activeHydration.fiber)
-            ).pipe(
+          (hydrationKey) =>
+            FiberMap.remove(fibers, hydrationKey).pipe(
               Effect.andThen(
                 Effect.sync(() => {
                   active.delete(hydrationKey);
@@ -306,11 +279,8 @@ export class SnippetHydrationEngine extends Context.Service<
 
       const pause = Effect.gen(function* () {
         yield* Ref.set(currentAccount, null);
-        if (retryFiber !== null) yield* Fiber.interrupt(retryFiber);
-        retryFiber = null;
-        const fibers = [...active.values()].flatMap(({ fiber }) => (fiber === null ? [] : [fiber]));
         active.clear();
-        yield* Effect.forEach(fibers, Fiber.interrupt, { discard: true });
+        yield* FiberMap.clear(fibers);
       });
 
       const resume = Effect.fn("SnippetHydrationEngine.resume")(function* (
@@ -327,8 +297,10 @@ export class SnippetHydrationEngine extends Context.Service<
         yield* Ref.set(currentAccount, account);
         yield* Ref.set(settings, nextSettings);
         yield* reconcile(account.id, "all");
-        if (retryFiber === null) {
-          retryFiber = yield* Effect.forkDetach(
+        if (!FiberMap.hasUnsafe(fibers, retryKey)) {
+          yield* FiberMap.run(
+            fibers,
+            retryKey,
             Effect.sleep("5 minutes").pipe(
               Effect.andThen(
                 Ref.get(currentAccount).pipe(
@@ -376,18 +348,7 @@ export class SnippetHydrationEngine extends Context.Service<
         }
         const hydrationKey = key(account.id, snippet.id);
         if (active.has(hydrationKey)) return;
-        const generation = Symbol(hydrationKey);
-        active.set(hydrationKey, { generation, fiber: null });
-        yield* content.invalidate(account.id, [snippet.id]).pipe(
-          Effect.onError(() =>
-            Effect.sync(() => {
-              if (active.get(hydrationKey)?.generation === generation) {
-                active.delete(hydrationKey);
-              }
-            }),
-          ),
-        );
-        yield* launchHydration(account, snippet, generation);
+        yield* startHydration(account, snippet, true);
       });
 
       const state = Effect.fn("SnippetHydrationEngine.state")(function* (

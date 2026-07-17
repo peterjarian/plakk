@@ -192,6 +192,9 @@ const harness = (options?: {
             calls.get += 1;
             return content.get(key(accountId, id)) ?? null;
           }),
+        getPrefix: (accountId, id, maxBytes) =>
+          Effect.sync(() => content.get(key(accountId, id))?.subarray(0, maxBytes) ?? null),
+        validateText: () => Effect.succeed("VALID"),
         available: (accountId, id, byteSize) =>
           Effect.sync(() => {
             calls.available += 1;
@@ -210,6 +213,10 @@ const harness = (options?: {
               });
             }
             content.delete(key(accountId, id));
+          }),
+        invalidate: (accountId, ids) =>
+          Effect.sync(() => {
+            for (const id of ids) content.delete(key(accountId, id));
           }),
       }),
     ),
@@ -564,7 +571,7 @@ describe("SnippetUploadEngine", () => {
     );
 
     expect(projection[0]).not.toHaveProperty("localContentAvailability");
-    expect(projection[0]).not.toHaveProperty("localTextContent");
+    expect(projection[0]).not.toHaveProperty("localTextPreview");
     expect(test.calls.get).toBe(0);
     expect(test.calls.available).toBe(0);
   });
@@ -606,7 +613,7 @@ describe("SnippetUploadEngine", () => {
             id: snippetId,
             localState: { phase: "IMPORTING" },
             importingContent: {
-              localTextContent: text,
+              localTextPreview: text,
               localContentAvailability: { status: "AVAILABLE" },
             },
           },

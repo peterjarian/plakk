@@ -19,10 +19,9 @@ const snippet: SnippetReadModel = {
     errorMessage: "The storage upload did not complete.",
     canRetry: true,
   },
-  localTextContent: "A text snippet",
+  localTextPreview: "A text snippet",
   localContentAvailability: { status: "AVAILABLE" },
   presentation: { type: "text", title: "A text snippet" },
-  textContent: { state: "ready", text: "A text snippet" },
   thumbnailUrl: null,
 };
 
@@ -97,10 +96,9 @@ describe("TrayRecentItem", () => {
           ...snippet,
           uploadStatus: "UPLOADED",
           localState: null,
-          localTextContent: null,
+          localTextPreview: null,
           localContentAvailability: { status: "NOT_AVAILABLE" },
           presentation: { type: "text", title: "Text snippet" },
-          textContent: undefined,
         }}
         copied={false}
         copying={false}
@@ -122,10 +120,9 @@ describe("TrayRecentItem", () => {
           ...snippet,
           uploadStatus: "UPLOADED",
           localState: null,
-          localTextContent: null,
+          localTextPreview: null,
           localContentAvailability: { status: "DOWNLOADING" },
           presentation: { type: "text", title: "Text snippet" },
-          textContent: undefined,
         }}
         copied={false}
         copying={false}
@@ -146,13 +143,12 @@ describe("TrayRecentItem", () => {
           ...snippet,
           uploadStatus: "UPLOADED",
           localState: null,
-          localTextContent: "https://plakk.app/notes",
+          localTextPreview: "https://plakk.app/notes",
           presentation: {
             type: "hyperlink",
             title: "plakk.app/notes",
             url: "https://plakk.app/notes",
           },
-          textContent: { state: "ready", text: "https://plakk.app/notes" },
         }}
         copied={false}
         copying={false}

@@ -1,8 +1,13 @@
-import { ManagedSnippetContent, ManagedSnippetContentError } from "@plakk/shared/SnippetReplica";
+import { ManagedSnippetContentError } from "@plakk/shared/SnippetReplica";
+import { SNIPPET_TEXT_PREVIEW_MAX_BYTES } from "@plakk/shared";
 import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import type { DesktopSnippet } from "../ipc/contracts.ts";
+import {
+  DesktopManagedSnippetContent,
+  type ManagedTextValidation,
+} from "./ManagedSnippetContent.ts";
 import { projectDesktopManagedContent } from "./SnippetProjection.ts";
 
 const accountId = "account-1";
@@ -16,34 +21,40 @@ const snippet: DesktopSnippet = {
   createdAt: "2026-07-16T10:00:00.000Z",
   updatedAt: "2026-07-16T10:00:00.000Z",
   localState: null,
-  localTextContent: null,
+  localTextPreview: null,
   localContentAvailability: { status: "NOT_AVAILABLE" },
 };
 
 const contentLayer = (
   bytes: Uint8Array | null,
-  get: () => Effect.Effect<Uint8Array | null, ManagedSnippetContentError> = vi.fn(() =>
+  getPrefix: () => Effect.Effect<Uint8Array | null, ManagedSnippetContentError> = vi.fn(() =>
     Effect.succeed(bytes),
   ),
+  validation: ManagedTextValidation = "VALID",
 ) => ({
-  get,
+  getPrefix,
   layer: Layer.succeed(
-    ManagedSnippetContent,
-    ManagedSnippetContent.of({
-      get,
+    DesktopManagedSnippetContent,
+    DesktopManagedSnippetContent.of({
+      get: () => Effect.succeed(bytes),
+      getPrefix,
       putStream: () => Effect.void,
       available: () => Effect.succeed(bytes !== null),
       invalidate: () => Effect.void,
+      discard: () => Effect.void,
+      ingest: () => Effect.succeed("/managed/content"),
+      path: () => Effect.succeed("/managed/content"),
+      validateText: () => Effect.succeed(validation),
     }),
   ),
 });
 
 describe("desktop snippet content projection", () => {
   it("preserves the origin importing text projection before managed bytes are committed", async () => {
-    const get = vi.fn(() => Effect.succeed<Uint8Array | null>(null));
-    const content = contentLayer(null, get);
+    const getPrefix = vi.fn(() => Effect.succeed<Uint8Array | null>(null));
+    const content = contentLayer(null, getPrefix);
     const {
-      localTextContent: _localTextContent,
+      localTextPreview: _localTextPreview,
       localContentAvailability: _localContentAvailability,
       ...metadata
     } = snippet;
@@ -54,7 +65,7 @@ describe("desktop snippet content projection", () => {
         {
           ...metadata,
           importingContent: {
-            localTextContent: "hello from origin",
+            localTextPreview: "hello from origin",
             localContentAvailability: { status: "AVAILABLE" },
           },
         },
@@ -63,10 +74,10 @@ describe("desktop snippet content projection", () => {
     );
 
     expect(projected).toMatchObject({
-      localTextContent: "hello from origin",
+      localTextPreview: "hello from origin",
       localContentAvailability: { status: "AVAILABLE" },
     });
-    expect(get).not.toHaveBeenCalled();
+    expect(getPrefix).not.toHaveBeenCalled();
   });
 
   it("reveals text presentation only after complete managed content decodes", async () => {
@@ -79,13 +90,17 @@ describe("desktop snippet content projection", () => {
     );
 
     expect(projected).toMatchObject({
-      localTextContent: "hello",
+      localTextPreview: "hello",
       localContentAvailability: { status: "AVAILABLE" },
     });
   });
 
-  it("turns same-size invalid UTF-8 into a retryable local presentation failure", async () => {
-    const content = contentLayer(new Uint8Array(5).fill(0xff));
+  it("keeps valid managed bytes available when their text presentation is invalid", async () => {
+    const content = contentLayer(
+      new Uint8Array(5).fill(0xff),
+      vi.fn(() => Effect.succeed(new Uint8Array(5).fill(0xff))),
+      "INVALID",
+    );
 
     const projected = await Effect.runPromise(
       projectDesktopManagedContent(accountId, snippet, { status: "AVAILABLE" }).pipe(
@@ -94,17 +109,38 @@ describe("desktop snippet content projection", () => {
     );
 
     expect(projected).toMatchObject({
-      localTextContent: null,
-      localContentAvailability: {
-        status: "FAILED",
-        message: "This text file is not valid UTF-8. Download it again.",
-      },
+      localTextPreview: null,
+      localContentAvailability: { status: "AVAILABLE" },
+    });
+  });
+
+  it("does not project text when UTF-8 becomes invalid after the bounded preview", async () => {
+    const preview = new TextEncoder().encode(
+      "Valid preview".padEnd(SNIPPET_TEXT_PREVIEW_MAX_BYTES),
+    );
+    const content = contentLayer(
+      preview,
+      vi.fn(() => Effect.succeed(preview)),
+      "INVALID",
+    );
+
+    const projected = await Effect.runPromise(
+      projectDesktopManagedContent(
+        accountId,
+        { ...snippet, byteSize: SNIPPET_TEXT_PREVIEW_MAX_BYTES + 1 },
+        { status: "AVAILABLE" },
+      ).pipe(Effect.provide(content.layer)),
+    );
+
+    expect(projected).toMatchObject({
+      localTextPreview: null,
+      localContentAvailability: { status: "AVAILABLE" },
     });
   });
 
   it("does not read or classify text before managed content is available", async () => {
-    const get = vi.fn(() => Effect.succeed<Uint8Array | null>(null));
-    const content = contentLayer(null, get);
+    const getPrefix = vi.fn(() => Effect.succeed<Uint8Array | null>(null));
+    const content = contentLayer(null, getPrefix);
 
     const projected = await Effect.runPromise(
       projectDesktopManagedContent(accountId, snippet, { status: "DOWNLOADING" }).pipe(
@@ -113,14 +149,14 @@ describe("desktop snippet content projection", () => {
     );
 
     expect(projected).toMatchObject({
-      localTextContent: null,
+      localTextPreview: null,
       localContentAvailability: { status: "DOWNLOADING" },
     });
-    expect(get).not.toHaveBeenCalled();
+    expect(getPrefix).not.toHaveBeenCalled();
   });
 
   it("keeps metadata visible when one local content read fails", async () => {
-    const get = vi.fn(() =>
+    const getPrefix = vi.fn(() =>
       Effect.fail(
         new ManagedSnippetContentError({
           cause: null,
@@ -129,7 +165,7 @@ describe("desktop snippet content projection", () => {
         }),
       ),
     );
-    const content = contentLayer(null, get);
+    const content = contentLayer(null, getPrefix);
 
     const projected = await Effect.runPromise(
       projectDesktopManagedContent(accountId, snippet, { status: "AVAILABLE" }).pipe(
@@ -139,11 +175,30 @@ describe("desktop snippet content projection", () => {
 
     expect(projected).toMatchObject({
       id: snippet.id,
-      localTextContent: null,
+      localTextPreview: null,
       localContentAvailability: {
         status: "FAILED",
         message: "Could not read managed snippet content.",
       },
     });
+  });
+
+  it("projects a bounded preview instead of reading a permitted large text file in full", async () => {
+    const preview = new TextEncoder().encode(
+      "Large text title\n".padEnd(SNIPPET_TEXT_PREVIEW_MAX_BYTES, "x"),
+    );
+    const getPrefix = vi.fn(() => Effect.succeed<Uint8Array | null>(preview));
+    const content = contentLayer(preview, getPrefix);
+
+    const projected = await Effect.runPromise(
+      projectDesktopManagedContent(
+        accountId,
+        { ...snippet, byteSize: SNIPPET_TEXT_PREVIEW_MAX_BYTES + 1 },
+        { status: "AVAILABLE" },
+      ).pipe(Effect.provide(content.layer)),
+    );
+
+    expect(getPrefix).toHaveBeenCalledWith(accountId, snippet.id, SNIPPET_TEXT_PREVIEW_MAX_BYTES);
+    expect(projected.localTextPreview).toHaveLength(preview.byteLength);
   });
 });

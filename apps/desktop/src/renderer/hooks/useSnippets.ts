@@ -1,5 +1,4 @@
 import { deriveSnippetPresentation, type SnippetPresentation } from "@plakk/shared";
-import type { TextSnippetContent } from "@plakk/ui/components/SnippetRow";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { DesktopSnippet } from "../../ipc/contracts.ts";
@@ -25,7 +24,6 @@ type SnippetSubscriptionAction =
 
 export type SnippetReadModel = DesktopSnippet & {
   readonly presentation: SnippetPresentation;
-  readonly textContent: TextSnippetContent | undefined;
   readonly thumbnailUrl: string | null;
 };
 
@@ -74,18 +72,11 @@ export const projectSnippetReadModels = (
   replicaItems.map((snippet) => {
     const presentation = deriveSnippetPresentation({
       fileName: snippet.fileName,
-      ...(snippet.localTextContent === null ? {} : { content: snippet.localTextContent }),
+      ...(snippet.localTextPreview === null ? {} : { content: snippet.localTextPreview }),
     });
-    const textContent =
-      snippet.localTextContent !== null &&
-      (presentation.type === "text" || presentation.type === "hyperlink")
-        ? ({ state: "ready", text: snippet.localTextContent } as const)
-        : undefined;
-
     return {
       ...snippet,
       presentation,
-      textContent,
       thumbnailUrl: thumbnailUrls[snippet.id] ?? null,
     };
   });

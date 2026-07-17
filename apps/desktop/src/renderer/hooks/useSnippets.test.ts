@@ -18,7 +18,7 @@ const snippet = (input: Partial<DesktopSnippet> = {}): DesktopSnippet => ({
   createdAt: "2026-07-11T00:00:00.000Z",
   updatedAt: "2026-07-11T00:00:00.000Z",
   localState: { phase: "QUEUED", progress: 0, errorMessage: null, canRetry: false },
-  localTextContent: "A stable local snippet",
+  localTextPreview: "A stable local snippet",
   localContentAvailability: { status: "AVAILABLE" },
   ...input,
 });
@@ -49,14 +49,14 @@ describe("snippet subscription transitions", () => {
   });
 
   it("never lets a stale initial list result replace a newer change event", () => {
-    const eventSnippet = snippet({ localTextContent: "From the change event" });
+    const eventSnippet = snippet({ localTextPreview: "From the change event" });
     const changed = updateSnippetSubscription(initialSnippetSubscriptionState, {
       type: "changed",
       items: [eventSnippet],
     });
     const staleList = updateSnippetSubscription(changed, {
       type: "load-succeeded",
-      items: [snippet({ localTextContent: "From the stale list" })],
+      items: [snippet({ localTextPreview: "From the stale list" })],
       requestRevision: 0,
     });
 
@@ -69,13 +69,12 @@ describe("snippet read-model projection", () => {
     const [item] = projectSnippetReadModels([snippet()], {});
 
     expect(item?.presentation).toEqual({ type: "text", title: "A stable local snippet" });
-    expect(item?.textContent).toEqual({ state: "ready", text: "A stable local snippet" });
   });
 
   it("projects a neutral file row before local text content is available", () => {
     const remoteText = snippet({
       localState: null,
-      localTextContent: null,
+      localTextPreview: null,
       storageObjectId: "remote-text",
       uploadStatus: "UPLOADED",
       localContentAvailability: { status: "DOWNLOADING" },
@@ -84,7 +83,6 @@ describe("snippet read-model projection", () => {
     const [item] = projectSnippetReadModels([remoteText], {});
 
     expect(item?.presentation).toEqual({ type: "file", title: "Text snippet" });
-    expect(item?.textContent).toBeUndefined();
     expect(item?.presentation.title).not.toContain(remoteText.id);
     expect(JSON.stringify(item)).not.toContain("Loading text");
   });
@@ -93,7 +91,7 @@ describe("snippet read-model projection", () => {
     const remoteText = snippet({
       fileName: "private-notes.md",
       localState: null,
-      localTextContent: null,
+      localTextPreview: null,
       storageObjectId: "remote-text",
       uploadStatus: "UPLOADED",
       localContentAvailability: { status: "NOT_AVAILABLE" },
@@ -110,7 +108,7 @@ describe("snippet read-model projection", () => {
       localState: null,
       storageObjectId: "remote-text",
       uploadStatus: "UPLOADED",
-      localTextContent: "https://plakk.app",
+      localTextPreview: "https://plakk.app",
       localContentAvailability: { status: "AVAILABLE" },
     });
     const [item] = projectSnippetReadModels([remoteText], {});
@@ -128,7 +126,7 @@ describe("snippet read-model projection", () => {
       localState: null,
       storageObjectId: "remote-text",
       uploadStatus: "UPLOADED",
-      localTextContent: "   ",
+      localTextPreview: "   ",
       localContentAvailability: { status: "AVAILABLE" },
     });
     const [item] = projectSnippetReadModels([remoteText], {});
@@ -140,7 +138,7 @@ describe("snippet read-model projection", () => {
   it("shows a controlled actionable row when remote text hydration fails", () => {
     const remoteText = snippet({
       localState: null,
-      localTextContent: null,
+      localTextPreview: null,
       storageObjectId: "remote-text",
       uploadStatus: "UPLOADED",
       localContentAvailability: {
@@ -151,7 +149,6 @@ describe("snippet read-model projection", () => {
     const [item] = projectSnippetReadModels([remoteText], {});
 
     expect(item?.presentation).toEqual({ type: "file", title: "Text snippet" });
-    expect(item?.textContent).toBeUndefined();
     expect(JSON.stringify(item)).not.toContain("Loading text");
     expect(item?.presentation.title).not.toContain(remoteText.id);
   });
@@ -159,7 +156,7 @@ describe("snippet read-model projection", () => {
   it("keeps a remote in-progress text row honest without inventing decoded content", () => {
     const remoteText = snippet({
       localState: null,
-      localTextContent: null,
+      localTextPreview: null,
       storageObjectId: null,
       uploadStatus: "UPLOADING",
       localContentAvailability: { status: "NOT_AVAILABLE" },
@@ -167,7 +164,6 @@ describe("snippet read-model projection", () => {
     const [item] = projectSnippetReadModels([remoteText], {});
 
     expect(item?.presentation).toEqual({ type: "file", title: "Text snippet" });
-    expect(item?.textContent).toBeUndefined();
   });
 });
 

@@ -405,13 +405,6 @@ export function Home({ active = true }: { active?: boolean }) {
                   void runSnippetAction(snippet.id, () => window.ipc.snippets.download(snippet.id))
                 }
                 onOpenLink={openLink}
-                {...((snippet.presentation.type === "text" ||
-                  snippet.presentation.type === "hyperlink") &&
-                snippet.textContent !== undefined
-                  ? {
-                      textContent: snippet.textContent,
-                    }
-                  : {})}
                 {...(snippet.presentation.type === "image"
                   ? {
                       thumbnailUrl: snippet.thumbnailUrl,
