@@ -26,6 +26,12 @@ import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstab
 
 import { StorageProviderService } from "./storage/StorageProvider.ts";
 import { getProviderSlug } from "./storage/getProviderSlug.ts";
+import {
+  appendSnippetChange,
+  getSnippetSnapshot,
+  pullSnippetChanges,
+} from "./SnippetChangeFeed.ts";
+import { snippetChangeRpcStream } from "./SnippetChangeWakes.ts";
 import { toApiSnippet } from "./transformers/toApiSnippet.ts";
 
 const DEFAULT_STORAGE_PROVIDER = "GOOGLE_DRIVE" as const;
@@ -56,14 +62,23 @@ export const insertSnippet = Effect.fn("@plakk/web/api/PlakkApiLive.insertSnippe
 ) {
   const currentUser = yield* CurrentUser;
   const uploadStatus: SnippetUploadStatus = "UPLOADING";
-  const [snippet] = yield* drizzle.db
-    .insert(snippets)
-    .values({
-      ...input,
-      ownerWorkosUserId: currentUser.id,
-      uploadStatus,
-    })
-    .returning()
+  const snippet = yield* drizzle.db
+    .transaction((tx) =>
+      Effect.gen(function* () {
+        const [inserted] = yield* tx
+          .insert(snippets)
+          .values({
+            ...input,
+            ownerWorkosUserId: currentUser.id,
+            uploadStatus,
+          })
+          .returning();
+        if (inserted !== undefined) {
+          yield* appendSnippetChange(tx, { type: "UPSERT", snippet: inserted });
+        }
+        return inserted;
+      }),
+    )
     .pipe(Effect.orDie);
 
   if (snippet === undefined) {
@@ -210,7 +225,7 @@ export const confirmTextSnippetUpload = Effect.fn(
     snippet.storageObjectId === null &&
     input.storageProvider !== undefined;
   const isPending =
-    snippet.uploadStatus === "UPLOADING" &&
+    (snippet.uploadStatus === "UPLOADING" || snippet.uploadStatus === "INTERRUPTED") &&
     snippet.storageProvider !== null &&
     input.storageProvider === undefined;
   if ((!isLegacy && !isPending) || requestedProvider === null) {
@@ -292,7 +307,7 @@ export const prepareSnippetUpload = Effect.fn("@plakk/web/api/PlakkApiLive.prepa
       snippet.storageProvider === null &&
       snippet.storageObjectId === null;
     const isPendingUpload =
-      snippet?.uploadStatus === "UPLOADING" &&
+      (snippet?.uploadStatus === "UPLOADING" || snippet?.uploadStatus === "INTERRUPTED") &&
       snippet.storageProvider === input.storageProvider &&
       (snippet.kind === "TEXT" || snippet.kind === "FILE" || snippet.kind === "IMAGE");
     if (
@@ -318,6 +333,10 @@ export const prepareSnippetUpload = Effect.fn("@plakk/web/api/PlakkApiLive.prepa
 );
 
 type UpdateSnippetUploadInput =
+  | {
+      readonly id: string;
+      readonly uploadStatus: "UPLOADING" | "INTERRUPTED";
+    }
   | {
       readonly id: string;
       readonly uploadStatus: "READY";
@@ -360,48 +379,78 @@ export const updateStoredSnippetUpload = Effect.fn(
   }
 
   let finalizedProvider: StorageProvider | undefined;
-  if (input.uploadStatus === "FAILED") {
-    if (current.uploadStatus !== "UPLOADING") {
+  if (input.uploadStatus === "READY") {
+    if (current.kind === "TEXT") {
+      finalizedProvider = yield* confirmTextSnippetUpload(storage, current, workosUserId, {
+        storageObjectId: input.storageObjectId,
+        ...(input.storageProvider === undefined ? {} : { storageProvider: input.storageProvider }),
+      });
+    } else if (
+      (current.uploadStatus !== "UPLOADING" && current.uploadStatus !== "INTERRUPTED") ||
+      "storageProvider" in input
+    ) {
       return yield* new RpcError({
         code: "NOT_FOUND",
         message: "Pending stored snippet not found.",
       });
     }
-  } else if (current.kind === "TEXT") {
-    finalizedProvider = yield* confirmTextSnippetUpload(storage, current, workosUserId, {
-      storageObjectId: input.storageObjectId,
-      ...(input.storageProvider === undefined ? {} : { storageProvider: input.storageProvider }),
-    });
-  } else if (current.uploadStatus !== "UPLOADING" || "storageProvider" in input) {
-    return yield* new RpcError({
-      code: "NOT_FOUND",
-      message: "Pending stored snippet not found.",
-    });
+  } else if (input.uploadStatus === "FAILED") {
+    if (current.uploadStatus !== "UPLOADING" && current.uploadStatus !== "INTERRUPTED") {
+      return yield* new RpcError({
+        code: "NOT_FOUND",
+        message: "Pending stored snippet not found.",
+      });
+    }
+  } else if (input.uploadStatus === "INTERRUPTED") {
+    if (current.uploadStatus !== "UPLOADING") {
+      return yield* new RpcError({
+        code: "NOT_FOUND",
+        message: "Uploading stored snippet not found.",
+      });
+    }
+  } else if (input.uploadStatus === "UPLOADING") {
+    if (current.uploadStatus !== "INTERRUPTED") {
+      return yield* new RpcError({
+        code: "NOT_FOUND",
+        message: "Interrupted stored snippet not found.",
+      });
+    }
   }
 
   const now = DateTime.toDateUtc(yield* DateTime.now);
-  const [snippet] = yield* drizzle.db
-    .update(snippets)
-    .set({
-      uploadStatus: input.uploadStatus,
-      updatedAt: now,
-      ...(input.storageObjectId !== undefined ? { storageObjectId: input.storageObjectId } : {}),
-      ...(finalizedProvider === undefined
-        ? {}
-        : { storageProvider: finalizedProvider, title: "Text snippet" }),
-    })
-    .where(
-      and(
-        eq(snippets.id, input.id),
-        eq(snippets.ownerWorkosUserId, workosUserId),
-        isNull(snippets.deletedAt),
-        eq(snippets.uploadStatus, current.uploadStatus),
-        current.storageProvider === null
-          ? isNull(snippets.storageProvider)
-          : eq(snippets.storageProvider, current.storageProvider),
-      ),
+  const snippet = yield* drizzle.db
+    .transaction((tx) =>
+      Effect.gen(function* () {
+        const [updated] = yield* tx
+          .update(snippets)
+          .set({
+            uploadStatus: input.uploadStatus,
+            updatedAt: now,
+            ...("storageObjectId" in input && input.storageObjectId !== undefined
+              ? { storageObjectId: input.storageObjectId }
+              : {}),
+            ...(finalizedProvider === undefined
+              ? {}
+              : { storageProvider: finalizedProvider, title: "Text snippet" }),
+          })
+          .where(
+            and(
+              eq(snippets.id, input.id),
+              eq(snippets.ownerWorkosUserId, workosUserId),
+              isNull(snippets.deletedAt),
+              eq(snippets.uploadStatus, current.uploadStatus),
+              current.storageProvider === null
+                ? isNull(snippets.storageProvider)
+                : eq(snippets.storageProvider, current.storageProvider),
+            ),
+          )
+          .returning();
+        if (updated !== undefined) {
+          yield* appendSnippetChange(tx, { type: "UPSERT", snippet: updated });
+        }
+        return updated;
+      }),
     )
-    .returning()
     .pipe(Effect.orDie);
 
   if (snippet === undefined) {
@@ -657,6 +706,28 @@ const SnippetsLive = SnippetRpcs.of({
       );
     }).pipe(Effect.annotateSpans({ kind: input.kind }));
   }),
+  GetSnippetSnapshot: Effect.fn("rpc.GetSnippetSnapshot")(function* () {
+    const drizzle = yield* Drizzle;
+    const currentUser = yield* CurrentUser;
+    const storage = yield* StorageProviderService;
+    const snapshot = yield* getSnippetSnapshot(drizzle, currentUser.id);
+    return {
+      cursor: snapshot.cursor,
+      items: yield* Effect.forEach(snapshot.rows, (snippet) =>
+        withContentUrls(storage, snippet, currentUser.id).pipe(
+          Effect.orElseSucceed(() => toApiSnippet(snippet)),
+        ),
+      ),
+    };
+  }),
+  PullSnippetChanges: Effect.fn("rpc.PullSnippetChanges")(function* (input) {
+    return yield* Effect.gen(function* () {
+      const drizzle = yield* Drizzle;
+      const currentUser = yield* CurrentUser;
+      return yield* pullSnippetChanges(drizzle, currentUser.id, input.cursor, input.limit);
+    }).pipe(Effect.annotateSpans({ limit: input.limit }));
+  }),
+  SubscribeSnippetChanges: () => snippetChangeRpcStream,
   UpdateStoredSnippetUploadStatus: Effect.fn("rpc.UpdateStoredSnippetUploadStatus")(
     function* (input) {
       return yield* Effect.gen(function* () {
@@ -683,9 +754,28 @@ const SnippetsLive = SnippetRpcs.of({
       yield* Effect.logInfo("Deleting snippet", { id: input.id });
       const now = DateTime.toDateUtc(yield* DateTime.now);
       yield* drizzle.db
-        .update(snippets)
-        .set({ deletedAt: now, updatedAt: now })
-        .where(and(eq(snippets.id, input.id), eq(snippets.ownerWorkosUserId, currentUser.id)))
+        .transaction((tx) =>
+          Effect.gen(function* () {
+            const [deleted] = yield* tx
+              .update(snippets)
+              .set({ deletedAt: now, updatedAt: now })
+              .where(
+                and(
+                  eq(snippets.id, input.id),
+                  eq(snippets.ownerWorkosUserId, currentUser.id),
+                  isNull(snippets.deletedAt),
+                ),
+              )
+              .returning();
+            if (deleted !== undefined) {
+              yield* appendSnippetChange(tx, {
+                type: "DELETE",
+                ownerWorkosUserId: currentUser.id,
+                snippetId: deleted.id,
+              });
+            }
+          }),
+        )
         .pipe(Effect.orDie);
     }).pipe(Effect.annotateSpans({ id: input.id }));
   }),
