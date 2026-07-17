@@ -1,12 +1,18 @@
 {
   "version": "8",
   "dialect": "postgres",
-  "id": "23414320-6746-4d42-a8c5-bafe8b9937d6",
-  "prevIds": ["d8e987a7-5061-4125-aa5d-35e9adae32e9"],
+  "id": "1ed3645d-180f-422d-8b93-0ad4e7b919ce",
+  "prevIds": ["00000000-0000-0000-0000-000000000000"],
   "ddl": [
     {
-      "values": ["TEXT", "LINK", "FILE", "IMAGE"],
-      "name": "snippet_kind",
+      "values": ["UPSERT", "DELETE"],
+      "name": "snippet_change_type",
+      "entityType": "enums",
+      "schema": "public"
+    },
+    {
+      "values": ["UPLOADING", "FAILED", "UPLOADED"],
+      "name": "snippet_upload_status",
       "entityType": "enums",
       "schema": "public"
     },
@@ -18,9 +24,125 @@
     },
     {
       "isRlsEnabled": false,
+      "name": "snippet_change_feeds",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "snippet_changes",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
       "name": "snippets",
       "entityType": "tables",
       "schema": "public"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "owner_workos_user_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "snippet_change_feeds"
+    },
+    {
+      "type": "bigint",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "0",
+      "generated": null,
+      "identity": null,
+      "name": "latest_sequence",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "snippet_change_feeds"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "owner_workos_user_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "snippet_changes"
+    },
+    {
+      "type": "bigint",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "sequence",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "snippet_changes"
+    },
+    {
+      "type": "snippet_change_type",
+      "typeSchema": "public",
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "change_type",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "snippet_changes"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "snippet_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "snippet_changes"
+    },
+    {
+      "type": "jsonb",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "snapshot",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "snippet_changes"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "snippet_changes"
     },
     {
       "type": "uuid",
@@ -49,35 +171,9 @@
       "table": "snippets"
     },
     {
-      "type": "snippet_kind",
-      "typeSchema": "public",
-      "notNull": true,
-      "dimensions": 0,
-      "default": null,
-      "generated": null,
-      "identity": null,
-      "name": "kind",
-      "entityType": "columns",
-      "schema": "public",
-      "table": "snippets"
-    },
-    {
-      "type": "text",
-      "typeSchema": null,
-      "notNull": true,
-      "dimensions": 0,
-      "default": null,
-      "generated": null,
-      "identity": null,
-      "name": "title",
-      "entityType": "columns",
-      "schema": "public",
-      "table": "snippets"
-    },
-    {
       "type": "storage_provider",
       "typeSchema": "public",
-      "notNull": false,
+      "notNull": true,
       "dimensions": 0,
       "default": null,
       "generated": null,
@@ -96,6 +192,32 @@
       "generated": null,
       "identity": null,
       "name": "storage_object_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "snippets"
+    },
+    {
+      "type": "snippet_upload_status",
+      "typeSchema": "public",
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "upload_status",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "snippets"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "upload_heartbeat_expires_at",
       "entityType": "columns",
       "schema": "public",
       "table": "snippets"
@@ -122,19 +244,6 @@
       "generated": null,
       "identity": null,
       "name": "byte_size",
-      "entityType": "columns",
-      "schema": "public",
-      "table": "snippets"
-    },
-    {
-      "type": "text",
-      "typeSchema": null,
-      "notNull": false,
-      "dimensions": 0,
-      "default": null,
-      "generated": null,
-      "identity": null,
-      "name": "content_type",
       "entityType": "columns",
       "schema": "public",
       "table": "snippets"
@@ -217,34 +326,6 @@
           "opclass": null
         },
         {
-          "value": "kind",
-          "isExpression": false,
-          "asc": true,
-          "nullsFirst": false,
-          "opclass": null
-        }
-      ],
-      "isUnique": false,
-      "where": null,
-      "with": "",
-      "method": "btree",
-      "concurrently": false,
-      "name": "snippets_owner_kind_idx",
-      "entityType": "indexes",
-      "schema": "public",
-      "table": "snippets"
-    },
-    {
-      "nameExplicit": true,
-      "columns": [
-        {
-          "value": "owner_workos_user_id",
-          "isExpression": false,
-          "asc": true,
-          "nullsFirst": false,
-          "opclass": null
-        },
-        {
           "value": "storage_provider",
           "isExpression": false,
           "asc": true,
@@ -270,12 +351,35 @@
       "table": "snippets"
     },
     {
+      "columns": ["owner_workos_user_id", "sequence"],
+      "nameExplicit": false,
+      "name": "snippet_changes_pkey",
+      "entityType": "pks",
+      "schema": "public",
+      "table": "snippet_changes"
+    },
+    {
+      "columns": ["owner_workos_user_id"],
+      "nameExplicit": false,
+      "name": "snippet_change_feeds_pkey",
+      "schema": "public",
+      "table": "snippet_change_feeds",
+      "entityType": "pks"
+    },
+    {
       "columns": ["id"],
       "nameExplicit": false,
       "name": "snippets_pkey",
       "schema": "public",
       "table": "snippets",
       "entityType": "pks"
+    },
+    {
+      "value": "(\"change_type\" = 'UPSERT') = (\"snapshot\" is not null)",
+      "name": "snippet_changes_snapshot_type_check",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "snippet_changes"
     }
   ],
   "renames": []

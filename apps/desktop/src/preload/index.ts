@@ -3,17 +3,28 @@ import type {
   AuthError,
   AuthStatus,
   ClipboardContent,
+  DesktopSnippet,
+  SnippetIngestPayload,
+  SnippetIngestResult,
   TrayDroppedItem,
   TrayAccountState,
   UserConfig,
   UserConfigPatch,
 } from "../ipc/contracts.ts";
-import type { ApiSnippet } from "@plakk/shared/PlakkApi";
 import { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
 import { invoke, on } from "../ipc/preload.ts";
-import type { RendererPreparedFileUploadPayload, StorageUploadResult } from "../storageUpload.ts";
 
 const plakkRpcUrl = process.env.PLAKK_RPC_URL ?? "https://app.plakk.io/api/rpc";
+
+type RendererSnippetIngestPayload = Pick<
+  SnippetIngestPayload,
+  "id" | "fileName" | "byteSize" | "mediaType" | "storageProvider"
+> &
+  (
+    | { readonly file: File; readonly filePath?: never; readonly bytes?: never }
+    | { readonly filePath: string; readonly file?: never; readonly bytes?: never }
+    | { readonly bytes: Uint8Array; readonly file?: never; readonly filePath?: never }
+  );
 
 export type DesktopApi = {
   readonly auth: {
@@ -31,20 +42,16 @@ export type DesktopApi = {
   readonly navigation: {
     readonly onRequested: (callback: (view: "home" | "settings") => void) => () => void;
   };
-  readonly storage: {
-    readonly cancelUpload: (id: string) => Promise<void>;
-    readonly uploadPreparedFile: (
-      payload: RendererPreparedFileUploadPayload,
-    ) => Promise<StorageUploadResult>;
-    readonly onProgress: (
-      callback: (progress: { id: string; progress: number }) => void,
-    ) => () => void;
-  };
   readonly snippets: {
+    readonly cancel: (id: string) => Promise<void>;
     readonly copy: (id: string) => Promise<void>;
-    readonly list: () => Promise<ReadonlyArray<ApiSnippet>>;
-    readonly onChanged: (callback: (items: ReadonlyArray<ApiSnippet>) => void) => () => void;
+    readonly delete: (id: string) => Promise<void>;
+    readonly discard: (id: string) => Promise<void>;
+    readonly ingest: (payload: RendererSnippetIngestPayload) => Promise<SnippetIngestResult>;
+    readonly list: () => Promise<ReadonlyArray<DesktopSnippet>>;
+    readonly onChanged: (callback: (items: ReadonlyArray<DesktopSnippet>) => void) => () => void;
     readonly read: (id: string) => Promise<Uint8Array>;
+    readonly retry: (id: string) => Promise<void>;
   };
   readonly tray: {
     readonly getAccountState: () => Promise<TrayAccountState>;
@@ -88,25 +95,27 @@ const desktopApi = {
     onRequested: (callback: (view: "home" | "settings") => void) =>
       on(ipcEvents.navigate, callback),
   },
-  storage: {
-    cancelUpload: (id: string) => invoke(ipcMethods.storageCancelUpload, id),
-    uploadPreparedFile: ({ file, ...payload }: RendererPreparedFileUploadPayload) => {
-      if (payload.bytes !== undefined) {
-        return invoke(ipcMethods.storageUploadPreparedFile, payload);
-      }
-      const filePath =
-        payload.filePath ?? (file === undefined ? "" : webUtils.getPathForFile(file));
-      if (!filePath) return Promise.reject(new Error("Choose a local file to upload."));
-      return invoke(ipcMethods.storageUploadPreparedFile, { ...payload, filePath });
-    },
-    onProgress: (callback: (progress: { id: string; progress: number }) => void) =>
-      on(ipcEvents.storageUploadProgress, callback),
-  },
   snippets: {
+    cancel: (snippet) => invoke(ipcMethods.snippetCancel, snippet),
     copy: (snippet) => invoke(ipcMethods.snippetCopy, snippet),
+    delete: (snippet) => invoke(ipcMethods.snippetDelete, snippet),
+    discard: (snippet) => invoke(ipcMethods.snippetDiscard, snippet),
+    ingest: ({ file, ...payload }: RendererSnippetIngestPayload) => {
+      const invocation =
+        payload.bytes !== undefined
+          ? invoke(ipcMethods.snippetIngest, payload)
+          : (() => {
+              const filePath =
+                payload.filePath ?? (file === undefined ? "" : webUtils.getPathForFile(file));
+              if (!filePath) return Promise.reject(new Error("Choose a file to add."));
+              return invoke(ipcMethods.snippetIngest, { ...payload, filePath });
+            })();
+      return invocation;
+    },
     list: () => invoke(ipcMethods.snippetList, undefined),
     onChanged: (callback) => on(ipcEvents.snippetReplicaChanged, callback),
     read: (snippet) => invoke(ipcMethods.snippetRead, snippet),
+    retry: (snippet) => invoke(ipcMethods.snippetRetry, snippet),
   },
   tray: {
     getAccountState: () => invoke(ipcMethods.trayGetAccountState, undefined),

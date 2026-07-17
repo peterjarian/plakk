@@ -40,6 +40,12 @@ export class SnippetReplica extends Context.Service<
     }>;
     get(accountId: string): Effect.Effect<SnippetReplicaState | null, SnippetReplicaError>;
     commit(accountId: string, state: SnippetReplicaState): Effect.Effect<void, SnippetReplicaError>;
+    remove(accountId: string, snippetId: string): Effect.Effect<void, SnippetReplicaError>;
+    pendingDeleteIds(accountId: string): Effect.Effect<ReadonlyArray<string>, SnippetReplicaError>;
+    completeDeleteCleanup(
+      accountId: string,
+      snippetId: string,
+    ): Effect.Effect<void, SnippetReplicaError>;
   }
 >()("@plakk/shared/SnippetReplica") {}
 
@@ -49,12 +55,10 @@ export class ManagedSnippetContent extends Context.Service<
     get(
       accountId: string,
       snippetId: string,
-      revision: string,
     ): Effect.Effect<Uint8Array | null, ManagedSnippetContentError>;
     put(
       accountId: string,
       snippetId: string,
-      revision: string,
       bytes: Uint8Array,
     ): Effect.Effect<void, ManagedSnippetContentError>;
     invalidate(
@@ -79,12 +83,7 @@ export class SnippetRemoteTransport extends Context.Service<
 >()("@plakk/shared/SnippetReplica/SnippetRemoteTransport") {}
 
 const ordered = (items: Iterable<ApiSnippet>): ReadonlyArray<ApiSnippet> =>
-  Array.from(items).sort((left, right) => {
-    const leftLegacy = left.kind === "TEXT" && left.storageProvider === null;
-    const rightLegacy = right.kind === "TEXT" && right.storageProvider === null;
-    if (leftLegacy !== rightLegacy) return leftLegacy ? -1 : 1;
-    return right.createdAt.localeCompare(left.createdAt);
-  });
+  Array.from(items).sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 
 const applyChanges = (
   items: ReadonlyArray<ApiSnippet>,
@@ -105,11 +104,10 @@ const replaceWithSnapshot = Effect.fn("SnippetReplica.replaceWithSnapshot")(func
 ) {
   const replica = yield* SnippetReplica;
   const content = yield* ManagedSnippetContent;
-  const fresh = new Map(snapshot.items.map((snippet) => [snippet.id, snippet]));
+  const freshIds = new Set(snapshot.items.map((snippet) => snippet.id));
   const staleIds =
-    current?.items
-      .filter((snippet) => fresh.get(snippet.id)?.updatedAt !== snippet.updatedAt)
-      .map((snippet) => snippet.id) ?? [];
+    current?.items.filter((snippet) => !freshIds.has(snippet.id)).map((snippet) => snippet.id) ??
+    [];
   const normalized = { cursor: snapshot.cursor, items: ordered(snapshot.items) };
   yield* content.invalidate(accountId, staleIds);
   yield* replica.commit(accountId, normalized);
@@ -145,12 +143,10 @@ export const syncSnippetReplica = Effect.fn("SnippetReplica.sync")(function* (
       return;
     }
 
-    yield* content.invalidate(
-      account.id,
-      page.changes.map((change) =>
-        change.type === "DELETE" ? change.snippetId : change.snippet.id,
-      ),
+    const deletedIds = page.changes.flatMap((change) =>
+      change.type === "DELETE" ? [change.snippetId] : [],
     );
+    if (deletedIds.length > 0) yield* content.invalidate(account.id, deletedIds);
     state = { cursor: page.nextCursor, items: applyChanges(state.items, page) };
     yield* replica.commit(account.id, state);
   }

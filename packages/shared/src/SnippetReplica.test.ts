@@ -18,16 +18,11 @@ import {
 const account: SnippetSyncAccount = { id: "user-1", accessToken: "token" };
 const snippet: ApiSnippet = {
   id: "0d1e2f3a-4567-4890-8abc-def012345678",
-  kind: "TEXT",
-  title: "Text snippet",
   fileName: "0d1e2f3a-4567-4890-8abc-def012345678.txt",
   byteSize: 12,
-  contentType: "text/plain; charset=utf-8",
-  contentUrl: null,
-  thumbnailUrl: null,
-  textContent: null,
   storageProvider: "GOOGLE_DRIVE",
-  uploadStatus: "READY",
+  storageObjectId: "drive-id",
+  uploadStatus: "UPLOADED",
   createdAt: "2026-07-10T20:00:00.000Z",
   updatedAt: "2026-07-10T20:00:01.000Z",
 };
@@ -64,6 +59,14 @@ const harness = (options: {
             state = next;
             return Effect.void;
           }),
+        remove: (_accountId, snippetId) =>
+          Effect.sync(() => {
+            if (state !== null) {
+              state = { ...state, items: state.items.filter((item) => item.id !== snippetId) };
+            }
+          }),
+        pendingDeleteIds: () => Effect.succeed([]),
+        completeDeleteCleanup: () => Effect.void,
       }),
     ),
     Layer.succeed(
@@ -121,6 +124,24 @@ describe("snippet replica synchronization", () => {
     await Effect.runPromise(syncSnippetReplica(account).pipe(Effect.provide(test.layer)));
 
     expect(test.state()).toEqual({ cursor: "next", items: [snippet] });
+    expect(test.invalidated).toEqual([]);
+  });
+
+  it("invalidates managed content only when the snippet is deleted", async () => {
+    const test = harness({
+      initial: { cursor: "old", items: [snippet] },
+      pages: [
+        {
+          status: "OK",
+          changes: [{ type: "DELETE", snippetId: snippet.id }],
+          nextCursor: "next",
+        },
+      ],
+    });
+
+    await Effect.runPromise(syncSnippetReplica(account).pipe(Effect.provide(test.layer)));
+
+    expect(test.state()).toEqual({ cursor: "next", items: [] });
     expect(test.invalidated).toEqual([[snippet.id]]);
   });
 

@@ -1,0 +1,7 @@
+# Use one upload lifecycle for snippets
+
+Every snippet has file content in the user's linked storage provider. Desktop ingestion converts source content into durable managed bytes and minimal file metadata, then one shared outbox and upload lifecycle creates authoritative metadata, prepares provider transfer, uploads, retries, and finalizes. Source content does not become a snippet until both the managed bytes and local outbox entry are durable. A copy or encoding failure before that point removes the temporary importing presentation, leaves the source untouched, and remains a local error; it creates no server record or authoritative `FAILED` state.
+
+If managed content disappears or becomes corrupt after durable enqueue, the snippet remains visible as failed. The origin offers removal rather than retry because it cannot reconstruct the immutable content. The failure is synchronized when authoritative metadata already exists and remains local otherwise; replacing the content creates a new snippet.
+
+The server stores neither a snippet kind, display title, nor content type: a shared client library derives text, hyperlink, image, or general-file presentation and titles from the file name and content. A media type supplied by an origin client or storage provider is only a transfer hint. Plakk has not launched and has no beta data, so the obsolete kind enum and metadata-only `LINK` records can be removed without a compatibility or content-migration path.

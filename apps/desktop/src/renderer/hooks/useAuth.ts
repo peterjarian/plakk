@@ -7,11 +7,11 @@ import {
   useMemo,
   useState,
 } from "react";
-import type { AuthStatus } from "../../ipc/contracts.ts";
+import type { AuthError, AuthStatus } from "../../ipc/contracts.ts";
 import type { ReactNode } from "react";
 
 type AuthState = {
-  issue: { message: string } | null;
+  issue: AuthError | null;
   isLoading: boolean;
   signIn: () => Promise<void>;
   signOut: () => Promise<void>;
@@ -24,7 +24,7 @@ const AUTH_REFRESH_INTERVAL_MS = 30 * 1000;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus | null>(null);
-  const [issue, setIssue] = useState<{ message: string } | null>(null);
+  const [issue, setIssue] = useState<AuthError | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -33,9 +33,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setIssue(null);
       setStatus(nextStatus);
     };
-    const reportError = (error: unknown) => {
+    const reportError = () => {
       if (!isMounted) return;
-      setIssue({ message: error instanceof Error ? error.message : "Could not check session." });
+      setIssue({ message: "Could not check session." });
     };
     const refresh = () => void window.ipc.auth.getAuth().then(applyStatus, reportError);
     const unsubscribeError = window.ipc.auth.onError((error) => {
@@ -44,9 +44,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
     const unsubscribe = window.ipc.auth.onStatusChanged(applyStatus);
 
-    void window.ipc.auth.getAuth().then(applyStatus, (error) => {
+    void window.ipc.auth.getAuth().then(applyStatus, () => {
       if (!isMounted) return;
-      reportError(error);
+      reportError();
       setStatus({ accessToken: null, user: null });
     });
     const refreshInterval = window.setInterval(refresh, AUTH_REFRESH_INTERVAL_MS);
@@ -65,8 +65,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIssue(null);
     try {
       await window.ipc.auth.signIn();
-    } catch (error) {
-      setIssue({ message: error instanceof Error ? error.message : "Could not start sign-in." });
+    } catch {
+      setIssue({ message: "Could not start sign-in." });
     }
   }, []);
 
@@ -74,8 +74,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIssue(null);
     try {
       await window.ipc.auth.signOut();
-    } catch (error) {
-      setIssue({ message: error instanceof Error ? error.message : "Could not sign out." });
+    } catch {
+      setIssue({ message: "Could not sign out." });
     }
   }, []);
 

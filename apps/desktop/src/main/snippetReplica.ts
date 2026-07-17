@@ -1,23 +1,55 @@
 import { UserSchema, type User } from "@plakk/shared";
 import {
   ManagedSnippetContent,
-  ManagedSnippetContentError,
   SnippetRemoteTransport,
   SnippetReplica,
   SnippetReplicaError,
   SnippetReplicaStateSchema,
   type SnippetReplicaState,
 } from "@plakk/shared/SnippetReplica";
-import { app } from "electron";
 import ElectronStore from "electron-store";
-import { Context, Effect, FileSystem, Layer, Path, PubSub, Schema, Stream } from "effect";
-import type { ApiSnippet, SnippetChangePage } from "@plakk/shared/PlakkApi";
+import { Context, Effect, Layer, PubSub, Schema, Semaphore, Stream } from "effect";
+import { SnippetIdSchema, type SnippetChangePage } from "@plakk/shared/PlakkApi";
 
-import { makePlakkClient, getSnippetCopyPayload } from "./accountStatus.ts";
+import { getSnippetCopyPayload } from "./accountStatus.ts";
 import { downloadSnippetBytes } from "./clipboard.ts";
+import { PlakkRpcClient } from "./PlakkRpcClient.ts";
 
 const StoredReplicaCodec = Schema.fromJsonString(SnippetReplicaStateSchema);
+const PendingReplicaDeleteSchema = Schema.Struct({
+  id: SnippetIdSchema,
+  remoteConfirmed: Schema.Boolean,
+  cleanupComplete: Schema.Boolean,
+});
+type PendingReplicaDelete = typeof PendingReplicaDeleteSchema.Type;
+const StoredPendingDeletesCodec = Schema.fromJsonString(Schema.Array(PendingReplicaDeleteSchema));
 const StoredAccountCodec = Schema.fromJsonString(UserSchema);
+const pendingDeletesKey = (accountId: string) => `pending-deletes:${accountId}`;
+const maskPendingReplicaDeletes = (
+  state: SnippetReplicaState,
+  pendingDeletes: ReadonlyArray<PendingReplicaDelete>,
+): SnippetReplicaState => {
+  const pending = new Set(pendingDeletes.map((deletion) => deletion.id));
+  return { ...state, items: state.items.filter((snippet) => !pending.has(snippet.id)) };
+};
+
+export const applyPendingReplicaDeletes = (
+  state: SnippetReplicaState,
+  pendingDeletes: ReadonlyArray<PendingReplicaDelete>,
+) => {
+  const incomingIds = new Set(state.items.map((snippet) => snippet.id));
+  const updatedDeletes = pendingDeletes.map((deletion) => ({
+    ...deletion,
+    remoteConfirmed: deletion.remoteConfirmed || !incomingIds.has(deletion.id),
+  }));
+  return {
+    state: maskPendingReplicaDeletes(state, pendingDeletes),
+    pendingDeletes: updatedDeletes.filter(
+      (deletion) =>
+        !(deletion.remoteConfirmed && deletion.cleanupComplete && !incomingIds.has(deletion.id)),
+    ),
+  };
+};
 
 export const SnippetReplicaLive = Layer.effect(
   SnippetReplica,
@@ -35,39 +67,143 @@ export const SnippetReplicaLive = Layer.effect(
       readonly accountId: string;
       readonly items: SnippetReplicaState["items"];
     }>();
+    const lock = yield* Semaphore.make(1);
+
+    const readReplica = Effect.fn("DesktopSnippetReplica.read")(function* (accountId: string) {
+      const json = yield* Effect.try({
+        try: () => store.get(accountId),
+        catch: (cause) =>
+          new SnippetReplicaError({ cause, reason: "Could not read the snippet replica." }),
+      });
+      if (json === undefined) return null;
+      return yield* Schema.decodeEffect(StoredReplicaCodec)(json).pipe(
+        Effect.mapError(
+          (cause) =>
+            new SnippetReplicaError({
+              cause,
+              reason: "Stored snippet replica is invalid.",
+            }),
+        ),
+      );
+    });
+
+    const readPendingDeletes = Effect.fn("DesktopSnippetReplica.readPendingDeletes")(function* (
+      accountId: string,
+    ) {
+      const json = yield* Effect.try({
+        try: () => store.get(pendingDeletesKey(accountId)),
+        catch: (cause) =>
+          new SnippetReplicaError({ cause, reason: "Could not read pending snippet deletions." }),
+      });
+      if (json === undefined) return [];
+      return yield* Schema.decodeEffect(StoredPendingDeletesCodec)(json).pipe(
+        Effect.mapError(
+          (cause) =>
+            new SnippetReplicaError({
+              cause,
+              reason: "Stored pending snippet deletions are invalid.",
+            }),
+        ),
+      );
+    });
+
+    const writeReplica = Effect.fn("DesktopSnippetReplica.write")(function* (
+      accountId: string,
+      state: SnippetReplicaState,
+    ) {
+      const json = yield* Schema.encodeEffect(StoredReplicaCodec)(state).pipe(
+        Effect.mapError(
+          (cause) => new SnippetReplicaError({ cause, reason: "Snippet replica is invalid." }),
+        ),
+      );
+      yield* Effect.try({
+        try: () => store.set(accountId, json),
+        catch: (cause) =>
+          new SnippetReplicaError({ cause, reason: "Could not commit the snippet replica." }),
+      });
+    });
+
+    const writePendingDeletes = Effect.fn("DesktopSnippetReplica.writePendingDeletes")(function* (
+      accountId: string,
+      pendingDeletes: ReadonlyArray<PendingReplicaDelete>,
+    ) {
+      const key = pendingDeletesKey(accountId);
+      const json = yield* Schema.encodeEffect(StoredPendingDeletesCodec)(pendingDeletes).pipe(
+        Effect.mapError(
+          (cause) =>
+            new SnippetReplicaError({
+              cause,
+              reason: "Pending snippet deletions are invalid.",
+            }),
+        ),
+      );
+      yield* Effect.try({
+        try: () => (pendingDeletes.length === 0 ? store.delete(key) : store.set(key, json)),
+        catch: (cause) =>
+          new SnippetReplicaError({ cause, reason: "Could not save pending snippet deletions." }),
+      });
+    });
 
     return SnippetReplica.of({
       changes: Stream.fromPubSub(changes),
-      get: Effect.fn("DesktopSnippetReplica.get")(function* (accountId: string) {
-        const json = yield* Effect.try({
-          try: () => store.get(accountId),
-          catch: (cause) =>
-            new SnippetReplicaError({ cause, reason: "Could not read the snippet replica." }),
-        });
-        if (json === undefined) return null;
-        return yield* Schema.decodeEffect(StoredReplicaCodec)(json).pipe(
-          Effect.mapError(
-            (cause) =>
-              new SnippetReplicaError({
-                cause,
-                reason: "Stored snippet replica is invalid.",
-              }),
+      get: (accountId) =>
+        lock.withPermit(
+          Effect.gen(function* () {
+            const state = yield* readReplica(accountId);
+            if (state === null) return null;
+            const pendingDeletes = yield* readPendingDeletes(accountId);
+            return maskPendingReplicaDeletes(state, pendingDeletes);
+          }),
+        ),
+      commit: (accountId, state) =>
+        lock.withPermit(
+          Effect.gen(function* () {
+            const pendingDeletes = yield* readPendingDeletes(accountId);
+            const next = applyPendingReplicaDeletes(state, pendingDeletes);
+            yield* writeReplica(accountId, next.state);
+            yield* writePendingDeletes(accountId, next.pendingDeletes);
+            yield* PubSub.publish(changes, { accountId, items: next.state.items });
+          }),
+        ),
+      remove: (accountId, snippetId) =>
+        lock.withPermit(
+          Effect.gen(function* () {
+            const state = yield* readReplica(accountId);
+            const pendingDeletes = yield* readPendingDeletes(accountId);
+            const nextPendingDeletes = pendingDeletes.some((deletion) => deletion.id === snippetId)
+              ? pendingDeletes
+              : [
+                  ...pendingDeletes,
+                  { id: snippetId, remoteConfirmed: false, cleanupComplete: false },
+                ];
+            yield* writePendingDeletes(accountId, nextPendingDeletes);
+            if (state === null) return;
+            const nextState = {
+              ...state,
+              items: state.items.filter((snippet) => snippet.id !== snippetId),
+            };
+            yield* writeReplica(accountId, nextState);
+            yield* PubSub.publish(changes, { accountId, items: nextState.items });
+          }),
+        ),
+      pendingDeleteIds: (accountId) =>
+        lock.withPermit(
+          readPendingDeletes(accountId).pipe(
+            Effect.map((pendingDeletes) => pendingDeletes.map((deletion) => deletion.id)),
           ),
-        );
-      }),
-      commit: Effect.fn("DesktopSnippetReplica.commit")(function* (accountId, state) {
-        const json = yield* Schema.encodeEffect(StoredReplicaCodec)(state).pipe(
-          Effect.mapError(
-            (cause) => new SnippetReplicaError({ cause, reason: "Snippet replica is invalid." }),
-          ),
-        );
-        yield* Effect.try({
-          try: () => store.set(accountId, json),
-          catch: (cause) =>
-            new SnippetReplicaError({ cause, reason: "Could not commit the snippet replica." }),
-        });
-        yield* PubSub.publish(changes, { accountId, items: state.items });
-      }),
+        ),
+      completeDeleteCleanup: (accountId, snippetId) =>
+        lock.withPermit(
+          Effect.gen(function* () {
+            const pendingDeletes = yield* readPendingDeletes(accountId);
+            const nextPendingDeletes = pendingDeletes
+              .map((deletion) =>
+                deletion.id === snippetId ? { ...deletion, cleanupComplete: true } : deletion,
+              )
+              .filter((deletion) => !(deletion.remoteConfirmed && deletion.cleanupComplete));
+            yield* writePendingDeletes(accountId, nextPendingDeletes);
+          }),
+        ),
     });
   }),
 );
@@ -145,117 +281,23 @@ export const ActiveSnippetAccountLive = Layer.effect(
   }),
 );
 
-export const ManagedSnippetContentLive = Layer.effect(
-  ManagedSnippetContent,
-  Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const contentDirectory = (accountId: string, snippetId: string) =>
-      path.join(
-        app.getPath("userData"),
-        "snippet-content",
-        Buffer.from(accountId).toString("base64url"),
-        snippetId,
-      );
-    const contentPath = (accountId: string, snippetId: string, revision: string) =>
-      path.join(
-        contentDirectory(accountId, snippetId),
-        Buffer.from(revision).toString("base64url"),
-      );
-
-    return ManagedSnippetContent.of({
-      get: Effect.fn("DesktopManagedSnippetContent.get")(
-        function* (accountId, snippetId, revision) {
-          return yield* fileSystem.readFile(contentPath(accountId, snippetId, revision)).pipe(
-            Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(null)),
-            Effect.mapError(
-              (cause) =>
-                new ManagedSnippetContentError({
-                  cause,
-                  reason: "Could not read managed snippet content.",
-                }),
-            ),
-          );
-        },
-      ),
-      put: Effect.fn("DesktopManagedSnippetContent.put")(
-        function* (accountId, snippetId, revision, bytes) {
-          const filePath = contentPath(accountId, snippetId, revision);
-          yield* fileSystem.makeDirectory(path.dirname(filePath), { recursive: true }).pipe(
-            Effect.mapError(
-              (cause) =>
-                new ManagedSnippetContentError({
-                  cause,
-                  reason: "Could not prepare managed snippet content.",
-                }),
-            ),
-          );
-          yield* fileSystem.writeFile(filePath, bytes).pipe(
-            Effect.mapError(
-              (cause) =>
-                new ManagedSnippetContentError({
-                  cause,
-                  reason: "Could not write managed snippet content.",
-                }),
-            ),
-          );
-        },
-      ),
-      invalidate: Effect.fn("DesktopManagedSnippetContent.invalidate")(
-        function* (accountId, snippetIds) {
-          yield* Effect.forEach(
-            snippetIds,
-            (snippetId) =>
-              fileSystem
-                .remove(contentDirectory(accountId, snippetId), { force: true, recursive: true })
-                .pipe(
-                  Effect.mapError(
-                    (cause) =>
-                      new ManagedSnippetContentError({
-                        cause,
-                        reason: "Could not invalidate managed snippet content.",
-                      }),
-                  ),
-                ),
-            { discard: true },
-          );
-        },
-      ),
-    });
-  }),
-);
-const durableSnippet = (snippet: ApiSnippet): ApiSnippet => ({
-  ...snippet,
-  contentUrl: null,
-  thumbnailUrl: null,
-});
-
 export const SnippetRemoteTransportLive = Layer.effect(
   SnippetRemoteTransport,
   Effect.gen(function* () {
-    const client = yield* makePlakkClient;
+    const client = yield* PlakkRpcClient;
     return SnippetRemoteTransport.of({
       snapshot: Effect.fn("DesktopSnippetRemote.snapshot")(function* (account) {
         const snapshot = yield* client.GetSnippetSnapshot(undefined, {
           headers: { authorization: `Bearer ${account.accessToken}` },
         });
-        return { cursor: snapshot.cursor, items: snapshot.items.map(durableSnippet) };
+        return snapshot;
       }),
       pull: Effect.fn("DesktopSnippetRemote.pull")(function* (account, cursor) {
         const page: SnippetChangePage = yield* client.PullSnippetChanges(
           { cursor, limit: 100 },
           { headers: { authorization: `Bearer ${account.accessToken}` } },
         );
-        return page.status === "RESNAPSHOT_REQUIRED"
-          ? page
-          : {
-              ...page,
-              changes: page.changes.map((change) =>
-                change.type === "UPSERT"
-                  ? { ...change, snippet: durableSnippet(change.snippet) }
-                  : change,
-              ),
-            };
+        return page;
       }),
       wakes: (account) =>
         client
@@ -288,28 +330,32 @@ export const getReplicaSnippet = Effect.fn("DesktopSnippetReplica.snippet")(func
 export const getManagedSnippetBytes = Effect.fn("DesktopSnippetReplica.content")(function* (
   account: { readonly id: string; readonly accessToken: string | null },
   snippetId: string,
+  knownSnippet?: {
+    readonly id: string;
+    readonly fileName: string;
+    readonly byteSize: number;
+    readonly uploadStatus: "UPLOADING" | "FAILED" | "UPLOADED" | null;
+  },
 ) {
   const content = yield* ManagedSnippetContent;
-  const snippet = yield* getReplicaSnippet(account.id, snippetId);
-  const cached = yield* content.get(account.id, snippetId, snippet.updatedAt);
+  const snippet = knownSnippet ?? (yield* getReplicaSnippet(account.id, snippetId));
+  const cached = yield* content.get(account.id, snippetId);
   if (cached?.byteLength === snippet.byteSize) return { bytes: cached, snippet };
   if (cached !== null) yield* content.invalidate(account.id, [snippetId]);
 
   const bytes =
-    snippet.kind === "TEXT" && snippet.textContent !== null
-      ? new TextEncoder().encode(snippet.textContent)
-      : account.accessToken === null
-        ? yield* new SnippetReplicaError({
-            cause: null,
-            reason: "Snippet content is not available offline yet.",
-          })
-        : yield* downloadSnippetBytes(yield* getSnippetCopyPayload(account.accessToken, snippetId));
+    account.accessToken === null || snippet.uploadStatus !== "UPLOADED"
+      ? yield* new SnippetReplicaError({
+          cause: null,
+          reason: "The local copy of this snippet is unavailable.",
+        })
+      : yield* downloadSnippetBytes(yield* getSnippetCopyPayload(account.accessToken, snippetId));
   if (bytes.byteLength !== snippet.byteSize) {
     return yield* new SnippetReplicaError({
       cause: null,
       reason: "Snippet content does not match its metadata.",
     });
   }
-  yield* content.put(account.id, snippetId, snippet.updatedAt, bytes);
+  yield* content.put(account.id, snippetId, bytes);
   return { bytes, snippet };
 });

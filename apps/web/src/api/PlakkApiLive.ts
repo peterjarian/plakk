@@ -1,11 +1,6 @@
 import { and, Drizzle, eq, isNull, type DrizzleService } from "@plakk/db";
-import { snippets, type SnippetRow } from "@plakk/db/schema";
-import {
-  STORAGE_PROVIDERS,
-  type SnippetKind,
-  type SnippetUploadStatus,
-  type StorageProvider,
-} from "@plakk/shared";
+import { snippets } from "@plakk/db/schema";
+import { STORAGE_PROVIDERS, type StorageProvider } from "@plakk/shared";
 import {
   AccountRpcs,
   CurrentUser,
@@ -26,12 +21,14 @@ import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstab
 
 import { StorageProviderService } from "./storage/StorageProvider.ts";
 import { getProviderSlug } from "./storage/getProviderSlug.ts";
+import { mapStorageErrorsToRpc } from "./storage/mapStorageErrorsToRpc.ts";
 import {
   appendSnippetChange,
   getSnippetSnapshot,
   pullSnippetChanges,
 } from "./SnippetChangeFeed.ts";
 import { snippetChangeRpcStream } from "./SnippetChangeWakes.ts";
+import { SnippetUploads } from "./SnippetUploads.ts";
 import { toApiSnippet } from "./transformers/toApiSnippet.ts";
 
 const DEFAULT_STORAGE_PROVIDER = "GOOGLE_DRIVE" as const;
@@ -43,95 +40,6 @@ const isStorageProvider = (value: string): value is StorageProvider =>
 const WorkosAuthorizeResponseSchema = Schema.Struct({ url: Schema.String });
 const WorkosConnectedAccountSchema = Schema.Struct({
   state: Schema.Literals(["connected", "needs_reauthorization"] as const),
-});
-
-export type CreateSnippetInput = {
-  readonly id: string;
-  readonly kind: Extract<SnippetKind, "TEXT" | "FILE" | "IMAGE">;
-  readonly title: string;
-  readonly fileName: string;
-  readonly byteSize: number;
-  readonly contentType: string | null;
-  readonly storageProvider: StorageProvider;
-  readonly storageObjectId: string | null;
-};
-
-export const insertSnippet = Effect.fn("@plakk/web/api/PlakkApiLive.insertSnippet")(function* (
-  drizzle: DrizzleService,
-  input: CreateSnippetInput,
-) {
-  const currentUser = yield* CurrentUser;
-  const uploadStatus: SnippetUploadStatus = "UPLOADING";
-  const snippet = yield* drizzle.db
-    .transaction((tx) =>
-      Effect.gen(function* () {
-        const [inserted] = yield* tx
-          .insert(snippets)
-          .values({
-            ...input,
-            ownerWorkosUserId: currentUser.id,
-            uploadStatus,
-          })
-          .returning();
-        if (inserted !== undefined) {
-          yield* appendSnippetChange(tx, { type: "UPSERT", snippet: inserted });
-        }
-        return inserted;
-      }),
-    )
-    .pipe(Effect.orDie);
-
-  if (snippet === undefined) {
-    return yield* Effect.die(new Error("Snippet insert returned no row"));
-  }
-
-  return toApiSnippet(snippet);
-});
-
-const withContentUrls = Effect.fn("@plakk/web/api/PlakkApiLive.withContentUrls")(function* (
-  storage: StorageProviderService["Service"],
-  snippet: SnippetRow,
-  workosUserId: string,
-) {
-  const result = toApiSnippet(snippet);
-  if (
-    snippet.uploadStatus !== "READY" ||
-    snippet.storageProvider === null ||
-    snippet.storageObjectId === null
-  ) {
-    return result;
-  }
-
-  const contentUrl = yield* storage
-    .getDownloadUrl({
-      storageProvider: snippet.storageProvider,
-      storageObjectId: snippet.storageObjectId,
-      workosUserId,
-    })
-    .pipe(
-      Effect.catchTags({
-        StorageObjectNotFoundError: (error) =>
-          Effect.fail(new RpcError({ code: "NOT_FOUND", message: error.message })),
-        StorageNotConnectedError: (error) =>
-          Effect.fail(new RpcError({ code: "FORBIDDEN", message: error.message })),
-        StorageNeedsReauthorizationError: (error) =>
-          Effect.fail(new RpcError({ code: "FORBIDDEN", message: error.message })),
-        StorageCredentialsError: (error) =>
-          Effect.fail(new RpcError({ code: "INTERNAL_SERVER_ERROR", message: error.message })),
-        StorageProviderError: (error) =>
-          Effect.fail(
-            new RpcError({
-              code: "INTERNAL_SERVER_ERROR",
-              message: `${error.storageProvider}: ${error.message}`,
-            }),
-          ),
-      }),
-    );
-  return {
-    ...result,
-    contentUrl,
-    thumbnailUrl: snippet.kind === "IMAGE" ? contentUrl : null,
-  };
 });
 
 export const getSnippetCopyPayload = Effect.fn("@plakk/web/api/PlakkApiLive.getSnippetCopyPayload")(
@@ -148,20 +56,15 @@ export const getSnippetCopyPayload = Effect.fn("@plakk/web/api/PlakkApiLive.getS
         and(
           eq(snippets.id, snippetId),
           eq(snippets.ownerWorkosUserId, workosUserId),
-          eq(snippets.uploadStatus, "READY"),
+          eq(snippets.uploadStatus, "UPLOADED"),
           isNull(snippets.deletedAt),
         ),
       )
       .limit(1)
       .pipe(Effect.orDie);
 
-    if (
-      snippet === undefined ||
-      (snippet.kind !== "TEXT" && snippet.kind !== "FILE" && snippet.kind !== "IMAGE") ||
-      snippet.storageProvider === null ||
-      snippet.storageObjectId === null
-    ) {
-      return yield* new RpcError({ code: "NOT_FOUND", message: "Ready snippet was not found." });
+    if (snippet === undefined || snippet.storageObjectId === null) {
+      return yield* new RpcError({ code: "NOT_FOUND", message: "Uploaded snippet was not found." });
     }
 
     const download = yield* storage
@@ -170,296 +73,16 @@ export const getSnippetCopyPayload = Effect.fn("@plakk/web/api/PlakkApiLive.getS
         storageObjectId: snippet.storageObjectId,
         workosUserId,
       })
-      .pipe(
-        Effect.catchTags({
-          StorageObjectNotFoundError: (error) =>
-            Effect.fail(new RpcError({ code: "NOT_FOUND", message: error.message })),
-          StorageNotConnectedError: (error) =>
-            Effect.fail(new RpcError({ code: "FORBIDDEN", message: error.message })),
-          StorageNeedsReauthorizationError: (error) =>
-            Effect.fail(new RpcError({ code: "FORBIDDEN", message: error.message })),
-          StorageCredentialsError: (error) =>
-            Effect.fail(new RpcError({ code: "INTERNAL_SERVER_ERROR", message: error.message })),
-          StorageProviderError: (error) =>
-            Effect.fail(
-              new RpcError({
-                code: "INTERNAL_SERVER_ERROR",
-                message: `${error.storageProvider}: ${error.message}`,
-              }),
-            ),
-        }),
-      );
+      .pipe(mapStorageErrorsToRpc);
 
     return {
-      kind: snippet.kind,
       storageProvider: snippet.storageProvider,
       fileName: snippet.fileName,
-      contentType: snippet.contentType,
       byteSize: snippet.byteSize,
       download,
     };
   },
 );
-
-export const confirmTextSnippetUpload = Effect.fn(
-  "@plakk/web/api/PlakkApiLive.confirmTextSnippetUpload",
-)(function* (
-  storage: StorageProviderService["Service"],
-  snippet: SnippetRow,
-  workosUserId: string,
-  input: {
-    readonly storageObjectId: string;
-    readonly storageProvider?: StorageProvider;
-  },
-) {
-  if (snippet.ownerWorkosUserId !== workosUserId || snippet.kind !== "TEXT") {
-    return yield* new RpcError({
-      code: "NOT_FOUND",
-      message: "Finalizable text snippet not found.",
-    });
-  }
-  const requestedProvider = input.storageProvider ?? snippet.storageProvider;
-  const isLegacy =
-    snippet.uploadStatus === "READY" &&
-    snippet.storageProvider === null &&
-    snippet.storageObjectId === null &&
-    input.storageProvider !== undefined;
-  const isPending =
-    (snippet.uploadStatus === "UPLOADING" || snippet.uploadStatus === "INTERRUPTED") &&
-    snippet.storageProvider !== null &&
-    input.storageProvider === undefined;
-  if ((!isLegacy && !isPending) || requestedProvider === null) {
-    return yield* new RpcError({
-      code: "NOT_FOUND",
-      message: "Finalizable text snippet not found.",
-    });
-  }
-
-  const bytes = yield* storage
-    .downloadObject({
-      storageProvider: requestedProvider,
-      storageObjectId: input.storageObjectId,
-      expectedByteSize: snippet.byteSize,
-      workosUserId,
-    })
-    .pipe(
-      Effect.catchTags({
-        StorageObjectNotFoundError: (error) =>
-          Effect.fail(new RpcError({ code: "NOT_FOUND", message: error.message })),
-        StorageNotConnectedError: (error) =>
-          Effect.fail(new RpcError({ code: "FORBIDDEN", message: error.message })),
-        StorageNeedsReauthorizationError: (error) =>
-          Effect.fail(new RpcError({ code: "FORBIDDEN", message: error.message })),
-        StorageCredentialsError: (error) =>
-          Effect.fail(new RpcError({ code: "INTERNAL_SERVER_ERROR", message: error.message })),
-        StorageProviderError: (error) =>
-          Effect.fail(
-            new RpcError({
-              code: "INTERNAL_SERVER_ERROR",
-              message: `${error.storageProvider}: ${error.message}`,
-            }),
-          ),
-      }),
-    );
-  if (bytes.byteLength !== snippet.byteSize) {
-    return yield* new RpcError({
-      code: "INTERNAL_SERVER_ERROR",
-      message: "Stored object size does not match snippet metadata.",
-    });
-  }
-  if (isLegacy) {
-    const legacyBytes = new TextEncoder().encode(snippet.title);
-    if (
-      legacyBytes.byteLength !== bytes.byteLength ||
-      legacyBytes.some((byte, index) => byte !== bytes[index])
-    ) {
-      return yield* new RpcError({
-        code: "INTERNAL_SERVER_ERROR",
-        message: "Uploaded object does not match the legacy snippet body.",
-      });
-    }
-  }
-  return requestedProvider;
-});
-
-export const prepareSnippetUpload = Effect.fn("@plakk/web/api/PlakkApiLive.prepareSnippetUpload")(
-  function* (
-    drizzle: DrizzleService,
-    storage: StorageProviderService["Service"],
-    workosUserId: string,
-    input: { readonly snippetId: string; readonly storageProvider: StorageProvider },
-  ) {
-    const [snippet] = yield* drizzle.db
-      .select()
-      .from(snippets)
-      .where(
-        and(
-          eq(snippets.id, input.snippetId),
-          eq(snippets.ownerWorkosUserId, workosUserId),
-          isNull(snippets.deletedAt),
-        ),
-      )
-      .limit(1)
-      .pipe(Effect.orDie);
-    const isLegacyText =
-      snippet?.kind === "TEXT" &&
-      snippet.uploadStatus === "READY" &&
-      snippet.storageProvider === null &&
-      snippet.storageObjectId === null;
-    const isPendingUpload =
-      (snippet?.uploadStatus === "UPLOADING" || snippet?.uploadStatus === "INTERRUPTED") &&
-      snippet.storageProvider === input.storageProvider &&
-      (snippet.kind === "TEXT" || snippet.kind === "FILE" || snippet.kind === "IMAGE");
-    if (
-      snippet === undefined ||
-      snippet.ownerWorkosUserId !== workosUserId ||
-      (!isLegacyText && !isPendingUpload)
-    ) {
-      return yield* new RpcError({
-        code: "NOT_FOUND",
-        message: "Uploadable snippet metadata was not found.",
-      });
-    }
-
-    return yield* storage.prepareUpload({
-      snippetId: snippet.id,
-      storageProvider: input.storageProvider,
-      fileName: snippet.kind === "TEXT" ? `${snippet.id}.txt` : snippet.fileName,
-      byteSize: snippet.byteSize,
-      contentType: snippet.kind === "TEXT" ? "text/plain; charset=utf-8" : snippet.contentType,
-      workosUserId,
-    });
-  },
-);
-
-type UpdateSnippetUploadInput =
-  | {
-      readonly id: string;
-      readonly uploadStatus: "UPLOADING" | "INTERRUPTED";
-    }
-  | {
-      readonly id: string;
-      readonly uploadStatus: "READY";
-      readonly storageObjectId: string;
-      readonly storageProvider?: StorageProvider;
-    }
-  | {
-      readonly id: string;
-      readonly uploadStatus: "FAILED";
-      readonly storageObjectId?: string | null;
-    };
-
-export const updateStoredSnippetUpload = Effect.fn(
-  "@plakk/web/api/PlakkApiLive.updateStoredSnippetUpload",
-)(function* (
-  drizzle: DrizzleService,
-  storage: StorageProviderService["Service"],
-  workosUserId: string,
-  input: UpdateSnippetUploadInput,
-) {
-  const [current] = yield* drizzle.db
-    .select()
-    .from(snippets)
-    .where(
-      and(
-        eq(snippets.id, input.id),
-        eq(snippets.ownerWorkosUserId, workosUserId),
-        isNull(snippets.deletedAt),
-      ),
-    )
-    .limit(1)
-    .pipe(Effect.orDie);
-  if (
-    current === undefined ||
-    current.ownerWorkosUserId !== workosUserId ||
-    current.deletedAt !== null ||
-    (current.kind !== "TEXT" && current.kind !== "FILE" && current.kind !== "IMAGE")
-  ) {
-    return yield* new RpcError({ code: "NOT_FOUND", message: "Stored snippet not found." });
-  }
-
-  let finalizedProvider: StorageProvider | undefined;
-  if (input.uploadStatus === "READY") {
-    if (current.kind === "TEXT") {
-      finalizedProvider = yield* confirmTextSnippetUpload(storage, current, workosUserId, {
-        storageObjectId: input.storageObjectId,
-        ...(input.storageProvider === undefined ? {} : { storageProvider: input.storageProvider }),
-      });
-    } else if (
-      (current.uploadStatus !== "UPLOADING" && current.uploadStatus !== "INTERRUPTED") ||
-      "storageProvider" in input
-    ) {
-      return yield* new RpcError({
-        code: "NOT_FOUND",
-        message: "Pending stored snippet not found.",
-      });
-    }
-  } else if (input.uploadStatus === "FAILED") {
-    if (current.uploadStatus !== "UPLOADING" && current.uploadStatus !== "INTERRUPTED") {
-      return yield* new RpcError({
-        code: "NOT_FOUND",
-        message: "Pending stored snippet not found.",
-      });
-    }
-  } else if (input.uploadStatus === "INTERRUPTED") {
-    if (current.uploadStatus !== "UPLOADING") {
-      return yield* new RpcError({
-        code: "NOT_FOUND",
-        message: "Uploading stored snippet not found.",
-      });
-    }
-  } else if (input.uploadStatus === "UPLOADING") {
-    if (current.uploadStatus !== "INTERRUPTED") {
-      return yield* new RpcError({
-        code: "NOT_FOUND",
-        message: "Interrupted stored snippet not found.",
-      });
-    }
-  }
-
-  const now = DateTime.toDateUtc(yield* DateTime.now);
-  const snippet = yield* drizzle.db
-    .transaction((tx) =>
-      Effect.gen(function* () {
-        const [updated] = yield* tx
-          .update(snippets)
-          .set({
-            uploadStatus: input.uploadStatus,
-            updatedAt: now,
-            ...("storageObjectId" in input && input.storageObjectId !== undefined
-              ? { storageObjectId: input.storageObjectId }
-              : {}),
-            ...(finalizedProvider === undefined
-              ? {}
-              : { storageProvider: finalizedProvider, title: "Text snippet" }),
-          })
-          .where(
-            and(
-              eq(snippets.id, input.id),
-              eq(snippets.ownerWorkosUserId, workosUserId),
-              isNull(snippets.deletedAt),
-              eq(snippets.uploadStatus, current.uploadStatus),
-              current.storageProvider === null
-                ? isNull(snippets.storageProvider)
-                : eq(snippets.storageProvider, current.storageProvider),
-            ),
-          )
-          .returning();
-        if (updated !== undefined) {
-          yield* appendSnippetChange(tx, { type: "UPSERT", snippet: updated });
-        }
-        return updated;
-      }),
-    )
-    .pipe(Effect.orDie);
-
-  if (snippet === undefined) {
-    return yield* new RpcError({ code: "NOT_FOUND", message: "Stored snippet not found." });
-  }
-  return yield* withContentUrls(storage, snippet, workosUserId).pipe(
-    Effect.orElseSucceed(() => toApiSnippet(snippet)),
-  );
-});
 
 const getConnectedAccountUrl = (provider: StorageProvider, workosUserId: string) =>
   `${WORKOS_BASE_URL}/user_management/users/${encodeURIComponent(workosUserId)}/connected_accounts/${encodeURIComponent(getProviderSlug(provider))}`;
@@ -614,83 +237,58 @@ const StorageLive = StorageRpcs.of({
       return yield* Effect.die(new Error("WorkOS Pipes disconnect failed"));
     }).pipe(Effect.annotateSpans({ storageProvider: input.storageProvider }));
   }),
-  PrepareStoredSnippetUpload: Effect.fn("rpc.PrepareStoredSnippetUpload")(function* (input) {
-    return yield* Effect.gen(function* () {
-      const drizzle = yield* Drizzle;
-      const storage = yield* StorageProviderService;
-      const currentUser = yield* CurrentUser;
-      return yield* prepareSnippetUpload(drizzle, storage, currentUser.id, input).pipe(
-        Effect.catchTags({
-          StorageNotConnectedError: (error) =>
-            Effect.fail(new RpcError({ code: "FORBIDDEN", message: error.message })),
-          StorageNeedsReauthorizationError: (error) =>
-            Effect.fail(new RpcError({ code: "FORBIDDEN", message: error.message })),
-          StorageCredentialsError: (error) =>
-            Effect.fail(new RpcError({ code: "INTERNAL_SERVER_ERROR", message: error.message })),
-          StorageProviderError: (error) =>
-            Effect.fail(
-              new RpcError({
-                code: "INTERNAL_SERVER_ERROR",
-                message: `${error.storageProvider}: ${error.message}`,
-              }),
-            ),
-        }),
-      );
-    }).pipe(Effect.annotateSpans({ storageProvider: input.storageProvider }));
-  }),
 });
 
 const SnippetsLive = SnippetRpcs.of({
   CreateStoredSnippet: Effect.fn("rpc.CreateStoredSnippet")(function* (input) {
-    return yield* Effect.gen(function* () {
-      const drizzle = yield* Drizzle;
-      const storage = yield* StorageProviderService;
-      const currentUser = yield* CurrentUser;
-
-      yield* Effect.logInfo("Creating stored snippet metadata", {
-        kind: input.kind,
-        byteSize: input.byteSize,
-      });
-      yield* storage
-        .ensureConnected({
-          storageProvider: input.storageProvider,
-          workosUserId: currentUser.id,
-        })
-        .pipe(
-          Effect.catchTags({
-            StorageNotConnectedError: (error) =>
-              Effect.fail(new RpcError({ code: "FORBIDDEN", message: error.message })),
-            StorageNeedsReauthorizationError: (error) =>
-              Effect.fail(new RpcError({ code: "FORBIDDEN", message: error.message })),
-            StorageCredentialsError: (error) =>
-              Effect.fail(new RpcError({ code: "INTERNAL_SERVER_ERROR", message: error.message })),
-          }),
-        );
-      return yield* insertSnippet(
-        drizzle,
-        input.kind === "TEXT"
-          ? {
-              ...input,
-              title: "Text snippet",
-              fileName: `${input.id}.txt`,
-              contentType: "text/plain; charset=utf-8",
-            }
-          : input,
-      );
-    }).pipe(Effect.annotateSpans({ kind: input.kind }));
+    const uploads = yield* SnippetUploads;
+    const currentUser = yield* CurrentUser;
+    return yield* uploads
+      .create(currentUser.id, input)
+      .pipe(Effect.annotateSpans({ id: input.id, byteSize: input.byteSize }));
+  }),
+  PrepareStoredSnippetUpload: Effect.fn("rpc.PrepareStoredSnippetUpload")(function* (input) {
+    const uploads = yield* SnippetUploads;
+    const currentUser = yield* CurrentUser;
+    return yield* uploads
+      .prepare(currentUser.id, { id: input.snippetId, mediaType: input.mediaType })
+      .pipe(Effect.annotateSpans({ id: input.snippetId }));
+  }),
+  HeartbeatStoredSnippetUpload: Effect.fn("rpc.HeartbeatStoredSnippetUpload")(function* (input) {
+    const uploads = yield* SnippetUploads;
+    const currentUser = yield* CurrentUser;
+    return yield* uploads
+      .heartbeat(currentUser.id, input.id)
+      .pipe(Effect.annotateSpans({ id: input.id }));
+  }),
+  FailStoredSnippetUpload: Effect.fn("rpc.FailStoredSnippetUpload")(function* (input) {
+    const uploads = yield* SnippetUploads;
+    const currentUser = yield* CurrentUser;
+    return yield* uploads
+      .fail(currentUser.id, input.id)
+      .pipe(Effect.annotateSpans({ id: input.id }));
+  }),
+  RetryStoredSnippetUpload: Effect.fn("rpc.RetryStoredSnippetUpload")(function* (input) {
+    const uploads = yield* SnippetUploads;
+    const currentUser = yield* CurrentUser;
+    return yield* uploads
+      .retry(currentUser.id, input.id)
+      .pipe(Effect.annotateSpans({ id: input.id }));
+  }),
+  CompleteStoredSnippetUpload: Effect.fn("rpc.CompleteStoredSnippetUpload")(function* (input) {
+    const uploads = yield* SnippetUploads;
+    const currentUser = yield* CurrentUser;
+    return yield* uploads
+      .complete(currentUser.id, input)
+      .pipe(Effect.annotateSpans({ id: input.id }));
   }),
   GetSnippetSnapshot: Effect.fn("rpc.GetSnippetSnapshot")(function* () {
     const drizzle = yield* Drizzle;
     const currentUser = yield* CurrentUser;
-    const storage = yield* StorageProviderService;
     const snapshot = yield* getSnippetSnapshot(drizzle, currentUser.id);
     return {
       cursor: snapshot.cursor,
-      items: yield* Effect.forEach(snapshot.rows, (snippet) =>
-        withContentUrls(storage, snippet, currentUser.id).pipe(
-          Effect.orElseSucceed(() => toApiSnippet(snippet)),
-        ),
-      ),
+      items: snapshot.rows.map(toApiSnippet),
     };
   }),
   PullSnippetChanges: Effect.fn("rpc.PullSnippetChanges")(function* (input) {
@@ -701,16 +299,6 @@ const SnippetsLive = SnippetRpcs.of({
     }).pipe(Effect.annotateSpans({ limit: input.limit }));
   }),
   SubscribeSnippetChanges: () => snippetChangeRpcStream,
-  UpdateStoredSnippetUploadStatus: Effect.fn("rpc.UpdateStoredSnippetUploadStatus")(
-    function* (input) {
-      return yield* Effect.gen(function* () {
-        const drizzle = yield* Drizzle;
-        const currentUser = yield* CurrentUser;
-        const storage = yield* StorageProviderService;
-        return yield* updateStoredSnippetUpload(drizzle, storage, currentUser.id, input);
-      }).pipe(Effect.annotateSpans({ id: input.id }));
-    },
-  ),
   GetSnippetCopyPayload: Effect.fn("rpc.GetSnippetCopyPayload")(function* (input) {
     return yield* Effect.gen(function* () {
       const drizzle = yield* Drizzle;

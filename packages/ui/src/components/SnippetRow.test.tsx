@@ -6,18 +6,15 @@ import { formatSnippetDate, SnippetRow } from "./SnippetRow.tsx";
 
 const snippet = {
   id: "8c72d6f6-9a25-4633-b72f-d8f83cf1c8e0",
-  kind: "TEXT",
-  title: "A text snippet",
   fileName: "snippet.txt",
   byteSize: 14,
-  contentType: "text/plain",
-  contentUrl: null,
-  thumbnailUrl: null,
-  textContent: null,
-  storageProvider: null,
-  uploadStatus: "READY",
+  storageProvider: "GOOGLE_DRIVE",
+  storageObjectId: "drive-object",
+  uploadStatus: "UPLOADED",
   createdAt: "2026-07-11T00:00:00.000Z",
   updatedAt: "2026-07-11T00:00:00.000Z",
+  localState: null,
+  contentAvailable: true,
 } as const;
 
 const now = DateTime.toEpochMillis(DateTime.makeUnsafe("2026-07-11T12:00:00.000Z"));
@@ -29,6 +26,7 @@ describe("SnippetRow", () => {
     const markup = renderToStaticMarkup(
       <SnippetRow
         snippet={snippet}
+        presentation={{ type: "text", title: "A text snippet" }}
         now={now}
         copied={false}
         onCopy={() => undefined}
@@ -47,6 +45,7 @@ describe("SnippetRow", () => {
     const markup = renderToStaticMarkup(
       <SnippetRow
         snippet={snippet}
+        presentation={{ type: "text", title: "A text snippet" }}
         now={now}
         copied={false}
         copying
@@ -59,6 +58,101 @@ describe("SnippetRow", () => {
 
     expect(markup).toContain('aria-label="Copying"');
     expect(markup).toContain("animate-spin");
+  });
+
+  it("shows remote uploads as syncing without an origin-only stop action", () => {
+    const markup = renderToStaticMarkup(
+      <SnippetRow
+        snippet={{ ...snippet, uploadStatus: "UPLOADING", contentAvailable: false }}
+        presentation={{ type: "text", title: "Text snippet" }}
+        now={now}
+        copied={false}
+        onCopy={() => undefined}
+        onDelete={() => undefined}
+        onStopUpload={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain('aria-label="Syncing"');
+    expect(markup).not.toContain('aria-label="Stop uploading"');
+  });
+
+  it("shows remote failure without an origin-only retry action", () => {
+    const markup = renderToStaticMarkup(
+      <SnippetRow
+        snippet={{ ...snippet, uploadStatus: "FAILED", contentAvailable: false }}
+        presentation={{ type: "text", title: "Text snippet" }}
+        now={now}
+        copied={false}
+        onCopy={() => undefined}
+        onDelete={() => undefined}
+        onRetryUpload={() => undefined}
+        onStopUpload={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain("Upload failed on the origin device.");
+    expect(markup).not.toContain('aria-label="Retry upload"');
+  });
+
+  it("only exposes hyperlink navigation through an explicit surface owner", () => {
+    const withoutOwner = renderToStaticMarkup(
+      <SnippetRow
+        snippet={snippet}
+        presentation={{
+          type: "hyperlink",
+          title: "https://example.com",
+          url: "https://example.com",
+        }}
+        now={now}
+        copied={false}
+        onCopy={() => undefined}
+        onDelete={() => undefined}
+        onStopUpload={() => undefined}
+        textContent={{ state: "ready", text: "https://example.com" }}
+      />,
+    );
+    const withOwner = renderToStaticMarkup(
+      <SnippetRow
+        snippet={snippet}
+        presentation={{
+          type: "hyperlink",
+          title: "https://example.com",
+          url: "https://example.com",
+        }}
+        now={now}
+        copied={false}
+        onCopy={() => undefined}
+        onDelete={() => undefined}
+        onOpenLink={() => undefined}
+        onStopUpload={() => undefined}
+        textContent={{ state: "ready", text: "https://example.com" }}
+      />,
+    );
+
+    expect(withoutOwner).not.toContain('aria-label="Open link"');
+    expect(withOwner).toContain('aria-label="Open link"');
+  });
+
+  it("renders the projected presentation without deriving a loading title", () => {
+    const markup = renderToStaticMarkup(
+      <SnippetRow
+        snippet={snippet}
+        presentation={{ type: "text", title: "Text unavailable" }}
+        now={now}
+        copied={false}
+        onCopy={() => undefined}
+        onDelete={() => undefined}
+        onRetryContent={() => undefined}
+        onStopUpload={() => undefined}
+        textContent={{ state: "failed", message: "Couldn’t load this text. Try again." }}
+      />,
+    );
+
+    expect(markup).toContain("Text unavailable");
+    expect(markup).toContain("Couldn’t load this text. Try again.");
+    expect(markup).not.toContain("Loading text");
+    expect(markup).toContain('aria-label="Retry loading text"');
   });
 });
 

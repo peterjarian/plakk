@@ -1,4 +1,4 @@
-import { formatFileSize, type SnippetKind } from "@plakk/shared";
+import { formatFileSize, type SnippetPresentation } from "@plakk/shared";
 import type { ApiSnippet } from "@plakk/shared/PlakkApi";
 import * as DateTime from "effect/DateTime";
 import {
@@ -14,27 +14,32 @@ import {
   Type,
   X,
 } from "lucide-react";
-import type { UploadTask } from "../atoms/upload.ts";
 import { Button } from "./primitives/button.tsx";
 
-export type SnippetRowItem = ApiSnippet | UploadTask;
-
-export type TextSnippetContent =
-  | { readonly state: "loading" }
-  | { readonly state: "ready"; readonly text: string; readonly migrationError?: string }
-  | { readonly state: "failed"; readonly message: string };
-
-const kindMeta: Record<SnippetKind, { Icon: typeof Type }> = {
-  TEXT: { Icon: Type },
-  LINK: { Icon: LinkIcon },
-  FILE: { Icon: FileText },
-  IMAGE: { Icon: ImageIcon },
+export type SnippetRowItem = Omit<ApiSnippet, "uploadStatus"> & {
+  readonly uploadStatus: ApiSnippet["uploadStatus"] | null;
+  readonly localState: null | {
+    readonly phase: "IMPORTING" | "QUEUED" | "UPLOADING" | "FAILED";
+    readonly progress: number;
+    readonly errorMessage: string | null;
+    readonly canRetry: boolean;
+  };
+  readonly contentAvailable: boolean;
 };
 
-const isUploadTask = (snippet: SnippetRowItem): snippet is UploadTask => "phase" in snippet;
+export type TextSnippetContent =
+  | { readonly state: "ready"; readonly text: string }
+  | { readonly state: "failed"; readonly message: string };
 
-const fileSubtitle = (snippet: Pick<ApiSnippet, "byteSize" | "fileName" | "kind">) =>
-  `${snippet.fileName.split(".").pop()?.toUpperCase() ?? snippet.kind} · ${formatFileSize(snippet.byteSize)}`;
+const presentationMeta: Record<SnippetPresentation["type"], { Icon: typeof Type }> = {
+  text: { Icon: Type },
+  hyperlink: { Icon: LinkIcon },
+  file: { Icon: FileText },
+  image: { Icon: ImageIcon },
+};
+
+const fileSubtitle = (snippet: Pick<ApiSnippet, "byteSize" | "fileName">) =>
+  `${snippet.fileName.split(".").pop()?.toUpperCase() ?? "FILE"} · ${formatFileSize(snippet.byteSize)}`;
 
 const relativeDateUnits = [
   [30 * 24 * 60 * 60 * 1000, "month"],
@@ -77,12 +82,14 @@ export function formatSnippetDate(
 
 export function SnippetRow(props: {
   snippet: SnippetRowItem;
+  presentation: SnippetPresentation;
   now: number;
   copied: boolean;
   onCopy: () => void;
   onDelete: () => void;
   onOpenLink?: (url: string) => void;
   onRetryContent?: () => void;
+  onRetryUpload?: () => void;
   onStopUpload: () => void;
   textContent?: TextSnippetContent;
   thumbnailUrl?: string | null;
@@ -93,12 +100,14 @@ export function SnippetRow(props: {
 }) {
   const {
     snippet,
+    presentation,
     now,
     copied,
     onCopy,
     onDelete,
     onOpenLink,
     onRetryContent,
+    onRetryUpload,
     onStopUpload,
     textContent,
     thumbnailUrl,
@@ -107,37 +116,37 @@ export function SnippetRow(props: {
     copyError,
     showActions = true,
   } = props;
-  const { Icon } = kindMeta[snippet.kind];
-  const isUploading = isUploadTask(snippet) && snippet.phase !== "FAILED";
-  const title =
-    snippet.kind === "TEXT"
-      ? textContent?.state === "ready"
-        ? textContent.text
-        : isUploadTask(snippet)
-          ? "Text snippet"
-          : snippet.title
-      : isUploadTask(snippet)
-        ? snippet.fileName
-        : snippet.title;
+  const { Icon } = presentationMeta[presentation.type];
+  const localState = snippet.localState;
+  const isRemoteUploading = localState === null && snippet.uploadStatus === "UPLOADING";
+  const isRemoteFailed = localState === null && snippet.uploadStatus === "FAILED";
+  const isUploading = isRemoteUploading || (localState !== null && localState.phase !== "FAILED");
+  const canStopUpload = localState !== null && localState.phase !== "FAILED";
+  const title = presentation.title;
+  const isText = presentation.type === "text" || presentation.type === "hyperlink";
   const subtitle =
-    isUploadTask(snippet) && snippet.phase === "FAILED"
-      ? (snippet.errorMessage ?? "Upload failed. Choose the file again to retry.")
-      : snippet.kind === "TEXT" && textContent?.state === "loading"
-        ? "Loading text…"
-        : snippet.kind === "TEXT" && textContent?.state === "ready" && textContent.migrationError
-          ? textContent.migrationError
-          : snippet.kind === "TEXT" && textContent?.state === "failed"
-            ? textContent.message
-            : snippet.kind === "FILE" || snippet.kind === "IMAGE"
-              ? fileSubtitle(snippet)
-              : isUploadTask(snippet)
-                ? ""
-                : formatFileSize(snippet.byteSize);
-  const time = isUploadTask(snippet)
-    ? snippet.phase === "FAILED"
-      ? "Failed"
-      : ""
-    : formatSnippetDate(snippet.createdAt, now);
+    copyError !== undefined
+      ? copyError
+      : isRemoteFailed
+        ? "Upload failed on the origin device."
+        : localState?.phase === "FAILED"
+          ? (localState.errorMessage ?? "Upload failed. Choose the file again to retry.")
+          : localState?.phase === "IMPORTING"
+            ? "Saving locally…"
+            : isText && textContent?.state === "failed"
+              ? textContent.message
+              : presentation.type === "file" || presentation.type === "image"
+                ? fileSubtitle(snippet)
+                : localState !== null
+                  ? ""
+                  : formatFileSize(snippet.byteSize);
+  const time = isRemoteFailed
+    ? "Failed"
+    : localState !== null
+      ? localState.phase === "FAILED"
+        ? "Failed"
+        : ""
+      : formatSnippetDate(snippet.createdAt, now);
 
   return (
     <li>
@@ -147,7 +156,7 @@ export function SnippetRow(props: {
         className="group relative flex items-center gap-2.5 rounded-lg px-2 py-2 transition-colors outline-none select-none hover:bg-muted/60 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-offset-1 focus-visible:ring-offset-background focus-visible:outline-none focus-within:bg-muted/60"
       >
         <span className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted text-muted-foreground">
-          {snippet.kind === "IMAGE" && thumbnailUrl !== null && thumbnailUrl !== undefined ? (
+          {presentation.type === "image" && thumbnailUrl !== null && thumbnailUrl !== undefined ? (
             <img src={thumbnailUrl} alt="" className="size-full object-cover" />
           ) : (
             <Icon className="size-4" />
@@ -161,17 +170,21 @@ export function SnippetRow(props: {
 
         <div className="flex shrink-0 items-center justify-end">
           {isUploading ? (
-            <div className="flex items-center gap-1">
+            <div
+              className="flex items-center gap-1"
+              role="status"
+              aria-label={localState?.phase === "IMPORTING" ? "Saving locally" : "Syncing"}
+            >
               <LoaderCircle
                 className="size-4 animate-spin text-muted-foreground"
                 aria-hidden="true"
               />
-              {showActions && (
+              {showActions && canStopUpload && (
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon-sm"
-                  aria-label="Stop uploading"
+                  aria-label={localState.phase === "IMPORTING" ? "Stop saving" : "Stop uploading"}
                   className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                   onClick={onStopUpload}
                 >
@@ -194,30 +207,34 @@ export function SnippetRow(props: {
                     : "hidden"
                 }
               >
-                {snippet.kind === "TEXT" &&
-                  (textContent?.state === "failed" ||
-                    (textContent?.state === "ready" && textContent.migrationError)) &&
-                  onRetryContent && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      aria-label="Retry loading text"
-                      onClick={onRetryContent}
-                    >
-                      <RotateCw />
-                    </Button>
-                  )}
+                {localState?.phase === "FAILED" && localState.canRetry && onRetryUpload && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="Retry upload"
+                    onClick={onRetryUpload}
+                  >
+                    <RotateCw />
+                  </Button>
+                )}
+                {isText && textContent?.state === "failed" && onRetryContent && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="Retry loading text"
+                    onClick={onRetryContent}
+                  >
+                    <RotateCw />
+                  </Button>
+                )}
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon-sm"
                   aria-label={copying ? "Copying" : copied ? "Copied" : "Copy"}
-                  disabled={
-                    copying ||
-                    copyDisabled ||
-                    (snippet.kind === "TEXT" && textContent?.state !== "ready")
-                  }
+                  disabled={copying || copyDisabled || (isText && textContent?.state !== "ready")}
                   onClick={onCopy}
                 >
                   {copying ? (
@@ -228,29 +245,16 @@ export function SnippetRow(props: {
                     <Copy />
                   )}
                 </Button>
-                {snippet.kind === "LINK" && (
-                  <>
-                    {onOpenLink ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label="Open link"
-                        onClick={() => onOpenLink(title)}
-                      >
-                        <ArrowUpRight />
-                      </Button>
-                    ) : (
-                      <Button
-                        render={<a href={title} target="_blank" rel="noreferrer" />}
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label="Open link"
-                      >
-                        <ArrowUpRight />
-                      </Button>
-                    )}
-                  </>
+                {presentation.type === "hyperlink" && onOpenLink && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="Open link"
+                    onClick={() => onOpenLink(presentation.url)}
+                  >
+                    <ArrowUpRight />
+                  </Button>
                 )}
                 <Button
                   type="button"

@@ -1,11 +1,46 @@
-import type { ApiSnippet } from "@plakk/shared/PlakkApi";
-import type { UploadTask } from "@plakk/ui/atoms/upload";
 import { SnippetRow } from "@plakk/ui/components/SnippetRow";
+import { Button } from "@plakk/ui/components/primitives/button";
 
-const noop = () => undefined;
+import type { SnippetReadModel } from "../../hooks/useSnippets.ts";
 
-export function TrayRecentItem({ snippet }: { snippet: ApiSnippet | UploadTask | undefined }) {
+export function TrayRecentItem({
+  snippet,
+  copied,
+  copying,
+  copyDisabled,
+  copyError,
+  readError,
+  onReload,
+  onCopy,
+  onDelete,
+  onRetryUpload,
+  onStopUpload,
+}: {
+  snippet: SnippetReadModel | undefined;
+  copied: boolean;
+  copying: boolean;
+  copyDisabled: boolean;
+  copyError?: string;
+  readError: string | null;
+  onReload: () => void;
+  onCopy: () => void;
+  onDelete: () => void;
+  onRetryUpload: () => void;
+  onStopUpload: () => void;
+}) {
   if (!snippet) {
+    if (readError !== null) {
+      return (
+        <section className="grid min-h-0 flex-1 place-content-center gap-2 px-6 text-center">
+          <p className="text-xs text-destructive" role="alert">
+            {readError}
+          </p>
+          <Button type="button" variant="outline" size="sm" onClick={onReload}>
+            Try again
+          </Button>
+        </section>
+      );
+    }
     return (
       <section className="grid min-h-0 flex-1 place-content-center gap-1 px-6 text-center">
         <p className="text-sm font-medium">Nothing added yet</p>
@@ -22,15 +57,18 @@ export function TrayRecentItem({ snippet }: { snippet: ApiSnippet | UploadTask |
       <ul className="rounded-lg border bg-card px-1 py-1">
         <SnippetRow
           snippet={snippet}
+          presentation={snippet.presentation}
           now={Date.now()}
-          copied={false}
-          onCopy={noop}
-          onDelete={noop}
-          onStopUpload={noop}
-          showActions={false}
-          {...(snippet.kind === "TEXT" && !("phase" in snippet) && snippet.textContent !== null
-            ? { textContent: { state: "ready" as const, text: snippet.textContent } }
-            : {})}
+          copied={copied}
+          copying={copying}
+          copyDisabled={copyDisabled}
+          thumbnailUrl={snippet.thumbnailUrl}
+          {...(copyError === undefined ? {} : { copyError })}
+          onCopy={onCopy}
+          onDelete={onDelete}
+          onRetryUpload={onRetryUpload}
+          onStopUpload={onStopUpload}
+          {...(snippet.textContent === undefined ? {} : { textContent: snippet.textContent })}
         />
       </ul>
     </section>

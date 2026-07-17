@@ -1,23 +1,11 @@
-import { PlakkApi } from "@plakk/shared/PlakkApi";
-import { Effect, Layer } from "effect";
-import { FetchHttpClient } from "effect/unstable/http";
-import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
+import { Effect } from "effect";
 
-const configuredRpcUrl = process.env.PLAKK_RPC_URL ?? "https://app.plakk.io/api/rpc";
-const rpcUrl = configuredRpcUrl.startsWith("/")
-  ? new URL(configuredRpcUrl, "http://localhost:3000").toString()
-  : configuredRpcUrl;
-const protocolLayer = RpcClient.layerProtocolHttp({ url: rpcUrl }).pipe(
-  Layer.provideMerge(FetchHttpClient.layer),
-  Layer.provideMerge(RpcSerialization.layerNdjson),
-);
-
-export const makePlakkClient = RpcClient.make(PlakkApi).pipe(Effect.provide(protocolLayer));
+import { PlakkRpcClient } from "./PlakkRpcClient.ts";
 
 export const getAccountStatus = Effect.fn("DesktopAccountStatus.get")(function* (
   accessToken: string,
 ) {
-  const client = yield* makePlakkClient;
+  const client = yield* PlakkRpcClient;
   return yield* client.GetAccountStatus(undefined, {
     headers: { authorization: `Bearer ${accessToken}` },
   });
@@ -27,7 +15,7 @@ export const getSnippetCopyPayload = Effect.fn("DesktopSnippetCopyPayload.get")(
   accessToken: string,
   id: string,
 ) {
-  const client = yield* makePlakkClient;
+  const client = yield* PlakkRpcClient;
   return yield* client.GetSnippetCopyPayload(
     { id },
     { headers: { authorization: `Bearer ${accessToken}` } },
