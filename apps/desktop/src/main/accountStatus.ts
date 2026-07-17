@@ -11,17 +11,6 @@ export const getAccountStatus = Effect.fn("DesktopAccountStatus.get")(function* 
   });
 });
 
-export const getSnippetCopyPayload = Effect.fn("DesktopSnippetCopyPayload.get")(function* (
-  accessToken: string,
-  id: string,
-) {
-  const client = yield* PlakkRpcClient;
-  return yield* client.GetSnippetCopyPayload(
-    { id },
-    { headers: { authorization: `Bearer ${accessToken}` } },
-  );
-});
-
 export const isUnauthenticatedAccountError = (error: unknown) =>
   typeof error === "object" &&
   error !== null &&

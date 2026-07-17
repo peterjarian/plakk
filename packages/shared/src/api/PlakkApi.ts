@@ -221,7 +221,7 @@ export const SnippetRpcs = RpcGroup.make(
     success: ApiSnippetSchema,
     error: RpcError,
   }),
-  Rpc.make("GetSnippetCopyPayload", {
+  Rpc.make("PrepareSnippetDownload", {
     payload: { id: SnippetIdSchema },
     success: Schema.Struct({
       storageProvider: StorageProviderLiteral,

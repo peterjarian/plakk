@@ -1,10 +1,12 @@
 import { formatFileSize, type SnippetPresentation } from "@plakk/shared";
 import type { ApiSnippet } from "@plakk/shared/PlakkApi";
+import type { LocalContentAvailability } from "@plakk/shared/SnippetHydration";
 import * as DateTime from "effect/DateTime";
 import {
   ArrowUpRight,
   Check,
   Copy,
+  Download,
   FileText,
   ImageIcon,
   LoaderCircle,
@@ -24,12 +26,10 @@ export type SnippetRowItem = Omit<ApiSnippet, "uploadStatus"> & {
     readonly errorMessage: string | null;
     readonly canRetry: boolean;
   };
-  readonly contentAvailable: boolean;
+  readonly localContentAvailability: LocalContentAvailability;
 };
 
-export type TextSnippetContent =
-  | { readonly state: "ready"; readonly text: string }
-  | { readonly state: "failed"; readonly message: string };
+export type TextSnippetContent = { readonly state: "ready"; readonly text: string };
 
 const presentationMeta: Record<SnippetPresentation["type"], { Icon: typeof Type }> = {
   text: { Icon: Type },
@@ -87,8 +87,8 @@ export function SnippetRow(props: {
   copied: boolean;
   onCopy: () => void;
   onDelete: () => void;
+  onDownload?: () => void;
   onOpenLink?: (url: string) => void;
-  onRetryContent?: () => void;
   onRetryUpload?: () => void;
   onStopUpload: () => void;
   textContent?: TextSnippetContent;
@@ -105,8 +105,8 @@ export function SnippetRow(props: {
     copied,
     onCopy,
     onDelete,
+    onDownload,
     onOpenLink,
-    onRetryContent,
     onRetryUpload,
     onStopUpload,
     textContent,
@@ -121,6 +121,11 @@ export function SnippetRow(props: {
   const isRemoteUploading = localState === null && snippet.uploadStatus === "UPLOADING";
   const isRemoteFailed = localState === null && snippet.uploadStatus === "FAILED";
   const isUploading = isRemoteUploading || (localState !== null && localState.phase !== "FAILED");
+  const isDownloading = snippet.localContentAvailability.status === "DOWNLOADING";
+  const needsDownload =
+    snippet.uploadStatus === "UPLOADED" &&
+    (snippet.localContentAvailability.status === "NOT_AVAILABLE" ||
+      snippet.localContentAvailability.status === "FAILED");
   const canStopUpload = localState !== null && localState.phase !== "FAILED";
   const title = presentation.title;
   const isText = presentation.type === "text" || presentation.type === "hyperlink";
@@ -131,22 +136,29 @@ export function SnippetRow(props: {
         ? "Upload failed on the origin device."
         : localState?.phase === "FAILED"
           ? (localState.errorMessage ?? "Upload failed. Choose the file again to retry.")
-          : localState?.phase === "IMPORTING"
-            ? "Saving locally…"
-            : isText && textContent?.state === "failed"
-              ? textContent.message
-              : presentation.type === "file" || presentation.type === "image"
-                ? fileSubtitle(snippet)
-                : localState !== null
-                  ? ""
-                  : formatFileSize(snippet.byteSize);
+          : snippet.localContentAvailability.status === "FAILED"
+            ? snippet.localContentAvailability.message
+            : isDownloading
+              ? "Saving on this device…"
+              : localState?.phase === "IMPORTING"
+                ? "Saving locally…"
+                : presentation.type === "file" || presentation.type === "image"
+                  ? `${fileSubtitle(snippet)}${snippet.localContentAvailability.status === "NOT_AVAILABLE" ? " · Not on this device" : ""}`
+                  : snippet.localContentAvailability.status === "NOT_AVAILABLE" &&
+                      snippet.uploadStatus === "UPLOADED"
+                    ? "Not on this device"
+                    : localState !== null
+                      ? ""
+                      : formatFileSize(snippet.byteSize);
   const time = isRemoteFailed
     ? "Failed"
     : localState !== null
       ? localState.phase === "FAILED"
         ? "Failed"
         : ""
-      : formatSnippetDate(snippet.createdAt, now);
+      : isDownloading
+        ? "Saving…"
+        : formatSnippetDate(snippet.createdAt, now);
 
   return (
     <li>
@@ -218,15 +230,23 @@ export function SnippetRow(props: {
                     <RotateCw />
                   </Button>
                 )}
-                {isText && textContent?.state === "failed" && onRetryContent && (
+                {needsDownload && onDownload && (
                   <Button
                     type="button"
                     variant="ghost"
                     size="icon-sm"
-                    aria-label="Retry loading text"
-                    onClick={onRetryContent}
+                    aria-label={
+                      snippet.localContentAvailability.status === "FAILED"
+                        ? "Retry download"
+                        : "Download to this device"
+                    }
+                    onClick={onDownload}
                   >
-                    <RotateCw />
+                    {snippet.localContentAvailability.status === "FAILED" ? (
+                      <RotateCw />
+                    ) : (
+                      <Download />
+                    )}
                   </Button>
                 )}
                 <Button
@@ -234,7 +254,7 @@ export function SnippetRow(props: {
                   variant="ghost"
                   size="icon-sm"
                   aria-label={copying ? "Copying" : copied ? "Copied" : "Copy"}
-                  disabled={copying || copyDisabled || (isText && textContent?.state !== "ready")}
+                  disabled={copying || copyDisabled || (isText && textContent === undefined)}
                   onClick={onCopy}
                 >
                   {copying ? (

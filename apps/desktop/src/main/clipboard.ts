@@ -2,9 +2,9 @@ import { statSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { basename, extname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { app, clipboard, nativeImage, net } from "electron";
+import { app, clipboard, nativeImage } from "electron";
 import { Data, Effect } from "effect";
-import { deriveSnippetPresentation, type StorageProvider } from "@plakk/shared";
+import { deriveSnippetPresentation } from "@plakk/shared";
 
 type SnippetContent = {
   readonly bytes: Uint8Array;
@@ -288,77 +288,3 @@ export const writeSnippetToClipboard = Effect.fn("writeSnippetToClipboard")(func
     catch: (cause) => new WriteClipboardError({ cause }),
   });
 });
-
-export const downloadSnippetToClipboard = Effect.fn("downloadSnippetToClipboard")(function* (
-  snippet: Omit<SnippetContent, "bytes"> & {
-    readonly storageProvider: StorageProvider;
-    readonly byteSize: number;
-    readonly download: {
-      readonly url: string;
-      readonly headers: ReadonlyArray<{ readonly name: string; readonly value: string }>;
-    };
-  },
-) {
-  const bytes = yield* downloadSnippetBytes(snippet);
-  yield* Effect.logInfo("Downloaded stored snippet", { byteSize: bytes.byteLength });
-  yield* writeSnippetToClipboard({ ...snippet, bytes });
-  yield* Effect.logInfo("Wrote stored snippet to clipboard", {
-    formats: clipboard.availableFormats(),
-  });
-});
-
-export const downloadSnippetBytes = Effect.fn("downloadSnippetBytes")(function* (snippet: {
-  readonly storageProvider: StorageProvider;
-  readonly fileName: string;
-  readonly byteSize: number;
-  readonly download: {
-    readonly url: string;
-    readonly headers: ReadonlyArray<{ readonly name: string; readonly value: string }>;
-  };
-}) {
-  if (!isSignedStorageUrl(snippet.storageProvider, snippet.download.url)) {
-    return yield* new WriteClipboardError({ cause: new Error("Invalid storage download URL.") });
-  }
-  yield* Effect.logInfo("Copying stored snippet", {
-    fileName: snippet.fileName,
-    storageProvider: snippet.storageProvider,
-    downloadHost: new URL(snippet.download.url).hostname,
-  });
-  return yield* Effect.tryPromise({
-    try: async () => {
-      const response = await net.fetch(snippet.download.url, {
-        headers: Object.fromEntries(
-          snippet.download.headers.map(({ name, value }) => [name, value]),
-        ),
-      });
-      if (!response.ok) throw new Error(`Snippet download failed: ${response.status}`);
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      if (bytes.byteLength !== snippet.byteSize) {
-        throw new Error("Snippet size does not match metadata.");
-      }
-      return bytes;
-    },
-    catch: (cause) => new WriteClipboardError({ cause }),
-  });
-});
-
-const isSignedStorageUrl = (storageProvider: StorageProvider, value: string): boolean => {
-  try {
-    const url = new URL(value);
-    if (url.protocol !== "https:") return false;
-    if (storageProvider === "GOOGLE_DRIVE") {
-      return (
-        url.hostname === "www.googleapis.com" ||
-        url.hostname === "drive.google.com" ||
-        url.hostname === "drive.usercontent.google.com" ||
-        url.hostname.endsWith(".googleusercontent.com")
-      );
-    }
-    if (storageProvider === "ONE_DRIVE") {
-      return url.hostname.endsWith(".1drv.com") || url.hostname.endsWith(".sharepoint.com");
-    }
-    return url.hostname.endsWith(".dropboxusercontent.com");
-  } catch {
-    return false;
-  }
-};

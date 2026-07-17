@@ -8,7 +8,6 @@ const electron = vi.hoisted(() => ({
   writeImage: vi.fn(),
   createFromBuffer: vi.fn(),
   getPath: vi.fn(() => "/tmp"),
-  fetch: vi.fn(),
 }));
 
 const fs = vi.hoisted(() => ({ writeFileSync: vi.fn() }));
@@ -27,10 +26,9 @@ vi.mock("electron", () => ({
     writeImage: electron.writeImage,
   },
   nativeImage: { createFromBuffer: electron.createFromBuffer },
-  net: { fetch: electron.fetch },
 }));
 
-import { downloadSnippetToClipboard, writeSnippetToClipboard } from "./clipboard.ts";
+import { writeSnippetToClipboard } from "./clipboard.ts";
 
 describe("stored snippet clipboard writes", () => {
   it("writes decodable images as native images", async () => {
@@ -84,68 +82,5 @@ describe("stored snippet clipboard writes", () => {
     expect(fileList?.toString()).toContain("<array><string>/tmp/plakk-snippet-");
     expect(fileList?.toString()).toContain("-report.pdf</string></array>");
     expect(electron.writeBuffer).not.toHaveBeenCalledWith("application/pdf", Buffer.from([1, 2]));
-  });
-
-  it("downloads signed content directly before copying it", async () => {
-    electron.fetch.mockResolvedValue(new Response(new Uint8Array([1, 2])));
-
-    await Effect.runPromise(
-      downloadSnippetToClipboard({
-        storageProvider: "DROPBOX",
-        download: { url: "https://dl.dropboxusercontent.com/signed", headers: [] },
-        fileName: "report.pdf",
-        contentType: "application/pdf",
-        byteSize: 2,
-      }),
-    );
-
-    expect(electron.fetch).toHaveBeenCalledWith("https://dl.dropboxusercontent.com/signed", {
-      headers: {},
-    });
-    expect(fs.writeFileSync).toHaveBeenCalledWith(
-      expect.stringContaining("-report.pdf"),
-      new Uint8Array([1, 2]),
-    );
-  });
-
-  it("downloads Google Drive media with provider authorization", async () => {
-    electron.fetch.mockResolvedValue(new Response(new Uint8Array([1, 2])));
-    electron.createFromBuffer.mockReturnValue({ isEmpty: () => false });
-
-    await Effect.runPromise(
-      downloadSnippetToClipboard({
-        storageProvider: "GOOGLE_DRIVE",
-        download: {
-          url: "https://www.googleapis.com/drive/v3/files/file-id?alt=media",
-          headers: [{ name: "Authorization", value: "Bearer provider-token" }],
-        },
-        fileName: "photo.jpeg",
-        contentType: "image/jpeg",
-        byteSize: 2,
-      }),
-    );
-
-    expect(electron.fetch).toHaveBeenCalledWith(
-      "https://www.googleapis.com/drive/v3/files/file-id?alt=media",
-      { headers: { Authorization: "Bearer provider-token" } },
-    );
-    expect(electron.writeImage).toHaveBeenCalled();
-  });
-
-  it("rejects a renderer-supplied URL outside the selected storage provider", async () => {
-    const result = await Effect.runPromise(
-      Effect.exit(
-        downloadSnippetToClipboard({
-          storageProvider: "DROPBOX",
-          download: { url: "https://localhost/admin", headers: [] },
-          fileName: "report.pdf",
-          contentType: "application/pdf",
-          byteSize: 2,
-        }),
-      ),
-    );
-
-    expect(result._tag).toBe("Failure");
-    expect(electron.fetch).not.toHaveBeenCalledWith("https://localhost/admin");
   });
 });

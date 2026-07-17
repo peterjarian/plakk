@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { DateTime, Effect } from "effect";
 
 import type { StorageProviderService } from "./storage/StorageProvider.ts";
-import { getSnippetCopyPayload } from "./PlakkApiLive.ts";
+import { prepareSnippetDownload } from "./PlakkApiLive.ts";
 
 const timestamp = DateTime.toDateUtc(DateTime.makeUnsafe("2026-07-15T12:00:00Z"));
 
@@ -34,7 +34,7 @@ const queryDb = (rows: ReadonlyArray<SnippetRow>) =>
     }),
   }) as unknown as DrizzleService["db"];
 
-describe("stored snippet copy payloads", () => {
+describe("stored snippet download preparation", () => {
   it("returns only durable metadata and a short-lived download target", async () => {
     const snippet = uploadedSnippet();
     const download = { url: "https://download.example/object", headers: [] };
@@ -42,7 +42,7 @@ describe("stored snippet copy payloads", () => {
     const storage = { getDownloadTarget } as unknown as StorageProviderService["Service"];
 
     const result = await Effect.runPromise(
-      getSnippetCopyPayload({ db: queryDb([snippet]) }, storage, "user-1", snippet.id),
+      prepareSnippetDownload({ db: queryDb([snippet]) }, storage, "user-1", snippet.id),
     );
 
     expect(result).toEqual({
@@ -63,7 +63,7 @@ describe("stored snippet copy payloads", () => {
     const storage = { getDownloadTarget } as unknown as StorageProviderService["Service"];
 
     const error = await Effect.runPromise(
-      Effect.flip(getSnippetCopyPayload({ db: queryDb([]) }, storage, "user-1", "missing")),
+      Effect.flip(prepareSnippetDownload({ db: queryDb([]) }, storage, "user-1", "missing")),
     );
 
     expect(error).toMatchObject({ code: "NOT_FOUND" });

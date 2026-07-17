@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ArrowLeft,
   ArrowUpRight,
   CloudOff,
   CreditCard,
   FileText,
+  HardDriveDownload,
   Keyboard,
   MessageCircle,
   RefreshCw,
@@ -41,7 +42,42 @@ export function Settings() {
   const [globalHotkey, setGlobalHotkey] = useState(true);
   const [toolbarWidget, setToolbarWidget] = useState(true);
   const [updateStatus, setUpdateStatus] = useState("Up to date");
+  const [keepAllFilesOffline, setKeepAllFilesOffline] = useState<boolean | null>(null);
+  const [savingOfflinePreference, setSavingOfflinePreference] = useState(false);
+  const [offlinePreferenceError, setOfflinePreferenceError] = useState<string | null>(null);
   const user = auth.user;
+
+  useEffect(() => {
+    let mounted = true;
+    void window.ipc.userConfig.get().then(
+      (config) => {
+        if (mounted) setKeepAllFilesOffline(config.keepAllFilesOffline);
+      },
+      () => {
+        if (mounted) setOfflinePreferenceError("Could not load offline file preferences.");
+      },
+    );
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const updateKeepAllFilesOffline = (checked: boolean) => {
+    const previous = keepAllFilesOffline;
+    setOfflinePreferenceError(null);
+    setKeepAllFilesOffline(checked);
+    setSavingOfflinePreference(true);
+    void window.ipc.userConfig
+      .set({ keepAllFilesOffline: checked })
+      .then(
+        (config) => setKeepAllFilesOffline(config.keepAllFilesOffline),
+        () => {
+          setKeepAllFilesOffline(previous);
+          setOfflinePreferenceError("Could not save offline file preferences.");
+        },
+      )
+      .finally(() => setSavingOfflinePreference(false));
+  };
 
   if (user === null) return null;
 
@@ -198,6 +234,31 @@ export function Settings() {
           <SettingsSection>
             <SettingsSectionTitle>Desktop</SettingsSectionTitle>
             <SettingsSectionBody>
+              <SettingsRow>
+                <SettingsRowMain>
+                  <HardDriveDownload
+                    className="size-4 shrink-0 text-muted-foreground"
+                    aria-hidden="true"
+                  />
+                  <SettingsRowText
+                    title="Keep all files offline"
+                    description="Save every uploaded snippet on this Mac."
+                  />
+                </SettingsRowMain>
+                <Switch
+                  aria-label="Keep all files offline"
+                  checked={keepAllFilesOffline ?? false}
+                  disabled={keepAllFilesOffline === null || savingOfflinePreference}
+                  onCheckedChange={updateKeepAllFilesOffline}
+                />
+              </SettingsRow>
+
+              {offlinePreferenceError !== null && (
+                <p className="px-4 pb-3 text-xs text-destructive" role="alert">
+                  {offlinePreferenceError}
+                </p>
+              )}
+
               <SettingsRow>
                 <SettingsRowMain>
                   <Keyboard className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />

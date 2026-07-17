@@ -13,6 +13,8 @@ export function TrayRecentItem({
   onReload,
   onCopy,
   onDelete,
+  onDownload,
+  onOpenLink,
   onRetryUpload,
   onStopUpload,
 }: {
@@ -25,6 +27,8 @@ export function TrayRecentItem({
   onReload: () => void;
   onCopy: () => void;
   onDelete: () => void;
+  onDownload: () => void;
+  onOpenLink: (url: string) => void;
   onRetryUpload: () => void;
   onStopUpload: () => void;
 }) {
@@ -66,6 +70,8 @@ export function TrayRecentItem({
           {...(copyError === undefined ? {} : { copyError })}
           onCopy={onCopy}
           onDelete={onDelete}
+          onDownload={onDownload}
+          onOpenLink={onOpenLink}
           onRetryUpload={onRetryUpload}
           onStopUpload={onStopUpload}
           {...(snippet.textContent === undefined ? {} : { textContent: snippet.textContent })}

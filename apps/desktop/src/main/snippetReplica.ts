@@ -11,8 +11,6 @@ import ElectronStore from "electron-store";
 import { Context, Effect, Layer, PubSub, Schema, Semaphore, Stream } from "effect";
 import { SnippetIdSchema, type SnippetChangePage } from "@plakk/shared/PlakkApi";
 
-import { getSnippetCopyPayload } from "./accountStatus.ts";
-import { downloadSnippetBytes } from "./clipboard.ts";
 import { PlakkRpcClient } from "./PlakkRpcClient.ts";
 
 const StoredReplicaCodec = Schema.fromJsonString(SnippetReplicaStateSchema);
@@ -328,7 +326,7 @@ export const getReplicaSnippet = Effect.fn("DesktopSnippetReplica.snippet")(func
 });
 
 export const getManagedSnippetBytes = Effect.fn("DesktopSnippetReplica.content")(function* (
-  account: { readonly id: string; readonly accessToken: string | null },
+  account: { readonly id: string },
   snippetId: string,
   knownSnippet?: {
     readonly id: string;
@@ -339,23 +337,19 @@ export const getManagedSnippetBytes = Effect.fn("DesktopSnippetReplica.content")
 ) {
   const content = yield* ManagedSnippetContent;
   const snippet = knownSnippet ?? (yield* getReplicaSnippet(account.id, snippetId));
-  const cached = yield* content.get(account.id, snippetId);
-  if (cached?.byteLength === snippet.byteSize) return { bytes: cached, snippet };
-  if (cached !== null) yield* content.invalidate(account.id, [snippetId]);
-
-  const bytes =
-    account.accessToken === null || snippet.uploadStatus !== "UPLOADED"
-      ? yield* new SnippetReplicaError({
-          cause: null,
-          reason: "The local copy of this snippet is unavailable.",
-        })
-      : yield* downloadSnippetBytes(yield* getSnippetCopyPayload(account.accessToken, snippetId));
-  if (bytes.byteLength !== snippet.byteSize) {
+  const available = yield* content.available(account.id, snippetId, snippet.byteSize);
+  if (!available) {
+    yield* content.invalidate(account.id, [snippetId]);
     return yield* new SnippetReplicaError({
       cause: null,
-      reason: "Snippet content does not match its metadata.",
+      reason: "Download this snippet before using it on this device.",
     });
   }
-  yield* content.put(account.id, snippetId, bytes);
-  return { bytes, snippet };
+  const cached = yield* content.get(account.id, snippetId);
+  if (cached?.byteLength === snippet.byteSize) return { bytes: cached, snippet };
+  yield* content.invalidate(account.id, [snippetId]);
+  return yield* new SnippetReplicaError({
+    cause: null,
+    reason: "Download this snippet before using it on this device.",
+  });
 });

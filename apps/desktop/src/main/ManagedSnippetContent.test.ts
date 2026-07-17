@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NodeFileSystem } from "@effect/platform-node";
 import { describe, expect, it, vi } from "vite-plus/test";
-import { Effect, Fiber, FileSystem, Layer, PlatformError } from "effect";
+import { Effect, Fiber, FileSystem, Layer, PlatformError, Stream } from "effect";
 
 import {
   DesktopManagedSnippetContent,
@@ -116,6 +116,119 @@ describe("managed snippet content ingestion", () => {
       await expect(readFile(managedPath)).resolves.toEqual(Buffer.from([4, 5, 6]));
     });
   });
+
+  it("streams hydrated bytes into the same atomic managed-content path", async () => {
+    await withDirectory(async (root) => {
+      const contentRoot = join(root, "content");
+      await Effect.runPromise(
+        DesktopManagedSnippetContent.use((content) =>
+          content.putStream(
+            accountId,
+            snippetId,
+            4,
+            Stream.make(new Uint8Array([1, 2]), new Uint8Array([3, 4])),
+          ),
+        ).pipe(
+          Effect.provide(
+            DesktopManagedSnippetContent.layer(contentRoot).pipe(Layer.provide(platformLayer)),
+          ),
+        ),
+      );
+
+      await expect(
+        readFile(managedSnippetContentPath(contentRoot, accountId, snippetId)),
+      ).resolves.toEqual(Buffer.from([1, 2, 3, 4]));
+    });
+  });
+
+  it("reconciles same-size corruption of hydrated content as unavailable", async () => {
+    await withDirectory(async (root) => {
+      const contentRoot = join(root, "content");
+      const layer = DesktopManagedSnippetContent.layer(contentRoot).pipe(
+        Layer.provide(platformLayer),
+      );
+      await Effect.runPromise(
+        DesktopManagedSnippetContent.use((content) =>
+          content.putStream(accountId, snippetId, 4, Stream.make(new Uint8Array([1, 2, 3, 4]))),
+        ).pipe(Effect.provide(layer)),
+      );
+
+      await writeFile(
+        managedSnippetContentPath(contentRoot, accountId, snippetId),
+        new Uint8Array([4, 3, 2, 1]),
+      );
+
+      await expect(
+        Effect.runPromise(
+          DesktopManagedSnippetContent.use((content) =>
+            content.available(accountId, snippetId, 4),
+          ).pipe(Effect.provide(layer)),
+        ),
+      ).resolves.toBe(false);
+    });
+  });
+
+  it("rejects and cleans an incomplete hydrated stream", async () => {
+    await withDirectory(async (root) => {
+      const contentRoot = join(root, "content");
+      await expect(
+        Effect.runPromise(
+          DesktopManagedSnippetContent.use((content) =>
+            content.putStream(accountId, snippetId, 4, Stream.make(new Uint8Array([1, 2]))),
+          ).pipe(
+            Effect.provide(
+              DesktopManagedSnippetContent.layer(contentRoot).pipe(Layer.provide(platformLayer)),
+            ),
+          ),
+        ),
+      ).rejects.toMatchObject({
+        _tag: "ManagedSnippetContentError",
+        reason: "Hydrated content does not match its metadata.",
+      });
+
+      const accountDirectory = join(contentRoot, Buffer.from(accountId).toString("base64url"));
+      await expect(readdir(accountDirectory, { recursive: true })).resolves.toEqual([]);
+    });
+  });
+
+  it.each(["ENOSPC", "EDQUOT"] as const)(
+    "reports local storage exhaustion (%s) during hydration and removes partial content",
+    async (code) => {
+      await withDirectory(async (root) => {
+        const contentRoot = join(root, "content");
+        const diskFull = PlatformError.systemError({
+          _tag: "Unknown",
+          module: "FileSystem",
+          method: "write",
+          cause: Object.assign(new Error("local storage exhausted"), { code }),
+        });
+
+        await expect(
+          Effect.runPromise(
+            DesktopManagedSnippetContent.use((content) =>
+              content.putStream(
+                accountId,
+                snippetId,
+                4,
+                Stream.make(new Uint8Array([1, 2])).pipe(Stream.concat(Stream.fail(diskFull))),
+              ),
+            ).pipe(
+              Effect.provide(
+                DesktopManagedSnippetContent.layer(contentRoot).pipe(Layer.provide(platformLayer)),
+              ),
+            ),
+          ),
+        ).rejects.toMatchObject({
+          _tag: "ManagedSnippetContentError",
+          reason:
+            "There isn’t enough space on this Mac to save this file. Free some space, then try again.",
+        });
+
+        const accountDirectory = join(contentRoot, Buffer.from(accountId).toString("base64url"));
+        await expect(readdir(accountDirectory, { recursive: true })).resolves.toEqual([]);
+      });
+    },
+  );
 
   it.each([
     {

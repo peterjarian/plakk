@@ -28,7 +28,7 @@ export class SnippetReplicaError extends Schema.TaggedErrorClass<SnippetReplicaE
 
 export class ManagedSnippetContentError extends Schema.TaggedErrorClass<ManagedSnippetContentError>()(
   "ManagedSnippetContentError",
-  { cause: Schema.Defect(), reason: Schema.String },
+  { cause: Schema.Defect(), reason: Schema.String, retryable: Schema.Boolean },
 ) {}
 
 export class SnippetReplica extends Context.Service<
@@ -56,11 +56,17 @@ export class ManagedSnippetContent extends Context.Service<
       accountId: string,
       snippetId: string,
     ): Effect.Effect<Uint8Array | null, ManagedSnippetContentError>;
-    put(
+    putStream<E>(
       accountId: string,
       snippetId: string,
-      bytes: Uint8Array,
-    ): Effect.Effect<void, ManagedSnippetContentError>;
+      byteSize: number,
+      source: Stream.Stream<Uint8Array, E>,
+    ): Effect.Effect<void, E | ManagedSnippetContentError>;
+    available(
+      accountId: string,
+      snippetId: string,
+      byteSize: number,
+    ): Effect.Effect<boolean, ManagedSnippetContentError>;
     invalidate(
       accountId: string,
       snippetIds: ReadonlyArray<string>,
@@ -109,8 +115,18 @@ const replaceWithSnapshot = Effect.fn("SnippetReplica.replaceWithSnapshot")(func
     current?.items.filter((snippet) => !freshIds.has(snippet.id)).map((snippet) => snippet.id) ??
     [];
   const normalized = { cursor: snapshot.cursor, items: ordered(snapshot.items) };
-  yield* content.invalidate(accountId, staleIds);
+  yield* Effect.forEach(staleIds, (snippetId) => replica.remove(accountId, snippetId), {
+    discard: true,
+  });
   yield* replica.commit(accountId, normalized);
+  yield* Effect.forEach(
+    staleIds,
+    (snippetId) =>
+      content
+        .invalidate(accountId, [snippetId])
+        .pipe(Effect.andThen(replica.completeDeleteCleanup(accountId, snippetId))),
+    { discard: true },
+  );
   return normalized;
 });
 
@@ -146,9 +162,19 @@ export const syncSnippetReplica = Effect.fn("SnippetReplica.sync")(function* (
     const deletedIds = page.changes.flatMap((change) =>
       change.type === "DELETE" ? [change.snippetId] : [],
     );
-    if (deletedIds.length > 0) yield* content.invalidate(account.id, deletedIds);
+    yield* Effect.forEach(deletedIds, (snippetId) => replica.remove(account.id, snippetId), {
+      discard: true,
+    });
     state = { cursor: page.nextCursor, items: applyChanges(state.items, page) };
     yield* replica.commit(account.id, state);
+    yield* Effect.forEach(
+      deletedIds,
+      (snippetId) =>
+        content
+          .invalidate(account.id, [snippetId])
+          .pipe(Effect.andThen(replica.completeDeleteCleanup(account.id, snippetId))),
+      { discard: true },
+    );
   }
 });
 

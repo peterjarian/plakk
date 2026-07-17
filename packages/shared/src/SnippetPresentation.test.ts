@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { deriveSnippetPresentation } from "./SnippetPresentation.ts";
+import { decodeSnippetText, deriveSnippetPresentation } from "./SnippetPresentation.ts";
 
 const utf8 = (value: string) => new TextEncoder().encode(value);
 
@@ -44,13 +44,18 @@ describe("snippet presentation", () => {
     ).toEqual({ type: "file", title: "website.pdf" });
   });
 
-  it("falls back to the file name when text content is unavailable or invalid", () => {
+  it("uses a presentation-neutral title when text content is unavailable or invalid", () => {
     expect(deriveSnippetPresentation({ fileName: "note.txt" })).toEqual({
-      type: "text",
-      title: "note.txt",
+      type: "file",
+      title: "Text snippet",
     });
     expect(
       deriveSnippetPresentation({ fileName: "note.txt", content: new Uint8Array([0xff]) }),
-    ).toEqual({ type: "text", title: "note.txt" });
+    ).toEqual({ type: "file", title: "Text snippet" });
+  });
+
+  it("decodes only valid UTF-8 for content-derived presentation", () => {
+    expect(decodeSnippetText(utf8("valid text"))).toBe("valid text");
+    expect(decodeSnippetText(new Uint8Array([0xc3, 0x28]))).toBeNull();
   });
 });

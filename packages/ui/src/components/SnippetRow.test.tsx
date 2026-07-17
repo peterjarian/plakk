@@ -14,7 +14,7 @@ const snippet = {
   createdAt: "2026-07-11T00:00:00.000Z",
   updatedAt: "2026-07-11T00:00:00.000Z",
   localState: null,
-  contentAvailable: true,
+  localContentAvailability: { status: "AVAILABLE" } as const,
 } as const;
 
 const now = DateTime.toEpochMillis(DateTime.makeUnsafe("2026-07-11T12:00:00.000Z"));
@@ -63,7 +63,11 @@ describe("SnippetRow", () => {
   it("shows remote uploads as syncing without an origin-only stop action", () => {
     const markup = renderToStaticMarkup(
       <SnippetRow
-        snippet={{ ...snippet, uploadStatus: "UPLOADING", contentAvailable: false }}
+        snippet={{
+          ...snippet,
+          uploadStatus: "UPLOADING",
+          localContentAvailability: { status: "NOT_AVAILABLE" },
+        }}
         presentation={{ type: "text", title: "Text snippet" }}
         now={now}
         copied={false}
@@ -80,7 +84,11 @@ describe("SnippetRow", () => {
   it("shows remote failure without an origin-only retry action", () => {
     const markup = renderToStaticMarkup(
       <SnippetRow
-        snippet={{ ...snippet, uploadStatus: "FAILED", contentAvailable: false }}
+        snippet={{
+          ...snippet,
+          uploadStatus: "FAILED",
+          localContentAvailability: { status: "NOT_AVAILABLE" },
+        }}
         presentation={{ type: "text", title: "Text snippet" }}
         now={now}
         copied={false}
@@ -134,25 +142,30 @@ describe("SnippetRow", () => {
     expect(withOwner).toContain('aria-label="Open link"');
   });
 
-  it("renders the projected presentation without deriving a loading title", () => {
+  it("keeps local download failure actionable without deriving a loading title", () => {
     const markup = renderToStaticMarkup(
       <SnippetRow
-        snippet={snippet}
-        presentation={{ type: "text", title: "Text unavailable" }}
+        snippet={{
+          ...snippet,
+          localContentAvailability: {
+            status: "FAILED",
+            message: "Couldn’t download this text. Try again.",
+          },
+        }}
+        presentation={{ type: "text", title: "Text snippet" }}
         now={now}
         copied={false}
         onCopy={() => undefined}
         onDelete={() => undefined}
-        onRetryContent={() => undefined}
+        onDownload={() => undefined}
         onStopUpload={() => undefined}
-        textContent={{ state: "failed", message: "Couldn’t load this text. Try again." }}
       />,
     );
 
-    expect(markup).toContain("Text unavailable");
-    expect(markup).toContain("Couldn’t load this text. Try again.");
+    expect(markup).toContain("Text snippet");
+    expect(markup).toContain("Couldn’t download this text. Try again.");
     expect(markup).not.toContain("Loading text");
-    expect(markup).toContain('aria-label="Retry loading text"');
+    expect(markup).toContain('aria-label="Retry download"');
   });
 });
 

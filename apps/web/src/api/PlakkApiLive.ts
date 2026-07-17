@@ -42,47 +42,47 @@ const WorkosConnectedAccountSchema = Schema.Struct({
   state: Schema.Literals(["connected", "needs_reauthorization"] as const),
 });
 
-export const getSnippetCopyPayload = Effect.fn("@plakk/web/api/PlakkApiLive.getSnippetCopyPayload")(
-  function* (
-    drizzle: DrizzleService,
-    storage: StorageProviderService["Service"],
-    workosUserId: string,
-    snippetId: string,
-  ) {
-    const [snippet] = yield* drizzle.db
-      .select()
-      .from(snippets)
-      .where(
-        and(
-          eq(snippets.id, snippetId),
-          eq(snippets.ownerWorkosUserId, workosUserId),
-          eq(snippets.uploadStatus, "UPLOADED"),
-          isNull(snippets.deletedAt),
-        ),
-      )
-      .limit(1)
-      .pipe(Effect.orDie);
+export const prepareSnippetDownload = Effect.fn(
+  "@plakk/web/api/PlakkApiLive.prepareSnippetDownload",
+)(function* (
+  drizzle: DrizzleService,
+  storage: StorageProviderService["Service"],
+  workosUserId: string,
+  snippetId: string,
+) {
+  const [snippet] = yield* drizzle.db
+    .select()
+    .from(snippets)
+    .where(
+      and(
+        eq(snippets.id, snippetId),
+        eq(snippets.ownerWorkosUserId, workosUserId),
+        eq(snippets.uploadStatus, "UPLOADED"),
+        isNull(snippets.deletedAt),
+      ),
+    )
+    .limit(1)
+    .pipe(Effect.orDie);
 
-    if (snippet === undefined || snippet.storageObjectId === null) {
-      return yield* new RpcError({ code: "NOT_FOUND", message: "Uploaded snippet was not found." });
-    }
+  if (snippet === undefined || snippet.storageObjectId === null) {
+    return yield* new RpcError({ code: "NOT_FOUND", message: "Uploaded snippet was not found." });
+  }
 
-    const download = yield* storage
-      .getDownloadTarget({
-        storageProvider: snippet.storageProvider,
-        storageObjectId: snippet.storageObjectId,
-        workosUserId,
-      })
-      .pipe(mapStorageErrorsToRpc);
-
-    return {
+  const download = yield* storage
+    .getDownloadTarget({
       storageProvider: snippet.storageProvider,
-      fileName: snippet.fileName,
-      byteSize: snippet.byteSize,
-      download,
-    };
-  },
-);
+      storageObjectId: snippet.storageObjectId,
+      workosUserId,
+    })
+    .pipe(mapStorageErrorsToRpc);
+
+  return {
+    storageProvider: snippet.storageProvider,
+    fileName: snippet.fileName,
+    byteSize: snippet.byteSize,
+    download,
+  };
+});
 
 const getConnectedAccountUrl = (provider: StorageProvider, workosUserId: string) =>
   `${WORKOS_BASE_URL}/user_management/users/${encodeURIComponent(workosUserId)}/connected_accounts/${encodeURIComponent(getProviderSlug(provider))}`;
@@ -299,12 +299,12 @@ const SnippetsLive = SnippetRpcs.of({
     }).pipe(Effect.annotateSpans({ limit: input.limit }));
   }),
   SubscribeSnippetChanges: () => snippetChangeRpcStream,
-  GetSnippetCopyPayload: Effect.fn("rpc.GetSnippetCopyPayload")(function* (input) {
+  PrepareSnippetDownload: Effect.fn("rpc.PrepareSnippetDownload")(function* (input) {
     return yield* Effect.gen(function* () {
       const drizzle = yield* Drizzle;
       const storage = yield* StorageProviderService;
       const currentUser = yield* CurrentUser;
-      return yield* getSnippetCopyPayload(drizzle, storage, currentUser.id, input.id);
+      return yield* prepareSnippetDownload(drizzle, storage, currentUser.id, input.id);
     }).pipe(Effect.annotateSpans({ id: input.id }));
   }),
   DeleteSnippet: Effect.fn("rpc.DeleteSnippet")(function* (input) {
