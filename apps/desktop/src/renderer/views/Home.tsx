@@ -1,14 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUpRight, Plus, TriangleAlert } from "lucide-react";
-import { useAtomSet, useAtomValue } from "@effect/atom-react";
+import { ArrowUpRight, LoaderCircle, Plus, TriangleAlert } from "lucide-react";
+import { useAtomSet } from "@effect/atom-react";
 import { snippetKindForFileName } from "@plakk/shared";
 import type { ApiSnippet } from "@plakk/shared/PlakkApi";
-import {
-  deleteSnippetOptions,
-  emptySnippetsAtom,
-  snippetReactivityKeys,
-  type SnippetRequestHeaders,
-} from "@plakk/ui/atoms/snippets";
 import { createPlakkRpc } from "@plakk/ui/atoms/rpc";
 import { AppHeader } from "@plakk/ui/components/AppHeader";
 import { SnippetList } from "@plakk/ui/components/SnippetList";
@@ -25,9 +19,9 @@ import {
   DialogTitle,
 } from "@plakk/ui/components/primitives/dialog";
 import { useActiveUploadTasks, useUploadActions } from "@plakk/ui/hooks/useUploadFlow";
-import { AsyncResult, Atom } from "effect/unstable/reactivity";
 import { SnippetComposer } from "../components/SnippetComposer.tsx";
 import { useAuth } from "../hooks/useAuth.ts";
+import { useSnippetReplica } from "../hooks/useSnippetReplica.ts";
 import {
   StorageProviderIcon,
   storageProviderLabel,
@@ -46,17 +40,6 @@ const createStoredSnippetMutationAtom = plakkRpc.mutation("CreateStoredSnippet")
 const updateStoredSnippetUploadStatusMutationAtom = plakkRpc.mutation(
   "UpdateStoredSnippetUploadStatus",
 );
-const listSnippetsQuery = (headers: SnippetRequestHeaders, contentUrlGeneration: number) =>
-  plakkRpc.query(
-    "ListSnippets",
-    { limit: 20 },
-    {
-      headers,
-      reactivityKeys: snippetReactivityKeys,
-      serializationKey: `latest-${contentUrlGeneration}`,
-    },
-  );
-
 export function Home({ active = true }: { active?: boolean }) {
   const auth = useAuth();
   const storageStatus = useStorageStatus();
@@ -70,7 +53,6 @@ export function Home({ active = true }: { active?: boolean }) {
   const [textContents, setTextContents] = useState<Record<string, TextSnippetContent>>({});
   const [thumbnailUrls, setThumbnailUrls] = useState<Record<string, string>>({});
   const [copyErrors, setCopyErrors] = useState<Record<string, string>>({});
-  const [contentUrlGeneration, setContentUrlGeneration] = useState(0);
   const [now, setNow] = useState(Date.now);
   const copiedTimerRef = useRef<number | undefined>(undefined);
   const thumbnailObjectUrlsRef = useRef(new Map<string, string>());
@@ -82,34 +64,12 @@ export function Home({ active = true }: { active?: boolean }) {
     return () => window.clearInterval(interval);
   }, []);
 
-  const snippetHeaders = useMemo<SnippetRequestHeaders | null>(
+  const snippetHeaders = useMemo(
     () => (auth.accessToken === null ? null : { authorization: `Bearer ${auth.accessToken}` }),
     [auth.accessToken],
   );
-  const snippetsAtom = useMemo(() => {
-    const source =
-      snippetHeaders === null
-        ? (emptySnippetsAtom as Atom.Atom<Atom.Type<ReturnType<typeof listSnippetsQuery>>>)
-        : listSnippetsQuery(snippetHeaders, contentUrlGeneration);
-    return Atom.optimistic(source);
-  }, [contentUrlGeneration, snippetHeaders]);
-  const snippetsResult = useAtomValue(snippetsAtom);
-  const syncedSnippetResponse = AsyncResult.getOrElse(snippetsResult, () => ({
-    items: [] as ReadonlyArray<ApiSnippet>,
-  }));
-  const deleteSyncedSnippetAtom = useMemo(
-    () =>
-      Atom.optimisticFn(snippetsAtom, {
-        reducer: (result, { payload }) =>
-          AsyncResult.map(result, (response) => ({
-            ...response,
-            items: response.items.filter((snippet) => snippet.id !== payload.id),
-          })),
-        fn: deleteSnippetMutationAtom,
-      }),
-    [snippetsAtom],
-  );
-  const deleteSyncedSnippet = useAtomSet(deleteSyncedSnippetAtom, { mode: "promise" });
+  const { isLoading: replicaLoading, items: replicaItems } = useSnippetReplica();
+  const deleteSyncedSnippet = useAtomSet(deleteSnippetMutationAtom, { mode: "promise" });
   const prepareStoredSnippetUpload = useAtomSet(prepareStoredSnippetUploadMutationAtom, {
     mode: "promise",
   });
@@ -121,9 +81,7 @@ export function Home({ active = true }: { active?: boolean }) {
   const uploadTasks = useActiveUploadTasks();
   const snippets = [
     ...uploadTasks,
-    ...syncedSnippetResponse.items.filter(
-      (snippet) => !uploadTasks.some((task) => task.id === snippet.id),
-    ),
+    ...replicaItems.filter((snippet) => !uploadTasks.some((task) => task.id === snippet.id)),
   ];
   const accountBlocked = !storageStatus.canSync;
   const user = auth.user;
@@ -181,7 +139,6 @@ export function Home({ active = true }: { active?: boolean }) {
           updateStoredSnippetUploadStatus({
             headers: snippetHeaders,
             payload,
-            reactivityKeys: snippetReactivityKeys,
           }),
       },
     }).catch(() => undefined);
@@ -189,18 +146,9 @@ export function Home({ active = true }: { active?: boolean }) {
 
   const loadTextContent = useCallback(
     async (snippet: ApiSnippet) => {
-      if (snippetHeaders === null) return;
       setTextContents((contents) => ({ ...contents, [snippet.id]: { state: "loading" } }));
       try {
-        let bytes: Uint8Array;
-        if (snippet.contentUrl === null) {
-          if (snippet.textContent === null) throw new Error("Snippet content is unavailable.");
-          bytes = encodeTextSnippet(snippet.textContent ?? "");
-        } else {
-          const response = await fetch(snippet.contentUrl);
-          if (!response.ok) throw new Error(`Snippet download failed: ${response.status}`);
-          bytes = new Uint8Array(await response.arrayBuffer());
-        }
+        const bytes = await window.ipc.snippets.read(snippet.id);
         const text = decodeTextSnippet(bytes);
         setTextContents((contents) => ({
           ...contents,
@@ -208,7 +156,11 @@ export function Home({ active = true }: { active?: boolean }) {
         }));
 
         if (snippet.storageProvider === null) {
-          if (storageStatus.kind !== "connected" || !storageStatus.canSync) {
+          if (
+            snippetHeaders === null ||
+            storageStatus.kind !== "connected" ||
+            !storageStatus.canSync
+          ) {
             setTextContents((contents) => ({
               ...contents,
               [snippet.id]: {
@@ -242,7 +194,6 @@ export function Home({ active = true }: { active?: boolean }) {
                 storageProvider: storageStatus.provider,
                 storageObjectId: uploaded.storageObjectId,
               },
-              reactivityKeys: snippetReactivityKeys,
             });
           } catch {
             setTextContents((contents) => ({
@@ -268,7 +219,7 @@ export function Home({ active = true }: { active?: boolean }) {
   );
 
   useEffect(() => {
-    for (const snippet of syncedSnippetResponse.items) {
+    for (const snippet of replicaItems) {
       if (
         snippet.kind === "TEXT" &&
         snippet.uploadStatus === "READY" &&
@@ -277,14 +228,14 @@ export function Home({ active = true }: { active?: boolean }) {
         void loadTextContent(snippet);
       }
     }
-  }, [loadTextContent, syncedSnippetResponse.items, textContents]);
+  }, [loadTextContent, replicaItems, textContents]);
 
   useEffect(() => {
-    const images = syncedSnippetResponse.items.filter(
+    const images = replicaItems.filter(
       (snippet) =>
         snippet.kind === "IMAGE" &&
         snippet.uploadStatus === "READY" &&
-        snippet.storageProvider === "GOOGLE_DRIVE",
+        snippet.storageProvider !== null,
     );
     const visibleIds = new Set(images.map((snippet) => snippet.id));
     visibleThumbnailIdsRef.current = visibleIds;
@@ -324,7 +275,7 @@ export function Home({ active = true }: { active?: boolean }) {
         })
         .finally(() => loadingThumbnailIdsRef.current.delete(snippet.id));
     }
-  }, [syncedSnippetResponse.items]);
+  }, [replicaItems]);
 
   useEffect(
     () => () => {
@@ -371,7 +322,6 @@ export function Home({ active = true }: { active?: boolean }) {
           updateStoredSnippetUploadStatus({
             headers: snippetHeaders,
             payload,
-            reactivityKeys: snippetReactivityKeys,
           }),
       },
     }).catch(() => undefined);
@@ -426,23 +376,7 @@ export function Home({ active = true }: { active?: boolean }) {
 
       if (needsCopySpinner) setCopyingId(snippet.id);
 
-      if (snippet.kind === "FILE" || snippet.kind === "IMAGE") {
-        if (snippet.contentUrl === null || snippet.storageProvider === null) {
-          throw new Error("Snippet download is unavailable.");
-        }
-        await window.ipc.snippets.copy(snippet.id);
-      } else {
-        const textContent = textContents[snippet.id];
-        const text =
-          snippet.kind === "TEXT"
-            ? textContent?.state === "ready"
-              ? textContent.text
-              : null
-            : snippet.title;
-        if (text === null) return;
-        if (navigator.clipboard === undefined) throw new Error("Clipboard access is unavailable.");
-        await navigator.clipboard.writeText(text);
-      }
+      await window.ipc.snippets.copy(snippet.id);
 
       setCopyErrors((errors) => {
         const { [snippet.id]: _error, ...remaining } = errors;
@@ -469,16 +403,6 @@ export function Home({ active = true }: { active?: boolean }) {
     return () => {
       if (copiedTimerRef.current !== undefined) window.clearTimeout(copiedTimerRef.current);
     };
-  }, []);
-
-  useEffect(() => {
-    const refresh = window.setInterval(
-      () => {
-        setContentUrlGeneration((generation) => generation + 1);
-      },
-      30 * 60 * 1000,
-    );
-    return () => window.clearInterval(refresh);
   }, []);
 
   useEffect(() => {
@@ -639,46 +563,56 @@ export function Home({ active = true }: { active?: boolean }) {
           />
         </div>
 
-        <SnippetList empty={snippets.length === 0}>
-          {snippets.map((snippet) => (
-            <SnippetRow
-              key={snippet.id}
-              snippet={snippet}
-              now={now}
-              copied={copiedId === snippet.id}
-              copying={copyingId === snippet.id}
-              onCopy={() => void copySnippet(snippet)}
-              copyDisabled={"phase" in snippet}
-              copyError={copyErrors[snippet.id]}
-              onDelete={() => {
-                if ("phase" in snippet) {
-                  if (snippet.phase === "FAILED") uploadActions.remove(snippet.id);
-                  else cancelUpload(snippet.id);
-                  return;
-                }
-                if (snippetHeaders !== null) {
-                  void deleteSyncedSnippet(deleteSnippetOptions(snippetHeaders, snippet.id));
-                }
-              }}
-              {...(snippet.kind === "LINK" ? { onOpenLink: openLink } : {})}
-              {...(snippet.kind === "TEXT" && !("phase" in snippet)
-                ? {
-                    textContent: textContents[snippet.id],
-                    onRetryContent: () => void loadTextContent(snippet),
+        {replicaLoading && snippets.length === 0 ? (
+          <div
+            className="grid min-h-0 flex-1 place-items-center text-muted-foreground"
+            role="status"
+          >
+            <LoaderCircle className="size-5 animate-spin" aria-hidden="true" />
+            <span className="sr-only">Loading snippets</span>
+          </div>
+        ) : (
+          <SnippetList empty={snippets.length === 0}>
+            {snippets.map((snippet) => (
+              <SnippetRow
+                key={snippet.id}
+                snippet={snippet}
+                now={now}
+                copied={copiedId === snippet.id}
+                copying={copyingId === snippet.id}
+                onCopy={() => void copySnippet(snippet)}
+                copyDisabled={"phase" in snippet}
+                copyError={copyErrors[snippet.id]}
+                onDelete={() => {
+                  if ("phase" in snippet) {
+                    if (snippet.phase === "FAILED") uploadActions.remove(snippet.id);
+                    else cancelUpload(snippet.id);
+                    return;
                   }
-                : {})}
-              {...(snippet.kind === "IMAGE" && !("phase" in snippet)
-                ? {
-                    thumbnailUrl:
-                      snippet.storageProvider === "GOOGLE_DRIVE"
-                        ? (thumbnailUrls[snippet.id] ?? null)
-                        : snippet.thumbnailUrl,
+                  if (snippetHeaders !== null) {
+                    void deleteSyncedSnippet({
+                      headers: snippetHeaders,
+                      payload: { id: snippet.id },
+                    });
                   }
-                : {})}
-              onStopUpload={() => cancelUpload(snippet.id)}
-            />
-          ))}
-        </SnippetList>
+                }}
+                {...(snippet.kind === "LINK" ? { onOpenLink: openLink } : {})}
+                {...(snippet.kind === "TEXT" && !("phase" in snippet)
+                  ? {
+                      textContent: textContents[snippet.id],
+                      onRetryContent: () => void loadTextContent(snippet),
+                    }
+                  : {})}
+                {...(snippet.kind === "IMAGE" && !("phase" in snippet)
+                  ? {
+                      thumbnailUrl: thumbnailUrls[snippet.id] ?? null,
+                    }
+                  : {})}
+                onStopUpload={() => cancelUpload(snippet.id)}
+              />
+            ))}
+          </SnippetList>
+        )}
       </div>
 
       {isDragging && (

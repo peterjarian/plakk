@@ -305,7 +305,8 @@ export const downloadSnippetToClipboard = Effect.fn("downloadSnippetToClipboard"
 });
 
 export const downloadSnippetBytes = Effect.fn("downloadSnippetBytes")(function* (
-  snippet: Omit<SnippetContent, "bytes"> & {
+  snippet: Omit<SnippetContent, "bytes" | "kind"> & {
+    readonly kind: "TEXT" | "FILE" | "IMAGE";
     readonly storageProvider: StorageProvider;
     readonly byteSize: number;
     readonly download: {

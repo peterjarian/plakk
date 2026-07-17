@@ -10,6 +10,7 @@ import { type StorageProviderService } from "./storage/StorageProvider.ts";
 import { StorageProviderError } from "./storage/types.ts";
 import {
   confirmTextSnippetUpload,
+  getSnippetCopyPayload,
   insertSnippet,
   prepareSnippetUpload,
   updateStoredSnippetUpload,
@@ -180,6 +181,26 @@ describe("text snippet persistence and authorization", () => {
       storageObjectId: null,
       ownerWorkosUserId: "user-1",
       uploadStatus: "UPLOADING",
+    });
+  });
+});
+
+describe("stored snippet content payloads", () => {
+  it("returns an owned ready text snippet download target", async () => {
+    const stored = row({ kind: "TEXT" });
+    const download = { url: "https://www.googleapis.com/download", headers: [] };
+    const getDownloadTarget = vi.fn(() => Effect.succeed(download));
+    const storage = { getDownloadTarget } as unknown as StorageProviderService["Service"];
+
+    const result = await Effect.runPromise(
+      getSnippetCopyPayload({ db: queryDb([stored]) }, storage, "user-1", stored.id),
+    );
+
+    expect(result).toMatchObject({ kind: "TEXT", download });
+    expect(getDownloadTarget).toHaveBeenCalledWith({
+      storageProvider: "GOOGLE_DRIVE",
+      storageObjectId: "drive-id",
+      workosUserId: "user-1",
     });
   });
 });

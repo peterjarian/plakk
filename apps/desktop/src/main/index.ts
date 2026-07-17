@@ -4,30 +4,33 @@ import { basename, join, resolve, sep } from "node:path";
 import { rm, stat } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { isHttpUrl } from "@plakk/shared";
-import { accountCanSync } from "@plakk/shared/PlakkApi";
+import { accountCanSync, type ApiSnippet } from "@plakk/shared/PlakkApi";
+import { SnippetReplica, runSnippetReplicaSync } from "@plakk/shared/SnippetReplica";
 import { app, BrowserWindow, dialog, Menu, net, protocol, shell } from "electron";
-import { Effect, Result } from "effect";
+import { Effect, Result, Stream } from "effect";
 import * as Fiber from "effect/Fiber";
 import type { AuthStatus, TrayAccountState, TrayDroppedItem } from "../ipc/contracts.ts";
 import { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
 import { handle, send } from "../ipc/main.ts";
 import { StorageUpload, type StorageUploadResult } from "../storageUpload.ts";
-import {
-  getAccountStatus,
-  getSnippetCopyPayload,
-  isUnauthenticatedAccountError,
-} from "./accountStatus.ts";
+import { getAccountStatus, isUnauthenticatedAccountError } from "./accountStatus.ts";
 import { AuthService } from "./auth/AuthService.ts";
 import {
   consumeTemporaryClipboardFile,
   readClipboard,
-  downloadSnippetBytes,
-  downloadSnippetToClipboard,
+  writeClipboard,
+  writeSnippetToClipboard,
 } from "./clipboard.ts";
 import { createTrayWindowController } from "./trayWindow.ts";
 import { isReloadShortcut, reconcileTrayAuth } from "./lifecycle.ts";
 import { UserConfigStore } from "./UserConfigStore.ts";
 import { runEffect, runtime } from "./runtime.ts";
+import {
+  ActiveSnippetAccount,
+  getManagedSnippetBytes,
+  getReplicaItems,
+  getReplicaSnippet,
+} from "./snippetReplica.ts";
 
 const rendererScheme = "plakk-app";
 const rendererHost = "renderer";
@@ -80,24 +83,38 @@ handle(ipcMethods.storageCancelUpload, (id) => {
 });
 
 handle(ipcMethods.snippetCopy, async (id) => {
-  const session = await runAuth(
-    AuthService.use((auth) => auth.getSession()),
-    "Could not load the stored snippet.",
+  const account = activeSnippetAccount();
+  if (account === null) throw new Error("Sign in to load stored snippets.");
+  const snippet = await runEffect(getReplicaSnippet(account.id, id));
+  if (snippet.kind === "LINK") {
+    await runEffect(writeClipboard({ type: "text", text: snippet.title }));
+    return;
+  }
+
+  const { bytes } = await runEffect(Effect.scoped(getManagedSnippetBytes(account, id)));
+  if (snippet.kind === "TEXT") {
+    await runEffect(writeClipboard({ type: "text", text: new TextDecoder().decode(bytes) }));
+    return;
+  }
+  await runEffect(
+    writeSnippetToClipboard({
+      bytes,
+      kind: snippet.kind,
+      fileName: snippet.fileName,
+      contentType: snippet.contentType,
+    }),
   );
-  if (session === null) throw new Error("Sign in to load stored snippets.");
-  const payload = await runEffect(Effect.scoped(getSnippetCopyPayload(session.accessToken, id)));
-  await runEffect(downloadSnippetToClipboard(payload));
 });
 
 handle(ipcMethods.snippetRead, async (id) => {
-  const session = await runAuth(
-    AuthService.use((auth) => auth.getSession()),
-    "Could not load the stored snippet.",
-  );
-  if (session === null) throw new Error("Sign in to load stored snippets.");
-  const payload = await runEffect(Effect.scoped(getSnippetCopyPayload(session.accessToken, id)));
-  return runEffect(downloadSnippetBytes(payload));
+  const account = activeSnippetAccount();
+  if (account === null) throw new Error("Sign in to load stored snippets.");
+  return runEffect(Effect.scoped(getManagedSnippetBytes(account, id))).then(({ bytes }) => bytes);
 });
+
+handle(ipcMethods.snippetList, () =>
+  activeSnippetAccountId === undefined ? [] : runEffect(getReplicaItems(activeSnippetAccountId)),
+);
 
 handle(ipcMethods.clipboardRead, () => runEffect(readClipboard()));
 
@@ -127,6 +144,14 @@ function authErrorMessage(error: unknown, fallback: string): string {
   ) {
     return error.message;
   }
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "reason" in error &&
+    typeof error.reason === "string"
+  ) {
+    return error.reason;
+  }
 
   return fallback;
 }
@@ -153,7 +178,7 @@ function authStatus(session: { accessToken: string; user: AuthStatus["user"] } |
 
 handle(ipcMethods.authGet, () =>
   runAuth(
-    AuthService.use((auth) => auth.getSession().pipe(Effect.map(authStatus))),
+    AuthService.use((auth) => auth.getSession().pipe(Effect.map(authStatusForSession))),
     "Could not check session.",
   ).then(
     (status) => {
@@ -161,7 +186,9 @@ handle(ipcMethods.authGet, () =>
       return status;
     },
     (error) => {
-      applyAuthStatus(authStatus(null));
+      const paused = { accessToken: null, user: currentAuthStatus.user } satisfies AuthStatus;
+      applyAuthStatus(paused);
+      if (paused.user !== null) return paused;
       throw error;
     },
   ),
@@ -191,8 +218,15 @@ handle(ipcMethods.authSignOut, async () => {
     AuthService.use((auth) => auth.signOut()),
     "Could not sign out.",
   );
+  if (snippetAccountPersistenceFiber !== undefined) {
+    await runEffect(Fiber.interrupt(snippetAccountPersistenceFiber));
+    snippetAccountPersistenceFiber = undefined;
+  }
+  await runEffect(ActiveSnippetAccount.use((account) => account.set(null)));
+  activeSnippetAccountId = undefined;
   const status = authStatus(null);
   applyAuthStatus(status);
+  broadcastSnippetReplica([]);
   broadcastAuthStatus(status);
 });
 
@@ -212,6 +246,9 @@ let isQuitting = false;
 let currentAuthStatus = authStatus(null);
 let currentTrayAccountState: TrayAccountState = { kind: "loading" };
 let trayRefreshGeneration = 0;
+let activeSnippetAccountId: string | undefined;
+let snippetSyncFiber: Fiber.Fiber<void, unknown> | undefined;
+let snippetAccountPersistenceFiber: Fiber.Fiber<void, unknown> | undefined;
 
 handle(ipcMethods.trayGetAccountState, (_payload, event) =>
   trayWindowController?.ownsWebContents(event.sender) === true
@@ -232,12 +269,36 @@ function applyAuthStatus(status: AuthStatus) {
     currentAuthStatus.accessToken !== status.accessToken ||
     currentAuthStatus.user?.id !== status.user?.id;
   currentAuthStatus = status;
+  if (status.user !== null) {
+    activeSnippetAccountId = status.user.id;
+    if (status.accessToken !== null) {
+      if (snippetAccountPersistenceFiber !== undefined)
+        runtime.runFork(Fiber.interrupt(snippetAccountPersistenceFiber));
+      snippetAccountPersistenceFiber = runtime.runFork(
+        ActiveSnippetAccount.use((account) => account.set(status.user)).pipe(
+          Effect.catch((error) =>
+            Effect.logWarning("Could not remember the active snippet account", { error }),
+          ),
+        ),
+      );
+    }
+  }
   if (changed) {
     trayRefreshGeneration += 1;
+    if (snippetSyncFiber !== undefined) runtime.runFork(Fiber.interrupt(snippetSyncFiber));
+    snippetSyncFiber =
+      status.user === null || status.accessToken === null
+        ? undefined
+        : runtime.runFork(
+            runSnippetReplicaSync({ id: status.user.id, accessToken: status.accessToken }),
+          );
   }
   reconcileTrayAuth(status, trayWindowController);
   if (status.user === null) {
     sendTrayAccountState({ kind: "loading" });
+  } else if (status.accessToken === null) {
+    trayWindowController?.setAccountState(true, false);
+    sendTrayAccountState({ kind: "failed" });
   } else if (changed) {
     void refreshTrayAccountState();
   }
@@ -266,13 +327,9 @@ async function refreshTrayAccountState() {
   }
 
   if (isUnauthenticatedAccountError(result.failure)) {
-    await runAuth(
-      AuthService.use((auth) => auth.signOut()),
-      "Could not clear the invalid session.",
-    ).catch(() => undefined);
-    const signedOut = authStatus(null);
-    applyAuthStatus(signedOut);
-    broadcastAuthStatus(signedOut);
+    const paused = { accessToken: null, user: status.user } satisfies AuthStatus;
+    applyAuthStatus(paused);
+    broadcastAuthStatus(paused);
     return;
   }
 
@@ -442,6 +499,34 @@ function broadcastAuthStatus(status: AuthStatus): void {
   }
 }
 
+function broadcastSnippetReplica(items: ReadonlyArray<ApiSnippet>): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) send(window.webContents, ipcEvents.snippetReplicaChanged, items);
+  }
+}
+
+function authStatusForSession(
+  session: { accessToken: string; user: AuthStatus["user"] } | null,
+): AuthStatus {
+  if (session !== null) return authStatus(session);
+  return activeSnippetAccountId !== undefined &&
+    currentAuthStatus.user?.id === activeSnippetAccountId
+    ? { accessToken: null, user: currentAuthStatus.user }
+    : authStatus(null);
+}
+
+function activeSnippetAccount(): {
+  readonly id: string;
+  readonly accessToken: string | null;
+} | null {
+  if (activeSnippetAccountId === undefined) return null;
+  return {
+    id: activeSnippetAccountId,
+    accessToken:
+      currentAuthStatus.user?.id === activeSnippetAccountId ? currentAuthStatus.accessToken : null,
+  };
+}
+
 function broadcastAuthError(message: string): void {
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed()) {
@@ -529,8 +614,33 @@ if (!hasSingleInstanceLock) {
     });
   });
 
-  void app.whenReady().then(() => {
+  void app.whenReady().then(async () => {
     registerRendererProtocol();
+
+    const storedAccount = await runEffect(
+      ActiveSnippetAccount.use((account) => account.get).pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("Could not restore the active snippet account", { error }).pipe(
+            Effect.as(null),
+          ),
+        ),
+      ),
+    );
+    if (storedAccount !== null) {
+      applyAuthStatus({ accessToken: null, user: storedAccount });
+    }
+
+    runtime.runFork(
+      SnippetReplica.use((replica) =>
+        replica.changes.pipe(
+          Stream.runForEach(({ accountId, items }) =>
+            Effect.sync(() => {
+              if (accountId === activeSnippetAccountId) broadcastSnippetReplica(items);
+            }),
+          ),
+        ),
+      ),
+    );
 
     Menu.setApplicationMenu(
       Menu.buildFromTemplate([
@@ -584,9 +694,11 @@ if (!hasSingleInstanceLock) {
     });
     createWindow();
     void runAuth(
-      AuthService.use((auth) => auth.getSession().pipe(Effect.map(authStatus))),
+      AuthService.use((auth) => auth.getSession().pipe(Effect.map(authStatusForSession))),
       "Could not check session.",
-    ).then(applyAuthStatus, () => applyAuthStatus(authStatus(null)));
+    ).then(applyAuthStatus, () =>
+      applyAuthStatus({ accessToken: null, user: currentAuthStatus.user }),
+    );
     void handleAuthUrls(process.argv);
 
     app.on("activate", () => {

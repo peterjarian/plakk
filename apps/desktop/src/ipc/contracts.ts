@@ -1,6 +1,7 @@
 import { UserSchema } from "@plakk/shared";
 import {
   AccountStatusSchema,
+  ApiSnippetSchema,
   PreparedStorageUploadSchema,
   SnippetIdSchema,
 } from "@plakk/shared/PlakkApi";
@@ -165,6 +166,11 @@ export const ipcMethods = {
     payload: SnippetIdSchema,
     result: Schema.Uint8Array,
   }),
+  snippetList: method({
+    channel: "snippet:list",
+    payload: Schema.Void,
+    result: Schema.Array(ApiSnippetSchema),
+  }),
   clipboardRead: method({
     channel: "clipboard:read",
     payload: Schema.Void,
@@ -227,5 +233,9 @@ export const ipcEvents = {
   storageUploadProgress: event({
     channel: "storage:upload-progress",
     payload: StorageUploadProgressSchema,
+  }),
+  snippetReplicaChanged: event({
+    channel: "snippet:replica-changed",
+    payload: Schema.Array(ApiSnippetSchema),
   }),
 } as const;
