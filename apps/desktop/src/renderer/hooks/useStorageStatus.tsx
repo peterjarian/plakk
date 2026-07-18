@@ -1,28 +1,18 @@
-import { accountCanSync, type AccountStatus, type PipeConnection } from "@plakk/shared/PlakkApi";
-import { Cause } from "effect";
-import { AsyncResult } from "effect/unstable/reactivity";
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-  type ComponentProps,
-  type ReactNode,
-} from "react";
 import { DropboxIcon } from "@plakk/ui/icons/DropboxIcon";
 import { GoogleDriveIcon } from "@plakk/ui/icons/GoogleDriveIcon";
 import { OneDriveIcon } from "@plakk/ui/icons/OneDriveIcon";
+import { accountCanSyncWithConnection, type AccountStatus } from "@plakk/shared/PlakkApi";
 import type { StorageProvider } from "@plakk/shared";
-import { useAuth } from "./useAuth.ts";
+import type { ComponentProps } from "react";
+
+import type { LocalState } from "../../ipc/contracts.ts";
+import { useLocalState } from "./useLocalState.tsx";
 
 const storageSetupUrl = "https://app.plakk.io/storage";
-const initialAccountResult = () => AsyncResult.initial<AccountStatus>();
-const initialConnectionResult = () => AsyncResult.initial<PipeConnection>();
 
 export type StorageStatus =
   | { readonly kind: "loading"; readonly canSync: false; readonly provider: StorageProvider | null }
+  | { readonly kind: "offline"; readonly canSync: false; readonly provider: StorageProvider | null }
   | { readonly kind: "failed"; readonly canSync: false; readonly provider: StorageProvider | null }
   | { readonly kind: "unlinked"; readonly canSync: false; readonly actionUrl: string }
   | {
@@ -40,31 +30,30 @@ export type StorageStatus =
       readonly provider: StorageProvider;
     };
 
-export const storageStatusFrom = (
-  accountResult: AsyncResult.AsyncResult<AccountStatus, unknown>,
-  connectionResult: AsyncResult.AsyncResult<PipeConnection, unknown>,
+export const storageStatusFromLocalState = (
+  localState: LocalState,
+  isLoading = false,
+  hasError = false,
 ): StorageStatus => {
-  if (AsyncResult.isFailure(accountResult))
-    return { kind: "failed", canSync: false, provider: null };
-  if (!AsyncResult.isSuccess(accountResult))
-    return { kind: "loading", canSync: false, provider: null };
+  const cachedProvider = localState.provider.value;
+  if (isLoading) return { kind: "loading", canSync: false, provider: cachedProvider };
+  if (hasError) return { kind: "failed", canSync: false, provider: cachedProvider };
+  if (localState.capability.status === "OFFLINE") {
+    return { kind: "offline", canSync: false, provider: cachedProvider };
+  }
 
-  const account = accountResult.value;
-  if (account.storageProvider === null)
+  const account = localState.capability.account;
+  if (account.storageProvider === null) {
     return { kind: "unlinked", canSync: false, actionUrl: storageSetupUrl };
-
-  if (AsyncResult.isFailure(connectionResult)) {
+  }
+  const connection = localState.capability.connection;
+  if (connection === null || connection.storageProvider !== account.storageProvider) {
     return { kind: "failed", canSync: false, provider: account.storageProvider };
   }
-  if (!AsyncResult.isSuccess(connectionResult)) {
-    return { kind: "loading", canSync: false, provider: account.storageProvider };
-  }
-
-  const connection = connectionResult.value;
   if (connection.status === "CONNECTED") {
     return {
       kind: "connected",
-      canSync: accountCanSync(account),
+      canSync: accountCanSyncWithConnection(account, connection),
       account,
       destinationUrl: connection.externalDestinationUrl,
       provider: account.storageProvider,
@@ -82,97 +71,12 @@ export const storageStatusFrom = (
   return { kind: "unlinked", canSync: false, actionUrl: storageSetupUrl };
 };
 
-export const createStorageSetupRefresh = () => {
-  let pending = false;
-  return {
-    begin: () => {
-      pending = true;
-    },
-    cancel: () => {
-      pending = false;
-    },
-    focus: (refresh: () => void) => {
-      if (!pending) return;
-      pending = false;
-      refresh();
-    },
-  };
-};
-
-type StorageStatusContextValue = {
-  readonly openSetup: (url: string) => void;
-  readonly status: StorageStatus;
-};
-
-const StorageStatusContext = createContext<StorageStatusContextValue | null>(null);
-
-export function StorageStatusProvider({ children }: { children: ReactNode }) {
-  const auth = useAuth();
-  const [accountResult, setAccountResult] =
-    useState<AsyncResult.AsyncResult<AccountStatus, unknown>>(initialAccountResult);
-  const [connectionResult, setConnectionResult] =
-    useState<AsyncResult.AsyncResult<PipeConnection, unknown>>(initialConnectionResult);
-  const [refreshVersion, setRefreshVersion] = useState(0);
-  const refresh = useCallback(() => setRefreshVersion((version) => version + 1), []);
-
-  useEffect(() => {
-    let active = true;
-    setAccountResult(initialAccountResult());
-    setConnectionResult(initialConnectionResult());
-    if (auth.user === null || !auth.isAuthenticated) return () => void (active = false);
-
-    void window.ipc.storage.getStatus().then(
-      ({ account, connection }) => {
-        if (!active) return;
-        setAccountResult(AsyncResult.success(account));
-        setConnectionResult(
-          connection === null ? initialConnectionResult() : AsyncResult.success(connection),
-        );
-      },
-      (error: unknown) => {
-        if (!active) return;
-        setAccountResult(AsyncResult.failure(Cause.fail(error)));
-        setConnectionResult(AsyncResult.failure(Cause.fail(error)));
-      },
-    );
-
-    return () => void (active = false);
-  }, [auth.isAuthenticated, auth.user?.id, refreshVersion]);
-  const setupRefresh = useMemo(createStorageSetupRefresh, []);
-  const openSetup = useCallback(
-    (url: string) => {
-      setupRefresh.begin();
-      void window.ipc.openExternal(url).catch(setupRefresh.cancel);
-    },
-    [setupRefresh],
-  );
-
-  useEffect(() => {
-    const onFocus = () => setupRefresh.focus(refresh);
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-  }, [refresh, setupRefresh]);
-
-  const value = useMemo(
-    () => ({ openSetup, status: storageStatusFrom(accountResult, connectionResult) }),
-    [accountResult, connectionResult, openSetup],
-  );
-  return <StorageStatusContext value={value}>{children}</StorageStatusContext>;
-}
-
-const useStorageStatusContext = () => {
-  const value = useContext(StorageStatusContext);
-  if (value === null) throw new Error("Storage status must be used inside StorageStatusProvider.");
-  return value;
-};
-
 export function useStorageStatus(): StorageStatus {
-  return useStorageStatusContext().status;
+  const state = useLocalState();
+  return storageStatusFromLocalState(state.localState, state.isLoading, state.error !== null);
 }
 
-export function useStorageSetup(): (url: string) => void {
-  return useStorageStatusContext().openSetup;
-}
+export const openStorageSetup = (url: string) => window.ipc.openExternal(url);
 
 export const storageProviderLabel = (provider: StorageProvider) => {
   switch (provider) {

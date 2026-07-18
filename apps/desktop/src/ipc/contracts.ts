@@ -1,6 +1,6 @@
 import { SnippetUploadStatusLiteral, StorageProviderLiteral, UserSchema } from "@plakk/shared";
 import { AccountStatusSchema, PipeConnectionSchema, SnippetIdSchema } from "@plakk/shared/PlakkApi";
-import { LocalContentAvailabilitySchema } from "@plakk/shared/SnippetHydration";
+import { LocalContentAvailabilitySchema } from "@plakk/shared";
 import { Schema } from "effect";
 
 export type IpcSchema = Schema.ConstraintCodec<unknown, unknown, never, never>;
@@ -26,25 +26,11 @@ export type IpcPayload<T extends IpcMethod<IpcSchema, IpcSchema>> = T["payload"]
 export type IpcResult<T extends IpcMethod<IpcSchema, IpcSchema>> = T["result"]["Type"];
 export type IpcEventPayload<T extends IpcEvent<IpcSchema>> = T["payload"]["Type"];
 
-export const AuthStatusSchema = Schema.Struct({
-  isAuthenticated: Schema.Boolean,
-  user: Schema.NullOr(UserSchema),
-});
-
-export type AuthStatus = typeof AuthStatusSchema.Type;
-
 export const AuthErrorSchema = Schema.Struct({
   message: Schema.String,
 });
 
 export type AuthError = typeof AuthErrorSchema.Type;
-
-export const StorageStatusSnapshotSchema = Schema.Struct({
-  account: AccountStatusSchema,
-  connection: Schema.NullOr(PipeConnectionSchema),
-});
-
-export type StorageStatusSnapshot = typeof StorageStatusSnapshotSchema.Type;
 
 export const ClipboardContentSchema = Schema.Union([
   Schema.Struct({
@@ -54,14 +40,14 @@ export const ClipboardContentSchema = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("image"),
     dataUrl: Schema.String,
-    path: Schema.String,
+    sourceId: Schema.String,
     width: Schema.Number,
     height: Schema.Number,
   }),
   Schema.Struct({
     type: Schema.Literal("file"),
     name: Schema.String,
-    path: Schema.String,
+    sourceId: Schema.String,
     extension: Schema.String,
     size: Schema.optionalKey(Schema.Number),
   }),
@@ -74,7 +60,6 @@ export type ClipboardContent = typeof ClipboardContentSchema.Type;
 
 export const UserConfigSchema = Schema.Struct({
   showExternalLinkWarning: Schema.Boolean,
-  keepAllFilesOffline: Schema.Boolean,
 });
 
 export type UserConfig = typeof UserConfigSchema.Type;
@@ -83,14 +68,13 @@ export type UserConfigPatch = Partial<UserConfig>;
 
 export const UserConfigPatchSchema = Schema.Struct({
   showExternalLinkWarning: Schema.optionalKey(Schema.Boolean),
-  keepAllFilesOffline: Schema.optionalKey(Schema.Boolean),
 });
 
 export const TrayDroppedItemSchema = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("files"),
     files: Schema.Array(
-      Schema.Struct({ path: Schema.String, name: Schema.String, size: Schema.Number }),
+      Schema.Struct({ sourceId: Schema.String, name: Schema.String, size: Schema.Number }),
     ),
   }),
   Schema.Struct({
@@ -100,14 +84,6 @@ export const TrayDroppedItemSchema = Schema.Union([
 ]);
 
 export type TrayDroppedItem = typeof TrayDroppedItemSchema.Type;
-
-export const TrayAccountStateSchema = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal("loading") }),
-  Schema.Struct({ kind: Schema.Literal("failed") }),
-  Schema.Struct({ kind: Schema.Literal("resolved"), account: AccountStatusSchema }),
-]);
-
-export type TrayAccountState = typeof TrayAccountStateSchema.Type;
 
 const SnippetIngestBaseSchema = {
   id: SnippetIdSchema,
@@ -119,10 +95,15 @@ const SnippetIngestBaseSchema = {
 
 export const SnippetIngestPayloadSchema = Schema.Union([
   Schema.Struct({ ...SnippetIngestBaseSchema, filePath: Schema.String }),
+  Schema.Struct({ ...SnippetIngestBaseSchema, sourceId: Schema.String }),
   Schema.Struct({ ...SnippetIngestBaseSchema, bytes: Schema.Uint8Array }),
 ]);
 
 export type SnippetIngestPayload = typeof SnippetIngestPayloadSchema.Type;
+export type ResolvedSnippetIngestPayload = Exclude<
+  SnippetIngestPayload,
+  { readonly sourceId: string }
+>;
 
 const SnippetIngestResultSchema = Schema.Union([
   Schema.Struct({ status: Schema.Literal("ENQUEUED") }),
@@ -143,7 +124,6 @@ export const DesktopSnippetSchema = Schema.Struct({
   fileName: Schema.String,
   byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   storageProvider: StorageProviderLiteral,
-  storageObjectId: Schema.NullOr(Schema.String),
   uploadStatus: Schema.NullOr(SnippetUploadStatusLiteral),
   createdAt: Schema.String,
   updatedAt: Schema.String,
@@ -154,12 +134,27 @@ export const DesktopSnippetSchema = Schema.Struct({
 
 export type DesktopSnippet = typeof DesktopSnippetSchema.Type;
 
-export const ipcMethods = {
-  authGet: method({
-    channel: "auth:get",
-    payload: Schema.Void,
-    result: AuthStatusSchema,
+export const LocalStateSchema = Schema.Struct({
+  revision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  account: Schema.NullOr(UserSchema),
+  provider: Schema.Struct({
+    known: Schema.Boolean,
+    value: Schema.NullOr(StorageProviderLiteral),
   }),
+  capability: Schema.Union([
+    Schema.Struct({ status: Schema.Literal("OFFLINE") }),
+    Schema.Struct({
+      status: Schema.Literal("ONLINE"),
+      account: AccountStatusSchema,
+      connection: Schema.NullOr(PipeConnectionSchema),
+    }),
+  ]),
+  snippets: Schema.Array(DesktopSnippetSchema),
+});
+
+export type LocalState = typeof LocalStateSchema.Type;
+
+export const ipcMethods = {
   authSignIn: method({
     channel: "auth:sign-in",
     payload: Schema.Void,
@@ -170,15 +165,15 @@ export const ipcMethods = {
     payload: Schema.Void,
     result: Schema.Void,
   }),
+  localStateGet: method({
+    channel: "local-state:get",
+    payload: Schema.Void,
+    result: LocalStateSchema,
+  }),
   openExternal: method({
     channel: "open-external",
     payload: Schema.String,
     result: Schema.Void,
-  }),
-  storageGetStatus: method({
-    channel: "storage:get-status",
-    payload: Schema.Void,
-    result: StorageStatusSnapshotSchema,
   }),
   snippetIngest: method({
     channel: "snippet:ingest",
@@ -220,11 +215,6 @@ export const ipcMethods = {
     payload: SnippetIdSchema,
     result: Schema.Void,
   }),
-  snippetList: method({
-    channel: "snippet:list",
-    payload: Schema.Void,
-    result: Schema.Array(DesktopSnippetSchema),
-  }),
   clipboardRead: method({
     channel: "clipboard:read",
     payload: Schema.Void,
@@ -234,13 +224,8 @@ export const ipcMethods = {
     channel: "tray:select-files",
     payload: Schema.Void,
     result: Schema.Array(
-      Schema.Struct({ path: Schema.String, name: Schema.String, size: Schema.Number }),
+      Schema.Struct({ sourceId: Schema.String, name: Schema.String, size: Schema.Number }),
     ),
-  }),
-  trayGetAccountState: method({
-    channel: "tray:get-account-state",
-    payload: Schema.Void,
-    result: TrayAccountStateSchema,
   }),
   userConfigGet: method({
     channel: "user-config:get",
@@ -260,13 +245,13 @@ export const ipcMethods = {
 } as const;
 
 export const ipcEvents = {
-  authStatusChanged: event({
-    channel: "auth:status-changed",
-    payload: AuthStatusSchema,
-  }),
   authError: event({
     channel: "auth:error",
     payload: AuthErrorSchema,
+  }),
+  localStateChanged: event({
+    channel: "local-state:changed",
+    payload: LocalStateSchema,
   }),
   clipboardPaste: event({
     channel: "clipboard:paste",
@@ -276,16 +261,8 @@ export const ipcEvents = {
     channel: "tray:dropped-item",
     payload: TrayDroppedItemSchema,
   }),
-  trayAccountStateChanged: event({
-    channel: "tray:account-state-changed",
-    payload: TrayAccountStateSchema,
-  }),
   navigate: event({
     channel: "navigation:requested",
     payload: Schema.Literals(["home", "settings"] as const),
-  }),
-  snippetReplicaChanged: event({
-    channel: "snippet:replica-changed",
-    payload: Schema.Array(DesktopSnippetSchema),
   }),
 } as const;

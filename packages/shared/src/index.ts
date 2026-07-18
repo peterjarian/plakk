@@ -31,6 +31,15 @@ export const SnippetUploadStatusLiteral = Schema.Literals(SNIPPET_UPLOAD_STATUSE
 
 export type SnippetUploadStatus = typeof SnippetUploadStatusLiteral.Type;
 
+export const LocalContentAvailabilitySchema = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("AVAILABLE") }),
+  Schema.Struct({ status: Schema.Literal("NOT_AVAILABLE") }),
+  Schema.Struct({ status: Schema.Literal("DOWNLOADING") }),
+  Schema.Struct({ status: Schema.Literal("FAILED"), message: Schema.String }),
+]);
+
+export type LocalContentAvailability = typeof LocalContentAvailabilitySchema.Type;
+
 const formatFileSizeNumber = (value: number) =>
   value >= 100 ? value.toFixed(0) : value.toFixed(1);
 

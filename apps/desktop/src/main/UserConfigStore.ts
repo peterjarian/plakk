@@ -9,7 +9,6 @@ export class UserConfigStoreError extends Data.TaggedError("UserConfigStoreError
 
 const defaultUserConfig: UserConfig = {
   showExternalLinkWarning: true,
-  keepAllFilesOffline: false,
 };
 
 const decodeUserConfig = (input: unknown) =>

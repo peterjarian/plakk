@@ -26,7 +26,7 @@ export function ingestTextSnippet(
 export function ingestFileSnippet(
   storageProvider: StorageProvider,
   file: IngestibleFile,
-  filePath?: string,
+  sourceId?: string,
 ): Promise<SnippetIngestResult> {
   return window.ipc.snippets.ingest({
     id: crypto.randomUUID(),
@@ -34,6 +34,6 @@ export function ingestFileSnippet(
     byteSize: file.size,
     mediaType: file.type || null,
     storageProvider,
-    ...(filePath === undefined ? { file: file as File } : { filePath }),
+    ...(sourceId === undefined ? { file: file as File } : { sourceId }),
   });
 }

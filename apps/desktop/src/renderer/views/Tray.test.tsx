@@ -9,7 +9,6 @@ const state = vi.hoisted(() => {
     fileName: "Alfa Romeo.png",
     byteSize: 61_700,
     storageProvider: "GOOGLE_DRIVE",
-    storageObjectId: "drive-object",
     uploadStatus: "UPLOADED",
     createdAt: "2026-07-11T00:00:00.000Z",
     updatedAt: "2026-07-11T00:00:00.000Z",
@@ -28,6 +27,14 @@ vi.mock("../hooks/useSnippets.ts", () => ({
     isLoading: false,
     items: [state.latest],
     reload: vi.fn(),
+  }),
+}));
+
+vi.mock("../hooks/useStorageStatus.tsx", () => ({
+  useStorageStatus: () => ({
+    kind: "connected",
+    provider: "GOOGLE_DRIVE",
+    canSync: true,
   }),
 }));
 

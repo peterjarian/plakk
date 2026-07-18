@@ -1,19 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import type { DesktopSnippet } from "../../ipc/contracts.ts";
-import {
-  createImageUrlRegistry,
-  initialSnippetSubscriptionState,
-  projectSnippetReadModels,
-  updateSnippetSubscription,
-} from "./useSnippets.ts";
+import { createImageUrlRegistry, projectSnippetReadModels } from "./useSnippets.ts";
 
 const snippet = (input: Partial<DesktopSnippet> = {}): DesktopSnippet => ({
   id: "8c72d6f6-9a25-4633-b72f-d8f83cf1c8e0",
   fileName: "8c72d6f6-9a25-4633-b72f-d8f83cf1c8e0.txt",
   byteSize: 24,
   storageProvider: "GOOGLE_DRIVE",
-  storageObjectId: null,
   uploadStatus: null,
   createdAt: "2026-07-11T00:00:00.000Z",
   updatedAt: "2026-07-11T00:00:00.000Z",
@@ -21,47 +15,6 @@ const snippet = (input: Partial<DesktopSnippet> = {}): DesktopSnippet => ({
   localTextPreview: "A stable local snippet",
   localContentAvailability: { status: "AVAILABLE" },
   ...input,
-});
-
-describe("snippet subscription transitions", () => {
-  it("uses a controlled list error and recovers when a retry succeeds", () => {
-    const loading = updateSnippetSubscription(initialSnippetSubscriptionState, {
-      type: "load-started",
-    });
-    const failed = updateSnippetSubscription(loading, {
-      type: "load-failed",
-      requestRevision: 0,
-    });
-
-    expect(failed).toMatchObject({
-      isLoading: false,
-      error: "Couldn’t load snippets. Try again.",
-    });
-
-    const retrying = updateSnippetSubscription(failed, { type: "load-started" });
-    const recovered = updateSnippetSubscription(retrying, {
-      type: "load-succeeded",
-      items: [snippet()],
-      requestRevision: 0,
-    });
-
-    expect(recovered).toMatchObject({ isLoading: false, error: null, items: [snippet()] });
-  });
-
-  it("never lets a stale initial list result replace a newer change event", () => {
-    const eventSnippet = snippet({ localTextPreview: "From the change event" });
-    const changed = updateSnippetSubscription(initialSnippetSubscriptionState, {
-      type: "changed",
-      items: [eventSnippet],
-    });
-    const staleList = updateSnippetSubscription(changed, {
-      type: "load-succeeded",
-      items: [snippet({ localTextPreview: "From the stale list" })],
-      requestRevision: 0,
-    });
-
-    expect(staleList).toMatchObject({ items: [eventSnippet], error: null });
-  });
 });
 
 describe("snippet read-model projection", () => {
@@ -75,7 +28,6 @@ describe("snippet read-model projection", () => {
     const remoteText = snippet({
       localState: null,
       localTextPreview: null,
-      storageObjectId: "remote-text",
       uploadStatus: "UPLOADED",
       localContentAvailability: { status: "DOWNLOADING" },
     });
@@ -92,7 +44,6 @@ describe("snippet read-model projection", () => {
       fileName: "private-notes.md",
       localState: null,
       localTextPreview: null,
-      storageObjectId: "remote-text",
       uploadStatus: "UPLOADED",
       localContentAvailability: { status: "NOT_AVAILABLE" },
     });
@@ -106,7 +57,6 @@ describe("snippet read-model projection", () => {
   it("projects decoded managed content atomically without a filename intermediate", () => {
     const remoteText = snippet({
       localState: null,
-      storageObjectId: "remote-text",
       uploadStatus: "UPLOADED",
       localTextPreview: "https://plakk.app",
       localContentAvailability: { status: "AVAILABLE" },
@@ -124,7 +74,6 @@ describe("snippet read-model projection", () => {
   it("never uses the generated package name when decoded text has no title", () => {
     const remoteText = snippet({
       localState: null,
-      storageObjectId: "remote-text",
       uploadStatus: "UPLOADED",
       localTextPreview: "   ",
       localContentAvailability: { status: "AVAILABLE" },
@@ -139,7 +88,6 @@ describe("snippet read-model projection", () => {
     const remoteText = snippet({
       localState: null,
       localTextPreview: null,
-      storageObjectId: "remote-text",
       uploadStatus: "UPLOADED",
       localContentAvailability: {
         status: "FAILED",
@@ -157,7 +105,6 @@ describe("snippet read-model projection", () => {
     const remoteText = snippet({
       localState: null,
       localTextPreview: null,
-      storageObjectId: null,
       uploadStatus: "UPLOADING",
       localContentAvailability: { status: "NOT_AVAILABLE" },
     });

@@ -46,6 +46,7 @@ export class SnippetUploadOutbox extends Context.Service<
       entry: SnippetUploadOutboxEntry,
     ): Effect.Effect<void, SnippetUploadOutboxError>;
     remove(accountId: string, snippetId: string): Effect.Effect<void, SnippetUploadOutboxError>;
+    purge(accountId: string): Effect.Effect<void, SnippetUploadOutboxError>;
   }
 >()("plakk/main/SnippetUploadOutbox") {
   static readonly Live = Layer.effect(
@@ -129,8 +130,17 @@ export class SnippetUploadOutbox extends Context.Service<
           }),
         ),
       );
+      const purge = Effect.fn("SnippetUploadOutbox.purge")((accountId: string) =>
+        lock.withPermit(
+          Effect.try({
+            try: () => store.delete(accountId),
+            catch: (cause) =>
+              new SnippetUploadOutboxError({ cause, reason: "Could not purge upload recovery." }),
+          }),
+        ),
+      );
 
-      return SnippetUploadOutbox.of({ get, list, put, remove });
+      return SnippetUploadOutbox.of({ get, list, purge, put, remove });
     }),
   );
 }

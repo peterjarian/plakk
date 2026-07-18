@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 import { Schema } from "effect";
 
-import { AuthStatusSchema, DesktopSnippetSchema } from "./contracts.ts";
+import { DesktopSnippetSchema } from "./contracts.ts";
 
 describe("DesktopSnippetSchema", () => {
-  it("encodes an uploading local text projection synchronously", () => {
+  it("encodes local state containing an active text upload synchronously", () => {
     const encode = Schema.encodeUnknownSync(Schema.Array(DesktopSnippetSchema));
 
     expect(
@@ -14,7 +14,6 @@ describe("DesktopSnippetSchema", () => {
           fileName: "0d1e2f3a-4567-4890-8abc-def012345678.txt",
           byteSize: 4,
           storageProvider: "GOOGLE_DRIVE",
-          storageObjectId: null,
           uploadStatus: "UPLOADING",
           createdAt: "2026-07-16T00:00:00.000Z",
           updatedAt: "2026-07-16T00:00:00.000Z",
@@ -30,14 +29,24 @@ describe("DesktopSnippetSchema", () => {
       ]),
     ).toHaveLength(1);
   });
-});
 
-describe("AuthStatusSchema", () => {
-  it("does not encode bearer tokens across the renderer boundary", () => {
-    const encode = Schema.encodeUnknownSync(AuthStatusSchema);
-    expect(encode({ isAuthenticated: false, user: null, accessToken: "secret" })).toEqual({
-      isAuthenticated: false,
-      user: null,
+  it("strips provider object references from renderer display data", () => {
+    const decode = Schema.decodeUnknownSync(DesktopSnippetSchema);
+
+    const snippet = decode({
+      id: "0d1e2f3a-4567-4890-8abc-def012345678",
+      fileName: "note.txt",
+      byteSize: 4,
+      storageProvider: "GOOGLE_DRIVE",
+      storageObjectId: "provider-private-object",
+      uploadStatus: "UPLOADED",
+      createdAt: "2026-07-16T00:00:00.000Z",
+      updatedAt: "2026-07-16T00:00:00.000Z",
+      localState: null,
+      localTextPreview: "text",
+      localContentAvailability: { status: "AVAILABLE" },
     });
+
+    expect(snippet).not.toHaveProperty("storageObjectId");
   });
 });

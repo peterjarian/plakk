@@ -4,39 +4,34 @@ import { basename, join, resolve, sep } from "node:path";
 import { rm, stat } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { decodeSnippetText, deriveSnippetPresentation, isHttpUrl } from "@plakk/shared";
-import { accountCanSync } from "@plakk/shared/PlakkApi";
-import { SnippetHydrationEngine } from "@plakk/shared/SnippetHydration";
-import { SnippetReplica, runSnippetReplicaSync } from "@plakk/shared/SnippetReplica";
+import { accountCanSyncWithConnection } from "@plakk/shared/PlakkApi";
 import { app, BrowserWindow, dialog, Menu, net, protocol, shell } from "electron";
-import { Effect, Result, Stream } from "effect";
-import * as Fiber from "effect/Fiber";
+import { Effect, PlatformError, Result, Stream } from "effect";
 import type {
-  AuthStatus,
-  DesktopSnippet,
-  TrayAccountState,
+  ClipboardContent,
+  LocalState as LocalStateValue,
   TrayDroppedItem,
 } from "../ipc/contracts.ts";
 import { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
 import { IpcHandlerError, makeHandle, send } from "../ipc/main.ts";
-import {
-  getAccountStatus,
-  getStorageStatus,
-  isUnauthenticatedAccountError,
-} from "./accountStatus.ts";
 import { AuthService, AuthServiceError } from "./auth/AuthService.ts";
 import {
   consumeTemporaryClipboardFile,
   readClipboard,
   writeClipboard,
   writeSnippetToClipboard,
+  type NativeClipboardContent,
 } from "./clipboard.ts";
 import { createTrayWindowController } from "./trayWindow.ts";
 import { isReloadShortcut, reconcileTrayAuth } from "./lifecycle.ts";
 import { UserConfigStore } from "./UserConfigStore.ts";
 import { runEffect, runtime } from "./runtime.ts";
-import { ActiveSnippetAccount, getManagedSnippetBytes, getReplicaItems } from "./snippetReplica.ts";
-import { projectDesktopManagedContent } from "./SnippetProjection.ts";
+import { getManagedSnippetBytes } from "./snippetReplica.ts";
 import { SnippetUploadEngine, snippetUploadFailureMessage } from "./SnippetUploadEngine.ts";
+import { DesktopSession } from "./Services/DesktopSession.ts";
+import { SnippetHydrationEngine } from "./Services/SnippetHydration.ts";
+import { LocalState } from "./Services/LocalState.ts";
+import { NativeFileSources } from "./Services/NativeFileSources.ts";
 
 const handle = makeHandle(runtime);
 
@@ -69,100 +64,143 @@ handle(ipcMethods.openExternal, (url) =>
       }),
 );
 
-handle(ipcMethods.snippetIngest, (payload, event) => {
-  const cleanup = Effect.gen(function* () {
-    if (!("filePath" in payload) || !consumeTemporaryClipboardFile(payload.filePath)) return;
-    yield* Effect.tryPromise(() => rm(payload.filePath, { force: true })).pipe(
-      Effect.catchCause((cause) =>
-        Effect.logWarning("Could not remove a temporary clipboard file", { cause }),
-      ),
-    );
-  });
+const getLocalState = LocalState.use((localState) => localState.current);
 
-  return Effect.gen(function* () {
-    if (
-      trayWindowController?.ownsWebContents(event.sender) === true &&
-      !trayWindowController.isIngestionEnabled()
-    ) {
-      return { status: "FAILED", message: "Adding is paused until the account is ready." } as const;
+handle(ipcMethods.localStateGet, () => getLocalState);
+
+handle(ipcMethods.snippetIngest, (payload, event) =>
+  Effect.gen(function* () {
+    const sources = yield* NativeFileSources;
+    const nativeSource = "sourceId" in payload ? sources.take(payload.sourceId) : undefined;
+    const resolvedPayload =
+      "sourceId" in payload
+        ? nativeSource === undefined
+          ? undefined
+          : {
+              id: payload.id,
+              fileName: payload.fileName,
+              byteSize: payload.byteSize,
+              mediaType: payload.mediaType,
+              storageProvider: payload.storageProvider,
+              filePath: nativeSource.filePath,
+            }
+        : payload;
+    const cleanup = Effect.gen(function* () {
+      const temporaryPath =
+        nativeSource?.temporary === true
+          ? nativeSource.filePath
+          : resolvedPayload !== undefined &&
+              "filePath" in resolvedPayload &&
+              consumeTemporaryClipboardFile(resolvedPayload.filePath)
+            ? resolvedPayload.filePath
+            : undefined;
+      if (temporaryPath === undefined) return;
+      yield* Effect.tryPromise(() => rm(temporaryPath, { force: true })).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("Could not remove a temporary clipboard file", { cause }),
+        ),
+      );
+    });
+    return yield* Effect.gen(function* () {
+      if (resolvedPayload === undefined) {
+        return { status: "FAILED", message: "Choose the file again before adding it." } as const;
+      }
+      if (
+        trayWindowController?.ownsWebContents(event.sender) === true &&
+        !trayWindowController.isIngestionEnabled()
+      ) {
+        return {
+          status: "FAILED",
+          message: "Adding is paused until the account is ready.",
+        } as const;
+      }
+      const account = yield* activeSnippetAccount;
+      if (account === null) {
+        return { status: "FAILED", message: "Sign in before adding snippets." } as const;
+      }
+      const engine = yield* SnippetUploadEngine;
+      return yield* engine.ingest(account.id, resolvedPayload).pipe(
+        Effect.as({ status: "ENQUEUED" } as const),
+        Effect.catch((error) =>
+          Effect.succeed({
+            status: "FAILED",
+            message: snippetUploadFailureMessage(error),
+          } as const),
+        ),
+      );
+    }).pipe(Effect.ensuring(cleanup));
+  }),
+);
+
+handle(ipcMethods.snippetDiscard, (id) =>
+  Effect.gen(function* () {
+    const account = yield* activeSnippetAccount;
+    if (account === null) return;
+    yield* SnippetUploadEngine.use((engine) => engine.discard(account.id, id)).pipe(
+      asIpcFailure("Could not discard this local snippet."),
+    );
+  }),
+);
+
+handle(ipcMethods.snippetCancel, (id) =>
+  Effect.gen(function* () {
+    const account = yield* activeSnippetAccount;
+    if (account === null) return;
+    yield* SnippetUploadEngine.use((engine) => engine.cancel(account, id)).pipe(
+      asIpcFailure("Could not stop this upload."),
+    );
+  }),
+);
+
+handle(ipcMethods.snippetRetry, (id) =>
+  Effect.gen(function* () {
+    const account = yield* activeSnippetAccount;
+    if (account === null) return;
+    yield* SnippetUploadEngine.use((engine) => engine.retry(account, id)).pipe(
+      asIpcFailure("Could not retry this upload."),
+    );
+  }),
+);
+
+handle(ipcMethods.snippetDelete, (id) =>
+  Effect.gen(function* () {
+    const account = yield* activeSnippetAccount;
+    if (account === null) return;
+    yield* SnippetUploadEngine.use((engine) => engine.delete(account, id)).pipe(
+      asIpcFailure("Could not delete this snippet."),
+    );
+  }),
+);
+
+handle(ipcMethods.snippetDownload, (id) =>
+  Effect.gen(function* () {
+    const account = yield* activeSnippetAccount;
+    if (account === null || account.accessToken === null) {
+      return yield* Effect.fail(
+        new IpcHandlerError({
+          cause: null,
+          message: "Reconnect storage before downloading this snippet.",
+        }),
+      );
     }
-    const account = activeSnippetAccount();
-    if (account === null) {
-      return { status: "FAILED", message: "Sign in before adding snippets." } as const;
-    }
-    const engine = yield* SnippetUploadEngine;
-    return yield* engine.ingest(account.id, payload).pipe(
-      Effect.as({ status: "ENQUEUED" } as const),
-      Effect.catch((error) =>
-        Effect.succeed({ status: "FAILED", message: snippetUploadFailureMessage(error) } as const),
-      ),
+    const hydrationAccount = { id: account.id, accessToken: account.accessToken };
+    yield* SnippetHydrationEngine.use((engine) => engine.download(hydrationAccount, id)).pipe(
+      Effect.mapError((cause) => new IpcHandlerError({ cause, message: cause.reason })),
     );
-  }).pipe(Effect.ensuring(cleanup));
-});
+  }),
+);
 
-handle(ipcMethods.snippetDiscard, (id) => {
-  const account = activeSnippetAccount();
-  return account === null
-    ? Effect.void
-    : SnippetUploadEngine.use((engine) => engine.discard(account.id, id)).pipe(
-        asIpcFailure("Could not discard this local snippet."),
-      );
-});
-
-handle(ipcMethods.snippetCancel, (id) => {
-  const account = activeSnippetAccount();
-  return account === null
-    ? Effect.void
-    : SnippetUploadEngine.use((engine) => engine.cancel(account, id)).pipe(
-        asIpcFailure("Could not stop this upload."),
-      );
-});
-
-handle(ipcMethods.snippetRetry, (id) => {
-  const account = activeSnippetAccount();
-  return account === null
-    ? Effect.void
-    : SnippetUploadEngine.use((engine) => engine.retry(account, id)).pipe(
-        asIpcFailure("Could not retry this upload."),
-      );
-});
-
-handle(ipcMethods.snippetDelete, (id) => {
-  const account = activeSnippetAccount();
-  return account === null
-    ? Effect.void
-    : SnippetUploadEngine.use((engine) => engine.delete(account, id)).pipe(
-        asIpcFailure("Could not delete this snippet."),
-      );
-});
-
-handle(ipcMethods.snippetDownload, (id) => {
-  const account = activeSnippetAccount();
-  if (account === null || account.accessToken === null) {
-    return Effect.fail(
-      new IpcHandlerError({
-        cause: null,
-        message: "Reconnect storage before downloading this snippet.",
-      }),
-    );
-  }
-  const hydrationAccount = { id: account.id, accessToken: account.accessToken };
-  return SnippetHydrationEngine.use((engine) => engine.download(hydrationAccount, id)).pipe(
-    Effect.mapError((cause) => new IpcHandlerError({ cause, message: cause.reason })),
-  );
-});
-
-const findSnippet = Effect.fn("DesktopSnippetProjection.find")(function* (id: string) {
-  const account = activeSnippetAccount();
+const findSnippet = Effect.fn("LocalState.findSnippet")(function* (id: string) {
+  const account = yield* activeSnippetAccount;
   if (account === null) {
     return yield* new IpcHandlerError({
       cause: null,
       message: "Sign in to load stored snippets.",
     });
   }
-  const snippets = yield* getProjectedSnippets(account.id).pipe(
-    asIpcFailure("Could not load your snippets."),
-  );
+  const localState = yield* LocalState;
+  const current = yield* localState.current;
+  const snippets = current.account?.id === account.id ? current.snippets : [];
   const snippet = snippets.find((item) => item.id === id);
   if (snippet === undefined) {
     return yield* new IpcHandlerError({ cause: null, message: "Snippet was not found." });
@@ -203,17 +241,19 @@ handle(ipcMethods.snippetRead, (id) =>
   }),
 );
 
-handle(ipcMethods.snippetList, () =>
-  activeSnippetAccountId === undefined
-    ? Effect.succeed([])
-    : getProjectedSnippets(activeSnippetAccountId).pipe(
-        asIpcFailure("Could not load your snippets."),
-      ),
+handle(ipcMethods.clipboardRead, () =>
+  readClipboard().pipe(
+    Effect.flatMap(projectClipboardContent),
+    asIpcFailure("Could not read the clipboard."),
+  ),
 );
 
-handle(ipcMethods.clipboardRead, () =>
-  readClipboard().pipe(asIpcFailure("Could not read the clipboard.")),
-);
+const projectNativeFile = Effect.fn("NativeFileSources.projectFile")(function* (path: string) {
+  const sources = yield* NativeFileSources;
+  const file = yield* Effect.tryPromise(() => stat(path));
+  const sourceId = yield* sources.register(path);
+  return { sourceId, name: basename(path), size: file.size };
+});
 
 handle(ipcMethods.traySelectFiles, (_payload, event) =>
   Effect.gen(function* () {
@@ -230,35 +270,11 @@ handle(ipcMethods.traySelectFiles, (_payload, event) =>
     if (result.canceled) return [];
     return yield* Effect.forEach(
       result.filePaths,
-      (path) =>
-        Effect.tryPromise({
-          try: () => stat(path),
-          catch: (cause) =>
-            new IpcHandlerError({ cause, message: "Could not read the selected file." }),
-        }).pipe(Effect.map((file) => ({ path, name: basename(path), size: file.size }))),
+      (path) => projectNativeFile(path).pipe(asIpcFailure("Could not read the selected file.")),
       { concurrency: "unbounded" },
     );
   }),
 );
-
-type DesktopSessionStatus = {
-  readonly accessToken: string | null;
-  readonly user: AuthStatus["user"];
-};
-
-function authStatus(
-  session: { accessToken: string; user: AuthStatus["user"] } | null,
-): DesktopSessionStatus {
-  return {
-    accessToken: session?.accessToken ?? null,
-    user: session?.user ?? null,
-  };
-}
-
-const rendererAuthStatus = (status: DesktopSessionStatus): AuthStatus => ({
-  isAuthenticated: status.accessToken !== null,
-  user: status.user,
-});
 
 const authFailureMessage = (cause: unknown, fallback: string) =>
   cause instanceof AuthServiceError ? cause.message : fallback;
@@ -272,35 +288,6 @@ const withAuthIpcError = Effect.fn("withAuthIpcError")(function* <A, E, R>(
       (cause) => new IpcHandlerError({ cause, message: authFailureMessage(cause, fallback) }),
     ),
   );
-});
-
-handle(ipcMethods.authGet, () =>
-  withAuthIpcError(
-    AuthService.use((auth) => auth.getSession().pipe(Effect.map(authStatusForSession))),
-    "Could not check session.",
-  ).pipe(
-    Effect.tap((status) => Effect.sync(() => applyAuthStatus(status))),
-    Effect.catchTag("IpcHandlerError", (error) => {
-      const paused = {
-        accessToken: null,
-        user: currentAuthStatus.user,
-      } satisfies DesktopSessionStatus;
-      return Effect.sync(() => applyAuthStatus(paused)).pipe(
-        Effect.andThen(paused.user === null ? Effect.fail(error) : Effect.succeed(paused)),
-      );
-    }),
-    Effect.map(rendererAuthStatus),
-  ),
-);
-
-handle(ipcMethods.storageGetStatus, () => {
-  const accessToken = currentAuthStatus.accessToken;
-  if (accessToken === null) {
-    return Effect.fail(
-      new IpcHandlerError({ cause: "Unauthenticated", message: "Storage status is unavailable." }),
-    );
-  }
-  return getStorageStatus(accessToken).pipe(asIpcFailure("Storage status is unavailable."));
 });
 
 handle(ipcMethods.authSignIn, () =>
@@ -327,26 +314,9 @@ handle(ipcMethods.authSignIn, () =>
 );
 
 handle(ipcMethods.authSignOut, () =>
-  Effect.gen(function* () {
-    yield* withAuthIpcError(
-      AuthService.use((auth) => auth.signOut()),
-      "Could not sign out.",
-    );
-    if (snippetAccountPersistenceFiber !== undefined) {
-      yield* Fiber.interrupt(snippetAccountPersistenceFiber);
-      snippetAccountPersistenceFiber = undefined;
-    }
-    yield* ActiveSnippetAccount.use((account) => account.set(null)).pipe(
-      asIpcFailure("Could not clear the local account."),
-    );
-    activeSnippetAccountId = undefined;
-    const status = authStatus(null);
-    yield* Effect.sync(() => {
-      applyAuthStatus(status);
-      broadcastSnippetReplica([]);
-      broadcastAuthStatus(status);
-    });
-  }),
+  DesktopSession.use((session) => session.signOut).pipe(
+    Effect.mapError((cause) => new IpcHandlerError({ cause, message: cause.reason })),
+  ),
 );
 
 handle(ipcMethods.userConfigGet, () =>
@@ -355,28 +325,14 @@ handle(ipcMethods.userConfigGet, () =>
   ),
 );
 
-const applyOfflineContentPreference = Effect.fn("DesktopSettings.applyOfflineContentPreference")(
-  function* (keepAllFilesOffline: boolean) {
-    yield* SnippetHydrationEngine.use((engine) =>
-      engine.updateSettings({ keepAllFilesOffline }),
-    ).pipe(
-      Effect.catchCause((cause) =>
-        Effect.logWarning("Could not apply offline content preference", { cause }),
-      ),
-    );
-  },
-);
-
 handle(ipcMethods.userConfigSet, (patch) =>
   UserConfigStore.use((store) => store.set(patch)).pipe(
-    Effect.tap((config) => applyOfflineContentPreference(config.keepAllFilesOffline)),
     asIpcFailure("Could not save desktop preferences."),
   ),
 );
 
 handle(ipcMethods.userConfigReset, () =>
   UserConfigStore.use((store) => store.reset).pipe(
-    Effect.tap((config) => applyOfflineContentPreference(config.keepAllFilesOffline)),
     asIpcFailure("Could not reset desktop preferences."),
   ),
 );
@@ -386,173 +342,6 @@ type RendererView = "home" | "settings" | "tray" | "welcome";
 let mainWindow: BrowserWindow | undefined;
 let trayWindowController: ReturnType<typeof createTrayWindowController> | undefined;
 let isQuitting = false;
-let currentAuthStatus = authStatus(null);
-let currentTrayAccountState: TrayAccountState = { kind: "loading" };
-let trayRefreshGeneration = 0;
-let activeSnippetAccountId: string | undefined;
-let snippetSyncFiber: Fiber.Fiber<void, unknown> | undefined;
-let snippetAccountPersistenceFiber: Fiber.Fiber<void, unknown> | undefined;
-let accountRecoveryTimer: ReturnType<typeof setTimeout> | undefined;
-
-handle(ipcMethods.trayGetAccountState, (_payload, event) =>
-  Effect.succeed(
-    trayWindowController?.ownsWebContents(event.sender) === true
-      ? currentTrayAccountState
-      : ({ kind: "failed" } satisfies TrayAccountState),
-  ),
-);
-
-function sendTrayAccountState(state: TrayAccountState) {
-  currentTrayAccountState = state;
-  const window = BrowserWindow.getAllWindows().find((candidate) =>
-    trayWindowController?.ownsWebContents(candidate.webContents),
-  );
-  if (window !== undefined) send(window.webContents, ipcEvents.trayAccountStateChanged, state);
-}
-
-function applyAuthStatus(status: DesktopSessionStatus) {
-  const changed =
-    currentAuthStatus.accessToken !== status.accessToken ||
-    currentAuthStatus.user?.id !== status.user?.id;
-  currentAuthStatus = status;
-  if (status.user !== null) {
-    activeSnippetAccountId = status.user.id;
-    if (status.accessToken !== null) {
-      if (snippetAccountPersistenceFiber !== undefined)
-        runtime.runFork(Fiber.interrupt(snippetAccountPersistenceFiber));
-      snippetAccountPersistenceFiber = runtime.runFork(
-        ActiveSnippetAccount.use((account) => account.set(status.user)).pipe(
-          Effect.catch((error) =>
-            Effect.logWarning("Could not remember the active snippet account", { error }),
-          ),
-        ),
-      );
-    }
-  }
-  if (changed) {
-    if (accountRecoveryTimer !== undefined) clearTimeout(accountRecoveryTimer);
-    accountRecoveryTimer = undefined;
-    trayRefreshGeneration += 1;
-    if (snippetSyncFiber !== undefined) runtime.runFork(Fiber.interrupt(snippetSyncFiber));
-    runtime.runFork(SnippetUploadEngine.use((engine) => engine.pause));
-    runtime.runFork(SnippetHydrationEngine.use((engine) => engine.pause));
-    snippetSyncFiber =
-      status.user === null || status.accessToken === null
-        ? undefined
-        : runtime.runFork(
-            runSnippetReplicaSync({ id: status.user.id, accessToken: status.accessToken }),
-          );
-  }
-  reconcileTrayAuth(status, trayWindowController);
-  if (status.user === null) {
-    sendTrayAccountState({ kind: "loading" });
-  } else if (status.accessToken === null) {
-    trayWindowController?.setAccountState(true, false);
-    sendTrayAccountState({ kind: "failed" });
-  } else if (changed) {
-    void refreshTrayAccountState();
-  }
-}
-
-function scheduleAccountRecovery(): void {
-  if (accountRecoveryTimer !== undefined) return;
-  accountRecoveryTimer = setTimeout(() => {
-    accountRecoveryTimer = undefined;
-    void refreshTrayAccountState();
-  }, 30_000);
-}
-
-async function refreshTrayAccountState() {
-  const status = currentAuthStatus;
-  if (status.accessToken === null || status.user === null || trayWindowController === undefined)
-    return;
-  const accessToken = status.accessToken;
-  const user = status.user;
-
-  const generation = ++trayRefreshGeneration;
-  trayWindowController.setAccountState(false, false);
-  sendTrayAccountState({ kind: "loading" });
-
-  const result = await runEffect(Effect.result(Effect.scoped(getAccountStatus(accessToken))));
-  if (generation !== trayRefreshGeneration || currentAuthStatus.accessToken !== accessToken) return;
-
-  if (Result.isSuccess(result)) {
-    const account = result.success;
-    if (accountCanSync(account)) {
-      if (accountRecoveryTimer !== undefined) clearTimeout(accountRecoveryTimer);
-      accountRecoveryTimer = undefined;
-    } else {
-      scheduleAccountRecovery();
-    }
-    trayWindowController.setAccountState(true, accountCanSync(account));
-    sendTrayAccountState({ kind: "resolved", account });
-    const resumeBackgroundWork = accountCanSync(account)
-      ? Effect.gen(function* () {
-          yield* SnippetUploadEngine.use((engine) =>
-            engine
-              .resume({ id: user.id, accessToken })
-              .pipe(
-                Effect.catchCause((cause) =>
-                  Effect.logError("Could not resume queued uploads", { cause }).pipe(
-                    Effect.andThen(
-                      Effect.sync(() => broadcastAuthError("Could not resume queued uploads.")),
-                    ),
-                  ),
-                ),
-              ),
-          );
-          const config = yield* UserConfigStore.use((store) => store.get);
-          yield* SnippetHydrationEngine.use((engine) =>
-            engine
-              .resume(
-                { id: user.id, accessToken },
-                { keepAllFilesOffline: config.keepAllFilesOffline },
-              )
-              .pipe(
-                Effect.catchCause((cause) =>
-                  Effect.logError("Could not resume offline snippet downloads", { cause }).pipe(
-                    Effect.andThen(
-                      Effect.sync(() =>
-                        broadcastAuthError("Could not resume offline snippet downloads."),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-          );
-        })
-      : Effect.all(
-          [
-            SnippetUploadEngine.use((engine) => engine.pause),
-            SnippetHydrationEngine.use((engine) => engine.pause),
-          ],
-          { discard: true },
-        );
-    void runEffect(
-      resumeBackgroundWork.pipe(
-        Effect.catchCause((cause) =>
-          Effect.logError("Could not resume background snippet work", { cause }).pipe(
-            Effect.andThen(
-              Effect.sync(() => broadcastAuthError("Could not resume background snippet work.")),
-            ),
-          ),
-        ),
-      ),
-    );
-    return;
-  }
-
-  if (isUnauthenticatedAccountError(result.failure)) {
-    const paused = { accessToken: null, user: status.user } satisfies DesktopSessionStatus;
-    applyAuthStatus(paused);
-    broadcastAuthStatus(paused);
-    return;
-  }
-
-  trayWindowController.setAccountState(true, false);
-  sendTrayAccountState({ kind: "failed" });
-  scheduleAccountRecovery();
-}
 
 app.setName(app.isPackaged ? "Plakk" : "Plakk (Dev)");
 
@@ -674,6 +463,7 @@ const createWindow = (view?: RendererView): void => {
   mainWindow.once("closed", () => {
     mainWindow = undefined;
   });
+  mainWindow.on("focus", () => runtime.runFork(DesktopSession.use((session) => session.refresh)));
 
   guardExternalWindows(mainWindow);
 
@@ -708,79 +498,20 @@ function registerAuthCallbackProtocol(callbackUrl: string): void {
   }
 }
 
-function broadcastAuthStatus(status: DesktopSessionStatus): void {
+function broadcastLocalState(localState: LocalStateValue): void {
+  const canSync =
+    localState.capability.status === "ONLINE" &&
+    accountCanSyncWithConnection(localState.capability.account, localState.capability.connection);
+  reconcileTrayAuth({ user: localState.account }, trayWindowController);
+  trayWindowController?.setAccountState(localState.account !== null, canSync);
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed()) {
-      send(window.webContents, ipcEvents.authStatusChanged, rendererAuthStatus(status));
+      send(window.webContents, ipcEvents.localStateChanged, localState);
     }
   }
 }
 
-const getProjectedSnippets = Effect.fn("DesktopSnippetProjection.list")(function* (
-  accountId: string,
-) {
-  const replicaItems = yield* getReplicaItems(accountId);
-  const engine = yield* SnippetUploadEngine;
-  yield* engine.reconcile(accountId, replicaItems);
-  const items = yield* engine.project(accountId, replicaItems);
-  const hydration = yield* SnippetHydrationEngine;
-  const reconciledAvailability = yield* hydration.reconcile(accountId);
-  return yield* Effect.forEach(items, (item) => {
-    const reconciled = reconciledAvailability.get(item.id);
-    const availability =
-      reconciled === undefined
-        ? hydration.state(accountId, item.id, item.byteSize)
-        : Effect.succeed(reconciled);
-    return availability.pipe(
-      Effect.flatMap((hydrationState) =>
-        projectDesktopManagedContent(accountId, item, hydrationState),
-      ),
-      Effect.catch((error) =>
-        projectDesktopManagedContent(accountId, item, {
-          status: "FAILED",
-          message: error.reason,
-        }),
-      ),
-    );
-  });
-});
-
-function broadcastSnippetReplica(items: ReadonlyArray<DesktopSnippet>): void {
-  for (const window of BrowserWindow.getAllWindows()) {
-    if (!window.isDestroyed()) send(window.webContents, ipcEvents.snippetReplicaChanged, items);
-  }
-}
-
-const refreshSnippetProjection = Effect.fn("DesktopSnippetProjection.refresh")(function* (
-  accountId: string,
-) {
-  const items = yield* getProjectedSnippets(accountId);
-  yield* Effect.sync(() => {
-    if (accountId === activeSnippetAccountId) broadcastSnippetReplica(items);
-  });
-});
-
-function authStatusForSession(
-  session: { accessToken: string; user: AuthStatus["user"] } | null,
-): DesktopSessionStatus {
-  if (session !== null) return authStatus(session);
-  return activeSnippetAccountId !== undefined &&
-    currentAuthStatus.user?.id === activeSnippetAccountId
-    ? { accessToken: null, user: currentAuthStatus.user }
-    : authStatus(null);
-}
-
-function activeSnippetAccount(): {
-  readonly id: string;
-  readonly accessToken: string | null;
-} | null {
-  if (activeSnippetAccountId === undefined) return null;
-  return {
-    id: activeSnippetAccountId,
-    accessToken:
-      currentAuthStatus.user?.id === activeSnippetAccountId ? currentAuthStatus.accessToken : null,
-  };
-}
+const activeSnippetAccount = DesktopSession.use((session) => session.currentAccount);
 
 function broadcastAuthError(message: string): void {
   for (const window of BrowserWindow.getAllWindows()) {
@@ -797,6 +528,31 @@ function broadcastTrayDroppedItem(item: TrayDroppedItem): void {
       send(window.webContents, ipcEvents.trayDroppedItem, item);
 }
 
+const projectClipboardContent = Effect.fn("NativeFileSources.projectClipboardContent")(function* (
+  content: NativeClipboardContent,
+): Effect.fn.Return<ClipboardContent, PlatformError.PlatformError, NativeFileSources> {
+  const sources = yield* NativeFileSources;
+  if (content.type === "image") {
+    return {
+      type: "image",
+      dataUrl: content.dataUrl,
+      sourceId: yield* sources.register(content.path, { temporary: true }),
+      width: content.width,
+      height: content.height,
+    };
+  }
+  if (content.type === "file") {
+    return {
+      type: "file",
+      name: content.name,
+      sourceId: yield* sources.register(content.path),
+      extension: content.extension,
+      ...(content.size === undefined ? {} : { size: content.size }),
+    };
+  }
+  return content;
+});
+
 async function handleAuthUrls(values: readonly string[]): Promise<boolean> {
   for (const rawUrl of values) {
     pendingOpenUrls.add(rawUrl);
@@ -810,11 +566,7 @@ async function handleAuthUrls(values: readonly string[]): Promise<boolean> {
 
     const result = await runEffect(
       Effect.result(
-        AuthService.use((auth) =>
-          auth
-            .handleCallbackUrl(rawUrl)
-            .pipe(Effect.map((user) => (user === null ? null : authStatus(user)))),
-        ),
+        DesktopSession.use((desktopSession) => desktopSession.handleCallbackUrl(rawUrl)),
       ),
     );
 
@@ -825,11 +577,9 @@ async function handleAuthUrls(values: readonly string[]): Promise<boolean> {
       continue;
     }
 
-    const status = result.success;
-    if (status !== null) {
+    const session = result.success;
+    if (session !== null) {
       handled = true;
-      applyAuthStatus(status);
-      broadcastAuthStatus(status);
       revealMainWindow();
     }
   }
@@ -847,9 +597,10 @@ function pasteIntoFocusedWindow(): void {
     return;
 
   void runEffect(readClipboard()).then((content) => {
-    if (content.type !== "empty" && !window.isDestroyed()) {
-      send(window.webContents, ipcEvents.clipboardPaste, content);
-    }
+    if (content.type === "empty" || window.isDestroyed()) return;
+    void runEffect(projectClipboardContent(content)).then((projected) => {
+      if (!window.isDestroyed()) send(window.webContents, ipcEvents.clipboardPaste, projected);
+    });
   });
 }
 
@@ -872,39 +623,19 @@ if (!hasSingleInstanceLock) {
   void app.whenReady().then(async () => {
     registerRendererProtocol();
 
-    const storedAccount = await runEffect(
-      ActiveSnippetAccount.use((account) => account.get).pipe(
-        Effect.catch((error) =>
-          Effect.logWarning("Could not restore the active snippet account", { error }).pipe(
-            Effect.as(null),
-          ),
+    runtime.runFork(
+      LocalState.use((localState) =>
+        localState.changes.pipe(
+          Stream.runForEach((value) => Effect.sync(() => broadcastLocalState(value))),
         ),
       ),
     );
-    if (storedAccount !== null) {
-      applyAuthStatus({ accessToken: null, user: storedAccount });
-    }
-
     runtime.runFork(
-      Effect.gen(function* () {
-        const replica = yield* SnippetReplica;
-        const uploads = yield* SnippetUploadEngine;
-        const hydration = yield* SnippetHydrationEngine;
-        const refresh = (accountId: string) =>
-          refreshSnippetProjection(accountId).pipe(
-            Effect.catchCause((cause) =>
-              Effect.logError("Could not refresh the desktop snippet projection", { cause }),
-            ),
-          );
-        yield* Effect.all(
-          [
-            replica.changes.pipe(Stream.runForEach(({ accountId }) => refresh(accountId))),
-            uploads.changes.pipe(Stream.runForEach(refresh)),
-            hydration.changes.pipe(Stream.runForEach(refresh)),
-          ],
-          { concurrency: "unbounded", discard: true },
-        );
-      }),
+      DesktopSession.use((session) =>
+        session.issues.pipe(
+          Stream.runForEach((message) => Effect.sync(() => broadcastAuthError(message))),
+        ),
+      ),
     );
 
     Menu.setApplicationMenu(
@@ -941,16 +672,13 @@ if (!hasSingleInstanceLock) {
     trayWindowController = createTrayWindowController({
       guardExternalWindows,
       loadTrayRenderer: (window) => loadRenderer(window, "tray"),
-      onAccountRefreshRequested: () => void refreshTrayAccountState(),
-      onRendererLoaded: () => void refreshTrayAccountState(),
+      onAccountRefreshRequested: () =>
+        runtime.runFork(DesktopSession.use((session) => session.refresh)),
+      onRendererLoaded: () => runtime.runFork(DesktopSession.use((session) => session.refresh)),
       onDropFiles: ({ files }) => {
-        void Promise.all(
-          files.map(async (path) => ({
-            path,
-            name: basename(path),
-            size: (await stat(path)).size,
-          })),
-        ).then((files) => broadcastTrayDroppedItem({ type: "files", files }));
+        void runEffect(Effect.forEach(files, projectNativeFile, { concurrency: "unbounded" })).then(
+          (files) => broadcastTrayDroppedItem({ type: "files", files }),
+        );
       },
       onDropText: ({ text }) => {
         if (text.trim()) broadcastTrayDroppedItem({ type: "text", text });
@@ -958,14 +686,14 @@ if (!hasSingleInstanceLock) {
       preloadPath: join(__dirname, "../preload/index.cjs"),
     });
     createWindow();
-    void runEffect(
-      AuthService.use((auth) => auth.getSession().pipe(Effect.map(authStatusForSession))).pipe(
-        Effect.match({
-          onFailure: () => applyAuthStatus({ accessToken: null, user: currentAuthStatus.user }),
-          onSuccess: applyAuthStatus,
-        }),
+    runtime.runFork(
+      LocalState.use((localState) =>
+        localState.current.pipe(
+          Effect.tap((value) => Effect.sync(() => broadcastLocalState(value))),
+        ),
       ),
     );
+    runtime.runFork(DesktopSession.use((session) => session.start));
     void handleAuthUrls(process.argv);
 
     app.on("activate", () => {

@@ -45,6 +45,11 @@ export const PipeConnectionSchema = Schema.Union([
 
 export type PipeConnection = typeof PipeConnectionSchema.Type;
 
+export const accountCanSyncWithConnection = (
+  account: AccountStatus,
+  connection: PipeConnection | null,
+): boolean => accountCanSync(account) && connection?.status === "CONNECTED";
+
 export const PreparedStorageUploadSchema = Schema.Struct({
   storageProvider: StorageProviderLiteral,
   storageObjectId: Schema.NullOr(Schema.String),

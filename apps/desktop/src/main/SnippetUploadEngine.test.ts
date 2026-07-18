@@ -78,10 +78,6 @@ const harness = (options?: {
   const outbox = new Map<string, Array<SnippetUploadOutboxEntry>>();
   const content = new Map<string, Uint8Array>();
   let replicaState: SnippetReplicaState | null = null;
-  const pendingReplicaDeletes = new Map<
-    string,
-    { remoteConfirmed: boolean; cleanupComplete: boolean }
-  >();
   const calls = {
     create: 0,
     prepare: 0,
@@ -109,39 +105,13 @@ const harness = (options?: {
       SnippetReplica,
       SnippetReplica.of({
         changes: Stream.empty,
-        get: () =>
-          Effect.sync(() =>
-            replicaState === null
-              ? null
-              : {
-                  ...replicaState,
-                  items: replicaState.items.filter(
-                    (snippet) => !pendingReplicaDeletes.has(snippet.id),
-                  ),
-                },
-          ),
+        get: () => Effect.sync(() => replicaState),
         commit: (_accountId, state) =>
           Effect.sync(() => {
-            const incomingIds = new Set(state.items.map((snippet) => snippet.id));
-            replicaState = {
-              ...state,
-              items: state.items.filter((snippet) => !pendingReplicaDeletes.has(snippet.id)),
-            };
-            for (const [snippetId, deletion] of pendingReplicaDeletes) {
-              if (!incomingIds.has(snippetId)) deletion.remoteConfirmed = true;
-              if (deletion.remoteConfirmed && deletion.cleanupComplete) {
-                pendingReplicaDeletes.delete(snippetId);
-              }
-            }
+            replicaState = state;
           }),
         remove: (_accountId, snippetId) =>
           Effect.sync(() => {
-            if (!pendingReplicaDeletes.has(snippetId)) {
-              pendingReplicaDeletes.set(snippetId, {
-                remoteConfirmed: false,
-                cleanupComplete: false,
-              });
-            }
             if (replicaState !== null) {
               replicaState = {
                 ...replicaState,
@@ -149,14 +119,7 @@ const harness = (options?: {
               };
             }
           }),
-        pendingDeleteIds: () => Effect.sync(() => [...pendingReplicaDeletes.keys()]),
-        completeDeleteCleanup: (_accountId, snippetId) =>
-          Effect.sync(() => {
-            const deletion = pendingReplicaDeletes.get(snippetId);
-            if (deletion === undefined) return;
-            deletion.cleanupComplete = true;
-            if (deletion.remoteConfirmed) pendingReplicaDeletes.delete(snippetId);
-          }),
+        purge: () => Effect.void,
       }),
     ),
     Layer.succeed(
@@ -218,6 +181,7 @@ const harness = (options?: {
           Effect.sync(() => {
             for (const id of ids) content.delete(key(accountId, id));
           }),
+        purge: () => Effect.void,
       }),
     ),
     Layer.succeed(
@@ -249,6 +213,10 @@ const harness = (options?: {
               accountId,
               accountEntries(accountId).filter((entry) => entry.id !== id),
             );
+          }),
+        purge: (accountId) =>
+          Effect.sync(() => {
+            outbox.delete(accountId);
           }),
       }),
     ),
@@ -544,7 +512,7 @@ describe("SnippetUploadEngine", () => {
     expect(test.calls.fail).toBe(0);
   });
 
-  it("leaves managed-content availability to the desktop projection owner", async () => {
+  it("leaves managed-content availability to the local state owner", async () => {
     const test = harness();
     const fileId = "1d1e2f3a-4567-4890-8abc-def012345679";
     test.content.set(`${account.id}/${fileId}`, new Uint8Array([1, 2, 3]));
@@ -843,7 +811,7 @@ describe("SnippetUploadEngine", () => {
     });
   });
 
-  it("keeps a server-deleted snippet hidden when local cleanup fails", async () => {
+  it("leaves tombstone cleanup to authoritative sync after local cleanup fails", async () => {
     const test = harness({ discardFailures: 1 });
     const replica = apiSnippet("UPLOADED");
     test.content.set(`${account.id}/${snippetId}`, bytes);
@@ -856,15 +824,13 @@ describe("SnippetUploadEngine", () => {
     const afterRestart = await test.run(
       SnippetUploadEngine.use((engine) => engine.project(account.id, [replica])),
     );
-    expect(afterRestart).toEqual([]);
-    await test.run(SnippetUploadEngine.use((engine) => engine.reconcile(account.id, [replica])));
-
+    expect(afterRestart).toHaveLength(1);
     expect(test.calls.delete).toBe(1);
-    expect(test.calls.discard).toBe(2);
-    expect(test.content.has(`${account.id}/${snippetId}`)).toBe(false);
+    expect(test.calls.discard).toBe(1);
+    expect(test.content.has(`${account.id}/${snippetId}`)).toBe(true);
   });
 
-  it("suppresses and retries a surviving outbox entry after restart", async () => {
+  it("does not delete remotely until its upload outbox entry is removed", async () => {
     const test = harness({ outboxRemoveFailures: 1 });
     const replica = apiSnippet("UPLOADED");
     test.replica.set([replica]);
@@ -892,17 +858,18 @@ describe("SnippetUploadEngine", () => {
     );
     expect(deleted._tag).toBe("Failure");
     expect(test.outbox.get(account.id)).toHaveLength(1);
+    expect(test.calls.delete).toBe(0);
 
     const afterRestart = await test.run(
       SnippetUploadEngine.use((engine) => engine.project(account.id, test.replica.items())),
     );
-    expect(afterRestart).toEqual([]);
+    expect(afterRestart).toHaveLength(1);
+    expect(afterRestart[0]?.localState?.phase).toBe("FAILED");
 
-    await test.run(
-      SnippetUploadEngine.use((engine) => engine.reconcile(account.id, test.replica.items())),
-    );
+    await test.run(SnippetUploadEngine.use((engine) => engine.delete(account, snippetId)));
     expect(test.outbox.get(account.id)).toEqual([]);
     expect(test.content.has(`${account.id}/${snippetId}`)).toBe(false);
+    expect(test.calls.delete).toBe(1);
   });
 
   it("deletes never-started queued work locally while offline", async () => {

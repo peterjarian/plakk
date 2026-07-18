@@ -1,6 +1,6 @@
 import { formatFileSize, type SnippetPresentation } from "@plakk/shared";
 import type { ApiSnippet } from "@plakk/shared/PlakkApi";
-import type { LocalContentAvailability } from "@plakk/shared/SnippetHydration";
+import type { LocalContentAvailability } from "@plakk/shared";
 import * as DateTime from "effect/DateTime";
 import {
   ArrowUpRight,
@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { Button } from "./primitives/button.tsx";
 
-export type SnippetRowItem = Omit<ApiSnippet, "uploadStatus"> & {
+export type SnippetRowItem = Omit<ApiSnippet, "storageObjectId" | "uploadStatus"> & {
   readonly uploadStatus: ApiSnippet["uploadStatus"] | null;
   readonly localState: null | {
     readonly phase: "IMPORTING" | "QUEUED" | "UPLOADING" | "FAILED";

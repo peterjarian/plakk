@@ -1,11 +1,11 @@
 import type { ApiSnippet } from "@plakk/shared/PlakkApi";
-import { SnippetHydrationTransport } from "@plakk/shared/SnippetHydration";
+import { SnippetHydrationTransport } from "./Services/SnippetHydration.ts";
 import { RpcError } from "@plakk/shared/RpcError";
 import { Effect, Fiber, Layer, Stream } from "effect";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { PlakkRpcClient } from "./PlakkRpcClient.ts";
-import { snippetHydrationTransportLayer } from "./SnippetHydrationTransport.ts";
+import { snippetHydrationTransportLayer } from "./Layers/SnippetHydrationTransport.ts";
 
 const snippet: ApiSnippet = {
   id: "0d1e2f3a-4567-4890-8abc-def012345678",

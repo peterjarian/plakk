@@ -52,7 +52,7 @@ describe("desktop snippet ingestion commands", () => {
     );
   });
 
-  it("ingests a file path with generated identity and file metadata", async () => {
+  it("ingests an opaque native source with generated identity and file metadata", async () => {
     randomUUID.mockReturnValue("2dfde965-60b3-46a6-8bc0-c871221c8f25");
 
     await expect(
@@ -70,7 +70,7 @@ describe("desktop snippet ingestion commands", () => {
       byteSize: 42_000,
       mediaType: "application/pdf",
       storageProvider: "ONE_DRIVE",
-      filePath: "/tmp/report.pdf",
+      sourceId: "/tmp/report.pdf",
     });
   });
 

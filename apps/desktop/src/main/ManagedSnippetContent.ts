@@ -3,10 +3,13 @@ import { Context, Effect, FileSystem, Layer, Option, PlatformError, Stream } fro
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 
-import type { SnippetIngestPayload } from "../ipc/contracts.ts";
+import type { ResolvedSnippetIngestPayload } from "../ipc/contracts.ts";
 
 const contentDirectory = (root: string, accountId: string, snippetId: string) =>
-  join(root, Buffer.from(accountId).toString("base64url"), snippetId);
+  join(accountContentDirectory(root, accountId), snippetId);
+
+const accountContentDirectory = (root: string, accountId: string) =>
+  join(root, Buffer.from(accountId).toString("base64url"));
 
 export const managedSnippetContentPath = (root: string, accountId: string, snippetId: string) =>
   join(contentDirectory(root, accountId, snippetId), "content");
@@ -101,7 +104,7 @@ export class DesktopManagedSnippetContent extends Context.Service<
   {
     ingest(
       accountId: string,
-      input: SnippetIngestPayload,
+      input: ResolvedSnippetIngestPayload,
     ): Effect.Effect<string, ManagedSnippetContentError>;
     path(
       accountId: string,
@@ -137,6 +140,7 @@ export class DesktopManagedSnippetContent extends Context.Service<
       accountId: string,
       snippetIds: ReadonlyArray<string>,
     ): Effect.Effect<void, ManagedSnippetContentError>;
+    purge(accountId: string): Effect.Effect<void, ManagedSnippetContentError>;
   }
 >()("plakk/main/DesktopManagedSnippetContent") {
   static layer(root: string) {
@@ -272,7 +276,7 @@ export class DesktopManagedSnippetContent extends Context.Service<
 
         const ingest = Effect.fn("DesktopManagedSnippetContent.ingest")(function* (
           accountId: string,
-          input: SnippetIngestPayload,
+          input: ResolvedSnippetIngestPayload,
         ) {
           return yield* ingestSource(
             accountId,
@@ -498,6 +502,28 @@ export class DesktopManagedSnippetContent extends Context.Service<
           });
         });
 
+        const purge = Effect.fn("DesktopManagedSnippetContent.purge")(function* (
+          accountId: string,
+        ) {
+          const directory = accountContentDirectory(root, accountId);
+          for (const path of verifiedIntegrity.keys()) {
+            if (path.startsWith(`${directory}/`)) verifiedIntegrity.delete(path);
+          }
+          for (const path of textValidity.keys()) {
+            if (path.startsWith(`${directory}/`)) textValidity.delete(path);
+          }
+          yield* fileSystem.remove(directory, { force: true, recursive: true }).pipe(
+            Effect.mapError(
+              (cause) =>
+                new ManagedSnippetContentError({
+                  cause,
+                  reason: "Could not purge managed account content.",
+                  retryable: true,
+                }),
+            ),
+          );
+        });
+
         return DesktopManagedSnippetContent.of({
           available,
           discard,
@@ -506,6 +532,7 @@ export class DesktopManagedSnippetContent extends Context.Service<
           ingest,
           invalidate,
           path,
+          purge,
           putStream,
           validateText,
         });

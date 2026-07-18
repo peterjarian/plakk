@@ -6,6 +6,7 @@ import type { ApiSnippet, SnippetChangePage } from "./api/PlakkApi.ts";
 import { RpcError } from "./api/RpcError.ts";
 import {
   ManagedSnippetContent,
+  ManagedSnippetContentError,
   SnippetRemoteTransport,
   SnippetReplica,
   SnippetReplicaError,
@@ -32,10 +33,12 @@ const harness = (options: {
   pages?: ReadonlyArray<SnippetChangePage>;
   snapshot?: SnippetReplicaState;
   failCommitOnce?: boolean;
+  failInvalidateOnce?: boolean;
   wakes?: Stream.Stream<void, RpcError>;
 }) => {
   let state = options.initial ?? null;
   let failed = false;
+  let invalidationFailed = false;
   let pulls = 0;
   let connections = 0;
   const invalidated: Array<ReadonlyArray<string>> = [];
@@ -66,8 +69,7 @@ const harness = (options: {
               state = { ...state, items: state.items.filter((item) => item.id !== snippetId) };
             }
           }),
-        pendingDeleteIds: () => Effect.succeed([]),
-        completeDeleteCleanup: () => Effect.void,
+        purge: () => Effect.void,
       }),
     ),
     Layer.succeed(
@@ -77,9 +79,20 @@ const harness = (options: {
         putStream: () => Effect.void,
         available: () => Effect.succeed(false),
         invalidate: (_accountId, ids) =>
-          Effect.sync(() => {
+          Effect.suspend(() => {
             invalidated.push(ids);
             statesAtInvalidation.push(state);
+            if (options.failInvalidateOnce === true && !invalidationFailed) {
+              invalidationFailed = true;
+              return Effect.fail(
+                new ManagedSnippetContentError({
+                  cause: null,
+                  reason: "simulated cleanup crash",
+                  retryable: true,
+                }),
+              );
+            }
+            return Effect.void;
           }),
       }),
     ),
@@ -147,7 +160,7 @@ describe("snippet replica synchronization", () => {
 
     expect(test.state()).toEqual({ cursor: "next", items: [] });
     expect(test.invalidated).toEqual([[snippet.id]]);
-    expect(test.statesAtInvalidation).toEqual([{ cursor: "next", items: [] }]);
+    expect(test.statesAtInvalidation).toEqual([{ cursor: "old", items: [snippet] }]);
   });
 
   it("re-pulls the same page after a crash before the cursor commit", async () => {
@@ -169,6 +182,27 @@ describe("snippet replica synchronization", () => {
 
     await Effect.runPromise(syncSnippetReplica(account).pipe(Effect.provide(test.layer)));
     expect(test.state()).toEqual({ cursor: "next", items: [snippet] });
+  });
+
+  it("does not advance a tombstone cursor until managed content cleanup succeeds", async () => {
+    const page = {
+      status: "OK",
+      changes: [{ type: "DELETE", snippetId: snippet.id }],
+      nextCursor: "next",
+    } as const;
+    const test = harness({
+      initial: { cursor: "old", items: [snippet] },
+      pages: [page, page],
+      failInvalidateOnce: true,
+    });
+
+    await expect(
+      Effect.runPromise(syncSnippetReplica(account).pipe(Effect.provide(test.layer))),
+    ).rejects.toMatchObject({ _tag: "ManagedSnippetContentError" });
+    expect(test.state()).toEqual({ cursor: "old", items: [snippet] });
+
+    await Effect.runPromise(syncSnippetReplica(account).pipe(Effect.provide(test.layer)));
+    expect(test.state()).toEqual({ cursor: "next", items: [] });
   });
 
   it("reconnects the wake stream and synchronizes after connectivity returns", async () => {

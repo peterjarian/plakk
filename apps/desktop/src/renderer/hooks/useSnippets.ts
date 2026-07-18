@@ -1,68 +1,12 @@
 import { deriveSnippetPresentation, type SnippetPresentation } from "@plakk/shared";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { DesktopSnippet } from "../../ipc/contracts.ts";
-
-const snippetListErrorMessage = "Couldn’t load snippets. Try again.";
-
-type SnippetSubscriptionState = {
-  readonly items: ReadonlyArray<DesktopSnippet>;
-  readonly isLoading: boolean;
-  readonly error: string | null;
-  readonly changeRevision: number;
-};
-
-type SnippetSubscriptionAction =
-  | { readonly type: "load-started" }
-  | {
-      readonly type: "load-succeeded";
-      readonly items: ReadonlyArray<DesktopSnippet>;
-      readonly requestRevision: number;
-    }
-  | { readonly type: "load-failed"; readonly requestRevision: number }
-  | { readonly type: "changed"; readonly items: ReadonlyArray<DesktopSnippet> };
+import { useLocalState } from "./useLocalState.tsx";
 
 export type SnippetReadModel = DesktopSnippet & {
   readonly presentation: SnippetPresentation;
   readonly thumbnailUrl: string | null;
-};
-
-export const initialSnippetSubscriptionState: SnippetSubscriptionState = {
-  items: [],
-  isLoading: true,
-  error: null,
-  changeRevision: 0,
-};
-
-export const updateSnippetSubscription = (
-  state: SnippetSubscriptionState,
-  action: SnippetSubscriptionAction,
-): SnippetSubscriptionState => {
-  switch (action.type) {
-    case "load-started":
-      return { ...state, isLoading: true, error: null };
-    case "load-succeeded":
-      return {
-        ...state,
-        items: action.requestRevision === state.changeRevision ? action.items : state.items,
-        isLoading: false,
-        error: null,
-      };
-    case "load-failed":
-      return {
-        ...state,
-        isLoading: false,
-        error:
-          action.requestRevision === state.changeRevision ? snippetListErrorMessage : state.error,
-      };
-    case "changed":
-      return {
-        items: action.items,
-        isLoading: false,
-        error: null,
-        changeRevision: state.changeRevision + 1,
-      };
-  }
 };
 
 export const projectSnippetReadModels = (
@@ -112,50 +56,6 @@ export const createImageUrlRegistry = () => {
       urls.clear();
     },
   };
-};
-
-const useSnippetSubscription = () => {
-  const [state, setState] = useState<SnippetSubscriptionState>(initialSnippetSubscriptionState);
-  const mountedRef = useRef(false);
-  const changeRevisionRef = useRef(0);
-
-  const reload = useCallback(() => {
-    const requestRevision = changeRevisionRef.current;
-    setState((current) => updateSnippetSubscription(current, { type: "load-started" }));
-    void window.ipc.snippets.list().then(
-      (items) => {
-        if (!mountedRef.current) return;
-        setState((current) =>
-          updateSnippetSubscription(current, {
-            type: "load-succeeded",
-            items,
-            requestRevision,
-          }),
-        );
-      },
-      () => {
-        if (!mountedRef.current) return;
-        setState((current) =>
-          updateSnippetSubscription(current, { type: "load-failed", requestRevision }),
-        );
-      },
-    );
-  }, []);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    const unsubscribe = window.ipc.snippets.onChanged((items) => {
-      changeRevisionRef.current += 1;
-      setState((current) => updateSnippetSubscription(current, { type: "changed", items }));
-    });
-    reload();
-    return () => {
-      mountedRef.current = false;
-      unsubscribe();
-    };
-  }, [reload]);
-
-  return { ...state, reload };
 };
 
 const useSnippetImageUrls = (snippets: ReadonlyArray<DesktopSnippet>) => {
@@ -215,12 +115,18 @@ const useSnippetImageUrls = (snippets: ReadonlyArray<DesktopSnippet>) => {
 };
 
 export function useSnippets() {
-  const { items: replicaItems, isLoading, error, reload } = useSnippetSubscription();
+  const state = useLocalState();
+  const replicaItems = state.localState.snippets;
   const thumbnailUrls = useSnippetImageUrls(replicaItems);
   const items = useMemo(
     () => projectSnippetReadModels(replicaItems, thumbnailUrls),
     [replicaItems, thumbnailUrls],
   );
 
-  return { error, isLoading, items, reload };
+  return {
+    error: state.error,
+    isLoading: state.isLoading,
+    items,
+    reload: state.reload,
+  };
 }

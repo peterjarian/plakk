@@ -14,12 +14,12 @@ import {
   DialogTitle,
 } from "@plakk/ui/components/primitives/dialog";
 import { SnippetComposer } from "../components/SnippetComposer.tsx";
-import { useAuth } from "../hooks/useAuth.ts";
+import { signOut, useAuth } from "../hooks/useAuth.ts";
 import { useSnippets } from "../hooks/useSnippets.ts";
 import {
   StorageProviderIcon,
   storageProviderLabel,
-  useStorageSetup,
+  openStorageSetup,
   useStorageStatus,
 } from "../hooks/useStorageStatus.tsx";
 import { navigate } from "../lib/navigate.ts";
@@ -30,7 +30,6 @@ const accountSetupUrl = "https://app.plakk.io/account/setup";
 export function Home({ active = true }: { active?: boolean }) {
   const auth = useAuth();
   const storageStatus = useStorageStatus();
-  const openStorageSetup = useStorageSetup();
   const [isDragging, setIsDragging] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copyingId, setCopyingId] = useState<string | null>(null);
@@ -57,8 +56,8 @@ export function Home({ active = true }: { active?: boolean }) {
   const accountBlocked = !storageStatus.canSync;
   const user = auth.user;
   const syncPausedMessage =
-    storageStatus.kind === "failed"
-      ? "Storage status is unavailable. Try again shortly."
+    storageStatus.kind === "failed" || storageStatus.kind === "offline"
+      ? "Offline — cached snippets stay available."
       : storageStatus.kind === "connected" &&
           storageStatus.account.blockedReasons.includes("billing")
         ? "Sync paused. Finish billing to add snippets."
@@ -90,10 +89,10 @@ export function Home({ active = true }: { active?: boolean }) {
     );
   }
 
-  function enqueueFileSnippet(file: Pick<File, "name" | "size" | "type">, filePath?: string) {
+  function enqueueFileSnippet(file: Pick<File, "name" | "size" | "type">, sourceId?: string) {
     if (storageStatus.kind !== "connected" || !storageStatus.canSync) return;
 
-    handleIngestion(ingestFileSnippet(storageStatus.provider, file, filePath));
+    handleIngestion(ingestFileSnippet(storageStatus.provider, file, sourceId));
   }
 
   function handleClipboardPaste(
@@ -113,7 +112,7 @@ export function Home({ active = true }: { active?: boolean }) {
         .then((blob) =>
           enqueueFileSnippet(
             new File([blob], "Pasted image.png", { type: blob.type }),
-            content.path,
+            content.sourceId,
           ),
         )
         .catch(() => setIngestionError("Plakk couldn’t read the pasted image."));
@@ -121,7 +120,7 @@ export function Home({ active = true }: { active?: boolean }) {
     }
 
     if (content.type === "file" && content.size !== undefined) {
-      enqueueFileSnippet({ name: content.name, size: content.size, type: "" }, content.path);
+      enqueueFileSnippet({ name: content.name, size: content.size, type: "" }, content.sourceId);
     }
   }
 
@@ -275,6 +274,11 @@ export function Home({ active = true }: { active?: boolean }) {
         {storageProviderLabel(storageStatus.provider)}
         <ArrowUpRight className="text-muted-foreground" />
       </Button>
+    ) : storageStatus.kind === "offline" && storageStatus.provider !== null ? (
+      <Button type="button" variant="ghost" size="sm" disabled>
+        <StorageProviderIcon provider={storageStatus.provider} className="size-4" />
+        {storageProviderLabel(storageStatus.provider)}
+      </Button>
     ) : null;
 
   if (user === null) return null;
@@ -315,17 +319,27 @@ export function Home({ active = true }: { active?: boolean }) {
       <AppHeader
         user={user}
         onSettingsClick={() => navigate("settings")}
-        onSignOutClick={() => void auth.signOut().then(() => navigate("welcome"))}
+        onSignOutClick={() =>
+          void signOut().then((signedOut) => {
+            if (signedOut) navigate("welcome");
+          })
+        }
         storageAction={storageAction}
       />
 
       <div className="scrollbar-hidden flex min-h-0 flex-1 flex-col overflow-y-auto px-6 pb-4">
         <div className="sticky top-0 z-20 bg-background pt-3 pb-5">
+          {auth.issue !== null && (
+            <div className="mb-2 flex items-center gap-2 rounded-md bg-muted px-2.5 py-1.5 text-xs text-muted-foreground">
+              <TriangleAlert className="size-3.5 shrink-0 text-amber-600" aria-hidden="true" />
+              <span className="min-w-0 flex-1 truncate">{auth.issue.message}</span>
+            </div>
+          )}
           {accountBlocked && storageStatus.kind !== "loading" && (
             <div className="mb-2 flex items-center gap-2 rounded-md bg-muted px-2.5 py-1.5 text-xs text-muted-foreground">
               <TriangleAlert className="size-3.5 shrink-0 text-amber-600" aria-hidden="true" />
               <span className="min-w-0 flex-1 truncate">{syncPausedMessage}</span>
-              {storageStatus.kind !== "failed" && (
+              {storageStatus.kind !== "failed" && storageStatus.kind !== "offline" && (
                 <Button
                   type="button"
                   variant="ghost"
