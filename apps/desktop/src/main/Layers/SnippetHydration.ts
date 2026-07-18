@@ -130,11 +130,17 @@ const makeSnippetHydration = Effect.gen(function* () {
     const state = yield* replica.get(accountId);
     const uploaded = (state?.items ?? []).filter((snippet) => snippet.uploadStatus === "UPLOADED");
     const uploadedKeys = new Set(uploaded.map((snippet) => key(accountId, snippet.id)));
+    const accountPrefix = `${accountId}/`;
+
+    for (const hydrationKey of failures.keys()) {
+      if (hydrationKey.startsWith(accountPrefix) && !uploadedKeys.has(hydrationKey)) {
+        failures.delete(hydrationKey);
+      }
+    }
 
     yield* Effect.forEach(
       [...active].filter(
-        (hydrationKey) =>
-          hydrationKey.startsWith(`${accountId}/`) && !uploadedKeys.has(hydrationKey),
+        (hydrationKey) => hydrationKey.startsWith(accountPrefix) && !uploadedKeys.has(hydrationKey),
       ),
       (hydrationKey) =>
         FiberMap.remove(fibers, hydrationKey).pipe(

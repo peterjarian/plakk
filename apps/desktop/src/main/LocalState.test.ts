@@ -11,6 +11,7 @@ import { makeLocalStateStoreLive } from "./Layers/LocalStateStore.ts";
 import {
   CachedLocalStateSessionSchema,
   LocalState,
+  LocalStateError,
   LocalStateSnippets,
 } from "./Services/LocalState.ts";
 
@@ -46,6 +47,12 @@ const connected: PipeConnection = {
   storageProvider: "GOOGLE_DRIVE",
   status: "CONNECTED",
   externalDestinationUrl: "https://drive.example.com/folder",
+};
+
+const notConnected: PipeConnection = {
+  storageProvider: "GOOGLE_DRIVE",
+  status: "NOT_CONNECTED",
+  externalDestinationUrl: null,
 };
 
 const makeRuntime = (
@@ -146,6 +153,194 @@ it.layer(NodeFileSystem.layer)("local state", (it) => {
     }),
   );
 
+  it.effect("does not cache a configured provider until its link is confirmed", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const cwd = yield* fileSystem.makeTempDirectoryScoped({ prefix: "plakk-local-state-" });
+      const account = user("user_1");
+      const runtime = makeRuntime(cwd, { [account.id]: [] });
+
+      yield* Effect.promise(() =>
+        runtime.runPromise(
+          LocalState.use((localState) =>
+            localState.update({
+              kind: "online",
+              account,
+              accountStatus: onlineAccount,
+              connection: notConnected,
+            }),
+          ),
+        ),
+      );
+      const current = yield* Effect.promise(() =>
+        runtime.runPromise(LocalState.use((localState) => localState.current)),
+      );
+      yield* Effect.promise(() => runtime.dispose());
+
+      expect(current.provider).toEqual({ known: true, value: null });
+      expect(current.capability).toMatchObject({
+        status: "ONLINE",
+        connection: { status: "NOT_CONNECTED" },
+      });
+    }),
+  );
+
+  it.effect("preserves a confirmed provider when a live refresh falls back offline", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const cwd = yield* fileSystem.makeTempDirectoryScoped({ prefix: "plakk-local-state-" });
+      const account = user("user_1");
+      const runtime = makeRuntime(cwd, { [account.id]: [] });
+
+      yield* Effect.promise(() =>
+        runtime.runPromise(
+          LocalState.use((localState) =>
+            localState.update({
+              kind: "online",
+              account,
+              accountStatus: onlineAccount,
+              connection: connected,
+            }),
+          ),
+        ),
+      );
+      yield* Effect.promise(() =>
+        runtime.runPromise(
+          LocalState.use((localState) => localState.update({ kind: "offline", account })),
+        ),
+      );
+      const current = yield* Effect.promise(() =>
+        runtime.runPromise(LocalState.use((localState) => localState.current)),
+      );
+      yield* Effect.promise(() => runtime.dispose());
+
+      expect(current.provider).toEqual({ known: true, value: "GOOGLE_DRIVE" });
+      expect(current.capability).toEqual({ status: "OFFLINE" });
+    }),
+  );
+
+  it.effect("keeps a switched account hidden when its snippets cannot materialize", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const cwd = yield* fileSystem.makeTempDirectoryScoped({ prefix: "plakk-local-state-" });
+      const firstAccount = user("user_1");
+      const secondAccount = user("user_2");
+      const firstSnippet = snippet("0d1e2f3a-4567-4890-8abc-def012345678", "first.txt");
+      const localStateSnippets = Layer.succeed(
+        LocalStateSnippets,
+        LocalStateSnippets.of({
+          changes: Stream.empty,
+          read: (accountId) =>
+            accountId === secondAccount.id
+              ? Effect.fail(
+                  new LocalStateError({
+                    cause: null,
+                    reason: "simulated materialization failure",
+                  }),
+                )
+              : Effect.succeed([firstSnippet]),
+        }),
+      );
+      const runtime = ManagedRuntime.make(
+        LocalStateLive.pipe(
+          Layer.provide(Layer.merge(makeLocalStateStoreLive({ cwd }), localStateSnippets)),
+        ),
+      );
+
+      yield* Effect.promise(() =>
+        runtime.runPromise(
+          LocalState.use((localState) =>
+            localState.update({ kind: "offline", account: firstAccount }),
+          ),
+        ),
+      );
+      yield* Effect.promise(() =>
+        runtime.runPromise(
+          LocalState.use((localState) => localState.update({ kind: "owner-cleanup-pending" })),
+        ),
+      );
+      const switched = yield* Effect.promise(() =>
+        runtime.runPromise(
+          LocalState.use((localState) =>
+            localState.update({ kind: "offline", account: secondAccount }),
+          ).pipe(Effect.result),
+        ),
+      );
+      const current = yield* Effect.promise(() =>
+        runtime.runPromise(LocalState.use((localState) => localState.current)),
+      );
+      yield* Effect.promise(() => runtime.dispose());
+
+      expect(switched._tag).toBe("Failure");
+      expect(current).toMatchObject({
+        account: null,
+        provider: { known: false, value: null },
+        capability: { status: "OFFLINE" },
+        snippets: [],
+      });
+    }),
+  );
+
+  it.effect("keeps a cleanup-pending account hidden after a restart", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const cwd = yield* fileSystem.makeTempDirectoryScoped({ prefix: "plakk-local-state-" });
+      const account = user("user_1");
+      const retainedSnippet = snippet("0d1e2f3a-4567-4890-8abc-def012345678", "retained.txt");
+
+      const runtime = makeRuntime(cwd, { [account.id]: [retainedSnippet] });
+      yield* Effect.promise(() =>
+        runtime.runPromise(
+          LocalState.use((localState) =>
+            localState.update({
+              kind: "online",
+              account,
+              accountStatus: onlineAccount,
+              connection: connected,
+            }),
+          ),
+        ),
+      );
+      yield* Effect.promise(() =>
+        runtime.runPromise(
+          LocalState.use((localState) => localState.update({ kind: "owner-cleanup-pending" })),
+        ),
+      );
+      const hiddenDuringCleanup = yield* Effect.promise(() =>
+        runtime.runPromise(
+          LocalState.use((localState) =>
+            localState.refresh.pipe(Effect.andThen(localState.current)),
+          ),
+        ),
+      );
+      yield* Effect.promise(() => runtime.dispose());
+
+      const restartedRuntime = makeRuntime(cwd, { [account.id]: [retainedSnippet] });
+      const restored = yield* Effect.promise(() =>
+        restartedRuntime.runPromise(
+          LocalState.use((localState) =>
+            Effect.all({ current: localState.current, owner: localState.owner }),
+          ),
+        ),
+      );
+      yield* Effect.promise(() => restartedRuntime.dispose());
+
+      expect(restored.current).toMatchObject({
+        account: null,
+        provider: { known: false, value: null },
+        capability: { status: "OFFLINE" },
+        snippets: [],
+      });
+      expect(hiddenDuringCleanup).toMatchObject({
+        account: null,
+        provider: { known: false, value: null },
+        capability: { status: "OFFLINE" },
+        snippets: [],
+      });
+      expect(restored.owner).toEqual({ account, cleanupPending: true });
+    }),
+  );
+
   it.effect("clears durable local state on explicit sign-out", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
@@ -229,6 +424,7 @@ it.layer(NodeFileSystem.layer)("local state", (it) => {
         encode({
           account,
           provider: { known: true, value: "GOOGLE_DRIVE" },
+          cleanupPending: false,
         }),
       );
 
@@ -286,7 +482,11 @@ it.layer(NodeFileSystem.layer)("local state", (it) => {
       });
       currentStore.set(
         "session",
-        encodeSession({ account, provider: { known: true, value: "GOOGLE_DRIVE" } }),
+        encodeSession({
+          account,
+          provider: { known: true, value: "GOOGLE_DRIVE" },
+          cleanupPending: false,
+        }),
       );
       const releasedStore = new ElectronStore<{ active: string | null }>({
         cwd,

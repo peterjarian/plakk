@@ -11,7 +11,7 @@ import { SnippetUploadEngine } from "./SnippetUploadEngine.ts";
 
 describe("desktop account purge", () => {
   it.effect(
-    "attempts every account-owned cleanup and clears local state even after a failure",
+    "attempts every account-owned cleanup and retains the account owner after a failure",
     () =>
       Effect.gen(function* () {
         const calls: Array<string> = [];
@@ -39,6 +39,7 @@ describe("desktop account purge", () => {
               project: () => Effect.succeed([]),
               purge: () => record("uploads"),
               reconcile: () => Effect.void,
+              removeTombstones: () => Effect.void,
               resume: () => Effect.void,
               retry: () => Effect.void,
             }),
@@ -86,6 +87,7 @@ describe("desktop account purge", () => {
             LocalState.of({
               changes: Stream.empty,
               current: Effect.die("unused"),
+              owner: Effect.die("unused"),
               refresh: Effect.void,
               update: (update) => record(`local-state:${update.kind}`),
             }),
@@ -103,14 +105,9 @@ describe("desktop account purge", () => {
         });
 
         expect(calls).toEqual(
-          expect.arrayContaining([
-            "uploads",
-            "hydration",
-            "replica",
-            "content",
-            "local-state:signed-out",
-          ]),
+          expect.arrayContaining(["uploads", "hydration", "replica", "content"]),
         );
+        expect(calls).not.toContain("local-state:signed-out");
       }),
   );
 });

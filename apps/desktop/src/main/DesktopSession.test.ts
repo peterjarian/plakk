@@ -97,6 +97,7 @@ describe("DesktopSession", () => {
               capability: { status: "OFFLINE" },
               snippets: [],
             }),
+            owner: Effect.succeed({ account, cleanupPending: false }),
             refresh: Effect.void,
             update: (update) => Effect.sync(() => void localStateUpdates.push(update)),
           }),
@@ -121,6 +122,7 @@ describe("DesktopSession", () => {
             project: () => Effect.succeed([]),
             purge: () => Effect.void,
             reconcile: () => Effect.void,
+            removeTombstones: () => Effect.void,
             resume: () => Effect.void,
             retry: () => Effect.void,
           }),
@@ -235,7 +237,8 @@ describe("DesktopSession", () => {
       expect(result.updateAfterRaces).toEqual({ kind: "signed-out" });
       expect(result.switchPurges).toEqual([account.id]);
       expect(result.switchTransitionEvents.slice(0, 2)).toEqual(["sync-stopped", "account-purged"]);
-      expect(result.localStateUpdates.slice(-3)).toEqual([
+      expect(result.localStateUpdates.slice(-4)).toEqual([
+        { kind: "owner-cleanup-pending" },
         { kind: "signed-out" },
         { kind: "offline", account: secondAccount },
         {

@@ -5,7 +5,8 @@ import {
   SnippetReplica,
   type SnippetReplicaState,
 } from "@plakk/shared/SnippetReplica";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it } from "@effect/vitest";
+import { vi } from "vite-plus/test";
 import { Effect, Fiber, Layer, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { RpcClientDefect, RpcClientError } from "effect/unstable/rpc/RpcClientError";
@@ -709,6 +710,54 @@ describe("SnippetUploadEngine", () => {
     ]);
   });
 
+  it("does not resurrect retained failed recovery after a tombstone and restart", async () => {
+    const test = harness();
+    const uploadingId = "1d1e2f3a-4567-4890-8abc-def012345679";
+    test.outbox.set(account.id, [
+      {
+        id: snippetId,
+        fileName: input.fileName,
+        byteSize: input.byteSize,
+        mediaType: input.mediaType,
+        storageProvider: input.storageProvider,
+        phase: "FAILED",
+        progress: 0,
+        storageObjectId: null,
+        authoritativeStatus: "CLIENT_UPLOAD_FAILED",
+        errorMessage: "Upload failed.",
+        canRetry: true,
+        createdAt,
+        updatedAt: createdAt,
+      },
+      {
+        id: uploadingId,
+        fileName: "uploading.txt",
+        byteSize: bytes.byteLength,
+        mediaType: "text/plain",
+        storageProvider: input.storageProvider,
+        phase: "UPLOADING",
+        progress: 25,
+        storageObjectId: null,
+        authoritativeStatus: "UPLOADING",
+        errorMessage: null,
+        canRetry: false,
+        createdAt,
+        updatedAt: createdAt,
+      },
+    ]);
+
+    const projection = await test.run(
+      SnippetUploadEngine.use((engine) =>
+        engine
+          .removeTombstones(account.id, [snippetId, uploadingId])
+          .pipe(Effect.andThen(engine.project(account.id, []))),
+      ),
+    );
+
+    expect(projection).toEqual([]);
+    expect(test.outbox.get(account.id)).toEqual([]);
+  });
+
   it("deletes remotely when create acknowledgement may have been lost", async () => {
     const test = harness();
     test.content.set(`${account.id}/${snippetId}`, bytes);
@@ -737,32 +786,34 @@ describe("SnippetUploadEngine", () => {
     expect(test.calls.discard).toBe(1);
   });
 
-  it("hides a snippet immediately while authoritative deletion is pending", async () => {
+  it.effect("keeps confirmed snippets visible while authoritative deletion is pending", () => {
     const test = harness({ longDelete: true });
     const replica = apiSnippet("UPLOADED");
     test.content.set(`${account.id}/${snippetId}`, bytes);
 
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const engine = yield* SnippetUploadEngine;
-        const deleting = yield* engine.delete(account, snippetId).pipe(Effect.forkChild);
-        yield* Effect.yieldNow;
+    return Effect.gen(function* () {
+      const engine = yield* SnippetUploadEngine;
+      const changed = yield* engine.changes.pipe(Stream.runHead, Effect.forkChild);
+      const deleting = yield* engine.delete(account, snippetId).pipe(Effect.forkChild);
+      yield* Effect.yieldNow;
 
-        const whileDeleting = yield* engine.project(account.id, [replica]);
-        expect(whileDeleting).toEqual([]);
+      const whileDeleting = yield* engine.project(account.id, [replica]);
+      expect(whileDeleting).toMatchObject([{ id: snippetId }]);
+      expect(changed.pollUnsafe()).toBeUndefined();
 
-        yield* TestClock.adjust("5 seconds");
-        yield* Fiber.join(deleting);
+      yield* TestClock.adjust("5 seconds");
+      yield* Fiber.join(deleting);
 
-        const beforeReplicaConfirmation = yield* engine.project(account.id, [replica]);
-        expect(beforeReplicaConfirmation).toEqual([]);
-      }).pipe(Effect.provide(test.layer), Effect.provide(TestClock.layer())),
-    );
+      const beforeReplicaConfirmation = yield* engine.project(account.id, [replica]);
+      expect(beforeReplicaConfirmation).toMatchObject([{ id: snippetId }]);
+      expect(changed.pollUnsafe()).toBeUndefined();
 
-    expect(test.calls.delete).toBe(1);
+      expect(test.calls.delete).toBe(1);
+      yield* Fiber.interrupt(changed);
+    }).pipe(Effect.provide(test.layer), Effect.provide(TestClock.layer()));
   });
 
-  it("durably removes the local replica before a restarted engine can project it", async () => {
+  it("waits for the ordered tombstone instead of rewriting the readable replica", async () => {
     const test = harness();
     const replica = apiSnippet("UPLOADED");
     test.replica.set([replica]);
@@ -770,11 +821,11 @@ describe("SnippetUploadEngine", () => {
 
     await test.run(SnippetUploadEngine.use((engine) => engine.delete(account, snippetId)));
 
-    expect(test.replica.items()).toEqual([]);
+    expect(test.replica.items()).toEqual([replica]);
     const afterRestart = await test.run(
       SnippetUploadEngine.use((engine) => engine.project(account.id, test.replica.items())),
     );
-    expect(afterRestart).toEqual([]);
+    expect(afterRestart).toMatchObject([{ id: snippetId }]);
   });
 
   it("restores an optimistically hidden snippet when deletion fails", async () => {
@@ -809,67 +860,6 @@ describe("SnippetUploadEngine", () => {
       _tag: "RpcError",
       message: "sensitive provider deletion detail",
     });
-  });
-
-  it("leaves tombstone cleanup to authoritative sync after local cleanup fails", async () => {
-    const test = harness({ discardFailures: 1 });
-    const replica = apiSnippet("UPLOADED");
-    test.content.set(`${account.id}/${snippetId}`, bytes);
-
-    const deleted = await test.run(
-      SnippetUploadEngine.use((engine) => Effect.exit(engine.delete(account, snippetId))),
-    );
-    expect(deleted._tag).toBe("Failure");
-
-    const afterRestart = await test.run(
-      SnippetUploadEngine.use((engine) => engine.project(account.id, [replica])),
-    );
-    expect(afterRestart).toHaveLength(1);
-    expect(test.calls.delete).toBe(1);
-    expect(test.calls.discard).toBe(1);
-    expect(test.content.has(`${account.id}/${snippetId}`)).toBe(true);
-  });
-
-  it("does not delete remotely until its upload outbox entry is removed", async () => {
-    const test = harness({ outboxRemoveFailures: 1 });
-    const replica = apiSnippet("UPLOADED");
-    test.replica.set([replica]);
-    test.content.set(`${account.id}/${snippetId}`, bytes);
-    test.outbox.set(account.id, [
-      {
-        id: snippetId,
-        fileName: input.fileName,
-        byteSize: input.byteSize,
-        mediaType: input.mediaType,
-        storageProvider: input.storageProvider,
-        phase: "FAILED",
-        progress: 25,
-        storageObjectId: null,
-        authoritativeStatus: "UPLOADING",
-        errorMessage: "Upload stopped.",
-        canRetry: true,
-        createdAt,
-        updatedAt: createdAt,
-      },
-    ]);
-
-    const deleted = await test.run(
-      SnippetUploadEngine.use((engine) => Effect.exit(engine.delete(account, snippetId))),
-    );
-    expect(deleted._tag).toBe("Failure");
-    expect(test.outbox.get(account.id)).toHaveLength(1);
-    expect(test.calls.delete).toBe(0);
-
-    const afterRestart = await test.run(
-      SnippetUploadEngine.use((engine) => engine.project(account.id, test.replica.items())),
-    );
-    expect(afterRestart).toHaveLength(1);
-    expect(afterRestart[0]?.localState?.phase).toBe("FAILED");
-
-    await test.run(SnippetUploadEngine.use((engine) => engine.delete(account, snippetId)));
-    expect(test.outbox.get(account.id)).toEqual([]);
-    expect(test.content.has(`${account.id}/${snippetId}`)).toBe(false);
-    expect(test.calls.delete).toBe(1);
   });
 
   it("deletes never-started queued work locally while offline", async () => {

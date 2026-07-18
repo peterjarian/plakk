@@ -1,7 +1,12 @@
 import { useEffect, useState, type DragEvent } from "react";
 import type { ClipboardContent, TrayDroppedItem } from "../../ipc/contracts.ts";
+import { useAuth } from "../hooks/useAuth.ts";
 import { useSnippets } from "../hooks/useSnippets.ts";
-import { useStorageStatus } from "../hooks/useStorageStatus.tsx";
+import {
+  StorageProviderIcon,
+  storageProviderLabel,
+  useStorageStatus,
+} from "../hooks/useStorageStatus.tsx";
 import { ipcActionErrorMessage } from "../lib/ipcActionErrorMessage.ts";
 import { ingestFileSnippet, ingestTextSnippet } from "../lib/snippetIngestion.ts";
 import { TrayActions } from "./tray/TrayActions.tsx";
@@ -14,9 +19,11 @@ export function Tray() {
   const [copyingId, setCopyingId] = useState<string | null>(null);
   const [copyError, setCopyError] = useState<{ id: string; message: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const auth = useAuth();
   const storageStatus = useStorageStatus();
   const ingestionAllowed = storageStatus.kind === "connected" && storageStatus.canSync;
-  const provider = storageStatus.kind === "connected" ? storageStatus.provider : null;
+  const provider = "provider" in storageStatus ? storageStatus.provider : null;
+  const ingestionProvider = storageStatus.kind === "connected" ? storageStatus.provider : null;
   const { error: snippetReadError, items, reload: reloadSnippets } = useSnippets();
   const latest = items.at(0);
   const copyDisabled =
@@ -43,13 +50,13 @@ export function Tray() {
   };
 
   const upload = (file: Pick<File, "name" | "size" | "type">, sourceId?: string) => {
-    if (provider === null) return;
-    handleIngestion(ingestFileSnippet(provider, file, sourceId));
+    if (ingestionProvider === null) return;
+    handleIngestion(ingestFileSnippet(ingestionProvider, file, sourceId));
   };
 
   const addText = (text: string) => {
-    if (provider === null) return;
-    const ingestion = ingestTextSnippet(provider, text.trim());
+    if (ingestionProvider === null) return;
+    const ingestion = ingestTextSnippet(ingestionProvider, text.trim());
     if (ingestion !== null) handleIngestion(ingestion);
   };
 
@@ -124,6 +131,15 @@ export function Tray() {
 
   return (
     <TrayShell>
+      <header className="flex shrink-0 items-center justify-between gap-3 border-b px-4 py-2.5">
+        <p className="min-w-0 truncate text-xs font-medium">{auth.user?.email ?? "Plakk"}</p>
+        {provider !== null && (
+          <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+            <StorageProviderIcon provider={provider} className="size-3.5" />
+            {storageProviderLabel(provider)}
+          </span>
+        )}
+      </header>
       <div
         className="flex min-h-0 flex-1 flex-col"
         onDragEnter={() => {

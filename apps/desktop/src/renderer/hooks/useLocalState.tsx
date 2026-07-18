@@ -25,6 +25,8 @@ type LocalStateSubscriptionAction =
   | { readonly type: "changed"; readonly localState: LocalState }
   | { readonly type: "failed" };
 
+type LocalStateApi = Window["ipc"]["localState"];
+
 export const initialLocalStateSubscription: LocalStateSubscription = {
   localState: {
     revision: 0,
@@ -54,6 +56,18 @@ export const updateLocalStateSubscription = (
   };
 };
 
+export const subscribeToLocalState = (
+  apply: (action: LocalStateSubscriptionAction) => void,
+  api: LocalStateApi = window.ipc.localState,
+) => {
+  const unsubscribe = api.onChanged((localState) => apply({ type: "changed", localState }));
+  const initial = api.get().then(
+    (localState) => apply({ type: "loaded", localState }),
+    () => apply({ type: "failed" }),
+  );
+  return { initial, unsubscribe };
+};
+
 const LocalStateContext = createContext<LocalStateContextValue | null>(null);
 
 export function LocalStateProvider({ children }: { readonly children: ReactNode }) {
@@ -74,16 +88,10 @@ export function LocalStateProvider({ children }: { readonly children: ReactNode 
     const apply = (action: LocalStateSubscriptionAction) => {
       if (mounted) setState((current) => updateLocalStateSubscription(current, action));
     };
-    const unsubscribe = window.ipc.localState.onChanged((localState) =>
-      apply({ type: "changed", localState }),
-    );
-    void window.ipc.localState.get().then(
-      (localState) => apply({ type: "loaded", localState }),
-      () => apply({ type: "failed" }),
-    );
+    const subscription = subscribeToLocalState(apply);
     return () => {
       mounted = false;
-      unsubscribe();
+      subscription.unsubscribe();
     };
   }, [reload]);
 

@@ -151,7 +151,11 @@ const makeLocalStateStore = (options: { readonly cwd?: string } = {}) =>
         ),
       );
       if (account === null) return null;
-      const migrated = { account, provider: { known: false, value: null } } as const;
+      const migrated = {
+        account,
+        provider: { known: false, value: null },
+        cleanupPending: false,
+      } as const;
       const json = yield* Schema.encodeEffect(StoredLocalStateSessionCodec)(migrated).pipe(
         Effect.mapError(
           (cause) =>

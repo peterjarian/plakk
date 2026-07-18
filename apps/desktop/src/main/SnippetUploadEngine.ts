@@ -1,11 +1,7 @@
 import { decodeSnippetTextPreview, isTextSnippetFileName, isValidSnippetText } from "@plakk/shared";
 import type { ApiSnippet } from "@plakk/shared/PlakkApi";
 import { RpcError } from "@plakk/shared/RpcError";
-import {
-  ManagedSnippetContentError,
-  SnippetReplica,
-  SnippetReplicaError,
-} from "@plakk/shared/SnippetReplica";
+import { ManagedSnippetContentError, SnippetReplicaError } from "@plakk/shared/SnippetReplica";
 import {
   Context,
   DateTime,
@@ -175,6 +171,10 @@ export class SnippetUploadEngine extends Context.Service<
       account: UploadOwner,
       snippetId: string,
     ): Effect.Effect<void, SnippetUploadEngineFailure>;
+    removeTombstones(
+      accountId: string,
+      snippetIds: ReadonlyArray<string>,
+    ): Effect.Effect<void, SnippetUploadOutboxError>;
     reconcile(
       accountId: string,
       replicaItems: ReadonlyArray<ApiSnippet>,
@@ -187,7 +187,6 @@ export class SnippetUploadEngine extends Context.Service<
       const content = yield* DesktopManagedSnippetContent;
       const outbox = yield* SnippetUploadOutbox;
       const remote = yield* SnippetUploadRemote;
-      const replica = yield* SnippetReplica;
       const storage = yield* StorageUpload;
       const changes = yield* PubSub.unbounded<string>();
       const currentAccount = yield* Ref.make<UploadAccount | null>(null);
@@ -512,8 +511,6 @@ export class SnippetUploadEngine extends Context.Service<
         accountId: string,
         replicaItems: ReadonlyArray<ApiSnippet>,
       ) {
-        const isDeletePending = (snippetId: string) =>
-          pendingDeletes.has(pendingDeleteKey(accountId, snippetId));
         const entries = yield* outbox.list(accountId);
         const replicas = new Map(replicaItems.map((snippet) => [snippet.id, snippet]));
         const projected: Array<UploadProjectedSnippet> = [];
@@ -527,10 +524,6 @@ export class SnippetUploadEngine extends Context.Service<
         }
         for (const entry of entries) {
           if (importingIds.has(entry.id)) continue;
-          if (isDeletePending(entry.id)) {
-            replicas.delete(entry.id);
-            continue;
-          }
           const replica = replicas.get(entry.id);
           replicas.delete(entry.id);
           const projectedEntry = {
@@ -550,7 +543,6 @@ export class SnippetUploadEngine extends Context.Service<
           });
         }
         for (const replica of replicas.values()) {
-          if (isDeletePending(replica.id)) continue;
           projected.push({
             ...replica,
             localState: null,
@@ -622,8 +614,8 @@ export class SnippetUploadEngine extends Context.Service<
         if (fiber !== undefined && fiber !== null) yield* Fiber.interrupt(fiber);
         active.delete(snippetId);
         progressById.delete(snippetId);
-        yield* outbox.remove(accountId, snippetId);
         yield* content.discard(accountId, snippetId);
+        yield* outbox.remove(accountId, snippetId);
       });
 
       const discard = Effect.fn("SnippetUploadEngine.discard")(function* (
@@ -632,6 +624,24 @@ export class SnippetUploadEngine extends Context.Service<
       ) {
         yield* cleanupLocal(accountId, snippetId);
         yield* publish(accountId);
+      });
+
+      const removeTombstones = Effect.fn("SnippetUploadEngine.removeTombstones")(function* (
+        accountId: string,
+        snippetIds: ReadonlyArray<string>,
+      ) {
+        yield* Effect.forEach(
+          snippetIds,
+          (snippetId) => {
+            const fiber = active.get(snippetId);
+            active.delete(snippetId);
+            progressById.delete(snippetId);
+            return (
+              fiber === undefined || fiber === null ? Effect.void : Fiber.interrupt(fiber)
+            ).pipe(Effect.andThen(outbox.remove(accountId, snippetId)));
+          },
+          { discard: true },
+        );
       });
 
       const remove = Effect.fn("SnippetUploadEngine.delete")(function* (
@@ -651,36 +661,20 @@ export class SnippetUploadEngine extends Context.Service<
         const deleteKey = pendingDeleteKey(account.id, snippetId);
         if (pendingDeletes.has(deleteKey)) return;
         pendingDeletes.add(deleteKey);
-        yield* publish(account.id);
 
-        const restore = Effect.sync(() => pendingDeletes.delete(deleteKey)).pipe(
-          Effect.andThen(publish(account.id)),
-        );
+        const release = Effect.sync(() => pendingDeletes.delete(deleteKey));
         if (account.accessToken !== null) {
           const fiber = active.get(snippetId);
           if (fiber !== undefined && fiber !== null) yield* Fiber.interrupt(fiber);
           active.delete(snippetId);
           progressById.delete(snippetId);
-          if (entry !== null)
-            yield* outbox.remove(account.id, snippetId).pipe(Effect.onError(() => restore));
-          const restoreRemoteFailure =
-            entry === null ? restore : outbox.put(account.id, entry).pipe(Effect.andThen(restore));
-          yield* remote.delete(account.accessToken, snippetId).pipe(
-            Effect.onError(() =>
-              restoreRemoteFailure.pipe(
-                Effect.catchCause((cause) =>
-                  Effect.logError("Could not restore upload work after deletion failed", {
-                    cause,
-                  }),
-                ),
-              ),
-            ),
-          );
-          yield* replica.remove(account.id, snippetId);
-          yield* content.discard(account.id, snippetId);
-          yield* publish(account.id);
+          yield* remote.delete(account.accessToken, snippetId).pipe(Effect.ensuring(release));
+          if (entry !== null && entry.authoritativeStatus === null) {
+            yield* cleanupLocal(account.id, snippetId);
+            yield* publish(account.id);
+          }
         } else {
-          yield* discard(account.id, snippetId).pipe(Effect.onError(() => restore));
+          yield* discard(account.id, snippetId).pipe(Effect.ensuring(release));
         }
       });
 
@@ -730,6 +724,7 @@ export class SnippetUploadEngine extends Context.Service<
         project,
         purge,
         reconcile,
+        removeTombstones,
         resume,
         retry,
       });
