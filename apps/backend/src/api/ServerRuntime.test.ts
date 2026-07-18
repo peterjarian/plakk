@@ -6,7 +6,7 @@ import * as Scope from "effect/Scope";
 import { TestClock } from "effect/testing";
 
 import { makeUploadExpirationLayer } from "./ServerRuntime.ts";
-import { SnippetUploads } from "./SnippetUploads.ts";
+import { SnippetUploads } from "./snippets/SnippetUploads.ts";
 
 const unexpectedUploadOperation = Effect.fn("ServerRuntimeTest.unexpectedUploadOperation")(() =>
   Effect.die("Unexpected upload operation in expiration runtime test."),

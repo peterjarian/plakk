@@ -63,9 +63,10 @@ import {
   subscribeToLocalState,
   updateLocalStateSubscription,
 } from "../renderer/hooks/useLocalState.tsx";
-import { LocalStateLive } from "./Layers/LocalState.ts";
-import { makeLocalStateStoreLive } from "./Layers/LocalStateStore.ts";
-import { LocalState, LocalStateSnippets } from "./Services/LocalState.ts";
+import { LocalState } from "./local-state/LocalState.ts";
+import { LocalStateLive } from "./local-state/LocalStateLive.ts";
+import { LocalStateSnippets } from "./local-state/LocalStateSnippets.ts";
+import { makeLocalStateStoreLive } from "./local-state/LocalStateStoreLive.ts";
 
 const account: User = {
   id: "user_1",
