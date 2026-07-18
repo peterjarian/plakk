@@ -3,7 +3,7 @@ import {
   isTextSnippetFileName,
   SNIPPET_TEXT_PREVIEW_MAX_BYTES,
 } from "@plakk/shared";
-import type { LocalContentAvailability } from "@plakk/shared/SnippetHydration";
+import type { LocalContentAvailability } from "@plakk/shared";
 import { Effect } from "effect";
 
 import { DesktopManagedSnippetContent } from "./ManagedSnippetContent.ts";

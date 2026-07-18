@@ -97,6 +97,8 @@ const makeLocalState = Effect.gen(function* () {
         }
 
         const currentSession = yield* Ref.get(session);
+        // Provider knowledge belongs to the account that established it. An offline refresh for the
+        // same account may reuse that cached display fact, while an account switch must forget it.
         const nextSession =
           input.kind === "online"
             ? cachedSession(input.account, {
@@ -107,6 +109,8 @@ const makeLocalState = Effect.gen(function* () {
               ? cachedSession(input.account, currentSession.provider)
               : cachedSession(input.account, { known: false, value: null });
         const capability =
+          // Capability is deliberately live-only: persisted and restored state remains offline until
+          // the backend authoritatively confirms that the current account can sync.
           input.kind === "online"
             ? ({
                 status: "ONLINE",

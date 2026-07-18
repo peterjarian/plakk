@@ -2,6 +2,7 @@ import type { Effect, Stream } from "effect";
 import { Context, Schema } from "effect";
 
 import type { AuthServiceFailure, AuthSession } from "../auth/AuthService.ts";
+import type { DesktopAccountPurgeError } from "./DesktopAccountData.ts";
 
 export type DesktopSessionAccount = {
   readonly id: string;
@@ -18,9 +19,9 @@ export interface DesktopSessionShape {
   readonly currentAccount: Effect.Effect<DesktopSessionAccount | null>;
   readonly handleCallbackUrl: (
     rawUrl: string,
-  ) => Effect.Effect<AuthSession | null, AuthServiceFailure>;
-  readonly refresh: Effect.Effect<void>;
-  readonly start: Effect.Effect<void>;
+  ) => Effect.Effect<AuthSession | null, AuthServiceFailure | DesktopAccountPurgeError>;
+  readonly refresh: Effect.Effect<void, DesktopAccountPurgeError>;
+  readonly start: Effect.Effect<void, DesktopAccountPurgeError>;
   readonly signOut: Effect.Effect<void, DesktopSessionSignOutError>;
 }
 

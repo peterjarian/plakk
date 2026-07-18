@@ -5,9 +5,8 @@ import { rm, stat } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { decodeSnippetText, deriveSnippetPresentation, isHttpUrl } from "@plakk/shared";
 import { accountCanSyncWithConnection } from "@plakk/shared/PlakkApi";
-import { SnippetHydrationEngine } from "@plakk/shared/SnippetHydration";
 import { app, BrowserWindow, dialog, Menu, net, protocol, shell } from "electron";
-import { Effect, Result, Stream } from "effect";
+import { Effect, PlatformError, Result, Stream } from "effect";
 import type {
   ClipboardContent,
   LocalState as LocalStateValue,
@@ -30,6 +29,7 @@ import { runEffect, runtime } from "./runtime.ts";
 import { getManagedSnippetBytes } from "./snippetReplica.ts";
 import { SnippetUploadEngine, snippetUploadFailureMessage } from "./SnippetUploadEngine.ts";
 import { DesktopSession } from "./Services/DesktopSession.ts";
+import { SnippetHydrationEngine } from "./Services/SnippetHydration.ts";
 import { LocalState } from "./Services/LocalState.ts";
 import { NativeFileSources } from "./Services/NativeFileSources.ts";
 
@@ -248,9 +248,15 @@ handle(ipcMethods.clipboardRead, () =>
   ),
 );
 
+const projectNativeFile = Effect.fn("NativeFileSources.projectFile")(function* (path: string) {
+  const sources = yield* NativeFileSources;
+  const file = yield* Effect.tryPromise(() => stat(path));
+  const sourceId = yield* sources.register(path);
+  return { sourceId, name: basename(path), size: file.size };
+});
+
 handle(ipcMethods.traySelectFiles, (_payload, event) =>
   Effect.gen(function* () {
-    const sources = yield* NativeFileSources;
     if (
       trayWindowController?.ownsWebContents(event.sender) !== true ||
       !trayWindowController.isIngestionEnabled()
@@ -264,18 +270,7 @@ handle(ipcMethods.traySelectFiles, (_payload, event) =>
     if (result.canceled) return [];
     return yield* Effect.forEach(
       result.filePaths,
-      (path) =>
-        Effect.tryPromise({
-          try: () => stat(path),
-          catch: (cause) =>
-            new IpcHandlerError({ cause, message: "Could not read the selected file." }),
-        }).pipe(
-          Effect.map((file) => ({
-            sourceId: sources.register(path),
-            name: basename(path),
-            size: file.size,
-          })),
-        ),
+      (path) => projectNativeFile(path).pipe(asIpcFailure("Could not read the selected file.")),
       { concurrency: "unbounded" },
     );
   }),
@@ -330,28 +325,14 @@ handle(ipcMethods.userConfigGet, () =>
   ),
 );
 
-const applyOfflineContentPreference = Effect.fn("DesktopSettings.applyOfflineContentPreference")(
-  function* (keepAllFilesOffline: boolean) {
-    yield* SnippetHydrationEngine.use((engine) =>
-      engine.updateSettings({ keepAllFilesOffline }),
-    ).pipe(
-      Effect.catchCause((cause) =>
-        Effect.logWarning("Could not apply offline content preference", { cause }),
-      ),
-    );
-  },
-);
-
 handle(ipcMethods.userConfigSet, (patch) =>
   UserConfigStore.use((store) => store.set(patch)).pipe(
-    Effect.tap((config) => applyOfflineContentPreference(config.keepAllFilesOffline)),
     asIpcFailure("Could not save desktop preferences."),
   ),
 );
 
 handle(ipcMethods.userConfigReset, () =>
   UserConfigStore.use((store) => store.reset).pipe(
-    Effect.tap((config) => applyOfflineContentPreference(config.keepAllFilesOffline)),
     asIpcFailure("Could not reset desktop preferences."),
   ),
 );
@@ -549,13 +530,13 @@ function broadcastTrayDroppedItem(item: TrayDroppedItem): void {
 
 const projectClipboardContent = Effect.fn("NativeFileSources.projectClipboardContent")(function* (
   content: NativeClipboardContent,
-): Effect.fn.Return<ClipboardContent, never, NativeFileSources> {
+): Effect.fn.Return<ClipboardContent, PlatformError.PlatformError, NativeFileSources> {
   const sources = yield* NativeFileSources;
   if (content.type === "image") {
     return {
       type: "image",
       dataUrl: content.dataUrl,
-      sourceId: sources.register(content.path, { temporary: true }),
+      sourceId: yield* sources.register(content.path, { temporary: true }),
       width: content.width,
       height: content.height,
     };
@@ -564,7 +545,7 @@ const projectClipboardContent = Effect.fn("NativeFileSources.projectClipboardCon
     return {
       type: "file",
       name: content.name,
-      sourceId: sources.register(content.path),
+      sourceId: yield* sources.register(content.path),
       extension: content.extension,
       ...(content.size === undefined ? {} : { size: content.size }),
     };
@@ -695,19 +676,9 @@ if (!hasSingleInstanceLock) {
         runtime.runFork(DesktopSession.use((session) => session.refresh)),
       onRendererLoaded: () => runtime.runFork(DesktopSession.use((session) => session.refresh)),
       onDropFiles: ({ files }) => {
-        void runEffect(
-          NativeFileSources.use((sources) =>
-            Effect.promise(() =>
-              Promise.all(
-                files.map(async (path) => ({
-                  sourceId: sources.register(path),
-                  name: basename(path),
-                  size: (await stat(path)).size,
-                })),
-              ),
-            ),
-          ),
-        ).then((files) => broadcastTrayDroppedItem({ type: "files", files }));
+        void runEffect(Effect.forEach(files, projectNativeFile, { concurrency: "unbounded" })).then(
+          (files) => broadcastTrayDroppedItem({ type: "files", files }),
+        );
       },
       onDropText: ({ text }) => {
         if (text.trim()) broadcastTrayDroppedItem({ type: "text", text });

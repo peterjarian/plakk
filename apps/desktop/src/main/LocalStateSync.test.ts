@@ -1,6 +1,7 @@
+import { NodeFileSystem } from "@effect/platform-node";
 import type { User } from "@plakk/shared";
 import type { ApiSnippet, SnippetChangePage } from "@plakk/shared/PlakkApi";
-import { SnippetHydrationEngine } from "@plakk/shared/SnippetHydration";
+import { SnippetHydrationEngine } from "./Services/SnippetHydration.ts";
 import {
   ManagedSnippetContent,
   runSnippetReplicaSync,
@@ -9,11 +10,8 @@ import {
   syncSnippetReplica,
   type SnippetReplicaState,
 } from "@plakk/shared/SnippetReplica";
-import { afterEach, describe, expect, it } from "@effect/vitest";
-import { Effect, Fiber, Layer, ManagedRuntime, Option, PubSub, Stream } from "effect";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { expect, it } from "@effect/vitest";
+import { Effect, Fiber, FileSystem, Layer, ManagedRuntime, Option, PubSub, Stream } from "effect";
 
 import { LocalStateLive } from "./Layers/LocalState.ts";
 import { LocalStateSnippetsLive } from "./Layers/LocalStateSnippets.ts";
@@ -46,11 +44,6 @@ const snippet = (
   updatedAt: "2026-01-01T00:00:00.000Z",
 });
 
-const temporaryDirectories: Array<string> = [];
-afterEach(async () => {
-  await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true })));
-});
-
 const harness = (options: {
   initial?: SnippetReplicaState | null;
   pages?: Array<SnippetChangePage>;
@@ -58,8 +51,8 @@ const harness = (options: {
   wakes?: Stream.Stream<void>;
 }) =>
   Effect.gen(function* () {
-    const cwd = yield* Effect.promise(() => mkdtemp(join(tmpdir(), "plakk-local-state-sync-")));
-    temporaryDirectories.push(cwd);
+    const fileSystem = yield* FileSystem.FileSystem;
+    const cwd = yield* fileSystem.makeTempDirectoryScoped({ prefix: "plakk-local-state-sync-" });
     let state = options.initial ?? null;
     const snapshot = options.snapshot ?? { cursor: "snapshot", items: [] };
     const pages = options.pages ?? [];
@@ -130,7 +123,6 @@ const harness = (options: {
         ),
       resume: () => Effect.void,
       state: () => Effect.succeed({ status: "NOT_AVAILABLE" }),
-      updateSettings: () => Effect.void,
     });
     const desktopContent = DesktopManagedSnippetContent.of({
       available: () => Effect.succeed(false),
@@ -173,7 +165,7 @@ const harness = (options: {
     };
   });
 
-describe("local state synchronization seam", () => {
+it.layer(NodeFileSystem.layer)("local state synchronization seam", (it) => {
   it.effect("publishes authoritative upload failures through replica changes", () =>
     Effect.gen(function* () {
       const first = snippet(

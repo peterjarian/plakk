@@ -1,10 +1,8 @@
-import type { User } from "@plakk/shared";
+import { NodeFileSystem } from "@effect/platform-node";
+import { UserSchema, type User } from "@plakk/shared";
 import type { AccountStatus, PipeConnection } from "@plakk/shared/PlakkApi";
-import { afterEach, describe, expect, it } from "@effect/vitest";
-import { Effect, Layer, ManagedRuntime, Schema, Stream } from "effect";
-import { mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { expect, it } from "@effect/vitest";
+import { Effect, FileSystem, Layer, ManagedRuntime, Schema, Stream } from "effect";
 import ElectronStore from "electron-store";
 
 import type { DesktopSnippet } from "../ipc/contracts.ts";
@@ -50,12 +48,6 @@ const connected: PipeConnection = {
   externalDestinationUrl: "https://drive.example.com/folder",
 };
 
-const temporaryDirectories: Array<string> = [];
-
-afterEach(async () => {
-  await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true })));
-});
-
 const makeRuntime = (
   cwd: string,
   items: Readonly<Record<string, ReadonlyArray<DesktopSnippet>>>,
@@ -73,11 +65,11 @@ const makeRuntime = (
   );
 };
 
-describe("local state", () => {
+it.layer(NodeFileSystem.layer)("local state", (it) => {
   it.effect("restores cached account, provider, and snippets offline after a restart", () =>
     Effect.gen(function* () {
-      const cwd = yield* Effect.promise(() => mkdtemp(join(tmpdir(), "plakk-local-state-")));
-      temporaryDirectories.push(cwd);
+      const fileSystem = yield* FileSystem.FileSystem;
+      const cwd = yield* fileSystem.makeTempDirectoryScoped({ prefix: "plakk-local-state-" });
       const firstSnippet = snippet("0d1e2f3a-4567-4890-8abc-def012345678", "first.txt");
       const account = user("user_1");
 
@@ -113,8 +105,8 @@ describe("local state", () => {
 
   it.effect("switches account-scoped state without leaking the previous account", () =>
     Effect.gen(function* () {
-      const cwd = yield* Effect.promise(() => mkdtemp(join(tmpdir(), "plakk-local-state-")));
-      temporaryDirectories.push(cwd);
+      const fileSystem = yield* FileSystem.FileSystem;
+      const cwd = yield* fileSystem.makeTempDirectoryScoped({ prefix: "plakk-local-state-" });
       const firstAccount = user("user_1");
       const secondAccount = user("user_2");
       const firstSnippet = snippet("0d1e2f3a-4567-4890-8abc-def012345678", "first.txt");
@@ -156,8 +148,8 @@ describe("local state", () => {
 
   it.effect("clears durable local state on explicit sign-out", () =>
     Effect.gen(function* () {
-      const cwd = yield* Effect.promise(() => mkdtemp(join(tmpdir(), "plakk-local-state-")));
-      temporaryDirectories.push(cwd);
+      const fileSystem = yield* FileSystem.FileSystem;
+      const cwd = yield* fileSystem.makeTempDirectoryScoped({ prefix: "plakk-local-state-" });
       const account = user("user_1");
       const runtime = makeRuntime(cwd, { [account.id]: [] });
 
@@ -197,8 +189,8 @@ describe("local state", () => {
 
   it.effect("recovers from an invalid cached session without failing desktop startup", () =>
     Effect.gen(function* () {
-      const cwd = yield* Effect.promise(() => mkdtemp(join(tmpdir(), "plakk-local-state-")));
-      temporaryDirectories.push(cwd);
+      const fileSystem = yield* FileSystem.FileSystem;
+      const cwd = yield* fileSystem.makeTempDirectoryScoped({ prefix: "plakk-local-state-" });
       const store = new ElectronStore<{ session: string | null }>({
         cwd,
         name: "local-state",
@@ -224,8 +216,8 @@ describe("local state", () => {
 
   it.effect("migrates the previously named durable store without losing offline state", () =>
     Effect.gen(function* () {
-      const cwd = yield* Effect.promise(() => mkdtemp(join(tmpdir(), "plakk-local-state-")));
-      temporaryDirectories.push(cwd);
+      const fileSystem = yield* FileSystem.FileSystem;
+      const cwd = yield* fileSystem.makeTempDirectoryScoped({ prefix: "plakk-local-state-" });
       const account = user("user_1");
       const legacyStore = new ElectronStore<{ session: string | null }>({
         cwd,
@@ -252,6 +244,74 @@ describe("local state", () => {
         capability: { status: "OFFLINE" },
       });
       expect(legacyStore.get("session")).toBeNull();
+    }),
+  );
+
+  it.effect("migrates the released active-account store with unknown provider state", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const cwd = yield* fileSystem.makeTempDirectoryScoped({ prefix: "plakk-local-state-" });
+      const account = user("user_1");
+      const legacyStore = new ElectronStore<{ active: string | null }>({
+        cwd,
+        defaults: { active: null },
+        name: "snippet-replica-account",
+      });
+      legacyStore.set("active", Schema.encodeSync(Schema.fromJsonString(UserSchema))(account));
+
+      const runtime = makeRuntime(cwd, { [account.id]: [] });
+      const localState = yield* Effect.promise(() =>
+        runtime.runPromise(LocalState.use((state) => state.current)),
+      );
+      yield* Effect.promise(() => runtime.dispose());
+
+      expect(localState).toMatchObject({
+        account,
+        provider: { known: false, value: null },
+        capability: { status: "OFFLINE" },
+      });
+      expect(legacyStore.get("active")).toBeNull();
+    }),
+  );
+
+  it.effect("cannot resurrect a stale released account after explicit sign-out", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const cwd = yield* fileSystem.makeTempDirectoryScoped({ prefix: "plakk-local-state-" });
+      const account = user("user_1");
+      const encodeSession = Schema.encodeSync(Schema.fromJsonString(CachedLocalStateSessionSchema));
+      const currentStore = new ElectronStore<{ session: string | null }>({
+        cwd,
+        name: "local-state",
+      });
+      currentStore.set(
+        "session",
+        encodeSession({ account, provider: { known: true, value: "GOOGLE_DRIVE" } }),
+      );
+      const releasedStore = new ElectronStore<{ active: string | null }>({
+        cwd,
+        defaults: { active: null },
+        name: "snippet-replica-account",
+      });
+      releasedStore.set("active", Schema.encodeSync(Schema.fromJsonString(UserSchema))(account));
+
+      const runtime = makeRuntime(cwd, { [account.id]: [] });
+      yield* Effect.promise(() =>
+        runtime.runPromise(
+          LocalState.use((localState) => localState.update({ kind: "signed-out" })),
+        ),
+      );
+      yield* Effect.promise(() => runtime.dispose());
+
+      const restartedRuntime = makeRuntime(cwd, { [account.id]: [] });
+      const restarted = yield* Effect.promise(() =>
+        restartedRuntime.runPromise(LocalState.use((localState) => localState.current)),
+      );
+      yield* Effect.promise(() => restartedRuntime.dispose());
+
+      expect(releasedStore.get("active")).toBeNull();
+      expect(restarted.account).toBeNull();
+      expect(restarted.snippets).toEqual([]);
     }),
   );
 });

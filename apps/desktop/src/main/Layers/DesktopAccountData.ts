@@ -1,4 +1,3 @@
-import { SnippetHydrationEngine } from "@plakk/shared/SnippetHydration";
 import { SnippetReplica } from "@plakk/shared/SnippetReplica";
 import { Effect, Layer } from "effect";
 
@@ -9,13 +8,12 @@ import {
   type DesktopAccountDataShape,
 } from "../Services/DesktopAccountData.ts";
 import { LocalState } from "../Services/LocalState.ts";
+import { SnippetHydrationEngine } from "../Services/SnippetHydration.ts";
 import { SnippetUploadEngine } from "../SnippetUploadEngine.ts";
-import { SnippetUploadOutbox } from "../SnippetUploadOutbox.ts";
 
 type DesktopAccountDataOwners = {
   readonly replica: SnippetReplica["Service"];
   readonly uploads: SnippetUploadEngine["Service"];
-  readonly outbox: SnippetUploadOutbox["Service"];
   readonly hydration: SnippetHydrationEngine["Service"];
   readonly content: DesktopManagedSnippetContent["Service"];
   readonly localState: LocalState["Service"];
@@ -40,7 +38,6 @@ const purgeWith = Effect.fn("DesktopAccountData.purgeWith")(function* (
       attempt("upload recovery", owners.uploads.purge(accountId)),
       attempt("hydration", owners.hydration.purge(accountId)),
       attempt("readable mirror", owners.replica.purge(accountId)),
-      attempt("legacy upload outbox", owners.outbox.purge(accountId)),
       attempt("managed content", owners.content.purge(accountId)),
     ],
     { concurrency: "unbounded", discard: true },
@@ -53,7 +50,6 @@ const makeDesktopAccountData = Effect.gen(function* () {
   const owners: DesktopAccountDataOwners = {
     replica: yield* SnippetReplica,
     uploads: yield* SnippetUploadEngine,
-    outbox: yield* SnippetUploadOutbox,
     hydration: yield* SnippetHydrationEngine,
     content: yield* DesktopManagedSnippetContent,
     localState: yield* LocalState,

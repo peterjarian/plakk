@@ -1,11 +1,11 @@
 import type { StorageProvider } from "@plakk/shared";
-import { SnippetHydrationError, SnippetHydrationTransport } from "@plakk/shared/SnippetHydration";
 import { RpcError } from "@plakk/shared/RpcError";
 import { net } from "electron";
 import { Effect, Layer, Stream } from "effect";
 import { RpcClientError } from "effect/unstable/rpc/RpcClientError";
 
-import { PlakkRpcClient } from "./PlakkRpcClient.ts";
+import { PlakkRpcClient } from "../PlakkRpcClient.ts";
+import { SnippetHydrationError, SnippetHydrationTransport } from "../Services/SnippetHydration.ts";
 
 type SnippetFetch = (input: string | URL, init?: RequestInit) => Promise<Response>;
 

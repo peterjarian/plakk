@@ -319,12 +319,22 @@ export function Home({ active = true }: { active?: boolean }) {
       <AppHeader
         user={user}
         onSettingsClick={() => navigate("settings")}
-        onSignOutClick={() => void signOut().then(() => navigate("welcome"))}
+        onSignOutClick={() =>
+          void signOut().then((signedOut) => {
+            if (signedOut) navigate("welcome");
+          })
+        }
         storageAction={storageAction}
       />
 
       <div className="scrollbar-hidden flex min-h-0 flex-1 flex-col overflow-y-auto px-6 pb-4">
         <div className="sticky top-0 z-20 bg-background pt-3 pb-5">
+          {auth.issue !== null && (
+            <div className="mb-2 flex items-center gap-2 rounded-md bg-muted px-2.5 py-1.5 text-xs text-muted-foreground">
+              <TriangleAlert className="size-3.5 shrink-0 text-amber-600" aria-hidden="true" />
+              <span className="min-w-0 flex-1 truncate">{auth.issue.message}</span>
+            </div>
+          )}
           {accountBlocked && storageStatus.kind !== "loading" && (
             <div className="mb-2 flex items-center gap-2 rounded-md bg-muted px-2.5 py-1.5 text-xs text-muted-foreground">
               <TriangleAlert className="size-3.5 shrink-0 text-amber-600" aria-hidden="true" />

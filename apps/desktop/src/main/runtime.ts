@@ -1,9 +1,8 @@
-import { NodeFileSystem } from "@effect/platform-node";
+import { NodeCrypto, NodeFileSystem } from "@effect/platform-node";
 import { app, net } from "electron";
 import { join } from "node:path";
 import { Layer, ManagedRuntime } from "effect";
 import { StorageUpload } from "../storageUpload.ts";
-import { SnippetHydrationEngine } from "@plakk/shared/SnippetHydration";
 import { AuthService } from "./auth/AuthService.ts";
 import { AuthStore } from "./auth/AuthStore.ts";
 import { UserConfigStore } from "./UserConfigStore.ts";
@@ -16,7 +15,8 @@ import { SnippetUploadEngine } from "./SnippetUploadEngine.ts";
 import { SnippetUploadOutbox } from "./SnippetUploadOutbox.ts";
 import { SnippetUploadRemote } from "./SnippetUploadRemote.ts";
 import { PlakkRpcClient, plakkRpcProtocolLayer } from "./PlakkRpcClient.ts";
-import { SnippetHydrationTransportLive } from "./SnippetHydrationTransport.ts";
+import { SnippetHydrationLive } from "./Layers/SnippetHydration.ts";
+import { SnippetHydrationTransportLive } from "./Layers/SnippetHydrationTransport.ts";
 import { LocalStateLive } from "./Layers/LocalState.ts";
 import { LocalStateSnippetsLive } from "./Layers/LocalStateSnippets.ts";
 import { LocalStateStoreLive } from "./Layers/LocalStateStore.ts";
@@ -27,7 +27,7 @@ import { DesktopSessionLive } from "./Layers/DesktopSession.ts";
 export const managedSnippetContentRoot = join(app.getPath("userData"), "snippet-content");
 const platformLayer = NodeFileSystem.layer;
 const authServiceLayer = AuthService.layer.pipe(Layer.provideMerge(AuthStore.Live));
-const nativeFileSourcesLayer = NativeFileSourcesLive;
+const nativeFileSourcesLayer = NativeFileSourcesLive.pipe(Layer.provide(NodeCrypto.layer));
 const desktopContentLayer = DesktopManagedSnippetContent.layer(managedSnippetContentRoot).pipe(
   Layer.provide(platformLayer),
 );
@@ -57,7 +57,7 @@ const hydrationEngineDependencies = Layer.mergeAll(
 const snippetUploadEngineLayer = SnippetUploadEngine.Live.pipe(
   Layer.provide(uploadEngineDependencies),
 );
-const snippetHydrationEngineLayer = SnippetHydrationEngine.Live.pipe(
+const snippetHydrationEngineLayer = SnippetHydrationLive.pipe(
   Layer.provide(hydrationEngineDependencies),
 );
 const localStateSnippetsLayer = LocalStateSnippetsLive.pipe(
@@ -78,7 +78,6 @@ const desktopAccountDataLayer = DesktopAccountDataLive.pipe(
     Layer.mergeAll(
       SnippetReplicaLive,
       snippetUploadEngineLayer,
-      SnippetUploadOutbox.Live,
       snippetHydrationEngineLayer,
       desktopContentLayer,
       localStateLayer,
@@ -94,7 +93,7 @@ const desktopSessionLayer = DesktopSessionLive.pipe(
       nativeFileSourcesLayer,
       snippetUploadEngineLayer,
       snippetHydrationEngineLayer,
-      UserConfigStore.Live,
+      platformLayer,
       SnippetReplicaLive,
       snippetRemoteTransportLayer,
       managedSnippetContentLayer,

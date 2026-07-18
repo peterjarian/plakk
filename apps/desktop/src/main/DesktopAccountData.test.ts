@@ -1,5 +1,5 @@
 import { ManagedSnippetContentError, SnippetReplica } from "@plakk/shared/SnippetReplica";
-import { SnippetHydrationEngine } from "@plakk/shared/SnippetHydration";
+import { SnippetHydrationEngine } from "./Services/SnippetHydration.ts";
 import { describe, expect, it } from "@effect/vitest";
 import { Effect, Layer, Stream } from "effect";
 
@@ -8,7 +8,6 @@ import { DesktopManagedSnippetContent } from "./ManagedSnippetContent.ts";
 import { DesktopAccountData } from "./Services/DesktopAccountData.ts";
 import { LocalState } from "./Services/LocalState.ts";
 import { SnippetUploadEngine } from "./SnippetUploadEngine.ts";
-import { SnippetUploadOutbox } from "./SnippetUploadOutbox.ts";
 
 describe("desktop account purge", () => {
   it.effect(
@@ -25,16 +24,6 @@ describe("desktop account purge", () => {
               commit: () => Effect.void,
               get: () => Effect.succeed(null),
               purge: () => record("replica"),
-              remove: () => Effect.void,
-            }),
-          ),
-          Layer.succeed(
-            SnippetUploadOutbox,
-            SnippetUploadOutbox.of({
-              get: () => Effect.succeed(null),
-              list: () => Effect.succeed([]),
-              purge: () => record("outbox"),
-              put: () => Effect.void,
               remove: () => Effect.void,
             }),
           ),
@@ -64,7 +53,6 @@ describe("desktop account purge", () => {
               reconcile: () => Effect.succeed(new Map()),
               resume: () => Effect.void,
               state: () => Effect.succeed({ status: "NOT_AVAILABLE" }),
-              updateSettings: () => Effect.void,
             }),
           ),
           Layer.succeed(
@@ -119,7 +107,6 @@ describe("desktop account purge", () => {
             "uploads",
             "hydration",
             "replica",
-            "outbox",
             "content",
             "local-state:signed-out",
           ]),

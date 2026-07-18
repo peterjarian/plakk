@@ -1,5 +1,6 @@
 import type { User } from "@plakk/shared";
-import { SnippetHydrationEngine } from "@plakk/shared/SnippetHydration";
+import { NodeFileSystem } from "@effect/platform-node";
+import { SnippetHydrationEngine } from "./Services/SnippetHydration.ts";
 import {
   ManagedSnippetContent,
   SnippetRemoteTransport,
@@ -16,7 +17,6 @@ import { DesktopSession } from "./Services/DesktopSession.ts";
 import { LocalState, type LocalStateUpdate } from "./Services/LocalState.ts";
 import { NativeFileSources } from "./Services/NativeFileSources.ts";
 import { SnippetUploadEngine } from "./SnippetUploadEngine.ts";
-import { UserConfigStore } from "./UserConfigStore.ts";
 
 const account: User = {
   id: "user_1",
@@ -25,6 +25,12 @@ const account: User = {
   lastName: "Owner",
   createdAt: "2026-01-01T00:00:00.000Z",
   updatedAt: "2026-01-01T00:00:00.000Z",
+};
+
+const secondAccount: User = {
+  ...account,
+  id: "user_2",
+  email: "user_2@example.com",
 };
 
 describe("DesktopSession", () => {
@@ -41,21 +47,25 @@ describe("DesktopSession", () => {
       const callbackStarted = yield* Deferred.make<void>();
       const localStateUpdates: Array<LocalStateUpdate> = [];
       const credentialEvents: Array<string> = [];
+      const transitionEvents: Array<string> = [];
       let credentialsPurged = false;
       let accountPurged = false;
+      const purgedAccountIds: Array<string> = [];
       const dependencies = Layer.mergeAll(
         Layer.succeed(
           AuthService,
           AuthService.of({
             callbackUrl: Effect.succeed("plakk-auth://callback"),
             getSession: () => Deferred.await(pendingSession),
-            handleCallbackUrl: () =>
-              Effect.gen(function* () {
-                yield* Deferred.succeed(callbackStarted, undefined);
-                const session = yield* Deferred.await(pendingCallback);
-                credentialEvents.push("callback-credentials-written");
-                return session;
-              }),
+            handleCallbackUrl: (rawUrl) =>
+              rawUrl === "plakk-auth://switch"
+                ? Effect.succeed({ accessToken: "second-token", user: secondAccount })
+                : Effect.gen(function* () {
+                    yield* Deferred.succeed(callbackStarted, undefined);
+                    const session = yield* Deferred.await(pendingCallback);
+                    credentialEvents.push("callback-credentials-written");
+                    return session;
+                  }),
             signOut: () =>
               Effect.sync(() => {
                 credentialsPurged = true;
@@ -67,9 +77,11 @@ describe("DesktopSession", () => {
         Layer.succeed(
           DesktopAccountData,
           DesktopAccountData.of({
-            purge: () =>
+            purge: (accountId) =>
               Effect.sync(() => {
                 accountPurged = true;
+                purgedAccountIds.push(accountId);
+                transitionEvents.push("account-purged");
                 localStateUpdates.push({ kind: "signed-out" });
               }),
           }),
@@ -92,7 +104,7 @@ describe("DesktopSession", () => {
         Layer.succeed(
           NativeFileSources,
           NativeFileSources.of({
-            register: () => "source-id",
+            register: () => Effect.succeed("source-id"),
             take: () => undefined,
             discardAll: () => [],
           }),
@@ -123,18 +135,6 @@ describe("DesktopSession", () => {
             reconcile: () => Effect.succeed(new Map()),
             resume: () => Effect.void,
             state: () => Effect.succeed({ status: "NOT_AVAILABLE" }),
-            updateSettings: () => Effect.void,
-          }),
-        ),
-        Layer.succeed(
-          UserConfigStore,
-          UserConfigStore.of({
-            get: Effect.succeed({
-              keepAllFilesOffline: false,
-              showExternalLinkWarning: true,
-            }),
-            reset: Effect.die("unused"),
-            set: () => Effect.die("unused"),
           }),
         ),
         Layer.succeed(
@@ -151,7 +151,12 @@ describe("DesktopSession", () => {
           SnippetRemoteTransport,
           SnippetRemoteTransport.of({
             pull: () => Effect.never,
-            snapshot: () => Effect.never,
+            snapshot: () =>
+              Effect.never.pipe(
+                Effect.onInterrupt(() =>
+                  Effect.sync(() => void transitionEvents.push("sync-stopped")),
+                ),
+              ),
             wakes: () => Stream.never,
           }),
         ),
@@ -195,22 +200,51 @@ describe("DesktopSession", () => {
         });
         yield* Fiber.join(callback);
         yield* Fiber.join(callbackSignOut);
+        const accountAfterRaces = yield* session.currentAccount;
+        const updateAfterRaces = localStateUpdates.at(-1);
+
+        yield* session.handleCallbackUrl("plakk-auth://callback");
+        yield* Effect.yieldNow;
+        const purgesBeforeSwitch = purgedAccountIds.length;
+        const transitionEventsBeforeSwitch = transitionEvents.length;
+        yield* session.handleCallbackUrl("plakk-auth://switch");
         return {
           account: yield* session.currentAccount,
+          accountAfterRaces,
           accountPurged,
           credentialEvents,
           credentialsPurged,
           localStateUpdates,
           refreshLocalStateUpdates,
+          switchPurges: purgedAccountIds.slice(purgesBeforeSwitch),
+          switchTransitionEvents: transitionEvents.slice(transitionEventsBeforeSwitch),
+          updateAfterRaces,
         };
-      }).pipe(Effect.provide(DesktopSessionLive.pipe(Layer.provide(dependencies))));
+      }).pipe(
+        Effect.provide(
+          DesktopSessionLive.pipe(Layer.provide(Layer.merge(dependencies, NodeFileSystem.layer))),
+        ),
+      );
 
-      expect(result.account).toBeNull();
+      expect(result.accountAfterRaces).toBeNull();
+      expect(result.account).toMatchObject({ id: secondAccount.id });
       expect(result.accountPurged).toBe(true);
       expect(result.credentialsPurged).toBe(true);
       expect(result.refreshLocalStateUpdates).not.toContainEqual({ kind: "offline", account });
-      expect(result.credentialEvents.at(-1)).toBe("credentials-purged");
-      expect(result.localStateUpdates.at(-1)).toEqual({ kind: "signed-out" });
+      expect(result.credentialEvents).toContain("credentials-purged");
+      expect(result.updateAfterRaces).toEqual({ kind: "signed-out" });
+      expect(result.switchPurges).toEqual([account.id]);
+      expect(result.switchTransitionEvents.slice(0, 2)).toEqual(["sync-stopped", "account-purged"]);
+      expect(result.localStateUpdates.slice(-3)).toEqual([
+        { kind: "signed-out" },
+        { kind: "offline", account: secondAccount },
+        {
+          kind: "online",
+          account: secondAccount,
+          accountStatus: { canSync: false, storageProvider: null, blockedReasons: [] },
+          connection: null,
+        },
+      ]);
     }),
   );
 });

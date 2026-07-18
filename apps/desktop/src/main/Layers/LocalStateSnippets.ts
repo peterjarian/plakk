@@ -1,9 +1,9 @@
-import { SnippetHydrationEngine } from "@plakk/shared/SnippetHydration";
 import { SnippetReplica } from "@plakk/shared/SnippetReplica";
 import { Effect, Layer, Schema, Stream } from "effect";
 
 import { DesktopSnippetSchema } from "../../ipc/contracts.ts";
 import { DesktopManagedSnippetContent } from "../ManagedSnippetContent.ts";
+import { SnippetHydrationEngine } from "../Services/SnippetHydration.ts";
 import {
   LocalStateError,
   LocalStateSnippets,

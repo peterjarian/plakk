@@ -1,4 +1,5 @@
 import { Context } from "effect";
+import type { Effect, PlatformError } from "effect";
 
 export type NativeFileSource = {
   readonly filePath: string;
@@ -6,7 +7,10 @@ export type NativeFileSource = {
 };
 
 export interface NativeFileSourcesShape {
-  readonly register: (filePath: string, options?: { readonly temporary?: boolean }) => string;
+  readonly register: (
+    filePath: string,
+    options?: { readonly temporary?: boolean },
+  ) => Effect.Effect<string, PlatformError.PlatformError>;
   readonly take: (sourceId: string) => NativeFileSource | undefined;
   readonly discardAll: () => ReadonlyArray<string>;
 }

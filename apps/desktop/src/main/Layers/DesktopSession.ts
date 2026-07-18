@@ -1,18 +1,29 @@
+import type { User } from "@plakk/shared";
 import { accountCanSyncWithConnection } from "@plakk/shared/PlakkApi";
-import { SnippetHydrationEngine } from "@plakk/shared/SnippetHydration";
+import { RpcError } from "@plakk/shared/RpcError";
 import {
   ManagedSnippetContent,
   runSnippetReplicaSync,
   SnippetRemoteTransport,
   SnippetReplica,
 } from "@plakk/shared/SnippetReplica";
-import { Effect, Fiber, Layer, PubSub, Ref, Result, Semaphore, Stream } from "effect";
-import { rm } from "node:fs/promises";
+import {
+  Effect,
+  Fiber,
+  FileSystem,
+  Layer,
+  PubSub,
+  Ref,
+  Result,
+  Schema,
+  Semaphore,
+  Stream,
+} from "effect";
 
-import { getAccountStatusWithConnection, isUnauthenticatedAccountError } from "../accountStatus.ts";
 import { AuthService, type AuthSession } from "../auth/AuthService.ts";
 import { PlakkRpcClient } from "../PlakkRpcClient.ts";
 import { DesktopAccountData } from "../Services/DesktopAccountData.ts";
+import type { DesktopAccountPurgeError } from "../Services/DesktopAccountData.ts";
 import {
   DesktopSession,
   DesktopSessionSignOutError,
@@ -20,8 +31,8 @@ import {
 } from "../Services/DesktopSession.ts";
 import { LocalState } from "../Services/LocalState.ts";
 import { NativeFileSources } from "../Services/NativeFileSources.ts";
+import { SnippetHydrationEngine } from "../Services/SnippetHydration.ts";
 import { SnippetUploadEngine } from "../SnippetUploadEngine.ts";
-import { UserConfigStore } from "../UserConfigStore.ts";
 
 type SessionStatus = { readonly accessToken: string | null; readonly user: User | null };
 
@@ -37,16 +48,16 @@ const makeDesktopSession = Effect.gen(function* () {
   const files = yield* NativeFileSources;
   const uploads = yield* SnippetUploadEngine;
   const hydration = yield* SnippetHydrationEngine;
-  const config = yield* UserConfigStore;
   const replica = yield* SnippetReplica;
   const remote = yield* SnippetRemoteTransport;
   const managedContent = yield* ManagedSnippetContent;
   const rpc = yield* PlakkRpcClient;
+  const fileSystem = yield* FileSystem.FileSystem;
   const status = yield* Ref.make<SessionStatus>({ accessToken: null, user: null });
   const generation = yield* Ref.make(0);
   const started = yield* Ref.make(false);
   const syncFiber = yield* Ref.make<Fiber.Fiber<void, unknown> | null>(null);
-  const refreshFiber = yield* Ref.make<Fiber.Fiber<void, never> | null>(null);
+  const refreshFiber = yield* Ref.make<Fiber.Fiber<void, DesktopAccountPurgeError> | null>(null);
   const refreshLock = yield* Semaphore.make(1);
   const issues = yield* PubSub.unbounded<string>();
 
@@ -55,11 +66,13 @@ const makeDesktopSession = Effect.gen(function* () {
     Effect.forEach(
       files.discardAll(),
       (temporaryPath) =>
-        Effect.tryPromise(() => rm(temporaryPath, { force: true })).pipe(
-          Effect.catchCause((cause) =>
-            Effect.logWarning("Could not remove a temporary native file source", { cause }),
+        fileSystem
+          .remove(temporaryPath, { force: true })
+          .pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("Could not remove a temporary native file source", { cause }),
+            ),
           ),
-        ),
       { discard: true },
     ),
   );
@@ -85,7 +98,15 @@ const makeDesktopSession = Effect.gen(function* () {
     const previous = yield* Ref.get(status);
     const accountChanged = previous.user?.id !== next.user?.id;
     const changed = previous.accessToken !== next.accessToken || accountChanged;
+    if (changed) {
+      yield* Ref.update(generation, (value) => value + 1);
+      yield* stopSync;
+      yield* pauseBackgroundWork;
+    }
     if (accountChanged) yield* clearFileSources;
+    if (previous.user !== null && next.user !== null && accountChanged) {
+      yield* accountData.purge(previous.user.id);
+    }
     yield* Ref.set(status, next);
     if (next.user !== null) {
       yield* localState
@@ -97,9 +118,6 @@ const makeDesktopSession = Effect.gen(function* () {
         );
     }
     if (!changed) return;
-    yield* Ref.update(generation, (value) => value + 1);
-    yield* stopSync;
-    yield* pauseBackgroundWork;
     if (next.user !== null && next.accessToken !== null) {
       yield* startSync({ user: next.user, accessToken: next.accessToken });
     }
@@ -117,20 +135,8 @@ const makeDesktopSession = Effect.gen(function* () {
           ),
         ),
       );
-    const settingsResult = yield* config.get.pipe(Effect.result);
-    if (Result.isFailure(settingsResult)) {
-      yield* Effect.logError("Could not load offline snippet settings", {
-        cause: settingsResult.failure,
-      });
-      yield* publishIssue("Could not resume background snippet work.");
-      return;
-    }
-    const settings = settingsResult.success;
     yield* hydration
-      .resume(
-        { id: session.user.id, accessToken: session.accessToken },
-        { keepAllFilesOffline: settings.keepAllFilesOffline },
-      )
+      .resume({ id: session.user.id, accessToken: session.accessToken })
       .pipe(
         Effect.catchCause((cause) =>
           Effect.logError("Could not resume offline snippet downloads", { cause }).pipe(
@@ -144,11 +150,18 @@ const makeDesktopSession = Effect.gen(function* () {
     const current = yield* Ref.get(status);
     if (current.user === null || current.accessToken === null) return;
     const checkedGeneration = yield* Ref.get(generation);
-    const result = yield* getAccountStatusWithConnection(current.accessToken).pipe(
-      Effect.provideService(PlakkRpcClient, rpc),
-      Effect.scoped,
-      Effect.result,
-    );
+    const headers = { authorization: `Bearer ${current.accessToken}` };
+    const result = yield* Effect.gen(function* () {
+      const account = yield* rpc.GetAccountStatus(undefined, { headers });
+      const connection =
+        account.storageProvider === null
+          ? null
+          : yield* rpc.GetPipeConnectionStatus(
+              { storageProvider: account.storageProvider },
+              { headers },
+            );
+      return { account, connection };
+    }).pipe(Effect.scoped, Effect.result);
     const latest = yield* Ref.get(status);
     if (
       checkedGeneration !== (yield* Ref.get(generation)) ||
@@ -158,7 +171,7 @@ const makeDesktopSession = Effect.gen(function* () {
     }
     if (Result.isFailure(result)) {
       yield* pauseBackgroundWork;
-      if (isUnauthenticatedAccountError(result.failure)) {
+      if (Schema.is(RpcError)(result.failure) && result.failure.code === "UNAUTHENTICATED") {
         yield* setStatus({ accessToken: null, user: current.user });
       } else {
         yield* localState
@@ -225,15 +238,15 @@ const makeDesktopSession = Effect.gen(function* () {
         const current = yield* Ref.get(status);
         yield* stopSync;
         yield* pauseBackgroundWork;
-        const localResult =
+        const localCleanup: Effect.Effect<void, unknown> =
           current.user === null
-            ? yield* Effect.result(localState.update({ kind: "signed-out" }))
-            : yield* Effect.result(accountData.purge(current.user.id));
+            ? localState.update({ kind: "signed-out" })
+            : accountData.purge(current.user.id);
+        const localResult = yield* Effect.result(localCleanup);
         const credentialResult = yield* Effect.result(auth.signOut());
         yield* clearFileSources;
         yield* Ref.set(status, { accessToken: null, user: null });
-        const localFailure =
-          localResult._tag === "Failure" ? (localResult.failure as unknown) : null;
+        const localFailure = Result.isFailure(localResult) ? localResult.failure : null;
         if (localFailure !== null) {
           return yield* new DesktopSessionSignOutError({
             cause: localFailure,
@@ -294,4 +307,3 @@ const makeDesktopSession = Effect.gen(function* () {
 });
 
 export const DesktopSessionLive = Layer.effect(DesktopSession, makeDesktopSession);
-import type { User } from "@plakk/shared";

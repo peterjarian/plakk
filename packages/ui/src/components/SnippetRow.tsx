@@ -1,6 +1,6 @@
 import { formatFileSize, type SnippetPresentation } from "@plakk/shared";
 import type { ApiSnippet } from "@plakk/shared/PlakkApi";
-import type { LocalContentAvailability } from "@plakk/shared/SnippetHydration";
+import type { LocalContentAvailability } from "@plakk/shared";
 import * as DateTime from "effect/DateTime";
 import {
   ArrowUpRight,

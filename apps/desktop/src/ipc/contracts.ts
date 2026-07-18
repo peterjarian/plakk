@@ -1,6 +1,6 @@
 import { SnippetUploadStatusLiteral, StorageProviderLiteral, UserSchema } from "@plakk/shared";
 import { AccountStatusSchema, PipeConnectionSchema, SnippetIdSchema } from "@plakk/shared/PlakkApi";
-import { LocalContentAvailabilitySchema } from "@plakk/shared/SnippetHydration";
+import { LocalContentAvailabilitySchema } from "@plakk/shared";
 import { Schema } from "effect";
 
 export type IpcSchema = Schema.ConstraintCodec<unknown, unknown, never, never>;
@@ -60,7 +60,6 @@ export type ClipboardContent = typeof ClipboardContentSchema.Type;
 
 export const UserConfigSchema = Schema.Struct({
   showExternalLinkWarning: Schema.Boolean,
-  keepAllFilesOffline: Schema.Boolean,
 });
 
 export type UserConfig = typeof UserConfigSchema.Type;
@@ -69,7 +68,6 @@ export type UserConfigPatch = Partial<UserConfig>;
 
 export const UserConfigPatchSchema = Schema.Struct({
   showExternalLinkWarning: Schema.optionalKey(Schema.Boolean),
-  keepAllFilesOffline: Schema.optionalKey(Schema.Boolean),
 });
 
 export const TrayDroppedItemSchema = Schema.Union([
