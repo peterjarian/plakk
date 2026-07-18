@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import { Schema } from "effect";
 
-import { DesktopSnippetSchema } from "./contracts.ts";
+import { AuthStatusSchema, DesktopSnippetSchema } from "./contracts.ts";
 
 describe("DesktopSnippetSchema", () => {
   it("encodes an uploading local text projection synchronously", () => {
@@ -29,5 +29,12 @@ describe("DesktopSnippetSchema", () => {
         },
       ]),
     ).toHaveLength(1);
+  });
+});
+
+describe("AuthStatusSchema", () => {
+  it("does not encode bearer tokens across the renderer boundary", () => {
+    const encode = Schema.encodeUnknownSync(AuthStatusSchema);
+    expect(encode({ user: null, accessToken: "secret" })).toEqual({ user: null });
   });
 });

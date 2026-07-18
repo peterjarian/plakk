@@ -15,7 +15,6 @@ type AuthState = {
   isLoading: boolean;
   signIn: () => Promise<void>;
   signOut: () => Promise<void>;
-  accessToken: string | null;
   user: AuthStatus["user"];
 };
 
@@ -47,7 +46,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void window.ipc.auth.getAuth().then(applyStatus, () => {
       if (!isMounted) return;
       reportError();
-      setStatus({ accessToken: null, user: null });
+      setStatus({ user: null });
     });
     const refreshInterval = window.setInterval(refresh, AUTH_REFRESH_INTERVAL_MS);
     window.addEventListener("focus", refresh);
@@ -83,7 +82,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const user = status?.user ?? null;
 
     return {
-      accessToken: status?.accessToken ?? null,
       issue,
       isLoading: status === null,
       signIn,

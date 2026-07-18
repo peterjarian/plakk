@@ -2,8 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 const state = vi.hoisted(() => ({
   effects: [] as Array<() => void>,
-  queries: [] as Array<{ tag: string; options: Record<string, unknown> }>,
-  refreshes: [] as string[],
+  getStatus: vi.fn(),
 }));
 
 vi.mock("react", async (importOriginal) => {
@@ -16,52 +15,33 @@ vi.mock("react", async (importOriginal) => {
       if (cleanup) state.effects.push(cleanup);
     },
     useMemo: <A,>(make: () => A) => make(),
+    useState: <A,>(initial: A | (() => A)) => [
+      typeof initial === "function" ? (initial as () => A)() : initial,
+      vi.fn(),
+    ],
   };
 });
 
-vi.mock("@effect/atom-react", () => ({
-  useAtomRefresh: (atom: { tag: string }) => () => state.refreshes.push(atom.tag),
-  useAtomValue: (atom: { tag: string }) =>
-    atom.tag === "GetAccountStatus"
-      ? {
-          _tag: "Success",
-          waiting: false,
-          value: { canSync: true, storageProvider: "GOOGLE_DRIVE", blockedReasons: [] },
-        }
-      : {
-          _tag: "Success",
-          waiting: false,
-          value: {
-            storageProvider: "GOOGLE_DRIVE",
-            status: "CONNECTED",
-            externalDestinationUrl: "https://drive.example",
-          },
-        },
-}));
-
-vi.mock("@plakk/ui/atoms/rpc", () => ({
-  createPlakkRpc: () => ({
-    mutation: () => ({}),
-    query: (tag: string, _payload: unknown, options: Record<string, unknown>) => {
-      state.queries.push({ tag, options });
-      return { tag };
-    },
-  }),
-}));
-
 vi.mock("./useAuth.ts", () => ({
-  useAuth: () => ({ accessToken: "token", user: { id: "user_1" } }),
+  useAuth: () => ({ user: { id: "user_1" } }),
 }));
 
 describe("StorageStatusProvider", () => {
   beforeEach(() => {
     vi.resetModules();
     state.effects.length = 0;
-    state.queries.length = 0;
-    state.refreshes.length = 0;
+    state.getStatus.mockReset();
+    state.getStatus.mockResolvedValue({
+      account: { canSync: true, storageProvider: "GOOGLE_DRIVE", blockedReasons: [] },
+      connection: {
+        storageProvider: "GOOGLE_DRIVE",
+        status: "CONNECTED",
+        externalDestinationUrl: "https://drive.example",
+      },
+    });
   });
 
-  it("shares stable queries and refreshes only after a setup flow returns", async () => {
+  it("loads protected storage state through Electron main without renderer credentials", async () => {
     let onFocus: (() => void) | undefined;
     const openExternal = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(globalThis, "window", {
@@ -71,7 +51,7 @@ describe("StorageStatusProvider", () => {
           if (event === "focus") onFocus = listener;
         },
         removeEventListener: vi.fn(),
-        ipc: { openExternal, runtimeConfig: { plakkRpcUrl: "https://rpc.example" } },
+        ipc: { openExternal, storage: { getStatus: state.getStatus } },
       },
     });
     const { StorageStatusProvider } = await import("./useStorageStatus.tsx");
@@ -79,25 +59,16 @@ describe("StorageStatusProvider", () => {
     const provider = StorageStatusProvider({ children: ["home", "settings"] }) as {
       props: { value: { openSetup: (url: string) => void } };
     };
-    expect(state.queries.map(({ tag }) => tag)).toEqual([
-      "GetAccountStatus",
-      "GetPipeConnectionStatus",
-    ]);
-    expect(state.queries.map(({ options }) => options.serializationKey)).toEqual([
-      "account-status",
-      "pipe-connection-GOOGLE_DRIVE",
-    ]);
+    expect(state.getStatus).toHaveBeenCalledOnce();
 
     onFocus?.();
     onFocus?.();
-    expect(state.refreshes).toEqual([]);
-    expect(state.queries).toHaveLength(2);
+    expect(state.getStatus).toHaveBeenCalledOnce();
 
     provider.props.value.openSetup("https://app.plakk.io/account/setup");
     expect(openExternal).toHaveBeenCalledWith("https://app.plakk.io/account/setup");
     onFocus?.();
     onFocus?.();
-    expect(state.refreshes).toEqual(["GetAccountStatus", "GetPipeConnectionStatus"]);
-    expect(state.queries).toHaveLength(2);
+    expect(openExternal).toHaveBeenCalledOnce();
   });
 });

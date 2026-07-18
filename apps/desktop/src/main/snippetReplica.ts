@@ -1,4 +1,4 @@
-import { UserSchema, type User } from "@plakk/shared";
+import { UserSchema, type SnippetUploadStatus, type User } from "@plakk/shared";
 import {
   ManagedSnippetContent,
   SnippetRemoteTransport,
@@ -332,7 +332,7 @@ export const getManagedSnippetBytes = Effect.fn("DesktopSnippetReplica.content")
     readonly id: string;
     readonly fileName: string;
     readonly byteSize: number;
-    readonly uploadStatus: "UPLOADING" | "FAILED" | "UPLOADED" | null;
+    readonly uploadStatus: SnippetUploadStatus | null;
   },
 ) {
   const content = yield* ManagedSnippetContent;

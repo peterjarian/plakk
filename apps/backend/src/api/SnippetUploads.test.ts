@@ -281,7 +281,10 @@ describe("authoritative snippet uploads", () => {
       DateTime.makeUnsafe(heartbeatTime + UPLOAD_HEARTBEAT_DURATION),
     );
     const heartbeatRow = row({ uploadHeartbeatExpiresAt: heartbeatExpiresAt });
-    const failedRow = row({ uploadStatus: "FAILED", uploadHeartbeatExpiresAt: null });
+    const failedRow = row({
+      uploadStatus: "CLIENT_UPLOAD_FAILED",
+      uploadHeartbeatExpiresAt: null,
+    });
     const store = scriptedDb({
       selects: [[row()], [], [{ id: createInput.id }], []],
       snippetUpdates: [[heartbeatRow], [failedRow]],
@@ -298,15 +301,18 @@ describe("authoritative snippet uploads", () => {
         yield* TestClock.setTime(Date.parse(heartbeat.expiresAt) - 1);
         const beforeDeadline = yield* uploads.expire;
         yield* TestClock.setTime(Date.parse(heartbeat.expiresAt) + 1);
-        const expired = yield* uploads.expire;
-        const replay = yield* uploads.expire;
+        const [expired, replay] = yield* Effect.all([uploads.expire, uploads.expire], {
+          concurrency: "unbounded",
+        });
         return { heartbeat, beforeDeadline, expired, replay };
       }),
     );
 
     expect(Date.parse(result.heartbeat.expiresAt)).toBe(heartbeatExpiresAt.getTime());
     expect(result).toMatchObject({ beforeDeadline: 0, expired: 1, replay: 0 });
-    expect(store.changes()).toMatchObject([{ id: createInput.id, uploadStatus: "FAILED" }]);
+    expect(store.changes()).toMatchObject([
+      { id: createInput.id, uploadStatus: "CLIENT_UPLOAD_FAILED" },
+    ]);
     expect(store.locks()).toEqual([
       { strength: "update", skipLocked: true },
       { strength: "update", skipLocked: true },
@@ -319,7 +325,7 @@ describe("authoritative snippet uploads", () => {
       ["UPLOADING", expect.any(Date)],
     );
     expect(store.updates()[1]!.set).toMatchObject({
-      uploadStatus: "FAILED",
+      uploadStatus: "CLIENT_UPLOAD_FAILED",
       uploadHeartbeatExpiresAt: null,
     });
     expectGuard(

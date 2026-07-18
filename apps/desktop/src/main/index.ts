@@ -18,7 +18,11 @@ import type {
 } from "../ipc/contracts.ts";
 import { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
 import { IpcHandlerError, makeHandle, send } from "../ipc/main.ts";
-import { getAccountStatus, isUnauthenticatedAccountError } from "./accountStatus.ts";
+import {
+  getAccountStatus,
+  getStorageStatus,
+  isUnauthenticatedAccountError,
+} from "./accountStatus.ts";
 import { AuthService, AuthServiceError } from "./auth/AuthService.ts";
 import {
   consumeTemporaryClipboardFile,
@@ -237,12 +241,21 @@ handle(ipcMethods.traySelectFiles, (_payload, event) =>
   }),
 );
 
-function authStatus(session: { accessToken: string; user: AuthStatus["user"] } | null): AuthStatus {
+type DesktopSessionStatus = {
+  readonly accessToken: string | null;
+  readonly user: AuthStatus["user"];
+};
+
+function authStatus(
+  session: { accessToken: string; user: AuthStatus["user"] } | null,
+): DesktopSessionStatus {
   return {
     accessToken: session?.accessToken ?? null,
     user: session?.user ?? null,
   };
 }
+
+const rendererAuthStatus = (status: DesktopSessionStatus): AuthStatus => ({ user: status.user });
 
 const authFailureMessage = (cause: unknown, fallback: string) =>
   cause instanceof AuthServiceError ? cause.message : fallback;
@@ -265,13 +278,27 @@ handle(ipcMethods.authGet, () =>
   ).pipe(
     Effect.tap((status) => Effect.sync(() => applyAuthStatus(status))),
     Effect.catchTag("IpcHandlerError", (error) => {
-      const paused = { accessToken: null, user: currentAuthStatus.user } satisfies AuthStatus;
+      const paused = {
+        accessToken: null,
+        user: currentAuthStatus.user,
+      } satisfies DesktopSessionStatus;
       return Effect.sync(() => applyAuthStatus(paused)).pipe(
         Effect.andThen(paused.user === null ? Effect.fail(error) : Effect.succeed(paused)),
       );
     }),
+    Effect.map(rendererAuthStatus),
   ),
 );
+
+handle(ipcMethods.storageGetStatus, () => {
+  const accessToken = currentAuthStatus.accessToken;
+  if (accessToken === null) {
+    return Effect.fail(
+      new IpcHandlerError({ cause: "Unauthenticated", message: "Storage status is unavailable." }),
+    );
+  }
+  return getStorageStatus(accessToken).pipe(asIpcFailure("Storage status is unavailable."));
+});
 
 handle(ipcMethods.authSignIn, () =>
   Effect.gen(function* () {
@@ -380,7 +407,7 @@ function sendTrayAccountState(state: TrayAccountState) {
   if (window !== undefined) send(window.webContents, ipcEvents.trayAccountStateChanged, state);
 }
 
-function applyAuthStatus(status: AuthStatus) {
+function applyAuthStatus(status: DesktopSessionStatus) {
   const changed =
     currentAuthStatus.accessToken !== status.accessToken ||
     currentAuthStatus.user?.id !== status.user?.id;
@@ -513,7 +540,7 @@ async function refreshTrayAccountState() {
   }
 
   if (isUnauthenticatedAccountError(result.failure)) {
-    const paused = { accessToken: null, user: status.user } satisfies AuthStatus;
+    const paused = { accessToken: null, user: status.user } satisfies DesktopSessionStatus;
     applyAuthStatus(paused);
     broadcastAuthStatus(paused);
     return;
@@ -678,10 +705,10 @@ function registerAuthCallbackProtocol(callbackUrl: string): void {
   }
 }
 
-function broadcastAuthStatus(status: AuthStatus): void {
+function broadcastAuthStatus(status: DesktopSessionStatus): void {
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed()) {
-      send(window.webContents, ipcEvents.authStatusChanged, status);
+      send(window.webContents, ipcEvents.authStatusChanged, rendererAuthStatus(status));
     }
   }
 }
@@ -732,7 +759,7 @@ const refreshSnippetProjection = Effect.fn("DesktopSnippetProjection.refresh")(f
 
 function authStatusForSession(
   session: { accessToken: string; user: AuthStatus["user"] } | null,
-): AuthStatus {
+): DesktopSessionStatus {
   if (session !== null) return authStatus(session);
   return activeSnippetAccountId !== undefined &&
     currentAuthStatus.user?.id === activeSnippetAccountId

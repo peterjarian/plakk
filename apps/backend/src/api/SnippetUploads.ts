@@ -65,7 +65,7 @@ export class SnippetUploads extends Context.Service<
     ) => Effect.Effect<ApiSnippet, RpcError>;
     readonly expire: Effect.Effect<number>;
   }
->()("@plakk/web/api/SnippetUploads") {
+>()("@plakk/backend/api/SnippetUploads") {
   static readonly Live = Layer.effect(
     SnippetUploads,
     Effect.gen(function* () {
@@ -376,7 +376,7 @@ export class SnippetUploads extends Context.Service<
               const updated = yield* tx
                 .update(snippets)
                 .set({
-                  uploadStatus: "FAILED",
+                  uploadStatus: "CLIENT_UPLOAD_FAILED",
                   uploadHeartbeatExpiresAt: null,
                   updatedAt: now,
                 })

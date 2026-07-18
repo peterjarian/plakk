@@ -6,6 +6,7 @@ import type {
   DesktopSnippet,
   SnippetIngestPayload,
   SnippetIngestResult,
+  StorageStatusSnapshot,
   TrayDroppedItem,
   TrayAccountState,
   UserConfig,
@@ -13,8 +14,6 @@ import type {
 } from "../ipc/contracts.ts";
 import { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
 import { invoke, on } from "../ipc/preload.ts";
-
-const plakkRpcUrl = process.env.PLAKK_RPC_URL ?? "https://app.plakk.io/api/rpc";
 
 type RendererSnippetIngestPayload = Pick<
   SnippetIngestPayload,
@@ -54,6 +53,9 @@ export type DesktopApi = {
     readonly read: (id: string) => Promise<Uint8Array>;
     readonly retry: (id: string) => Promise<void>;
   };
+  readonly storage: {
+    readonly getStatus: () => Promise<StorageStatusSnapshot>;
+  };
   readonly tray: {
     readonly getAccountState: () => Promise<TrayAccountState>;
     readonly onAccountStateChanged: (callback: (state: TrayAccountState) => void) => () => void;
@@ -66,9 +68,6 @@ export type DesktopApi = {
     readonly get: () => Promise<UserConfig>;
     readonly reset: () => Promise<UserConfig>;
     readonly set: (patch: UserConfigPatch) => Promise<UserConfig>;
-  };
-  readonly runtimeConfig: {
-    readonly plakkRpcUrl: string;
   };
   readonly versions: {
     readonly chrome: string;
@@ -119,6 +118,9 @@ const desktopApi = {
     read: (snippet) => invoke(ipcMethods.snippetRead, snippet),
     retry: (snippet) => invoke(ipcMethods.snippetRetry, snippet),
   },
+  storage: {
+    getStatus: () => invoke(ipcMethods.storageGetStatus, undefined),
+  },
   tray: {
     getAccountState: () => invoke(ipcMethods.trayGetAccountState, undefined),
     onAccountStateChanged: (callback: (state: TrayAccountState) => void) =>
@@ -131,9 +133,6 @@ const desktopApi = {
     get: () => invoke(ipcMethods.userConfigGet, undefined),
     reset: () => invoke(ipcMethods.userConfigReset, undefined),
     set: (patch: UserConfigPatch) => invoke(ipcMethods.userConfigSet, patch),
-  },
-  runtimeConfig: {
-    plakkRpcUrl,
   },
   versions: {
     chrome: process.versions.chrome,

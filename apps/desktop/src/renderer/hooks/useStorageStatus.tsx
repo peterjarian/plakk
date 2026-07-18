@@ -1,12 +1,13 @@
-import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
 import { accountCanSync, type AccountStatus, type PipeConnection } from "@plakk/shared/PlakkApi";
-import { Atom, AsyncResult } from "effect/unstable/reactivity";
+import { Cause } from "effect";
+import { AsyncResult } from "effect/unstable/reactivity";
 import {
   createContext,
   useCallback,
   useContext,
   useEffect,
   useMemo,
+  useState,
   type ComponentProps,
   type ReactNode,
 } from "react";
@@ -14,17 +15,11 @@ import { DropboxIcon } from "@plakk/ui/icons/DropboxIcon";
 import { GoogleDriveIcon } from "@plakk/ui/icons/GoogleDriveIcon";
 import { OneDriveIcon } from "@plakk/ui/icons/OneDriveIcon";
 import type { StorageProvider } from "@plakk/shared";
-import { createPlakkRpc } from "@plakk/ui/atoms/rpc";
 import { useAuth } from "./useAuth.ts";
 
 const storageSetupUrl = "https://app.plakk.io/storage";
-const emptyAccountStatusAtom = Atom.make(AsyncResult.initial<AccountStatus>());
-const emptyPipeConnectionAtom = Atom.make(AsyncResult.initial<PipeConnection>());
-let sharedPlakkRpc: ReturnType<typeof createPlakkRpc> | undefined;
-
-const getPlakkRpc = () => (sharedPlakkRpc ??= createPlakkRpc(window.ipc.runtimeConfig.plakkRpcUrl));
-
-export const storageStatusReactivityKeys = ["storage-status"] as const;
+const initialAccountResult = () => AsyncResult.initial<AccountStatus>();
+const initialConnectionResult = () => AsyncResult.initial<PipeConnection>();
 
 export type StorageStatus =
   | { readonly kind: "loading"; readonly canSync: false; readonly provider: StorageProvider | null }
@@ -113,46 +108,36 @@ const StorageStatusContext = createContext<StorageStatusContextValue | null>(nul
 
 export function StorageStatusProvider({ children }: { children: ReactNode }) {
   const auth = useAuth();
-  const plakkRpc = useMemo(getPlakkRpc, []);
-  const headers = useMemo(
-    () => (auth.accessToken === null ? null : { authorization: `Bearer ${auth.accessToken}` }),
-    [auth.accessToken],
-  );
-  const accountAtom = useMemo(
-    () =>
-      headers === null
-        ? emptyAccountStatusAtom
-        : plakkRpc.query("GetAccountStatus", undefined, {
-            headers,
-            reactivityKeys: storageStatusReactivityKeys,
-            serializationKey: "account-status",
-          }),
-    [headers],
-  );
-  const accountResult = useAtomValue(accountAtom);
-  const account = AsyncResult.getOrElse(accountResult, () => null);
-  const connectionAtom = useMemo(
-    () =>
-      headers === null || account?.storageProvider === null || account === null
-        ? emptyPipeConnectionAtom
-        : plakkRpc.query(
-            "GetPipeConnectionStatus",
-            { storageProvider: account.storageProvider },
-            {
-              headers,
-              reactivityKeys: storageStatusReactivityKeys,
-              serializationKey: `pipe-connection-${account.storageProvider}`,
-            },
-          ),
-    [account, headers],
-  );
-  const connectionResult = useAtomValue(connectionAtom);
-  const refreshAccount = useAtomRefresh(accountAtom);
-  const refreshConnection = useAtomRefresh(connectionAtom);
-  const refresh = useCallback(() => {
-    refreshAccount();
-    refreshConnection();
-  }, [refreshAccount, refreshConnection]);
+  const [accountResult, setAccountResult] =
+    useState<AsyncResult.AsyncResult<AccountStatus, unknown>>(initialAccountResult);
+  const [connectionResult, setConnectionResult] =
+    useState<AsyncResult.AsyncResult<PipeConnection, unknown>>(initialConnectionResult);
+  const [refreshVersion, setRefreshVersion] = useState(0);
+  const refresh = useCallback(() => setRefreshVersion((version) => version + 1), []);
+
+  useEffect(() => {
+    let active = true;
+    setAccountResult(initialAccountResult());
+    setConnectionResult(initialConnectionResult());
+    if (auth.user === null) return () => void (active = false);
+
+    void window.ipc.storage.getStatus().then(
+      ({ account, connection }) => {
+        if (!active) return;
+        setAccountResult(AsyncResult.success(account));
+        setConnectionResult(
+          connection === null ? initialConnectionResult() : AsyncResult.success(connection),
+        );
+      },
+      (error: unknown) => {
+        if (!active) return;
+        setAccountResult(AsyncResult.failure(Cause.fail(error)));
+        setConnectionResult(AsyncResult.failure(Cause.fail(error)));
+      },
+    );
+
+    return () => void (active = false);
+  }, [auth.user?.id, refreshVersion]);
   const setupRefresh = useMemo(createStorageSetupRefresh, []);
   const openSetup = useCallback(
     (url: string) => {
