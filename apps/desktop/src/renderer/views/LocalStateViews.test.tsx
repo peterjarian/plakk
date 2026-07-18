@@ -57,6 +57,10 @@ describe("local state views", () => {
 
     expect(home).toContain(">same<");
     expect(tray).toContain(">same<");
+    expect(home).toContain(">OR<");
+    expect(tray).toContain("reader@example.com");
+    expect(home).toContain("Google Drive");
+    expect(tray).toContain("Google Drive");
     expect(home).toContain("Offline — cached snippets stay available.");
     expect(tray).toContain("Offline — cached snippets stay available");
   });

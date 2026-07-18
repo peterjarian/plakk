@@ -42,6 +42,7 @@ const harness = (options: {
   let pulls = 0;
   let connections = 0;
   const invalidated: Array<ReadonlyArray<string>> = [];
+  const committedDeletions: Array<ReadonlyArray<string>> = [];
   const statesAtInvalidation: Array<SnippetReplicaState | null> = [];
   const pages = [...(options.pages ?? [])];
   const snapshot = options.snapshot ?? { cursor: "snapshot", items: [] };
@@ -52,7 +53,7 @@ const harness = (options: {
       SnippetReplica.of({
         changes: Stream.empty,
         get: () => Effect.succeed(state),
-        commit: (_accountId, next) =>
+        commit: (_accountId, next, deletedIds = []) =>
           Effect.suspend(() => {
             if (options.failCommitOnce === true && !failed) {
               failed = true;
@@ -60,6 +61,7 @@ const harness = (options: {
                 new SnippetReplicaError({ cause: null, reason: "simulated crash" }),
               );
             }
+            committedDeletions.push(deletedIds);
             state = next;
             return Effect.void;
           }),
@@ -118,6 +120,7 @@ const harness = (options: {
 
   return {
     invalidated,
+    committedDeletions,
     statesAtInvalidation,
     layer,
     state: () => state,
@@ -160,6 +163,7 @@ describe("snippet replica synchronization", () => {
 
     expect(test.state()).toEqual({ cursor: "next", items: [] });
     expect(test.invalidated).toEqual([[snippet.id]]);
+    expect(test.committedDeletions).toEqual([[snippet.id]]);
     expect(test.statesAtInvalidation).toEqual([{ cursor: "old", items: [snippet] }]);
   });
 

@@ -539,4 +539,26 @@ describe("SnippetHydrationEngine", () => {
       expect(stalled.content.size).toBe(0);
     }),
   );
+
+  it.live("clears an idle hydration failure when the snippet is tombstoned", () =>
+    Effect.gen(function* () {
+      const failure = new SnippetHydrationError({
+        cause: null,
+        reason: "Provider download failed.",
+        retryable: false,
+      });
+      const failed = hydrationHarness({ stream: Stream.fail(failure) });
+
+      yield* Effect.gen(function* () {
+        const engine = yield* SnippetHydrationEngine;
+        yield* engine.resume(account);
+        yield* failed.awaitState(engine, "FAILED");
+        failed.removeSnippet();
+        yield* engine.reconcile(account.id);
+        expect(yield* engine.state(account.id, snippetId, remoteBytes.byteLength)).toEqual({
+          status: "NOT_AVAILABLE",
+        });
+      }).pipe(Effect.provide(failed.layer));
+    }),
+  );
 });

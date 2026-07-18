@@ -20,6 +20,7 @@ import {
   StorageProviderIcon,
   storageProviderLabel,
   openStorageSetup,
+  useLinkedStorageProvider,
   useStorageStatus,
 } from "../hooks/useStorageStatus.tsx";
 import { navigate } from "../lib/navigate.ts";
@@ -29,6 +30,7 @@ import { ingestFileSnippet, ingestTextSnippet } from "../lib/snippetIngestion.ts
 const accountSetupUrl = "https://app.plakk.io/account/setup";
 export function Home({ active = true }: { active?: boolean }) {
   const auth = useAuth();
+  const linkedProvider = useLinkedStorageProvider();
   const storageStatus = useStorageStatus();
   const [isDragging, setIsDragging] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -274,10 +276,10 @@ export function Home({ active = true }: { active?: boolean }) {
         {storageProviderLabel(storageStatus.provider)}
         <ArrowUpRight className="text-muted-foreground" />
       </Button>
-    ) : storageStatus.kind === "offline" && storageStatus.provider !== null ? (
+    ) : storageStatus.kind === "offline" && linkedProvider !== null ? (
       <Button type="button" variant="ghost" size="sm" disabled>
-        <StorageProviderIcon provider={storageStatus.provider} className="size-4" />
-        {storageProviderLabel(storageStatus.provider)}
+        <StorageProviderIcon provider={linkedProvider} className="size-4" />
+        {storageProviderLabel(linkedProvider)}
       </Button>
     ) : null;
 

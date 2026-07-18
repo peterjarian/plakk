@@ -56,6 +56,7 @@ describe("DesktopSession", () => {
           AuthService,
           AuthService.of({
             callbackUrl: Effect.succeed("plakk-auth://callback"),
+            getStoredAccount: () => Effect.succeed(account),
             getSession: () => Deferred.await(pendingSession),
             handleCallbackUrl: (rawUrl) =>
               rawUrl === "plakk-auth://switch"
@@ -97,6 +98,7 @@ describe("DesktopSession", () => {
               capability: { status: "OFFLINE" },
               snippets: [],
             }),
+            owner: Effect.succeed({ account, cleanupPending: false }),
             refresh: Effect.void,
             update: (update) => Effect.sync(() => void localStateUpdates.push(update)),
           }),
@@ -121,6 +123,7 @@ describe("DesktopSession", () => {
             project: () => Effect.succeed([]),
             purge: () => Effect.void,
             reconcile: () => Effect.void,
+            removeTombstones: () => Effect.void,
             resume: () => Effect.void,
             retry: () => Effect.void,
           }),
@@ -180,12 +183,12 @@ describe("DesktopSession", () => {
       const result = yield* Effect.gen(function* () {
         const session = yield* DesktopSession;
         const starting = yield* session.start.pipe(Effect.forkChild);
-        yield* Effect.yieldNow;
+        yield* Fiber.join(starting);
+        localStateUpdates.length = 0;
         const signingOut = yield* session.signOut.pipe(Effect.forkChild);
         yield* Effect.yieldNow;
         yield* Deferred.succeed(pendingSession, { accessToken: "stale-token", user: account });
         yield* Fiber.join(signingOut);
-        yield* Fiber.interrupt(starting);
         const refreshLocalStateUpdates = [...localStateUpdates];
 
         const callback = yield* session
@@ -235,7 +238,8 @@ describe("DesktopSession", () => {
       expect(result.updateAfterRaces).toEqual({ kind: "signed-out" });
       expect(result.switchPurges).toEqual([account.id]);
       expect(result.switchTransitionEvents.slice(0, 2)).toEqual(["sync-stopped", "account-purged"]);
-      expect(result.localStateUpdates.slice(-3)).toEqual([
+      expect(result.localStateUpdates.slice(-4)).toEqual([
+        { kind: "owner-cleanup-pending" },
         { kind: "signed-out" },
         { kind: "offline", account: secondAccount },
         {

@@ -16,9 +16,11 @@ import { Effect, Fiber, FileSystem, Layer, ManagedRuntime, Option, PubSub, Strea
 import { LocalStateLive } from "./Layers/LocalState.ts";
 import { LocalStateSnippetsLive } from "./Layers/LocalStateSnippets.ts";
 import { makeLocalStateStoreLive } from "./Layers/LocalStateStore.ts";
+import { SnippetReplicaWithUploadCleanupLive } from "./Layers/SnippetReplica.ts";
 import { LocalState } from "./Services/LocalState.ts";
 import { DesktopManagedSnippetContent } from "./ManagedSnippetContent.ts";
 import { SnippetUploadEngine } from "./SnippetUploadEngine.ts";
+import { SnippetUploadOutboxError } from "./SnippetUploadOutbox.ts";
 
 const user: User = {
   id: "user_1",
@@ -48,6 +50,7 @@ const harness = (options: {
   initial?: SnippetReplicaState | null;
   pages?: Array<SnippetChangePage>;
   snapshot?: SnippetReplicaState;
+  failTombstoneCleanupOnce?: boolean;
   wakes?: Stream.Stream<void>;
 }) =>
   Effect.gen(function* () {
@@ -56,6 +59,8 @@ const harness = (options: {
     let state = options.initial ?? null;
     const snapshot = options.snapshot ?? { cursor: "snapshot", items: [] };
     const pages = options.pages ?? [];
+    const tombstoneCleanups: Array<ReadonlyArray<string>> = [];
+    let tombstoneCleanupFailed = false;
     const replicaChanges = yield* PubSub.unbounded<{
       readonly accountId: string;
       readonly items: ReadonlyArray<ApiSnippet>;
@@ -107,6 +112,20 @@ const harness = (options: {
         Effect.succeed(items.map((item) => ({ ...item, localState: null }))),
       purge: () => Effect.void,
       reconcile: () => Effect.void,
+      removeTombstones: (_accountId, snippetIds) =>
+        Effect.suspend(() => {
+          tombstoneCleanups.push(snippetIds);
+          if (options.failTombstoneCleanupOnce === true && !tombstoneCleanupFailed) {
+            tombstoneCleanupFailed = true;
+            return Effect.fail(
+              new SnippetUploadOutboxError({
+                cause: null,
+                reason: "simulated device-local cleanup failure",
+              }),
+            );
+          }
+          return Effect.void;
+        }),
       resume: () => Effect.void,
       retry: () => Effect.void,
     });
@@ -136,18 +155,22 @@ const harness = (options: {
       putStream: () => Effect.void,
       validateText: () => Effect.succeed("NOT_FOUND"),
     });
+    const uploadsLayer = Layer.succeed(SnippetUploadEngine, uploads);
+    const replicaLayer = SnippetReplicaWithUploadCleanupLive.pipe(
+      Layer.provide(Layer.merge(Layer.succeed(SnippetReplica, replica), uploadsLayer)),
+    );
     const localStateSnippets = LocalStateSnippetsLive.pipe(
       Layer.provide(
         Layer.mergeAll(
-          Layer.succeed(SnippetReplica, replica),
-          Layer.succeed(SnippetUploadEngine, uploads),
+          replicaLayer,
+          uploadsLayer,
           Layer.succeed(SnippetHydrationEngine, hydration),
           Layer.succeed(DesktopManagedSnippetContent, desktopContent),
         ),
       ),
     );
     const syncLayer = Layer.mergeAll(
-      Layer.succeed(SnippetReplica, replica),
+      replicaLayer,
       Layer.succeed(SnippetRemoteTransport, remote),
       Layer.succeed(ManagedSnippetContent, managed),
     );
@@ -162,6 +185,7 @@ const harness = (options: {
     return {
       currentState: () => state,
       runtime,
+      tombstoneCleanups,
     };
   });
 
@@ -242,8 +266,36 @@ it.layer(NodeFileSystem.layer)("local state synchronization seam", (it) => {
         ),
       );
       expect(pull.currentState()).toEqual({ cursor: "pulled", items: [] });
+      expect(pull.tombstoneCleanups).toEqual([[first.id]]);
       expect(pulledLocalState).toMatchObject({ snippets: [] });
       yield* Effect.promise(() => pull.runtime.dispose());
+    }),
+  );
+
+  it.effect("retries device-local tombstone cleanup before advancing the cursor", () =>
+    Effect.gen(function* () {
+      const first = snippet("0d1e2f3a-4567-4890-8abc-def012345678", "first.txt");
+      const page = {
+        status: "OK",
+        changes: [{ type: "DELETE", snippetId: first.id }],
+        nextCursor: "pulled",
+      } as const;
+      const test = yield* harness({
+        initial: { cursor: "snapshot", items: [first] },
+        pages: [page, page],
+        failTombstoneCleanupOnce: true,
+      });
+
+      const firstSync = yield* Effect.promise(() =>
+        test.runtime.runPromise(syncSnippetReplica(syncAccount).pipe(Effect.result)),
+      );
+      expect(firstSync._tag).toBe("Failure");
+      expect(test.currentState()).toEqual({ cursor: "snapshot", items: [first] });
+
+      yield* Effect.promise(() => test.runtime.runPromise(syncSnippetReplica(syncAccount)));
+      expect(test.currentState()).toEqual({ cursor: "pulled", items: [] });
+      expect(test.tombstoneCleanups).toEqual([[first.id], [first.id]]);
+      yield* Effect.promise(() => test.runtime.dispose());
     }),
   );
 

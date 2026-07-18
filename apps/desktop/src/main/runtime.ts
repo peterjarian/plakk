@@ -23,6 +23,7 @@ import { LocalStateStoreLive } from "./Layers/LocalStateStore.ts";
 import { DesktopAccountDataLive } from "./Layers/DesktopAccountData.ts";
 import { NativeFileSourcesLive } from "./Layers/NativeFileSources.ts";
 import { DesktopSessionLive } from "./Layers/DesktopSession.ts";
+import { SnippetReplicaWithUploadCleanupLive } from "./Layers/SnippetReplica.ts";
 
 export const managedSnippetContentRoot = join(app.getPath("userData"), "snippet-content");
 const platformLayer = NodeFileSystem.layer;
@@ -44,18 +45,20 @@ const managedSnippetContentLayer = managedSnippetContentFromDesktopLayer.pipe(
 );
 const uploadEngineDependencies = Layer.mergeAll(
   desktopContentLayer,
-  SnippetReplicaLive,
   SnippetUploadOutbox.Live,
   snippetUploadRemoteLayer,
   storageUploadLayer,
 );
-const hydrationEngineDependencies = Layer.mergeAll(
-  managedSnippetContentLayer,
-  SnippetReplicaLive,
-  SnippetHydrationTransportLive.pipe(Layer.provide(plakkRpcClientLayer)),
-);
 const snippetUploadEngineLayer = SnippetUploadEngine.Live.pipe(
   Layer.provide(uploadEngineDependencies),
+);
+const snippetReplicaLayer = SnippetReplicaWithUploadCleanupLive.pipe(
+  Layer.provide(Layer.merge(SnippetReplicaLive, snippetUploadEngineLayer)),
+);
+const hydrationEngineDependencies = Layer.mergeAll(
+  managedSnippetContentLayer,
+  snippetReplicaLayer,
+  SnippetHydrationTransportLive.pipe(Layer.provide(plakkRpcClientLayer)),
 );
 const snippetHydrationEngineLayer = SnippetHydrationLive.pipe(
   Layer.provide(hydrationEngineDependencies),
@@ -63,7 +66,7 @@ const snippetHydrationEngineLayer = SnippetHydrationLive.pipe(
 const localStateSnippetsLayer = LocalStateSnippetsLive.pipe(
   Layer.provide(
     Layer.mergeAll(
-      SnippetReplicaLive,
+      snippetReplicaLayer,
       snippetUploadEngineLayer,
       snippetHydrationEngineLayer,
       desktopContentLayer,
@@ -76,7 +79,7 @@ const localStateLayer = LocalStateLive.pipe(
 const desktopAccountDataLayer = DesktopAccountDataLive.pipe(
   Layer.provide(
     Layer.mergeAll(
-      SnippetReplicaLive,
+      snippetReplicaLayer,
       snippetUploadEngineLayer,
       snippetHydrationEngineLayer,
       desktopContentLayer,
@@ -94,7 +97,7 @@ const desktopSessionLayer = DesktopSessionLive.pipe(
       snippetUploadEngineLayer,
       snippetHydrationEngineLayer,
       platformLayer,
-      SnippetReplicaLive,
+      snippetReplicaLayer,
       snippetRemoteTransportLayer,
       managedSnippetContentLayer,
       plakkRpcClientLayer,
@@ -105,7 +108,7 @@ const desktopSessionLayer = DesktopSessionLive.pipe(
 const MainLayer = Layer.mergeAll(
   UserConfigStore.Live,
   authServiceLayer,
-  SnippetReplicaLive,
+  snippetReplicaLayer,
   plakkRpcClientLayer,
   platformLayer,
   desktopContentLayer,

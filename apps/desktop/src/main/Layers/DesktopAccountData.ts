@@ -42,8 +42,14 @@ const purgeWith = Effect.fn("DesktopAccountData.purgeWith")(function* (
     ],
     { concurrency: "unbounded", discard: true },
   );
-  yield* attempt("local state", owners.localState.update({ kind: "signed-out" }));
   if (failures.length > 0) return yield* new DesktopAccountPurgeError({ failures });
+  yield* owners.localState
+    .update({ kind: "signed-out" })
+    .pipe(
+      Effect.mapError(
+        (cause) => new DesktopAccountPurgeError({ failures: [{ owner: "local state", cause }] }),
+      ),
+    );
 });
 
 const makeDesktopAccountData = Effect.gen(function* () {

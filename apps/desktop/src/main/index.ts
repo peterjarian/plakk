@@ -114,98 +114,125 @@ handle(ipcMethods.snippetIngest, (payload, event) =>
           message: "Adding is paused until the account is ready.",
         } as const;
       }
-      const account = yield* activeSnippetAccount;
-      if (account === null) {
-        return { status: "FAILED", message: "Sign in before adding snippets." } as const;
-      }
       const engine = yield* SnippetUploadEngine;
-      return yield* engine.ingest(account.id, resolvedPayload).pipe(
-        Effect.as({ status: "ENQUEUED" } as const),
-        Effect.catch((error) =>
-          Effect.succeed({
-            status: "FAILED",
-            message: snippetUploadFailureMessage(error),
-          } as const),
-        ),
-      );
+      const session = yield* DesktopSession;
+      return yield* session
+        .withCurrentAccount((account) =>
+          engine.ingest(account.id, resolvedPayload).pipe(
+            Effect.as({ status: "ENQUEUED" } as const),
+            Effect.catch((error) =>
+              Effect.succeed({
+                status: "FAILED",
+                message: snippetUploadFailureMessage(error),
+              } as const),
+            ),
+          ),
+        )
+        .pipe(
+          Effect.catchTag("DesktopSessionCommandError", () =>
+            Effect.succeed({
+              status: "FAILED",
+              message: "Sign in before adding snippets.",
+            } as const),
+          ),
+        );
     }).pipe(Effect.ensuring(cleanup));
   }),
 );
 
 handle(ipcMethods.snippetDiscard, (id) =>
   Effect.gen(function* () {
-    const account = yield* activeSnippetAccount;
-    if (account === null) return;
-    yield* SnippetUploadEngine.use((engine) => engine.discard(account.id, id)).pipe(
-      asIpcFailure("Could not discard this local snippet."),
-    );
+    const engine = yield* SnippetUploadEngine;
+    const session = yield* DesktopSession;
+    yield* session
+      .withCurrentAccount((account) => engine.discard(account.id, id))
+      .pipe(asIpcFailure("Could not discard this local snippet."));
   }),
 );
 
 handle(ipcMethods.snippetCancel, (id) =>
   Effect.gen(function* () {
-    const account = yield* activeSnippetAccount;
-    if (account === null) return;
-    yield* SnippetUploadEngine.use((engine) => engine.cancel(account, id)).pipe(
-      asIpcFailure("Could not stop this upload."),
-    );
+    const engine = yield* SnippetUploadEngine;
+    const session = yield* DesktopSession;
+    yield* session
+      .withCurrentAccount((account) => engine.cancel(account, id))
+      .pipe(asIpcFailure("Could not stop this upload."));
   }),
 );
 
 handle(ipcMethods.snippetRetry, (id) =>
   Effect.gen(function* () {
-    const account = yield* activeSnippetAccount;
-    if (account === null) return;
-    yield* SnippetUploadEngine.use((engine) => engine.retry(account, id)).pipe(
-      asIpcFailure("Could not retry this upload."),
-    );
+    const engine = yield* SnippetUploadEngine;
+    const session = yield* DesktopSession;
+    yield* session
+      .withCurrentAccount((account) => engine.retry(account, id))
+      .pipe(asIpcFailure("Could not retry this upload."));
   }),
 );
 
 handle(ipcMethods.snippetDelete, (id) =>
   Effect.gen(function* () {
-    const account = yield* activeSnippetAccount;
-    if (account === null) return;
-    yield* SnippetUploadEngine.use((engine) => engine.delete(account, id)).pipe(
-      asIpcFailure("Could not delete this snippet."),
-    );
+    const engine = yield* SnippetUploadEngine;
+    const session = yield* DesktopSession;
+    yield* session
+      .withCurrentAccount((account) => engine.delete(account, id))
+      .pipe(asIpcFailure("Could not delete this snippet."));
   }),
 );
 
 handle(ipcMethods.snippetDownload, (id) =>
   Effect.gen(function* () {
-    const account = yield* activeSnippetAccount;
-    if (account === null || account.accessToken === null) {
-      return yield* Effect.fail(
-        new IpcHandlerError({
-          cause: null,
-          message: "Reconnect storage before downloading this snippet.",
-        }),
+    const engine = yield* SnippetHydrationEngine;
+    const session = yield* DesktopSession;
+    yield* session
+      .withCurrentAccount((account) => {
+        if (account.accessToken === null) {
+          return Effect.fail(
+            new IpcHandlerError({
+              cause: null,
+              message: "Reconnect storage before downloading this snippet.",
+            }),
+          );
+        }
+        return engine
+          .download({ id: account.id, accessToken: account.accessToken }, id)
+          .pipe(Effect.mapError((cause) => new IpcHandlerError({ cause, message: cause.reason })));
+      })
+      .pipe(
+        Effect.mapError((cause) =>
+          cause instanceof IpcHandlerError
+            ? cause
+            : new IpcHandlerError({
+                cause,
+                message: "Reconnect storage before downloading this snippet.",
+              }),
+        ),
       );
-    }
-    const hydrationAccount = { id: account.id, accessToken: account.accessToken };
-    yield* SnippetHydrationEngine.use((engine) => engine.download(hydrationAccount, id)).pipe(
-      Effect.mapError((cause) => new IpcHandlerError({ cause, message: cause.reason })),
-    );
   }),
 );
 
 const findSnippet = Effect.fn("LocalState.findSnippet")(function* (id: string) {
-  const account = yield* activeSnippetAccount;
-  if (account === null) {
-    return yield* new IpcHandlerError({
-      cause: null,
-      message: "Sign in to load stored snippets.",
-    });
-  }
   const localState = yield* LocalState;
-  const current = yield* localState.current;
-  const snippets = current.account?.id === account.id ? current.snippets : [];
-  const snippet = snippets.find((item) => item.id === id);
-  if (snippet === undefined) {
-    return yield* new IpcHandlerError({ cause: null, message: "Snippet was not found." });
-  }
-  return { account, snippet };
+  const session = yield* DesktopSession;
+  return yield* session
+    .withCurrentAccount(
+      Effect.fn("LocalState.findAuthorizedSnippet")(function* (account) {
+        const current = yield* localState.current;
+        const snippets = current.account?.id === account.id ? current.snippets : [];
+        const snippet = snippets.find((item) => item.id === id);
+        if (snippet === undefined) {
+          return yield* new IpcHandlerError({ cause: null, message: "Snippet was not found." });
+        }
+        return { account, snippet };
+      }),
+    )
+    .pipe(
+      Effect.mapError((cause) =>
+        cause instanceof IpcHandlerError
+          ? cause
+          : new IpcHandlerError({ cause, message: "Sign in to load stored snippets." }),
+      ),
+    );
 });
 
 handle(ipcMethods.snippetCopy, (id) =>
@@ -511,8 +538,6 @@ function broadcastLocalState(localState: LocalStateValue): void {
   }
 }
 
-const activeSnippetAccount = DesktopSession.use((session) => session.currentAccount);
-
 function broadcastAuthError(message: string): void {
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed()) {
@@ -623,6 +648,12 @@ if (!hasSingleInstanceLock) {
   void app.whenReady().then(async () => {
     registerRendererProtocol();
 
+    // Reconcile the locally persisted account owner before any renderer can read cached Local State.
+    // Network credential refresh continues in the background so it cannot prevent the UI opening.
+    const initialSession = await runEffect(
+      Effect.result(DesktopSession.use((session) => session.start)),
+    );
+
     runtime.runFork(
       LocalState.use((localState) =>
         localState.changes.pipe(
@@ -693,7 +724,9 @@ if (!hasSingleInstanceLock) {
         ),
       ),
     );
-    runtime.runFork(DesktopSession.use((session) => session.start));
+    if (Result.isFailure(initialSession)) {
+      broadcastAuthError("Plakk could not finish reconciling the local account.");
+    }
     void handleAuthUrls(process.argv);
 
     app.on("activate", () => {

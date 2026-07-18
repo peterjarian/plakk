@@ -30,7 +30,14 @@ vi.mock("../hooks/useSnippets.ts", () => ({
   }),
 }));
 
+vi.mock("../hooks/useAuth.ts", () => ({
+  useAuth: () => ({ user: { email: "reader@example.com" } }),
+}));
+
 vi.mock("../hooks/useStorageStatus.tsx", () => ({
+  StorageProviderIcon: () => null,
+  storageProviderLabel: () => "Google Drive",
+  useLinkedStorageProvider: () => "GOOGLE_DRIVE",
   useStorageStatus: () => ({
     kind: "connected",
     provider: "GOOGLE_DRIVE",

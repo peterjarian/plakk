@@ -83,7 +83,7 @@ export type DesktopApi = {
   };
 };
 
-const desktopApi = {
+export const desktopApi = {
   auth: {
     onError: (callback: (error: AuthError) => void) => on(ipcEvents.authError, callback),
     signIn: () => invoke(ipcMethods.authSignIn, undefined),

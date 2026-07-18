@@ -26,6 +26,11 @@ export class SnippetReplicaError extends Schema.TaggedErrorClass<SnippetReplicaE
   { cause: Schema.Defect(), reason: Schema.String },
 ) {}
 
+export class SnippetRecoveryCleanupError extends Schema.TaggedErrorClass<SnippetRecoveryCleanupError>()(
+  "SnippetRecoveryCleanupError",
+  { cause: Schema.Defect(), reason: Schema.String },
+) {}
+
 export class ManagedSnippetContentError extends Schema.TaggedErrorClass<ManagedSnippetContentError>()(
   "ManagedSnippetContentError",
   { cause: Schema.Defect(), reason: Schema.String, retryable: Schema.Boolean },
@@ -39,7 +44,11 @@ export class SnippetReplica extends Context.Service<
       readonly items: ReadonlyArray<ApiSnippet>;
     }>;
     get(accountId: string): Effect.Effect<SnippetReplicaState | null, SnippetReplicaError>;
-    commit(accountId: string, state: SnippetReplicaState): Effect.Effect<void, SnippetReplicaError>;
+    commit(
+      accountId: string,
+      state: SnippetReplicaState,
+      deletedIds?: ReadonlyArray<string>,
+    ): Effect.Effect<void, SnippetReplicaError | SnippetRecoveryCleanupError>;
     purge(accountId: string): Effect.Effect<void, SnippetReplicaError>;
     remove(accountId: string, snippetId: string): Effect.Effect<void, SnippetReplicaError>;
   }
@@ -112,7 +121,7 @@ const replaceWithSnapshot = Effect.fn("SnippetReplica.replaceWithSnapshot")(func
     [];
   const normalized = { cursor: snapshot.cursor, items: ordered(snapshot.items) };
   yield* content.invalidate(accountId, staleIds);
-  yield* replica.commit(accountId, normalized);
+  yield* replica.commit(accountId, normalized, staleIds);
   return normalized;
 });
 
@@ -150,7 +159,7 @@ export const syncSnippetReplica = Effect.fn("SnippetReplica.sync")(function* (
     );
     state = { cursor: page.nextCursor, items: applyChanges(state.items, page) };
     if (deletedIds.length > 0) yield* content.invalidate(account.id, deletedIds);
-    yield* replica.commit(account.id, state);
+    yield* replica.commit(account.id, state, deletedIds);
   }
 });
 
