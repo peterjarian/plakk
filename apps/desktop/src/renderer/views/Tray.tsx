@@ -1,7 +1,7 @@
 import { useEffect, useState, type DragEvent } from "react";
-import { accountCanSync } from "@plakk/shared/PlakkApi";
-import type { ClipboardContent, TrayAccountState, TrayDroppedItem } from "../../ipc/contracts.ts";
+import type { ClipboardContent, TrayDroppedItem } from "../../ipc/contracts.ts";
 import { useSnippets } from "../hooks/useSnippets.ts";
+import { useStorageStatus } from "../hooks/useStorageStatus.tsx";
 import { ipcActionErrorMessage } from "../lib/ipcActionErrorMessage.ts";
 import { ingestFileSnippet, ingestTextSnippet } from "../lib/snippetIngestion.ts";
 import { TrayActions } from "./tray/TrayActions.tsx";
@@ -14,10 +14,9 @@ export function Tray() {
   const [copyingId, setCopyingId] = useState<string | null>(null);
   const [copyError, setCopyError] = useState<{ id: string; message: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [accountState, setAccountState] = useState<TrayAccountState>({ kind: "loading" });
-  const ingestionAllowed = accountState.kind === "resolved" && accountCanSync(accountState.account);
-  const account = accountState.kind === "resolved" ? accountState.account : null;
-  const provider = account?.storageProvider ?? null;
+  const storageStatus = useStorageStatus();
+  const ingestionAllowed = storageStatus.kind === "connected" && storageStatus.canSync;
+  const provider = storageStatus.kind === "connected" ? storageStatus.provider : null;
   const { error: snippetReadError, items, reload: reloadSnippets } = useSnippets();
   const latest = items.at(0);
   const copyDisabled =
@@ -27,9 +26,9 @@ export function Tray() {
   const currentCopyError =
     latest !== undefined && copyError?.id === latest.id ? copyError.message : null;
   const pausedMessage =
-    accountState.kind === "loading"
+    storageStatus.kind === "loading"
       ? "Checking account — adding is paused"
-      : accountState.kind === "failed"
+      : storageStatus.kind === "offline" || storageStatus.kind === "failed"
         ? "Offline — cached snippets stay available"
         : "Adding is paused — finish account setup on the web";
 
@@ -43,9 +42,9 @@ export function Tray() {
     );
   };
 
-  const upload = (file: Pick<File, "name" | "size" | "type">, filePath?: string) => {
+  const upload = (file: Pick<File, "name" | "size" | "type">, sourceId?: string) => {
     if (provider === null) return;
-    handleIngestion(ingestFileSnippet(provider, file, filePath));
+    handleIngestion(ingestFileSnippet(provider, file, sourceId));
   };
 
   const addText = (text: string) => {
@@ -59,9 +58,9 @@ export function Tray() {
       if (content.type === "text") addText(content.text);
       else if (content.type === "image") {
         const blob = await fetch(content.dataUrl).then((response) => response.blob());
-        upload({ name: "Pasted image.png", size: blob.size, type: blob.type }, content.path);
+        upload({ name: "Pasted image.png", size: blob.size, type: blob.type }, content.sourceId);
       } else if (content.type === "file" && content.size !== undefined)
-        upload({ name: content.name, size: content.size, type: "" }, content.path);
+        upload({ name: content.name, size: content.size, type: "" }, content.sourceId);
     } catch {
       setError("Plakk couldn’t read the clipboard item.");
     }
@@ -71,32 +70,12 @@ export function Tray() {
     if (item.type === "text") addText(item.text);
     else
       for (const file of item.files)
-        upload({ name: file.name, size: file.size, type: "" }, file.path);
+        upload({ name: file.name, size: file.size, type: "" }, file.sourceId);
   };
 
   useEffect(() => {
     if (!ingestionAllowed) setIsDragging(false);
   }, [ingestionAllowed]);
-
-  useEffect(() => {
-    let mounted = true;
-    const unsubscribe = window.ipc.tray.onAccountStateChanged(setAccountState);
-    void window.ipc.tray.getAccountState().then(
-      (state) => {
-        if (mounted) setAccountState(state);
-      },
-      () => {
-        if (mounted) {
-          setAccountState({ kind: "failed" });
-          setError("Could not check the account.");
-        }
-      },
-    );
-    return () => {
-      mounted = false;
-      unsubscribe();
-    };
-  }, []);
 
   useEffect(
     () =>
@@ -239,7 +218,7 @@ export function Tray() {
                   .selectFiles()
                   .then((files) => {
                     for (const file of files)
-                      upload({ name: file.name, size: file.size, type: "" }, file.path);
+                      upload({ name: file.name, size: file.size, type: "" }, file.sourceId);
                   })
                   .catch(() => setError("Could not choose a file."))
               }

@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { Button } from "./primitives/button.tsx";
 
-export type SnippetRowItem = Omit<ApiSnippet, "uploadStatus"> & {
+export type SnippetRowItem = Omit<ApiSnippet, "storageObjectId" | "uploadStatus"> & {
   readonly uploadStatus: ApiSnippet["uploadStatus"] | null;
   readonly localState: null | {
     readonly phase: "IMPORTING" | "QUEUED" | "UPLOADING" | "FAILED";

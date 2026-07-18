@@ -1,96 +1,33 @@
-import {
-  createContext,
-  createElement,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
-import type { AuthError, AuthStatus } from "../../ipc/contracts.ts";
+import { createContext, createElement, useContext, useEffect, useMemo, useState } from "react";
+import type { AuthError } from "../../ipc/contracts.ts";
 import type { ReactNode } from "react";
+import { useDesktopProjection } from "./useDesktopProjection.tsx";
 
 type AuthState = {
-  issue: AuthError | null;
-  isLoading: boolean;
-  signIn: () => Promise<void>;
-  signOut: () => Promise<void>;
-  accessToken: string | null;
-  user: AuthStatus["user"];
+  readonly issue: AuthError | null;
+  readonly isLoading: boolean;
+  readonly user: ReturnType<typeof useDesktopProjection>["projection"]["account"];
 };
 
 const AuthContext = createContext<AuthState | null>(null);
-const AUTH_REFRESH_INTERVAL_MS = 30 * 1000;
+
+export const signIn = () => window.ipc.auth.signIn();
+export const signOut = () => window.ipc.auth.signOut();
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [status, setStatus] = useState<AuthStatus | null>(null);
+  const projection = useDesktopProjection();
   const [issue, setIssue] = useState<AuthError | null>(null);
 
-  useEffect(() => {
-    let isMounted = true;
-    const applyStatus = (nextStatus: AuthStatus) => {
-      if (!isMounted) return;
-      setIssue(null);
-      setStatus(nextStatus);
-    };
-    const reportError = () => {
-      if (!isMounted) return;
-      setIssue({ message: "Could not check session." });
-    };
-    const refresh = () => void window.ipc.auth.getAuth().then(applyStatus, reportError);
-    const unsubscribeError = window.ipc.auth.onError((error) => {
-      if (!isMounted) return;
-      setIssue(error);
-    });
-    const unsubscribe = window.ipc.auth.onStatusChanged(applyStatus);
+  useEffect(() => window.ipc.auth.onError(setIssue), []);
 
-    void window.ipc.auth.getAuth().then(applyStatus, () => {
-      if (!isMounted) return;
-      reportError();
-      setStatus({ accessToken: null, user: null });
-    });
-    const refreshInterval = window.setInterval(refresh, AUTH_REFRESH_INTERVAL_MS);
-    window.addEventListener("focus", refresh);
-
-    return () => {
-      isMounted = false;
-      window.clearInterval(refreshInterval);
-      window.removeEventListener("focus", refresh);
-      unsubscribe();
-      unsubscribeError();
-    };
-  }, []);
-
-  const signIn = useCallback(async () => {
-    setIssue(null);
-    try {
-      await window.ipc.auth.signIn();
-    } catch {
-      setIssue({ message: "Could not start sign-in." });
-    }
-  }, []);
-
-  const signOut = useCallback(async () => {
-    setIssue(null);
-    try {
-      await window.ipc.auth.signOut();
-    } catch {
-      setIssue({ message: "Could not sign out." });
-    }
-  }, []);
-
-  const value = useMemo(() => {
-    const user = status?.user ?? null;
-
-    return {
-      accessToken: status?.accessToken ?? null,
+  const value = useMemo(
+    () => ({
       issue,
-      isLoading: status === null,
-      signIn,
-      signOut,
-      user,
-    };
-  }, [issue, signIn, signOut, status]);
+      isLoading: projection.isLoading,
+      user: projection.projection.account,
+    }),
+    [issue, projection.isLoading, projection.projection.account],
+  );
 
   return createElement(AuthContext.Provider, { value }, children);
 }

@@ -7,11 +7,7 @@ import { SnippetHydrationEngine } from "@plakk/shared/SnippetHydration";
 import { AuthService } from "./auth/AuthService.ts";
 import { AuthStore } from "./auth/AuthStore.ts";
 import { UserConfigStore } from "./UserConfigStore.ts";
-import {
-  ActiveSnippetAccountLive,
-  SnippetRemoteTransportLive,
-  SnippetReplicaLive,
-} from "./snippetReplica.ts";
+import { SnippetRemoteTransportLive, SnippetReplicaLive } from "./snippetReplica.ts";
 import {
   DesktopManagedSnippetContent,
   managedSnippetContentFromDesktopLayer,
@@ -21,9 +17,19 @@ import { SnippetUploadOutbox } from "./SnippetUploadOutbox.ts";
 import { SnippetUploadRemote } from "./SnippetUploadRemote.ts";
 import { PlakkRpcClient, plakkRpcProtocolLayer } from "./PlakkRpcClient.ts";
 import { SnippetHydrationTransportLive } from "./SnippetHydrationTransport.ts";
+import {
+  DesktopProjection,
+  DesktopProjectionStore,
+  DesktopSnippetProjector,
+} from "./DesktopProjection.ts";
+import { DesktopAccountData } from "./DesktopAccountData.ts";
+import { NativeFileSources } from "./NativeFileSources.ts";
+import { DesktopSession } from "./DesktopSession.ts";
 
 export const managedSnippetContentRoot = join(app.getPath("userData"), "snippet-content");
 const platformLayer = NodeFileSystem.layer;
+const authServiceLayer = AuthService.layer.pipe(Layer.provideMerge(AuthStore.Live));
+const nativeFileSourcesLayer = NativeFileSources.Live;
 const desktopContentLayer = DesktopManagedSnippetContent.layer(managedSnippetContentRoot).pipe(
   Layer.provide(platformLayer),
 );
@@ -50,11 +56,58 @@ const hydrationEngineDependencies = Layer.mergeAll(
   SnippetReplicaLive,
   SnippetHydrationTransportLive.pipe(Layer.provide(plakkRpcClientLayer)),
 );
+const snippetUploadEngineLayer = SnippetUploadEngine.Live.pipe(
+  Layer.provide(uploadEngineDependencies),
+);
+const snippetHydrationEngineLayer = SnippetHydrationEngine.Live.pipe(
+  Layer.provide(hydrationEngineDependencies),
+);
+const desktopSnippetProjectorLayer = DesktopSnippetProjector.Live.pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      SnippetReplicaLive,
+      snippetUploadEngineLayer,
+      snippetHydrationEngineLayer,
+      desktopContentLayer,
+    ),
+  ),
+);
+const desktopProjectionLayer = DesktopProjection.layer.pipe(
+  Layer.provide(Layer.merge(DesktopProjectionStore.Live, desktopSnippetProjectorLayer)),
+);
+const desktopAccountDataLayer = DesktopAccountData.Live.pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      SnippetReplicaLive,
+      snippetUploadEngineLayer,
+      SnippetUploadOutbox.Live,
+      snippetHydrationEngineLayer,
+      desktopContentLayer,
+      desktopProjectionLayer,
+    ),
+  ),
+);
+const desktopSessionLayer = DesktopSession.Live.pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      authServiceLayer,
+      desktopAccountDataLayer,
+      desktopProjectionLayer,
+      nativeFileSourcesLayer,
+      snippetUploadEngineLayer,
+      snippetHydrationEngineLayer,
+      UserConfigStore.Live,
+      SnippetReplicaLive,
+      snippetRemoteTransportLayer,
+      managedSnippetContentLayer,
+      plakkRpcClientLayer,
+    ),
+  ),
+);
 
 const MainLayer = Layer.mergeAll(
   UserConfigStore.Live,
-  AuthService.layer.pipe(Layer.provideMerge(AuthStore.Live)),
-  ActiveSnippetAccountLive,
+  authServiceLayer,
   SnippetReplicaLive,
   plakkRpcClientLayer,
   platformLayer,
@@ -62,8 +115,13 @@ const MainLayer = Layer.mergeAll(
   managedSnippetContentLayer,
   snippetRemoteTransportLayer,
   storageUploadLayer,
-  SnippetUploadEngine.Live.pipe(Layer.provide(uploadEngineDependencies)),
-  SnippetHydrationEngine.Live.pipe(Layer.provide(hydrationEngineDependencies)),
+  snippetUploadEngineLayer,
+  snippetHydrationEngineLayer,
+  desktopSnippetProjectorLayer,
+  desktopProjectionLayer,
+  desktopAccountDataLayer,
+  nativeFileSourcesLayer,
+  desktopSessionLayer,
 );
 
 export const runtime = ManagedRuntime.make(MainLayer);

@@ -29,7 +29,7 @@ import { useAuth } from "../hooks/useAuth.ts";
 import {
   StorageProviderIcon,
   storageProviderLabel,
-  useStorageSetup,
+  openStorageSetup,
   useStorageStatus,
 } from "../hooks/useStorageStatus.tsx";
 import { navigate } from "../lib/navigate.ts";
@@ -37,7 +37,6 @@ import { navigate } from "../lib/navigate.ts";
 export function Settings() {
   const auth = useAuth();
   const storageStatus = useStorageStatus();
-  const openStorageSetup = useStorageSetup();
   const [autoUpdate, setAutoUpdate] = useState(true);
   const [globalHotkey, setGlobalHotkey] = useState(true);
   const [toolbarWidget, setToolbarWidget] = useState(true);
@@ -138,7 +137,9 @@ export function Settings() {
                 </Button>
               </SettingsRow>
 
-              {storageStatus.kind === "loading" || storageStatus.kind === "failed" ? (
+              {storageStatus.kind === "loading" ||
+              storageStatus.kind === "failed" ||
+              storageStatus.kind === "offline" ? (
                 <SettingsRow className="px-4">
                   <SettingsRowMain>
                     <SettingsRowIcon>
@@ -148,12 +149,16 @@ export function Settings() {
                       title={
                         storageStatus.kind === "loading"
                           ? "Checking storage"
-                          : "Storage status unavailable"
+                          : storageStatus.kind === "offline" && storageStatus.provider !== null
+                            ? `${storageProviderLabel(storageStatus.provider)} linked`
+                            : "Storage status unavailable"
                       }
                       description={
                         storageStatus.kind === "loading"
                           ? "Checking your storage connection."
-                          : "Could not check storage. Try again shortly."
+                          : storageStatus.kind === "offline"
+                            ? "Offline — showing the last confirmed storage provider."
+                            : "Could not check storage. Try again shortly."
                       }
                     />
                   </SettingsRowMain>

@@ -9,7 +9,6 @@ const snippet: SnippetReadModel = {
   fileName: "snippet.txt",
   byteSize: 14,
   storageProvider: "GOOGLE_DRIVE",
-  storageObjectId: null,
   uploadStatus: "FAILED",
   createdAt: "2026-07-11T00:00:00.000Z",
   updatedAt: "2026-07-11T00:00:00.000Z",

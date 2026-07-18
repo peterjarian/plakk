@@ -1,11 +1,18 @@
-import type { AuthStatus } from "../ipc/contracts.ts";
+import type { User } from "@plakk/shared";
+
+export type DesktopAuthState = {
+  readonly user: User | null;
+};
 
 type TrayAuthController = {
   disable(): void;
   setup(): void;
 };
 
-export function reconcileTrayAuth(status: AuthStatus, controller: TrayAuthController | undefined) {
+export function reconcileTrayAuth(
+  status: DesktopAuthState,
+  controller: TrayAuthController | undefined,
+) {
   if (status.user === null) {
     controller?.disable();
     return;

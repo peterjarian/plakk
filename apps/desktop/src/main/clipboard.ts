@@ -34,7 +34,7 @@ export type WritableClipboardContent =
       readonly dataUrl: string;
     };
 
-type ClipboardContent =
+export type NativeClipboardContent =
   | {
       readonly type: "text";
       readonly text: string;
@@ -75,11 +75,11 @@ function encodeXmlText(value: string): string {
     .replaceAll("'", "&apos;");
 }
 
-function fileContentFromPath(path: string): ClipboardContent | undefined {
+function fileContentFromPath(path: string): NativeClipboardContent | undefined {
   const stats = statSync(path, { throwIfNoEntry: false });
   if (stats === undefined) return undefined;
 
-  const content: ClipboardContent = {
+  const content: NativeClipboardContent = {
     type: "file",
     name: basename(path),
     path,
@@ -91,14 +91,14 @@ function fileContentFromPath(path: string): ClipboardContent | undefined {
   return content;
 }
 
-function textContent(text: string): ClipboardContent {
+function textContent(text: string): NativeClipboardContent {
   return {
     type: "text",
     text,
   };
 }
 
-function emptyContent(): ClipboardContent {
+function emptyContent(): NativeClipboardContent {
   return { type: "empty" };
 }
 
@@ -165,7 +165,7 @@ function firstLinuxClipboardFilePath(formats: ReadonlyArray<string>): string {
 
 export const readClipboard = Effect.fn("readClipboard")(function* () {
   const file = yield* Effect.try({
-    try: (): ClipboardContent | undefined => {
+    try: (): NativeClipboardContent | undefined => {
       const formats = clipboard.availableFormats();
       const rawPath =
         process.platform === "darwin"
@@ -190,7 +190,7 @@ export const readClipboard = Effect.fn("readClipboard")(function* () {
 
   if (!image.isEmpty()) {
     return yield* Effect.try({
-      try: (): ClipboardContent => {
+      try: (): NativeClipboardContent => {
         const { width, height } = image.getSize();
         const path = join(app.getPath("temp"), `plakk-clipboard-${crypto.randomUUID()}.png`);
         writeFileSync(path, image.toPNG());

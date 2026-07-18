@@ -48,4 +48,21 @@ describe("snippet ingestion preload boundary", () => {
 
     expect(boundary.api?.snippets.ingest(payload)).toBe(invocation);
   });
+
+  it("passes an opaque native source without exposing its filesystem path", async () => {
+    boundary.invoke.mockResolvedValue({ status: "ENQUEUED" });
+    const { bytes: _bytes, ...fileMetadata } = payload;
+
+    await boundary.api?.snippets.ingest({
+      ...fileMetadata,
+      sourceId: "opaque-source",
+    });
+
+    expect(boundary.invoke).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ sourceId: "opaque-source" }),
+    );
+    expect(boundary.api?.tray.selectFiles).toBeTypeOf("function");
+    expect(boundary.api).not.toHaveProperty("runtimeConfig");
+  });
 });

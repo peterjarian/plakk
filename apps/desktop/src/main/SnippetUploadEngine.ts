@@ -22,7 +22,7 @@ import {
 } from "effect";
 import { RpcClientError } from "effect/unstable/rpc/RpcClientError";
 
-import type { DesktopSnippet, SnippetIngestPayload } from "../ipc/contracts.ts";
+import type { DesktopSnippet, ResolvedSnippetIngestPayload } from "../ipc/contracts.ts";
 import { StorageUpload, StorageUploadError } from "../storageUpload.ts";
 import { DesktopManagedSnippetContent } from "./ManagedSnippetContent.ts";
 import {
@@ -36,7 +36,7 @@ type UploadAccount = { readonly id: string; readonly accessToken: string };
 type UploadOwner = { readonly id: string; readonly accessToken: string | null };
 type ImportProjection = {
   readonly accountId: string;
-  readonly input: SnippetIngestPayload;
+  readonly input: ResolvedSnippetIngestPayload;
   readonly createdAt: string;
   readonly localTextPreview: string | null;
 };
@@ -45,6 +45,7 @@ export type UploadProjectedSnippet = Omit<
   DesktopSnippet,
   "localTextPreview" | "localContentAvailability"
 > & {
+  readonly storageObjectId?: string | null;
   readonly importingContent?: Pick<DesktopSnippet, "localTextPreview" | "localContentAvailability">;
 };
 
@@ -100,7 +101,7 @@ export type SnippetUploadEngineFailure =
 export const snippetUploadFailureMessage = (cause: SnippetUploadEngineFailure) =>
   errorReason(cause, "Plakk couldn’t save this snippet locally.");
 
-const localTextFrom = (input: SnippetIngestPayload): string | null => {
+const localTextFrom = (input: ResolvedSnippetIngestPayload): string | null => {
   if (!("bytes" in input)) return null;
   return isTextSnippetFileName(input.fileName) && isValidSnippetText(input.bytes)
     ? decodeSnippetTextPreview(input.bytes)
@@ -155,10 +156,11 @@ export class SnippetUploadEngine extends Context.Service<
     readonly changes: Stream.Stream<string>;
     ingest(
       accountId: string,
-      input: SnippetIngestPayload,
+      input: ResolvedSnippetIngestPayload,
     ): Effect.Effect<void, SnippetUploadEngineFailure>;
     resume(account: UploadAccount): Effect.Effect<void, SnippetUploadEngineFailure>;
     pause: Effect.Effect<void>;
+    purge(accountId: string): Effect.Effect<void, SnippetUploadEngineFailure>;
     project(
       accountId: string,
       replicaItems: ReadonlyArray<ApiSnippet>,
@@ -371,7 +373,7 @@ export class SnippetUploadEngine extends Context.Service<
 
       const ingest = Effect.fn("SnippetUploadEngine.ingest")(function* (
         accountId: string,
-        input: SnippetIngestPayload,
+        input: ResolvedSnippetIngestPayload,
       ) {
         if (imports.has(input.id)) {
           return yield* new SnippetUploadEngineError({
@@ -487,13 +489,30 @@ export class SnippetUploadEngine extends Context.Service<
         yield* Effect.forEach(fibers, Fiber.interrupt, { discard: true });
       });
 
+      const purge = Effect.fn("SnippetUploadEngine.purge")(function* (accountId: string) {
+        const account = yield* Ref.get(currentAccount);
+        if (account?.id === accountId) yield* pause;
+        for (const value of imports.values()) {
+          if (value.accountId !== accountId) continue;
+          const cancellation = importCancellations.get(value.input.id);
+          if (cancellation !== undefined) yield* Deferred.succeed(cancellation, undefined);
+          imports.delete(value.input.id);
+          importCancellations.delete(value.input.id);
+          progressById.delete(value.input.id);
+        }
+        const prefix = `${accountId}/`;
+        for (const deleteKey of pendingDeletes) {
+          if (deleteKey.startsWith(prefix)) pendingDeletes.delete(deleteKey);
+        }
+        yield* outbox.purge(accountId);
+        yield* publish(accountId);
+      });
+
       const project = Effect.fn("SnippetUploadEngine.project")(function* (
         accountId: string,
         replicaItems: ReadonlyArray<ApiSnippet>,
       ) {
-        const durablePendingDeletes = new Set(yield* replica.pendingDeleteIds(accountId));
         const isDeletePending = (snippetId: string) =>
-          durablePendingDeletes.has(snippetId) ||
           pendingDeletes.has(pendingDeleteKey(accountId, snippetId));
         const entries = yield* outbox.list(accountId);
         const replicas = new Map(replicaItems.map((snippet) => [snippet.id, snippet]));
@@ -638,10 +657,27 @@ export class SnippetUploadEngine extends Context.Service<
           Effect.andThen(publish(account.id)),
         );
         if (account.accessToken !== null) {
-          yield* remote.delete(account.accessToken, snippetId).pipe(Effect.onError(() => restore));
+          const fiber = active.get(snippetId);
+          if (fiber !== undefined && fiber !== null) yield* Fiber.interrupt(fiber);
+          active.delete(snippetId);
+          progressById.delete(snippetId);
+          if (entry !== null)
+            yield* outbox.remove(account.id, snippetId).pipe(Effect.onError(() => restore));
+          const restoreRemoteFailure =
+            entry === null ? restore : outbox.put(account.id, entry).pipe(Effect.andThen(restore));
+          yield* remote.delete(account.accessToken, snippetId).pipe(
+            Effect.onError(() =>
+              restoreRemoteFailure.pipe(
+                Effect.catchCause((cause) =>
+                  Effect.logError("Could not restore upload work after deletion failed", {
+                    cause,
+                  }),
+                ),
+              ),
+            ),
+          );
           yield* replica.remove(account.id, snippetId);
-          yield* cleanupLocal(account.id, snippetId);
-          yield* replica.completeDeleteCleanup(account.id, snippetId);
+          yield* content.discard(account.id, snippetId);
           yield* publish(account.id);
         } else {
           yield* discard(account.id, snippetId).pipe(Effect.onError(() => restore));
@@ -652,22 +688,6 @@ export class SnippetUploadEngine extends Context.Service<
         accountId: string,
         replicaItems: ReadonlyArray<ApiSnippet>,
       ) {
-        const durablePendingDeletes = yield* replica.pendingDeleteIds(accountId);
-        yield* Effect.forEach(
-          durablePendingDeletes,
-          (snippetId) =>
-            cleanupLocal(accountId, snippetId).pipe(
-              Effect.andThen(replica.completeDeleteCleanup(accountId, snippetId)),
-              Effect.catchCause((cause) =>
-                Effect.logWarning("Could not finish local snippet deletion cleanup", {
-                  accountId,
-                  snippetId,
-                  cause,
-                }),
-              ),
-            ),
-          { discard: true },
-        );
         const uploaded = new Set(
           replicaItems
             .filter((snippet) => snippet.uploadStatus === "UPLOADED")
@@ -708,6 +728,7 @@ export class SnippetUploadEngine extends Context.Service<
         ingest,
         pause,
         project,
+        purge,
         reconcile,
         resume,
         retry,

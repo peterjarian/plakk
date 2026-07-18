@@ -13,11 +13,11 @@ const ACCESS_TOKEN_REFRESH_WINDOW_MS = 60 * 1000;
 
 const AccessTokenClaimsCodec = Schema.fromJsonString(Schema.Struct({ exp: Schema.Number }));
 
-type AuthSession = {
+export type AuthSession = {
   readonly accessToken: string;
   readonly user: User;
 };
-type AuthServiceFailure = AuthServiceError | Config.ConfigError;
+export type AuthServiceFailure = AuthServiceError | Config.ConfigError;
 
 export class AuthServiceError extends Schema.TaggedErrorClass<AuthServiceError>()(
   "AuthServiceError",

@@ -96,6 +96,7 @@ export class SnippetHydrationEngine extends Context.Service<
     ): Effect.Effect<void, SnippetHydrationEngineFailure>;
     updateSettings(settings: HydrationSettings): Effect.Effect<void, SnippetHydrationEngineFailure>;
     readonly pause: Effect.Effect<void>;
+    purge(accountId: string): Effect.Effect<void>;
     reconcile(
       accountId: string,
     ): Effect.Effect<ReadonlyMap<string, LocalContentAvailability>, SnippetHydrationEngineFailure>;
@@ -283,6 +284,16 @@ export class SnippetHydrationEngine extends Context.Service<
         yield* FiberMap.clear(fibers);
       });
 
+      const purge = Effect.fn("SnippetHydrationEngine.purge")(function* (accountId: string) {
+        const account = yield* Ref.get(currentAccount);
+        if (account?.id === accountId) yield* pause;
+        const prefix = `${accountId}/`;
+        for (const hydrationKey of failures.keys()) {
+          if (hydrationKey.startsWith(prefix)) failures.delete(hydrationKey);
+        }
+        yield* publish(accountId);
+      });
+
       const resume = Effect.fn("SnippetHydrationEngine.resume")(function* (
         account: SnippetSyncAccount,
         nextSettings: HydrationSettings,
@@ -365,6 +376,7 @@ export class SnippetHydrationEngine extends Context.Service<
         changes: Stream.fromPubSub(changes),
         download,
         pause,
+        purge,
         reconcile: (accountId) => reconcile(accountId),
         resume,
         state,

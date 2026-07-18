@@ -135,8 +135,7 @@ const hydrationHarness = (input?: {
               items: replicaState.items.filter((snippet) => snippet.id !== id),
             };
           }),
-        pendingDeleteIds: () => Effect.succeed([]),
-        completeDeleteCleanup: () => Effect.void,
+        purge: () => Effect.void,
       }),
     ),
     Layer.succeed(
