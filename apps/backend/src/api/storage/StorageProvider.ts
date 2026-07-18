@@ -115,7 +115,7 @@ export class StorageProviderService extends Context.Service<
       input: Omit<GetStorageObjectUrlInput, "accessToken"> & { readonly workosUserId: string },
     ) => Effect.Effect<StorageDownloadTarget, StorageDownloadError>;
   }
->()("@plakk/web/api/storage/StorageProvider/StorageProviderService") {
+>()("@plakk/backend/api/storage/StorageProvider/StorageProviderService") {
   static readonly Live = Layer.effect(
     StorageProviderService,
     Effect.gen(function* () {

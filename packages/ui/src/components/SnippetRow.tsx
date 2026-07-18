@@ -115,7 +115,9 @@ export function SnippetRow(props: {
   const { Icon } = presentationMeta[presentation.type];
   const localState = snippet.localState;
   const isRemoteUploading = localState === null && snippet.uploadStatus === "UPLOADING";
-  const isRemoteFailed = localState === null && snippet.uploadStatus === "FAILED";
+  const isRemoteFailed =
+    localState === null &&
+    (snippet.uploadStatus === "FAILED" || snippet.uploadStatus === "CLIENT_UPLOAD_FAILED");
   const isUploading = isRemoteUploading || (localState !== null && localState.phase !== "FAILED");
   const isDownloading = snippet.localContentAvailability.status === "DOWNLOADING";
   const needsDownload =

@@ -3,7 +3,7 @@ import type { AuthStatus } from "../ipc/contracts.ts";
 import { isReloadShortcut, reconcileTrayAuth } from "./lifecycle.ts";
 
 const signedIn: AuthStatus = {
-  accessToken: "token",
+  isAuthenticated: true,
   user: {
     id: "user_1",
     email: "user@example.com",
@@ -36,17 +36,17 @@ describe("desktop lifecycle", () => {
   it("keeps the tray for a known offline account and removes it on sign-out", () => {
     const controller = { setup: vi.fn(), disable: vi.fn() };
 
-    reconcileTrayAuth({ accessToken: null, user: null }, controller);
+    reconcileTrayAuth({ user: null }, controller);
     expect(controller.disable).toHaveBeenCalledOnce();
     expect(controller.setup).not.toHaveBeenCalled();
 
     reconcileTrayAuth(signedIn, controller);
     expect(controller.setup).toHaveBeenCalledOnce();
 
-    reconcileTrayAuth({ accessToken: null, user: signedIn.user }, controller);
+    reconcileTrayAuth({ user: signedIn.user }, controller);
     expect(controller.setup).toHaveBeenCalledTimes(2);
 
-    reconcileTrayAuth({ accessToken: null, user: null }, controller);
+    reconcileTrayAuth({ user: null }, controller);
     expect(controller.disable).toHaveBeenCalledTimes(2);
   });
 });

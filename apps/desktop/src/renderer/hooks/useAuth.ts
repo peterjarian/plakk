@@ -12,10 +12,10 @@ import type { ReactNode } from "react";
 
 type AuthState = {
   issue: AuthError | null;
+  isAuthenticated: boolean;
   isLoading: boolean;
   signIn: () => Promise<void>;
   signOut: () => Promise<void>;
-  accessToken: string | null;
   user: AuthStatus["user"];
 };
 
@@ -47,7 +47,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void window.ipc.auth.getAuth().then(applyStatus, () => {
       if (!isMounted) return;
       reportError();
-      setStatus({ accessToken: null, user: null });
+      setStatus({ isAuthenticated: false, user: null });
     });
     const refreshInterval = window.setInterval(refresh, AUTH_REFRESH_INTERVAL_MS);
     window.addEventListener("focus", refresh);
@@ -83,8 +83,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const user = status?.user ?? null;
 
     return {
-      accessToken: status?.accessToken ?? null,
       issue,
+      isAuthenticated: status?.isAuthenticated ?? false,
       isLoading: status === null,
       signIn,
       signOut,

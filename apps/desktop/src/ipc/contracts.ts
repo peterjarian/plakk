@@ -1,5 +1,5 @@
 import { SnippetUploadStatusLiteral, StorageProviderLiteral, UserSchema } from "@plakk/shared";
-import { AccountStatusSchema, SnippetIdSchema } from "@plakk/shared/PlakkApi";
+import { AccountStatusSchema, PipeConnectionSchema, SnippetIdSchema } from "@plakk/shared/PlakkApi";
 import { LocalContentAvailabilitySchema } from "@plakk/shared/SnippetHydration";
 import { Schema } from "effect";
 
@@ -27,7 +27,7 @@ export type IpcResult<T extends IpcMethod<IpcSchema, IpcSchema>> = T["result"]["
 export type IpcEventPayload<T extends IpcEvent<IpcSchema>> = T["payload"]["Type"];
 
 export const AuthStatusSchema = Schema.Struct({
-  accessToken: Schema.NullOr(Schema.String),
+  isAuthenticated: Schema.Boolean,
   user: Schema.NullOr(UserSchema),
 });
 
@@ -38,6 +38,13 @@ export const AuthErrorSchema = Schema.Struct({
 });
 
 export type AuthError = typeof AuthErrorSchema.Type;
+
+export const StorageStatusSnapshotSchema = Schema.Struct({
+  account: AccountStatusSchema,
+  connection: Schema.NullOr(PipeConnectionSchema),
+});
+
+export type StorageStatusSnapshot = typeof StorageStatusSnapshotSchema.Type;
 
 export const ClipboardContentSchema = Schema.Union([
   Schema.Struct({
@@ -167,6 +174,11 @@ export const ipcMethods = {
     channel: "open-external",
     payload: Schema.String,
     result: Schema.Void,
+  }),
+  storageGetStatus: method({
+    channel: "storage:get-status",
+    payload: Schema.Void,
+    result: StorageStatusSnapshotSchema,
   }),
   snippetIngest: method({
     channel: "snippet:ingest",

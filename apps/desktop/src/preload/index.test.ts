@@ -48,4 +48,9 @@ describe("snippet ingestion preload boundary", () => {
 
     expect(boundary.api?.snippets.ingest(payload)).toBe(invocation);
   });
+
+  it("exposes protected storage state through IPC without backend configuration", () => {
+    expect(boundary.api?.storage.getStatus).toBeTypeOf("function");
+    expect(boundary.api).not.toHaveProperty("runtimeConfig");
+  });
 });

@@ -1,6 +1,4 @@
 import type { User } from "@plakk/shared";
-import type { AuthKitCore } from "@workos/authkit-session";
-import type { User as WorkOSUser } from "@workos-inc/node";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 
 const jwksByUrl = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
@@ -16,22 +14,11 @@ const publicKeyFor = (jwksUrl: string) => {
 
 const stringClaim = (value: unknown) => (typeof value === "string" ? value : null);
 
-export const userFromWorkOSUser = (user: WorkOSUser): User => ({
-  id: user.id,
-  firstName: user.firstName,
-  lastName: user.lastName,
-  email: user.email,
-  createdAt: user.createdAt,
-  updatedAt: user.updatedAt,
-});
-
 export const userFromWorkOSAccessToken = async (
   token: string,
   jwksUrl: string,
-  authKitCore: AuthKitCore,
 ): Promise<User | null> => {
-  await jwtVerify(token, publicKeyFor(jwksUrl));
-  const claims = authKitCore.parseTokenClaims<Record<string, unknown>>(token);
+  const { payload: claims } = await jwtVerify(token, publicKeyFor(jwksUrl));
   const id = stringClaim(claims.sub);
 
   if (id === null) return null;

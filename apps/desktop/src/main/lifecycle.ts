@@ -5,7 +5,10 @@ type TrayAuthController = {
   setup(): void;
 };
 
-export function reconcileTrayAuth(status: AuthStatus, controller: TrayAuthController | undefined) {
+export function reconcileTrayAuth(
+  status: Pick<AuthStatus, "user">,
+  controller: TrayAuthController | undefined,
+) {
   if (status.user === null) {
     controller?.disable();
     return;

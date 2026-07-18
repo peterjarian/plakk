@@ -24,7 +24,7 @@ export default defineConfig({
     root: resolve("src/renderer"),
     server: {
       proxy: {
-        "/api": "http://localhost:3000",
+        "/api": "http://localhost:3100",
       },
     },
   },
