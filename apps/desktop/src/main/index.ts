@@ -255,7 +255,10 @@ function authStatus(
   };
 }
 
-const rendererAuthStatus = (status: DesktopSessionStatus): AuthStatus => ({ user: status.user });
+const rendererAuthStatus = (status: DesktopSessionStatus): AuthStatus => ({
+  isAuthenticated: status.accessToken !== null,
+  user: status.user,
+});
 
 const authFailureMessage = (cause: unknown, fallback: string) =>
   cause instanceof AuthServiceError ? cause.message : fallback;

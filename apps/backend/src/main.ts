@@ -1,3 +1,5 @@
+import "dotenv/config";
+
 import { NodeHttpServer, NodeRuntime } from "@effect/platform-node";
 import * as Config from "effect/Config";
 import * as Layer from "effect/Layer";

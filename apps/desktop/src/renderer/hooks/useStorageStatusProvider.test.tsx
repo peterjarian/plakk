@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 const state = vi.hoisted(() => ({
+  auth: { isAuthenticated: true, user: { id: "user_1" } },
   effects: [] as Array<() => void>,
   getStatus: vi.fn(),
 }));
@@ -23,12 +24,13 @@ vi.mock("react", async (importOriginal) => {
 });
 
 vi.mock("./useAuth.ts", () => ({
-  useAuth: () => ({ user: { id: "user_1" } }),
+  useAuth: () => state.auth,
 }));
 
 describe("StorageStatusProvider", () => {
   beforeEach(() => {
     vi.resetModules();
+    state.auth.isAuthenticated = true;
     state.effects.length = 0;
     state.getStatus.mockReset();
     state.getStatus.mockResolvedValue({
@@ -39,6 +41,26 @@ describe("StorageStatusProvider", () => {
         externalDestinationUrl: "https://drive.example",
       },
     });
+  });
+
+  it("loads again when backend authentication recovers for the same user", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        ipc: { openExternal: vi.fn(), storage: { getStatus: state.getStatus } },
+      },
+    });
+    const { StorageStatusProvider } = await import("./useStorageStatus.tsx");
+
+    state.auth.isAuthenticated = false;
+    StorageStatusProvider({ children: "paused" });
+    expect(state.getStatus).not.toHaveBeenCalled();
+
+    state.auth.isAuthenticated = true;
+    StorageStatusProvider({ children: "recovered" });
+    expect(state.getStatus).toHaveBeenCalledOnce();
   });
 
   it("loads protected storage state through Electron main without renderer credentials", async () => {

@@ -27,6 +27,7 @@ export type IpcResult<T extends IpcMethod<IpcSchema, IpcSchema>> = T["result"]["
 export type IpcEventPayload<T extends IpcEvent<IpcSchema>> = T["payload"]["Type"];
 
 export const AuthStatusSchema = Schema.Struct({
+  isAuthenticated: Schema.Boolean,
   user: Schema.NullOr(UserSchema),
 });
 

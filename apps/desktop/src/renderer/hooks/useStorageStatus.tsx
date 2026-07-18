@@ -119,7 +119,7 @@ export function StorageStatusProvider({ children }: { children: ReactNode }) {
     let active = true;
     setAccountResult(initialAccountResult());
     setConnectionResult(initialConnectionResult());
-    if (auth.user === null) return () => void (active = false);
+    if (auth.user === null || !auth.isAuthenticated) return () => void (active = false);
 
     void window.ipc.storage.getStatus().then(
       ({ account, connection }) => {
@@ -137,7 +137,7 @@ export function StorageStatusProvider({ children }: { children: ReactNode }) {
     );
 
     return () => void (active = false);
-  }, [auth.user?.id, refreshVersion]);
+  }, [auth.isAuthenticated, auth.user?.id, refreshVersion]);
   const setupRefresh = useMemo(createStorageSetupRefresh, []);
   const openSetup = useCallback(
     (url: string) => {

@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vp node --env-file-if-exists=.env src/main.ts",
+    "dev": "vp node src/main.ts",
     "build": "vp pack src/main.ts --format esm --out-dir dist",
     "start": "node dist/main.mjs",
     "test": "vp test run",
@@ -14,10 +14,12 @@
     "@plakk/db": "workspace:*",
     "@plakk/shared": "workspace:*",
     "@workos-inc/node": "^10.7.0",
+    "dotenv": "^17.4.2",
     "effect": "catalog:",
     "jose": "^6.2.3"
   },
   "devDependencies": {
+    "@effect/vitest": "4.0.0-beta.92",
     "@types/node": "catalog:",
     "typescript": "catalog:"
   }

@@ -1,4 +1,4 @@
-import { and, Drizzle, eq, gt, inArray, isNull, lte } from "@plakk/db";
+import { and, Drizzle, eq, gt, inArray, isNull, lte, or } from "@plakk/db";
 import { snippets, type SnippetRow } from "@plakk/db/schema";
 import type {
   ApiSnippet,
@@ -259,7 +259,7 @@ export class SnippetUploads extends Context.Service<
         const now = DateTime.toDateUtc(nowDateTime);
         if (current === null) return yield* notFound();
         if (hasLiveUploadHeartbeat(current, now)) return toApiSnippet(current);
-        if (current.uploadStatus !== "FAILED") {
+        if (current.uploadStatus !== "FAILED" && current.uploadStatus !== "CLIENT_UPLOAD_FAILED") {
           return yield* conflict("Only a failed upload can be retried.");
         }
         const uploadHeartbeatExpiresAt = DateTime.toDateUtc(
@@ -279,7 +279,10 @@ export class SnippetUploads extends Context.Service<
                   and(
                     eq(snippets.id, id),
                     eq(snippets.ownerWorkosUserId, ownerWorkosUserId),
-                    eq(snippets.uploadStatus, "FAILED"),
+                    or(
+                      eq(snippets.uploadStatus, "FAILED"),
+                      eq(snippets.uploadStatus, "CLIENT_UPLOAD_FAILED"),
+                    ),
                     isNull(snippets.deletedAt),
                   ),
                 )

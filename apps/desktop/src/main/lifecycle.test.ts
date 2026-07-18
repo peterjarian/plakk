@@ -3,6 +3,7 @@ import type { AuthStatus } from "../ipc/contracts.ts";
 import { isReloadShortcut, reconcileTrayAuth } from "./lifecycle.ts";
 
 const signedIn: AuthStatus = {
+  isAuthenticated: true,
   user: {
     id: "user_1",
     email: "user@example.com",

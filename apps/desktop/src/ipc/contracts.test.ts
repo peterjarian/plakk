@@ -35,6 +35,9 @@ describe("DesktopSnippetSchema", () => {
 describe("AuthStatusSchema", () => {
   it("does not encode bearer tokens across the renderer boundary", () => {
     const encode = Schema.encodeUnknownSync(AuthStatusSchema);
-    expect(encode({ user: null, accessToken: "secret" })).toEqual({ user: null });
+    expect(encode({ isAuthenticated: false, user: null, accessToken: "secret" })).toEqual({
+      isAuthenticated: false,
+      user: null,
+    });
   });
 });

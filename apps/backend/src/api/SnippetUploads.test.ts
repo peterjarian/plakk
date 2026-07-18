@@ -438,6 +438,38 @@ describe("authoritative snippet uploads", () => {
     expect(store.remaining()).toEqual({ selects: 0, snippetInserts: 0, snippetUpdates: 0 });
   });
 
+  it("retries a heartbeat-expired client failure through the transitional failure path", async () => {
+    const failedRow = row({
+      uploadStatus: "CLIENT_UPLOAD_FAILED",
+      uploadHeartbeatExpiresAt: null,
+    });
+    const retriedRow = row();
+    const store = scriptedDb({
+      selects: [[failedRow]],
+      snippetUpdates: [[retriedRow]],
+    });
+    const storage = makeStorage();
+
+    const retried = await runWith(
+      store,
+      storage.service,
+      Effect.gen(function* () {
+        yield* TestClock.setTime(baseTime.getTime());
+        const uploads = yield* SnippetUploads;
+        return yield* uploads.retry("user-1", createInput.id);
+      }),
+    );
+
+    expect(retried.uploadStatus).toBe("UPLOADING");
+    expect(store.changes()).toMatchObject([{ id: createInput.id, uploadStatus: "UPLOADING" }]);
+    expectGuard(
+      store.updates()[0]!.condition,
+      ["id", "owner_workos_user_id", "upload_status", "deleted_at"],
+      ["FAILED", "CLIENT_UPLOAD_FAILED"],
+    );
+    expect(store.remaining()).toEqual({ selects: 0, snippetInserts: 0, snippetUpdates: 0 });
+  });
+
   it("rejects expired or already-deleted completion before mutation", async () => {
     const expiredRow = row({ uploadHeartbeatExpiresAt: baseTime });
     const store = scriptedDb({ selects: [[expiredRow], []] });
