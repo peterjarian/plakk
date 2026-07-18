@@ -614,8 +614,8 @@ export class SnippetUploadEngine extends Context.Service<
         if (fiber !== undefined && fiber !== null) yield* Fiber.interrupt(fiber);
         active.delete(snippetId);
         progressById.delete(snippetId);
-        yield* content.discard(accountId, snippetId);
         yield* outbox.remove(accountId, snippetId);
+        yield* content.discard(accountId, snippetId);
       });
 
       const discard = Effect.fn("SnippetUploadEngine.discard")(function* (

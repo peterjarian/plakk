@@ -5,6 +5,7 @@ import { useSnippets } from "../hooks/useSnippets.ts";
 import {
   StorageProviderIcon,
   storageProviderLabel,
+  useLinkedStorageProvider,
   useStorageStatus,
 } from "../hooks/useStorageStatus.tsx";
 import { ipcActionErrorMessage } from "../lib/ipcActionErrorMessage.ts";
@@ -20,9 +21,9 @@ export function Tray() {
   const [copyError, setCopyError] = useState<{ id: string; message: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const auth = useAuth();
+  const provider = useLinkedStorageProvider();
   const storageStatus = useStorageStatus();
   const ingestionAllowed = storageStatus.kind === "connected" && storageStatus.canSync;
-  const provider = "provider" in storageStatus ? storageStatus.provider : null;
   const ingestionProvider = storageStatus.kind === "connected" ? storageStatus.provider : null;
   const { error: snippetReadError, items, reload: reloadSnippets } = useSnippets();
   const latest = items.at(0);

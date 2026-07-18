@@ -11,9 +11,9 @@ import { useLocalState } from "./useLocalState.tsx";
 const storageSetupUrl = "https://app.plakk.io/storage";
 
 export type StorageStatus =
-  | { readonly kind: "loading"; readonly canSync: false; readonly provider: StorageProvider | null }
-  | { readonly kind: "offline"; readonly canSync: false; readonly provider: StorageProvider | null }
-  | { readonly kind: "failed"; readonly canSync: false; readonly provider: StorageProvider | null }
+  | { readonly kind: "loading"; readonly canSync: false }
+  | { readonly kind: "offline"; readonly canSync: false }
+  | { readonly kind: "failed"; readonly canSync: false }
   | { readonly kind: "unlinked"; readonly canSync: false; readonly actionUrl: string }
   | {
       readonly kind: "needs-reauthorization";
@@ -35,11 +35,10 @@ export const storageStatusFromLocalState = (
   isLoading = false,
   hasError = false,
 ): StorageStatus => {
-  const cachedProvider = localState.provider.value;
-  if (isLoading) return { kind: "loading", canSync: false, provider: cachedProvider };
-  if (hasError) return { kind: "failed", canSync: false, provider: cachedProvider };
+  if (isLoading) return { kind: "loading", canSync: false };
+  if (hasError) return { kind: "failed", canSync: false };
   if (localState.capability.status === "OFFLINE") {
-    return { kind: "offline", canSync: false, provider: cachedProvider };
+    return { kind: "offline", canSync: false };
   }
 
   const account = localState.capability.account;
@@ -48,7 +47,7 @@ export const storageStatusFromLocalState = (
   }
   const connection = localState.capability.connection;
   if (connection === null || connection.storageProvider !== account.storageProvider) {
-    return { kind: "failed", canSync: false, provider: account.storageProvider };
+    return { kind: "failed", canSync: false };
   }
   if (connection.status === "CONNECTED") {
     return {
@@ -74,6 +73,10 @@ export const storageStatusFromLocalState = (
 export function useStorageStatus(): StorageStatus {
   const state = useLocalState();
   return storageStatusFromLocalState(state.localState, state.isLoading, state.error !== null);
+}
+
+export function useLinkedStorageProvider(): StorageProvider | null {
+  return useLocalState().localState.provider.value;
 }
 
 export const openStorageSetup = (url: string) => window.ipc.openExternal(url);

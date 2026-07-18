@@ -786,6 +786,42 @@ describe("SnippetUploadEngine", () => {
     expect(test.calls.discard).toBe(1);
   });
 
+  it.effect("removes upload recovery before fallible content cleanup after remote deletion", () => {
+    const test = harness({ discardFailures: 1 });
+    test.content.set(`${account.id}/${snippetId}`, bytes);
+    test.outbox.set(account.id, [
+      {
+        id: snippetId,
+        fileName: input.fileName,
+        byteSize: input.byteSize,
+        mediaType: input.mediaType,
+        storageProvider: input.storageProvider,
+        phase: "FAILED",
+        progress: 0,
+        storageObjectId: null,
+        authoritativeStatus: null,
+        errorMessage: "Plakk could not start this upload.",
+        canRetry: true,
+        createdAt,
+        updatedAt: createdAt,
+      },
+    ]);
+
+    return Effect.gen(function* () {
+      const deleted = yield* SnippetUploadEngine.use((engine) =>
+        engine.delete(account, snippetId),
+      ).pipe(Effect.result);
+
+      expect(deleted).toMatchObject({
+        _tag: "Failure",
+        failure: { _tag: "ManagedSnippetContentError" },
+      });
+      expect(test.calls.delete).toBe(1);
+      expect(test.outbox.get(account.id)).toEqual([]);
+      expect(test.calls.discard).toBe(1);
+    }).pipe(Effect.provide(test.layer));
+  });
+
   it.effect("keeps confirmed snippets visible while authoritative deletion is pending", () => {
     const test = harness({ longDelete: true });
     const replica = apiSnippet("UPLOADED");

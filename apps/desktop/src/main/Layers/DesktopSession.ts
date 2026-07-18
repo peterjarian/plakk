@@ -79,7 +79,9 @@ const makeDesktopSession = Effect.gen(function* () {
   const commandLock = yield* Semaphore.make(1);
   const issues = yield* PubSub.unbounded<string>();
 
-  const publishIssue = (message: string) => PubSub.publish(issues, message);
+  const publishIssue = Effect.fn("DesktopSession.publishIssue")(function* (message: string) {
+    yield* PubSub.publish(issues, message);
+  });
   const clearFileSources = Effect.suspend(() =>
     Effect.forEach(
       files.discardAll(),
@@ -270,8 +272,44 @@ const makeDesktopSession = Effect.gen(function* () {
     );
   });
 
+  const reconcileStoredAccount = Effect.fn("DesktopSession.reconcileStoredAccount")(function* () {
+    let storedAccount = yield* auth.getStoredAccount();
+    const current = yield* Ref.get(status);
+    const cleanupAccount = current.user;
+
+    if (current.cleanupPending && cleanupAccount !== null) {
+      if (storedAccount?.id === cleanupAccount.id) {
+        yield* auth.signOut();
+        storedAccount = null;
+      }
+      yield* commandLock.withPermit(
+        Effect.gen(function* () {
+          yield* accountData.purge(cleanupAccount.id);
+          yield* Ref.set(status, {
+            accessToken: null,
+            user: null,
+            commandsAuthorized: false,
+            cleanupPending: false,
+          });
+        }),
+      );
+    }
+
+    yield* setStatus({
+      accessToken: null,
+      user: storedAccount,
+      commandsAuthorized: false,
+      cleanupPending: false,
+    });
+  });
+
   const refresh = refreshLock.withPermit(
-    reconcileCredentials().pipe(Effect.andThen(refreshCapability())),
+    Effect.gen(function* () {
+      const current = yield* Ref.get(status);
+      if (current.cleanupPending) yield* reconcileStoredAccount();
+      yield* reconcileCredentials();
+      yield* refreshCapability();
+    }),
   );
 
   const handleCallbackUrl = (rawUrl: string) =>
@@ -353,17 +391,31 @@ const makeDesktopSession = Effect.gen(function* () {
         cleanupPending: cached.cleanupPending,
       });
     }
-    const initialRefresh = yield* Effect.result(refreshLock.withPermit(reconcileCredentials()));
     const fiber = yield* Effect.sleep("30 seconds").pipe(
       Effect.andThen(refresh),
       Effect.forever,
       Effect.forkDetach,
     );
     yield* Ref.set(refreshFiber, fiber);
-    if (Result.isFailure(initialRefresh)) return yield* initialRefresh.failure;
-    const capability = yield* refreshCapability().pipe(
+    const storedAccount = yield* Effect.result(refreshLock.withPermit(reconcileStoredAccount()));
+    if (Result.isFailure(storedAccount)) {
+      const current = yield* Ref.get(status);
+      if (current.user !== null && !current.cleanupPending) {
+        yield* Ref.set(status, {
+          ...current,
+          accessToken: null,
+          commandsAuthorized: false,
+          cleanupPending: true,
+        });
+        yield* localState.update({ kind: "owner-cleanup-pending" });
+      }
+      return yield* storedAccount.failure;
+    }
+    const capability = yield* refresh.pipe(
       Effect.catchCause((cause) =>
-        Effect.logError("Could not refresh initial desktop capability", { cause }),
+        Effect.logError("Could not refresh the initial desktop session", { cause }).pipe(
+          Effect.andThen(publishIssue("Could not refresh the desktop session.")),
+        ),
       ),
       Effect.forkDetach,
     );

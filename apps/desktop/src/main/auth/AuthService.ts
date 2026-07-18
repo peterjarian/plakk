@@ -69,6 +69,7 @@ export class AuthService extends Context.Service<
   AuthService,
   {
     readonly callbackUrl: Effect.Effect<string, Config.ConfigError>;
+    getStoredAccount(): Effect.Effect<User | null, AuthServiceError>;
     getSession(): Effect.Effect<AuthSession | null, AuthServiceFailure>;
     handleCallbackUrl(rawUrl: string): Effect.Effect<AuthSession | null, AuthServiceFailure>;
     startSignIn(): Effect.Effect<string, AuthServiceFailure>;
@@ -165,6 +166,9 @@ export class AuthService extends Context.Service<
 
       return AuthService.of({
         callbackUrl: clientConfig.pipe(Effect.map(({ callbackUrl }) => callbackUrl.href)),
+        getStoredAccount: Effect.fn("AuthService.getStoredAccount")(function* () {
+          return (yield* readStoredCredentials())?.user ?? null;
+        }),
         getSession,
         handleCallbackUrl: Effect.fn("AuthService.handleCallbackUrl")(function* (rawUrl: string) {
           if (

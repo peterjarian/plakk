@@ -648,8 +648,8 @@ if (!hasSingleInstanceLock) {
   void app.whenReady().then(async () => {
     registerRendererProtocol();
 
-    // Reconcile persisted credentials before any renderer can read or receive cached Local State.
-    // This prevents a signed-in account B from briefly seeing account A after an application restart.
+    // Reconcile the locally persisted account owner before any renderer can read cached Local State.
+    // Network credential refresh continues in the background so it cannot prevent the UI opening.
     const initialSession = await runEffect(
       Effect.result(DesktopSession.use((session) => session.start)),
     );

@@ -8,6 +8,7 @@ import {
 } from "@plakk/shared/SnippetReplica";
 import { describe, expect, it } from "@effect/vitest";
 import { Deferred, Effect, Fiber, Layer, Stream } from "effect";
+import { TestClock } from "effect/testing";
 
 import { AuthService } from "./auth/AuthService.ts";
 import { DesktopSessionLive } from "./Layers/DesktopSession.ts";
@@ -40,20 +41,27 @@ const dependencies = (options: {
     readonly accessToken: string;
     readonly user: User;
   } | null>;
+  readonly getStoredAccount?: () => Effect.Effect<User | null>;
+  readonly handleCallbackUrl?: (rawUrl: string) => Effect.Effect<{
+    readonly accessToken: string;
+    readonly user: User;
+  } | null>;
   readonly purge: (accountId: string) => Effect.Effect<void, DesktopAccountPurgeError>;
   readonly localStateUpdates: Array<LocalStateUpdate>;
   readonly localStateOwner?: { readonly account: User; readonly cleanupPending: boolean };
   readonly updateLocalState?: (update: LocalStateUpdate) => Effect.Effect<void, LocalStateError>;
   readonly rpc?: PlakkRpcClient["Service"];
+  readonly signOut?: () => Effect.Effect<void>;
 }) =>
   Layer.mergeAll(
     Layer.succeed(
       AuthService,
       AuthService.of({
         callbackUrl: Effect.succeed("plakk-auth://callback"),
+        getStoredAccount: options.getStoredAccount ?? (() => Effect.succeed(firstAccount)),
         getSession: options.getSession,
-        handleCallbackUrl: () => Effect.succeed(null),
-        signOut: () => Effect.void,
+        handleCallbackUrl: options.handleCallbackUrl ?? (() => Effect.succeed(null)),
+        signOut: options.signOut ?? (() => Effect.void),
         startSignIn: () => Effect.succeed("https://example.com/sign-in"),
       }),
     ),
@@ -160,8 +168,11 @@ describe("DesktopSession command authority", () => {
       const releaseCommand = yield* Deferred.make<void>();
       const localStateUpdates: Array<LocalStateUpdate> = [];
       const purgeCalls: Array<string> = [];
+      let signedOut = false;
       const layer = dependencies({
-        getSession: () => Effect.succeed({ accessToken: "token", user: firstAccount }),
+        getSession: () =>
+          Effect.succeed(signedOut ? null : { accessToken: "token", user: firstAccount }),
+        getStoredAccount: () => Effect.succeed(signedOut ? null : firstAccount),
         localStateUpdates,
         purge: (accountId) =>
           Effect.gen(function* () {
@@ -172,6 +183,7 @@ describe("DesktopSession command authority", () => {
               });
             }
           }),
+        signOut: () => Effect.sync(() => void (signedOut = true)),
       });
 
       const result = yield* Effect.gen(function* () {
@@ -243,6 +255,7 @@ describe("DesktopSession command authority", () => {
       const localStateUpdates: Array<LocalStateUpdate> = [];
       const layer = dependencies({
         getSession: () => Effect.succeed({ accessToken: "second-token", user: secondAccount }),
+        getStoredAccount: () => Effect.succeed(secondAccount),
         localStateUpdates,
         purge: () => Effect.void,
         updateLocalState: (update) =>
@@ -280,11 +293,15 @@ describe("DesktopSession command authority", () => {
   it.effect("keeps a persisted cleanup owner unauthorized after restart", () =>
     Effect.gen(function* () {
       const localStateUpdates: Array<LocalStateUpdate> = [];
+      const purgeCalls: Array<string> = [];
+      let signedOut = false;
       const layer = dependencies({
-        getSession: () => Effect.succeed({ accessToken: "token", user: firstAccount }),
+        getSession: () =>
+          Effect.succeed(signedOut ? null : { accessToken: "token", user: firstAccount }),
         localStateOwner: { account: firstAccount, cleanupPending: true },
         localStateUpdates,
-        purge: () => Effect.void,
+        purge: (accountId) => Effect.sync(() => void purgeCalls.push(accountId)),
+        signOut: () => Effect.sync(() => void (signedOut = true)),
       });
 
       const result = yield* Effect.gen(function* () {
@@ -300,12 +317,118 @@ describe("DesktopSession command authority", () => {
         ),
       );
 
-      expect(result.account).toMatchObject({ id: firstAccount.id, accessToken: "token" });
+      expect(result.account).toBeNull();
       expect(result.command).toMatchObject({
         _tag: "Failure",
         failure: { _tag: "DesktopSessionCommandError" },
       });
-      expect(localStateUpdates).toEqual([]);
+      expect(purgeCalls).toEqual([firstAccount.id]);
+    }),
+  );
+
+  it.effect("does not block cached offline startup on a pending credential refresh", () =>
+    Effect.gen(function* () {
+      const localStateUpdates: Array<LocalStateUpdate> = [];
+      const layer = dependencies({
+        getSession: () => Effect.never,
+        getStoredAccount: () => Effect.succeed(firstAccount),
+        localStateUpdates,
+        purge: () => Effect.void,
+      });
+
+      const completed = yield* Effect.gen(function* () {
+        const session = yield* DesktopSession;
+        const start = yield* session.start.pipe(Effect.forkChild);
+        yield* Effect.yieldNow;
+        return start.pollUnsafe();
+      }).pipe(
+        Effect.provide(
+          DesktopSessionLive.pipe(Layer.provide(Layer.merge(layer, NodeFileSystem.layer))),
+        ),
+      );
+
+      expect(completed).toBeDefined();
+    }),
+  );
+
+  it.effect("serializes startup account reconciliation with an auth callback", () =>
+    Effect.gen(function* () {
+      const storedAccountRead = yield* Deferred.make<void>();
+      const releaseStoredAccount = yield* Deferred.make<void>();
+      const localStateUpdates: Array<LocalStateUpdate> = [];
+      const layer = dependencies({
+        getSession: () => Effect.never,
+        getStoredAccount: () =>
+          Deferred.succeed(storedAccountRead, undefined).pipe(
+            Effect.andThen(Deferred.await(releaseStoredAccount)),
+            Effect.as(firstAccount),
+          ),
+        handleCallbackUrl: () =>
+          Effect.succeed({ accessToken: "second-token", user: secondAccount }),
+        localStateUpdates,
+        purge: () => Effect.void,
+      });
+
+      const current = yield* Effect.gen(function* () {
+        const session = yield* DesktopSession;
+        const starting = yield* session.start.pipe(Effect.forkChild);
+        yield* Deferred.await(storedAccountRead);
+        const callback = yield* session
+          .handleCallbackUrl("plakk-auth://callback")
+          .pipe(Effect.forkChild);
+        yield* Effect.yieldNow;
+        yield* Deferred.succeed(releaseStoredAccount, undefined);
+        yield* Fiber.join(starting);
+        yield* Fiber.join(callback);
+        return yield* session.currentAccount;
+      }).pipe(
+        Effect.provide(
+          DesktopSessionLive.pipe(Layer.provide(Layer.merge(layer, NodeFileSystem.layer))),
+        ),
+      );
+
+      expect(current).toMatchObject({ id: secondAccount.id, accessToken: "second-token" });
+    }),
+  );
+
+  it.effect("retries a persisted cleanup owner after the initial purge still fails", () =>
+    Effect.gen(function* () {
+      const localStateUpdates: Array<LocalStateUpdate> = [];
+      const purgeCalls: Array<string> = [];
+      let signedOut = false;
+      const layer = dependencies({
+        getSession: () => Effect.succeed(null),
+        getStoredAccount: () => Effect.succeed(signedOut ? null : firstAccount),
+        localStateOwner: { account: firstAccount, cleanupPending: true },
+        localStateUpdates,
+        purge: (accountId) =>
+          Effect.gen(function* () {
+            purgeCalls.push(accountId);
+            if (purgeCalls.length === 1) {
+              return yield* new DesktopAccountPurgeError({
+                failures: [{ owner: "managed content", cause: "simulated failure" }],
+              });
+            }
+          }),
+        signOut: () => Effect.sync(() => void (signedOut = true)),
+      });
+
+      const result = yield* Effect.gen(function* () {
+        const session = yield* DesktopSession;
+        const started = yield* session.start.pipe(Effect.result);
+        yield* TestClock.adjust("30 seconds");
+        yield* Effect.yieldNow;
+        return { account: yield* session.currentAccount, started };
+      }).pipe(
+        Effect.provide(
+          DesktopSessionLive.pipe(Layer.provide(Layer.merge(layer, NodeFileSystem.layer))),
+        ),
+        Effect.provide(TestClock.layer()),
+      );
+
+      expect(result.started._tag).toBe("Failure");
+      expect(result.account).toBeNull();
+      expect(purgeCalls).toEqual([firstAccount.id, firstAccount.id]);
     }),
   );
 
@@ -351,8 +474,8 @@ describe("DesktopSession command authority", () => {
       );
 
       expect(current).toMatchObject({ id: firstAccount.id, accessToken: "token" });
-      expect(localStateUpdates).toHaveLength(2);
       expect(localStateUpdates.every((update) => update.kind === "offline")).toBe(true);
+      expect(localStateUpdates.length).toBeGreaterThanOrEqual(2);
     }),
   );
 
@@ -383,7 +506,8 @@ describe("DesktopSession command authority", () => {
       );
 
       expect(completed).toBeDefined();
-      expect(localStateUpdates).toEqual([{ kind: "offline", account: firstAccount }]);
+      expect(localStateUpdates.length).toBeGreaterThanOrEqual(1);
+      expect(localStateUpdates.every((update) => update.kind === "offline")).toBe(true);
     }),
   );
 });

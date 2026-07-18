@@ -20,7 +20,10 @@ export class DesktopSessionCommandError extends Schema.TaggedErrorClass<DesktopS
   { reason: Schema.String },
 ) {}
 
-export type DesktopSessionTransitionError = DesktopAccountPurgeError | LocalStateError;
+export type DesktopSessionTransitionError =
+  | AuthServiceFailure
+  | DesktopAccountPurgeError
+  | LocalStateError;
 
 export interface DesktopSessionShape {
   readonly issues: Stream.Stream<string>;

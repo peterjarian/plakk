@@ -13,12 +13,12 @@ const localState = (input: Partial<LocalState> = {}): LocalState => ({
 });
 
 describe("storage status from the local state", () => {
-  it("shows the cached provider offline without claiming sync capability", () => {
+  it("keeps cached provider display facts out of offline capability status", () => {
     const status = storageStatusFromLocalState(
       localState({ provider: { known: true, value: "GOOGLE_DRIVE" } }),
     );
 
-    expect(status).toEqual({ kind: "offline", canSync: false, provider: "GOOGLE_DRIVE" });
+    expect(status).toEqual({ kind: "offline", canSync: false });
   });
 
   it("uses a live connected capability only when main confirms it", () => {

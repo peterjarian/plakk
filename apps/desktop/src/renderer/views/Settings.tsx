@@ -29,12 +29,14 @@ import {
   StorageProviderIcon,
   storageProviderLabel,
   openStorageSetup,
+  useLinkedStorageProvider,
   useStorageStatus,
 } from "../hooks/useStorageStatus.tsx";
 import { navigate } from "../lib/navigate.ts";
 
 export function Settings() {
   const auth = useAuth();
+  const linkedProvider = useLinkedStorageProvider();
   const storageStatus = useStorageStatus();
   const [autoUpdate, setAutoUpdate] = useState(true);
   const [globalHotkey, setGlobalHotkey] = useState(true);
@@ -113,8 +115,8 @@ export function Settings() {
                       title={
                         storageStatus.kind === "loading"
                           ? "Checking storage"
-                          : storageStatus.kind === "offline" && storageStatus.provider !== null
-                            ? `${storageProviderLabel(storageStatus.provider)} linked`
+                          : storageStatus.kind === "offline" && linkedProvider !== null
+                            ? `${storageProviderLabel(linkedProvider)} linked`
                             : "Storage status unavailable"
                       }
                       description={

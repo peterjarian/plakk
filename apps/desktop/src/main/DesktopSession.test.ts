@@ -56,6 +56,7 @@ describe("DesktopSession", () => {
           AuthService,
           AuthService.of({
             callbackUrl: Effect.succeed("plakk-auth://callback"),
+            getStoredAccount: () => Effect.succeed(account),
             getSession: () => Deferred.await(pendingSession),
             handleCallbackUrl: (rawUrl) =>
               rawUrl === "plakk-auth://switch"
@@ -182,12 +183,12 @@ describe("DesktopSession", () => {
       const result = yield* Effect.gen(function* () {
         const session = yield* DesktopSession;
         const starting = yield* session.start.pipe(Effect.forkChild);
-        yield* Effect.yieldNow;
+        yield* Fiber.join(starting);
+        localStateUpdates.length = 0;
         const signingOut = yield* session.signOut.pipe(Effect.forkChild);
         yield* Effect.yieldNow;
         yield* Deferred.succeed(pendingSession, { accessToken: "stale-token", user: account });
         yield* Fiber.join(signingOut);
-        yield* Fiber.interrupt(starting);
         const refreshLocalStateUpdates = [...localStateUpdates];
 
         const callback = yield* session
