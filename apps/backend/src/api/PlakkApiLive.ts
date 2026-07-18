@@ -26,9 +26,9 @@ import {
   appendSnippetChange,
   getSnippetSnapshot,
   pullSnippetChanges,
-} from "./SnippetChangeFeed.ts";
-import { snippetChangeRpcStream } from "./SnippetChangeWakes.ts";
-import { SnippetUploads } from "./SnippetUploads.ts";
+} from "./snippets/changeFeed.ts";
+import { snippetChangeRpcStream } from "./snippets/changeWakes.ts";
+import { SnippetUploads } from "./snippets/SnippetUploads.ts";
 import { toApiSnippet } from "./transformers/toApiSnippet.ts";
 
 const DEFAULT_STORAGE_PROVIDER = "GOOGLE_DRIVE" as const;

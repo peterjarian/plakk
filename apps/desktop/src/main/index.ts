@@ -22,16 +22,17 @@ import {
   writeSnippetToClipboard,
   type NativeClipboardContent,
 } from "./clipboard.ts";
-import { createTrayWindowController } from "./trayWindow.ts";
-import { isReloadShortcut, reconcileTrayAuth } from "./lifecycle.ts";
 import { UserConfigStore } from "./UserConfigStore.ts";
+import { isReloadShortcut, reconcileTrayAuth } from "./lifecycle.ts";
+import { LocalState } from "./local-state/LocalState.ts";
 import { runEffect, runtime } from "./runtime.ts";
-import { getManagedSnippetBytes } from "./snippetReplica.ts";
-import { SnippetUploadEngine, snippetUploadFailureMessage } from "./SnippetUploadEngine.ts";
-import { DesktopSession } from "./Services/DesktopSession.ts";
-import { SnippetHydrationEngine } from "./Services/SnippetHydration.ts";
-import { LocalState } from "./Services/LocalState.ts";
-import { NativeFileSources } from "./Services/NativeFileSources.ts";
+import { DesktopSession } from "./session/DesktopSession.ts";
+import { SnippetHydrationEngine } from "./snippets/hydration/SnippetHydration.ts";
+import { getManagedSnippetBytes } from "./snippets/replica/read.ts";
+import { NativeFileSources } from "./snippets/sources/NativeFileSources.ts";
+import { SnippetUploadEngine } from "./snippets/upload/SnippetUploadEngine.ts";
+import { snippetUploadFailureMessage } from "./snippets/upload/SnippetUploadEngineLive.ts";
+import { createTrayWindowController } from "./tray/window.ts";
 
 const handle = makeHandle(runtime);
 

@@ -1,19 +1,18 @@
-import { Drizzle, PgClientLive } from "@plakk/db";
+import { DrizzleLive, PgClientLive } from "@plakk/db";
 import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { FetchHttpClient } from "effect/unstable/http";
 
-import { StorageProviderService } from "./storage/StorageProvider.ts";
-import { SnippetUploads } from "./SnippetUploads.ts";
+import { StorageProviderLive } from "./storage/StorageProviderLive.ts";
+import { SnippetUploads } from "./snippets/SnippetUploads.ts";
+import { SnippetUploadsLive } from "./snippets/SnippetUploadsLive.ts";
 
-const InfrastructureLive = Layer.mergeAll(
-  Drizzle.Live,
-  PgClientLive,
-  StorageProviderService.Live,
-).pipe(Layer.provideMerge(FetchHttpClient.layer));
+const InfrastructureLive = Layer.mergeAll(DrizzleLive, PgClientLive, StorageProviderLive).pipe(
+  Layer.provideMerge(FetchHttpClient.layer),
+);
 
-const BackendServicesLive = SnippetUploads.Live.pipe(Layer.provideMerge(InfrastructureLive));
+const BackendServicesLive = SnippetUploadsLive.pipe(Layer.provideMerge(InfrastructureLive));
 
 export const makeUploadExpirationLayer = (
   interval: Duration.Input,
