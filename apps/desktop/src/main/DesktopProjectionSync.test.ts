@@ -32,13 +32,17 @@ const user: User = {
   updatedAt: "2026-01-01T00:00:00.000Z",
 };
 const syncAccount = { id: user.id, accessToken: "token" };
-const snippet = (id: string, fileName: string): ApiSnippet => ({
+const snippet = (
+  id: string,
+  fileName: string,
+  uploadStatus: ApiSnippet["uploadStatus"] = "UPLOADED",
+): ApiSnippet => ({
   id,
   fileName,
   byteSize: 4,
   storageProvider: "GOOGLE_DRIVE",
   storageObjectId: `provider-${id}`,
-  uploadStatus: "UPLOADED",
+  uploadStatus,
   createdAt: "2026-01-01T00:00:00.000Z",
   updatedAt: "2026-01-01T00:00:00.000Z",
 });
@@ -169,8 +173,12 @@ const harness = async (options: {
 };
 
 describe("desktop projection synchronization seam", () => {
-  it("publishes the initial snapshot through replica changes", async () => {
-    const first = snippet("0d1e2f3a-4567-4890-8abc-def012345678", "first.txt");
+  it("publishes authoritative upload failures through replica changes", async () => {
+    const first = snippet(
+      "0d1e2f3a-4567-4890-8abc-def012345678",
+      "first.txt",
+      "CLIENT_UPLOAD_FAILED",
+    );
     const test = await harness({ snapshot: { cursor: "snapshot", items: [first] } });
     await test.runtime.runPromise(
       DesktopProjection.use((projection) => projection.update({ kind: "offline", account: user })),
@@ -192,7 +200,9 @@ describe("desktop projection synchronization seam", () => {
         return value;
       }),
     );
-    expect(snapshotProjection.snippets).toMatchObject([{ id: first.id }]);
+    expect(snapshotProjection.snippets).toMatchObject([
+      { id: first.id, uploadStatus: "CLIENT_UPLOAD_FAILED" },
+    ]);
     await test.runtime.dispose();
   });
 

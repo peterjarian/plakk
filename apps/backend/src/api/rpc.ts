@@ -7,12 +7,11 @@ import {
 } from "@plakk/shared/PlakkApi";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { FetchHttpClient, HttpRouter } from "effect/unstable/http";
+import { FetchHttpClient } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 
 import { authenticateRequest } from "./auth/authenticateRequest.ts";
 import { PlakkApiLive } from "./PlakkApiLive.ts";
-import { ServerRuntimeLive } from "./ServerRuntime.ts";
 
 const InternalServerErrorLive = Layer.succeed(InternalServerErrorMiddleware)(
   InternalServerErrorMiddleware.of((effect) =>
@@ -46,20 +45,15 @@ const AuthMiddlewareLive = Layer.succeed(AuthMiddleware)(
   ),
 );
 
-const RpcRoutes = RpcServer.layerHttp({
+export const RpcRoutes = RpcServer.layerHttp({
   group: PlakkApi,
   path: "/api/rpc",
   protocol: "http",
   disableFatalDefects: true,
 }).pipe(
   Layer.provide(PlakkApiLive),
-  Layer.provide(ServerRuntimeLive),
   Layer.provide(AuthMiddlewareLive),
   Layer.provide(InternalServerErrorLive),
   Layer.provide(FetchHttpClient.layer),
   Layer.provide(RpcSerialization.layerNdjson),
 );
-
-export const { handler: handleRpcRequest } = HttpRouter.toWebHandler(RpcRoutes, {
-  disableLogger: true,
-});

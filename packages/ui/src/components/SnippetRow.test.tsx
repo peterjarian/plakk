@@ -80,25 +80,27 @@ describe("SnippetRow", () => {
   });
 
   it("shows remote failure without an origin-only retry action", () => {
-    const markup = renderToStaticMarkup(
-      <SnippetRow
-        snippet={{
-          ...snippet,
-          uploadStatus: "FAILED",
-          localContentAvailability: { status: "NOT_AVAILABLE" },
-        }}
-        presentation={{ type: "text", title: "Text snippet" }}
-        now={now}
-        copied={false}
-        onCopy={() => undefined}
-        onDelete={() => undefined}
-        onRetryUpload={() => undefined}
-        onStopUpload={() => undefined}
-      />,
-    );
+    for (const uploadStatus of ["FAILED", "CLIENT_UPLOAD_FAILED"] as const) {
+      const markup = renderToStaticMarkup(
+        <SnippetRow
+          snippet={{
+            ...snippet,
+            uploadStatus,
+            localContentAvailability: { status: "NOT_AVAILABLE" },
+          }}
+          presentation={{ type: "text", title: "Text snippet" }}
+          now={now}
+          copied={false}
+          onCopy={() => undefined}
+          onDelete={() => undefined}
+          onRetryUpload={() => undefined}
+          onStopUpload={() => undefined}
+        />,
+      );
 
-    expect(markup).toContain("Upload failed on the origin device.");
-    expect(markup).not.toContain('aria-label="Retry upload"');
+      expect(markup).toContain("Upload failed on the origin device.");
+      expect(markup).not.toContain('aria-label="Retry upload"');
+    }
   });
 
   it("only exposes hyperlink navigation through an explicit surface owner", () => {
