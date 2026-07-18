@@ -4,7 +4,7 @@ import { Schema } from "effect";
 import { DesktopSnippetSchema } from "./contracts.ts";
 
 describe("DesktopSnippetSchema", () => {
-  it("encodes an uploading local text projection synchronously", () => {
+  it("encodes local state containing an active text upload synchronously", () => {
     const encode = Schema.encodeUnknownSync(Schema.Array(DesktopSnippetSchema));
 
     expect(

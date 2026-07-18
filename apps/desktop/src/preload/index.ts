@@ -2,7 +2,7 @@ import { contextBridge, webUtils } from "electron";
 import type {
   AuthError,
   ClipboardContent,
-  DesktopProjection,
+  LocalState,
   SnippetIngestPayload,
   SnippetIngestResult,
   TrayDroppedItem,
@@ -48,9 +48,9 @@ export type DesktopApi = {
     readonly onPaste: (callback: (content: ClipboardContent) => void) => () => void;
   };
   readonly openExternal: (url: string) => Promise<void>;
-  readonly projection: {
-    readonly get: () => Promise<DesktopProjection>;
-    readonly onChanged: (callback: (projection: DesktopProjection) => void) => () => void;
+  readonly localState: {
+    readonly get: () => Promise<LocalState>;
+    readonly onChanged: (callback: (localState: LocalState) => void) => () => void;
   };
   readonly navigation: {
     readonly onRequested: (callback: (view: "home" | "settings") => void) => () => void;
@@ -95,10 +95,10 @@ const desktopApi = {
       on(ipcEvents.clipboardPaste, callback),
   },
   openExternal: (url: string) => invoke(ipcMethods.openExternal, url),
-  projection: {
-    get: () => invoke(ipcMethods.desktopProjectionGet, undefined),
-    onChanged: (callback: (projection: DesktopProjection) => void) =>
-      on(ipcEvents.desktopProjectionChanged, callback),
+  localState: {
+    get: () => invoke(ipcMethods.localStateGet, undefined),
+    onChanged: (callback: (localState: LocalState) => void) =>
+      on(ipcEvents.localStateChanged, callback),
   },
   navigation: {
     onRequested: (callback: (view: "home" | "settings") => void) =>

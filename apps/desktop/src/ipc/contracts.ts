@@ -136,7 +136,7 @@ export const DesktopSnippetSchema = Schema.Struct({
 
 export type DesktopSnippet = typeof DesktopSnippetSchema.Type;
 
-export const DesktopProjectionSchema = Schema.Struct({
+export const LocalStateSchema = Schema.Struct({
   revision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   account: Schema.NullOr(UserSchema),
   provider: Schema.Struct({
@@ -154,7 +154,7 @@ export const DesktopProjectionSchema = Schema.Struct({
   snippets: Schema.Array(DesktopSnippetSchema),
 });
 
-export type DesktopProjection = typeof DesktopProjectionSchema.Type;
+export type LocalState = typeof LocalStateSchema.Type;
 
 export const ipcMethods = {
   authSignIn: method({
@@ -167,10 +167,10 @@ export const ipcMethods = {
     payload: Schema.Void,
     result: Schema.Void,
   }),
-  desktopProjectionGet: method({
-    channel: "desktop-projection:get",
+  localStateGet: method({
+    channel: "local-state:get",
     payload: Schema.Void,
-    result: DesktopProjectionSchema,
+    result: LocalStateSchema,
   }),
   openExternal: method({
     channel: "open-external",
@@ -251,9 +251,9 @@ export const ipcEvents = {
     channel: "auth:error",
     payload: AuthErrorSchema,
   }),
-  desktopProjectionChanged: event({
-    channel: "desktop-projection:changed",
-    payload: DesktopProjectionSchema,
+  localStateChanged: event({
+    channel: "local-state:changed",
+    payload: LocalStateSchema,
   }),
   clipboardPaste: event({
     channel: "clipboard:paste",

@@ -512,7 +512,7 @@ describe("SnippetUploadEngine", () => {
     expect(test.calls.fail).toBe(0);
   });
 
-  it("leaves managed-content availability to the desktop projection owner", async () => {
+  it("leaves managed-content availability to the local state owner", async () => {
     const test = harness();
     const fileId = "1d1e2f3a-4567-4890-8abc-def012345679";
     test.content.set(`${account.id}/${fileId}`, new Uint8Array([1, 2, 3]));

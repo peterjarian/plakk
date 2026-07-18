@@ -72,12 +72,12 @@ _Avoid_: Available provider, live connection
 The device-owned, durable copy of last-confirmed remote facts needed for local reading: the current account, linked storage provider, and all snippet records including their upload status. It is refreshed from one authoritative source and never accepts competing local mutations.
 _Avoid_: Local authority, offline mutation store, renderer cache
 
-**Desktop projection**:
-The device-owned source presented consistently to desktop surfaces. It combines the readable mirror, local content availability, and device-local upload activity without making device-local state authoritative.
+**Local state**:
+The device-owned representation of everything desktop surfaces need to present consistently: the readable mirror, current online capability, local content availability, and device-local upload activity. It is a materialization of authoritative and device-owned facts, not an independent authority.
 _Avoid_: Renderer store, server snapshot, authoritative local state
 
 **Screen-local optimistic update**:
-A transient renderer-owned presentation of an online command on the screen that invoked it. It is not written to the readable mirror, broadcast to other windows, or retained across restart. Confirmed local staging or authoritative backend changes replace it through the desktop projection; command failure rolls it back and presents an error on the invoking screen.
+A transient renderer-owned presentation of an online command on the screen that invoked it. It is not written to the readable mirror, broadcast to other windows, or retained across restart. Confirmed local staging or authoritative backend changes replace it through the local state; command failure rolls it back and presents an error on the invoking screen.
 _Avoid_: Cross-window optimistic state, offline mutation, durable optimistic journal
 
 **Online capability**:
@@ -109,5 +109,5 @@ The device-local choice to retain `UPLOADED` content that does not qualify for a
 _Avoid_: Global download, synchronized retention, temporary preview
 
 **Snippet deletion**:
-The authoritative removal of a snippet through an online command. The invoking screen may hide it optimistically, but the readable mirror and other windows change only after backend confirmation. The backend removes the snippet and publishes its deletion without waiting for provider cleanup; deleting the provider file is a best-effort side effect that cannot restore or delay the snippet deletion. Command failure restores the invoking screen from the unchanged desktop projection.
+The authoritative removal of a snippet through an online command. The invoking screen may hide it optimistically, but the readable mirror and other windows change only after backend confirmation. The backend removes the snippet and publishes its deletion without waiting for provider cleanup; deleting the provider file is a best-effort side effect that cannot restore or delay the snippet deletion. Command failure restores the invoking screen from the unchanged local state.
 _Avoid_: Local tombstone, optimistic replica deletion, canceled upload

@@ -9,7 +9,7 @@ import { Welcome } from "./views/Welcome.tsx";
 import type { ComponentType } from "react";
 import type { ViewType } from "./lib/navigate.ts";
 import { AuthProvider, useAuth } from "./hooks/useAuth.ts";
-import { DesktopProjectionProvider } from "./hooks/useDesktopProjection.tsx";
+import { LocalStateProvider } from "./hooks/useLocalState.tsx";
 import {
   getDesktopView,
   navigate,
@@ -89,7 +89,7 @@ const isProtectedView = view !== null && view !== "welcome";
 
 createRoot(document.querySelector<HTMLDivElement>("#app")!).render(
   <TooltipProvider>
-    <DesktopProjectionProvider>
+    <LocalStateProvider>
       <AuthProvider>
         {isProtectedView ? (
           <ProtectedView View={View} redirectOnSignOut={view !== "tray"} />
@@ -97,6 +97,6 @@ createRoot(document.querySelector<HTMLDivElement>("#app")!).render(
           <View />
         )}
       </AuthProvider>
-    </DesktopProjectionProvider>
+    </LocalStateProvider>
   </TooltipProvider>,
 );

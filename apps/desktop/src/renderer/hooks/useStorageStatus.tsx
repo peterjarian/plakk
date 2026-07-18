@@ -5,8 +5,8 @@ import { accountCanSyncWithConnection, type AccountStatus } from "@plakk/shared/
 import type { StorageProvider } from "@plakk/shared";
 import type { ComponentProps } from "react";
 
-import type { DesktopProjection } from "../../ipc/contracts.ts";
-import { useDesktopProjection } from "./useDesktopProjection.tsx";
+import type { LocalState } from "../../ipc/contracts.ts";
+import { useLocalState } from "./useLocalState.tsx";
 
 const storageSetupUrl = "https://app.plakk.io/storage";
 
@@ -30,23 +30,23 @@ export type StorageStatus =
       readonly provider: StorageProvider;
     };
 
-export const storageStatusFromProjection = (
-  projection: DesktopProjection,
+export const storageStatusFromLocalState = (
+  localState: LocalState,
   isLoading = false,
   hasError = false,
 ): StorageStatus => {
-  const cachedProvider = projection.provider.value;
+  const cachedProvider = localState.provider.value;
   if (isLoading) return { kind: "loading", canSync: false, provider: cachedProvider };
   if (hasError) return { kind: "failed", canSync: false, provider: cachedProvider };
-  if (projection.capability.status === "OFFLINE") {
+  if (localState.capability.status === "OFFLINE") {
     return { kind: "offline", canSync: false, provider: cachedProvider };
   }
 
-  const account = projection.capability.account;
+  const account = localState.capability.account;
   if (account.storageProvider === null) {
     return { kind: "unlinked", canSync: false, actionUrl: storageSetupUrl };
   }
-  const connection = projection.capability.connection;
+  const connection = localState.capability.connection;
   if (connection === null || connection.storageProvider !== account.storageProvider) {
     return { kind: "failed", canSync: false, provider: account.storageProvider };
   }
@@ -72,8 +72,8 @@ export const storageStatusFromProjection = (
 };
 
 export function useStorageStatus(): StorageStatus {
-  const state = useDesktopProjection();
-  return storageStatusFromProjection(state.projection, state.isLoading, state.error !== null);
+  const state = useLocalState();
+  return storageStatusFromLocalState(state.localState, state.isLoading, state.error !== null);
 }
 
 export const openStorageSetup = (url: string) => window.ipc.openExternal(url);

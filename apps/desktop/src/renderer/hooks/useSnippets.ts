@@ -2,7 +2,7 @@ import { deriveSnippetPresentation, type SnippetPresentation } from "@plakk/shar
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { DesktopSnippet } from "../../ipc/contracts.ts";
-import { useDesktopProjection } from "./useDesktopProjection.tsx";
+import { useLocalState } from "./useLocalState.tsx";
 
 export type SnippetReadModel = DesktopSnippet & {
   readonly presentation: SnippetPresentation;
@@ -115,8 +115,8 @@ const useSnippetImageUrls = (snippets: ReadonlyArray<DesktopSnippet>) => {
 };
 
 export function useSnippets() {
-  const projection = useDesktopProjection();
-  const replicaItems = projection.projection.snippets;
+  const state = useLocalState();
+  const replicaItems = state.localState.snippets;
   const thumbnailUrls = useSnippetImageUrls(replicaItems);
   const items = useMemo(
     () => projectSnippetReadModels(replicaItems, thumbnailUrls),
@@ -124,9 +124,9 @@ export function useSnippets() {
   );
 
   return {
-    error: projection.error,
-    isLoading: projection.isLoading,
+    error: state.error,
+    isLoading: state.isLoading,
     items,
-    reload: projection.reload,
+    reload: state.reload,
   };
 }

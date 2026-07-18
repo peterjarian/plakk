@@ -17,19 +17,17 @@ import { SnippetUploadOutbox } from "./SnippetUploadOutbox.ts";
 import { SnippetUploadRemote } from "./SnippetUploadRemote.ts";
 import { PlakkRpcClient, plakkRpcProtocolLayer } from "./PlakkRpcClient.ts";
 import { SnippetHydrationTransportLive } from "./SnippetHydrationTransport.ts";
-import {
-  DesktopProjection,
-  DesktopProjectionStore,
-  DesktopSnippetProjector,
-} from "./DesktopProjection.ts";
-import { DesktopAccountData } from "./DesktopAccountData.ts";
-import { NativeFileSources } from "./NativeFileSources.ts";
-import { DesktopSession } from "./DesktopSession.ts";
+import { LocalStateLive } from "./Layers/LocalState.ts";
+import { LocalStateSnippetsLive } from "./Layers/LocalStateSnippets.ts";
+import { LocalStateStoreLive } from "./Layers/LocalStateStore.ts";
+import { DesktopAccountDataLive } from "./Layers/DesktopAccountData.ts";
+import { NativeFileSourcesLive } from "./Layers/NativeFileSources.ts";
+import { DesktopSessionLive } from "./Layers/DesktopSession.ts";
 
 export const managedSnippetContentRoot = join(app.getPath("userData"), "snippet-content");
 const platformLayer = NodeFileSystem.layer;
 const authServiceLayer = AuthService.layer.pipe(Layer.provideMerge(AuthStore.Live));
-const nativeFileSourcesLayer = NativeFileSources.Live;
+const nativeFileSourcesLayer = NativeFileSourcesLive;
 const desktopContentLayer = DesktopManagedSnippetContent.layer(managedSnippetContentRoot).pipe(
   Layer.provide(platformLayer),
 );
@@ -62,7 +60,7 @@ const snippetUploadEngineLayer = SnippetUploadEngine.Live.pipe(
 const snippetHydrationEngineLayer = SnippetHydrationEngine.Live.pipe(
   Layer.provide(hydrationEngineDependencies),
 );
-const desktopSnippetProjectorLayer = DesktopSnippetProjector.Live.pipe(
+const localStateSnippetsLayer = LocalStateSnippetsLive.pipe(
   Layer.provide(
     Layer.mergeAll(
       SnippetReplicaLive,
@@ -72,10 +70,10 @@ const desktopSnippetProjectorLayer = DesktopSnippetProjector.Live.pipe(
     ),
   ),
 );
-const desktopProjectionLayer = DesktopProjection.layer.pipe(
-  Layer.provide(Layer.merge(DesktopProjectionStore.Live, desktopSnippetProjectorLayer)),
+const localStateLayer = LocalStateLive.pipe(
+  Layer.provide(Layer.merge(LocalStateStoreLive, localStateSnippetsLayer)),
 );
-const desktopAccountDataLayer = DesktopAccountData.Live.pipe(
+const desktopAccountDataLayer = DesktopAccountDataLive.pipe(
   Layer.provide(
     Layer.mergeAll(
       SnippetReplicaLive,
@@ -83,16 +81,16 @@ const desktopAccountDataLayer = DesktopAccountData.Live.pipe(
       SnippetUploadOutbox.Live,
       snippetHydrationEngineLayer,
       desktopContentLayer,
-      desktopProjectionLayer,
+      localStateLayer,
     ),
   ),
 );
-const desktopSessionLayer = DesktopSession.Live.pipe(
+const desktopSessionLayer = DesktopSessionLive.pipe(
   Layer.provide(
     Layer.mergeAll(
       authServiceLayer,
       desktopAccountDataLayer,
-      desktopProjectionLayer,
+      localStateLayer,
       nativeFileSourcesLayer,
       snippetUploadEngineLayer,
       snippetHydrationEngineLayer,
@@ -117,8 +115,8 @@ const MainLayer = Layer.mergeAll(
   storageUploadLayer,
   snippetUploadEngineLayer,
   snippetHydrationEngineLayer,
-  desktopSnippetProjectorLayer,
-  desktopProjectionLayer,
+  localStateSnippetsLayer,
+  localStateLayer,
   desktopAccountDataLayer,
   nativeFileSourcesLayer,
   desktopSessionLayer,

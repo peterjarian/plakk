@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import type { DesktopProjection } from "../../ipc/contracts.ts";
-import { storageStatusFromProjection } from "./useStorageStatus.tsx";
+import type { LocalState } from "../../ipc/contracts.ts";
+import { storageStatusFromLocalState } from "./useStorageStatus.tsx";
 
-const projection = (input: Partial<DesktopProjection> = {}): DesktopProjection => ({
+const localState = (input: Partial<LocalState> = {}): LocalState => ({
   revision: 1,
   account: null,
   provider: { known: false, value: null },
@@ -12,18 +12,18 @@ const projection = (input: Partial<DesktopProjection> = {}): DesktopProjection =
   ...input,
 });
 
-describe("storage status from the desktop projection", () => {
+describe("storage status from the local state", () => {
   it("shows the cached provider offline without claiming sync capability", () => {
-    const status = storageStatusFromProjection(
-      projection({ provider: { known: true, value: "GOOGLE_DRIVE" } }),
+    const status = storageStatusFromLocalState(
+      localState({ provider: { known: true, value: "GOOGLE_DRIVE" } }),
     );
 
     expect(status).toEqual({ kind: "offline", canSync: false, provider: "GOOGLE_DRIVE" });
   });
 
   it("uses a live connected capability only when main confirms it", () => {
-    const status = storageStatusFromProjection(
-      projection({
+    const status = storageStatusFromLocalState(
+      localState({
         provider: { known: true, value: "GOOGLE_DRIVE" },
         capability: {
           status: "ONLINE",
@@ -46,8 +46,8 @@ describe("storage status from the desktop projection", () => {
   });
 
   it("keeps a confirmed unlinked account distinct from offline capability", () => {
-    const status = storageStatusFromProjection(
-      projection({
+    const status = storageStatusFromLocalState(
+      localState({
         provider: { known: true, value: null },
         capability: {
           status: "ONLINE",

@@ -13,7 +13,7 @@ const state = vi.hoisted(() => {
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
   } as const;
-  const projection = {
+  const localState = {
     revision: 7,
     account,
     provider: { known: true, value: "GOOGLE_DRIVE" },
@@ -21,7 +21,7 @@ const state = vi.hoisted(() => {
     snippets: [
       {
         id: "0d1e2f3a-4567-4890-8abc-def012345678",
-        fileName: "same-projection.txt",
+        fileName: "same-local-state.txt",
         byteSize: 4,
         storageProvider: "GOOGLE_DRIVE",
         uploadStatus: "UPLOADED",
@@ -33,12 +33,12 @@ const state = vi.hoisted(() => {
       },
     ],
   } as const;
-  return { account, projection };
+  return { account, localState };
 });
 
-vi.mock("../hooks/useDesktopProjection.tsx", () => ({
-  useDesktopProjection: () => ({
-    projection: state.projection,
+vi.mock("../hooks/useLocalState.tsx", () => ({
+  useLocalState: () => ({
+    localState: state.localState,
     isLoading: false,
     error: null,
     reload: vi.fn(),
@@ -50,8 +50,8 @@ vi.mock("../hooks/useAuth.ts", () => ({
   useAuth: () => ({ issue: null, isLoading: false, user: state.account }),
 }));
 
-describe("desktop projection views", () => {
-  it("presents the same cached offline projection in Home and Tray", () => {
+describe("local state views", () => {
+  it("presents the same cached offline local state in Home and Tray", () => {
     const home = renderToStaticMarkup(<Home />);
     const tray = renderToStaticMarkup(<Tray />);
 

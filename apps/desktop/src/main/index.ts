@@ -10,7 +10,7 @@ import { app, BrowserWindow, dialog, Menu, net, protocol, shell } from "electron
 import { Effect, Result, Stream } from "effect";
 import type {
   ClipboardContent,
-  DesktopProjection as DesktopProjectionValue,
+  LocalState as LocalStateValue,
   TrayDroppedItem,
 } from "../ipc/contracts.ts";
 import { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
@@ -29,9 +29,9 @@ import { UserConfigStore } from "./UserConfigStore.ts";
 import { runEffect, runtime } from "./runtime.ts";
 import { getManagedSnippetBytes } from "./snippetReplica.ts";
 import { SnippetUploadEngine, snippetUploadFailureMessage } from "./SnippetUploadEngine.ts";
-import { DesktopProjection } from "./DesktopProjection.ts";
-import { NativeFileSources } from "./NativeFileSources.ts";
-import { DesktopSession } from "./DesktopSession.ts";
+import { DesktopSession } from "./Services/DesktopSession.ts";
+import { LocalState } from "./Services/LocalState.ts";
+import { NativeFileSources } from "./Services/NativeFileSources.ts";
 
 const handle = makeHandle(runtime);
 
@@ -64,9 +64,9 @@ handle(ipcMethods.openExternal, (url) =>
       }),
 );
 
-handle(ipcMethods.desktopProjectionGet, () =>
-  DesktopProjection.use((projection) => projection.current),
-);
+const getLocalState = LocalState.use((localState) => localState.current);
+
+handle(ipcMethods.localStateGet, () => getLocalState);
 
 handle(ipcMethods.snippetIngest, (payload, event) =>
   Effect.gen(function* () {
@@ -190,7 +190,7 @@ handle(ipcMethods.snippetDownload, (id) =>
   }),
 );
 
-const findSnippet = Effect.fn("DesktopSnippetProjection.find")(function* (id: string) {
+const findSnippet = Effect.fn("LocalState.findSnippet")(function* (id: string) {
   const account = yield* activeSnippetAccount;
   if (account === null) {
     return yield* new IpcHandlerError({
@@ -198,8 +198,8 @@ const findSnippet = Effect.fn("DesktopSnippetProjection.find")(function* (id: st
       message: "Sign in to load stored snippets.",
     });
   }
-  const projection = yield* DesktopProjection;
-  const current = yield* projection.current;
+  const localState = yield* LocalState;
+  const current = yield* localState.current;
   const snippets = current.account?.id === account.id ? current.snippets : [];
   const snippet = snippets.find((item) => item.id === id);
   if (snippet === undefined) {
@@ -517,15 +517,15 @@ function registerAuthCallbackProtocol(callbackUrl: string): void {
   }
 }
 
-function broadcastDesktopProjection(projection: DesktopProjectionValue): void {
+function broadcastLocalState(localState: LocalStateValue): void {
   const canSync =
-    projection.capability.status === "ONLINE" &&
-    accountCanSyncWithConnection(projection.capability.account, projection.capability.connection);
-  reconcileTrayAuth({ user: projection.account }, trayWindowController);
-  trayWindowController?.setAccountState(projection.account !== null, canSync);
+    localState.capability.status === "ONLINE" &&
+    accountCanSyncWithConnection(localState.capability.account, localState.capability.connection);
+  reconcileTrayAuth({ user: localState.account }, trayWindowController);
+  trayWindowController?.setAccountState(localState.account !== null, canSync);
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed()) {
-      send(window.webContents, ipcEvents.desktopProjectionChanged, projection);
+      send(window.webContents, ipcEvents.localStateChanged, localState);
     }
   }
 }
@@ -643,9 +643,9 @@ if (!hasSingleInstanceLock) {
     registerRendererProtocol();
 
     runtime.runFork(
-      DesktopProjection.use((projection) =>
-        projection.changes.pipe(
-          Stream.runForEach((value) => Effect.sync(() => broadcastDesktopProjection(value))),
+      LocalState.use((localState) =>
+        localState.changes.pipe(
+          Stream.runForEach((value) => Effect.sync(() => broadcastLocalState(value))),
         ),
       ),
     );
@@ -716,9 +716,9 @@ if (!hasSingleInstanceLock) {
     });
     createWindow();
     runtime.runFork(
-      DesktopProjection.use((projection) =>
-        projection.current.pipe(
-          Effect.tap((value) => Effect.sync(() => broadcastDesktopProjection(value))),
+      LocalState.use((localState) =>
+        localState.current.pipe(
+          Effect.tap((value) => Effect.sync(() => broadcastLocalState(value))),
         ),
       ),
     );
