@@ -11,7 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiRpcRouteImport } from './routes/api/rpc'
-import { Route as ApiSnippetsEventsRouteImport } from './routes/api/snippets/events'
+import { Route as ApiSnippetsInvalidationsRouteImport } from './routes/api/snippets/invalidations'
 import { Route as ApiAuthSignInRouteImport } from './routes/api/auth/sign-in'
 import { Route as ApiAuthCallbackRouteImport } from './routes/api/auth/callback'
 
@@ -25,11 +25,12 @@ const ApiRpcRoute = ApiRpcRouteImport.update({
   path: '/api/rpc',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiSnippetsEventsRoute = ApiSnippetsEventsRouteImport.update({
-  id: '/api/snippets/events',
-  path: '/api/snippets/events',
-  getParentRoute: () => rootRouteImport,
-} as any)
+const ApiSnippetsInvalidationsRoute =
+  ApiSnippetsInvalidationsRouteImport.update({
+    id: '/api/snippets/invalidations',
+    path: '/api/snippets/invalidations',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiAuthSignInRoute = ApiAuthSignInRouteImport.update({
   id: '/api/auth/sign-in',
   path: '/api/auth/sign-in',
@@ -46,14 +47,14 @@ export interface FileRoutesByFullPath {
   '/api/rpc': typeof ApiRpcRoute
   '/api/auth/callback': typeof ApiAuthCallbackRoute
   '/api/auth/sign-in': typeof ApiAuthSignInRoute
-  '/api/snippets/events': typeof ApiSnippetsEventsRoute
+  '/api/snippets/invalidations': typeof ApiSnippetsInvalidationsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/api/rpc': typeof ApiRpcRoute
   '/api/auth/callback': typeof ApiAuthCallbackRoute
   '/api/auth/sign-in': typeof ApiAuthSignInRoute
-  '/api/snippets/events': typeof ApiSnippetsEventsRoute
+  '/api/snippets/invalidations': typeof ApiSnippetsInvalidationsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -61,7 +62,7 @@ export interface FileRoutesById {
   '/api/rpc': typeof ApiRpcRoute
   '/api/auth/callback': typeof ApiAuthCallbackRoute
   '/api/auth/sign-in': typeof ApiAuthSignInRoute
-  '/api/snippets/events': typeof ApiSnippetsEventsRoute
+  '/api/snippets/invalidations': typeof ApiSnippetsInvalidationsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -70,21 +71,21 @@ export interface FileRouteTypes {
     | '/api/rpc'
     | '/api/auth/callback'
     | '/api/auth/sign-in'
-    | '/api/snippets/events'
+    | '/api/snippets/invalidations'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/api/rpc'
     | '/api/auth/callback'
     | '/api/auth/sign-in'
-    | '/api/snippets/events'
+    | '/api/snippets/invalidations'
   id:
     | '__root__'
     | '/'
     | '/api/rpc'
     | '/api/auth/callback'
     | '/api/auth/sign-in'
-    | '/api/snippets/events'
+    | '/api/snippets/invalidations'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -92,7 +93,7 @@ export interface RootRouteChildren {
   ApiRpcRoute: typeof ApiRpcRoute
   ApiAuthCallbackRoute: typeof ApiAuthCallbackRoute
   ApiAuthSignInRoute: typeof ApiAuthSignInRoute
-  ApiSnippetsEventsRoute: typeof ApiSnippetsEventsRoute
+  ApiSnippetsInvalidationsRoute: typeof ApiSnippetsInvalidationsRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -111,11 +112,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiRpcRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/snippets/events': {
-      id: '/api/snippets/events'
-      path: '/api/snippets/events'
-      fullPath: '/api/snippets/events'
-      preLoaderRoute: typeof ApiSnippetsEventsRouteImport
+    '/api/snippets/invalidations': {
+      id: '/api/snippets/invalidations'
+      path: '/api/snippets/invalidations'
+      fullPath: '/api/snippets/invalidations'
+      preLoaderRoute: typeof ApiSnippetsInvalidationsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/auth/sign-in': {
@@ -140,7 +141,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiRpcRoute: ApiRpcRoute,
   ApiAuthCallbackRoute: ApiAuthCallbackRoute,
   ApiAuthSignInRoute: ApiAuthSignInRoute,
-  ApiSnippetsEventsRoute: ApiSnippetsEventsRoute,
+  ApiSnippetsInvalidationsRoute: ApiSnippetsInvalidationsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

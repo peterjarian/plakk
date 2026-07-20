@@ -113,6 +113,13 @@ const makeDesktopSession = Effect.gen(function* () {
         );
     }
   });
+  const refreshSessionDetached = (failureMessage: string) =>
+    Ref.get(connectionRefresh).pipe(
+      Effect.flatten,
+      Effect.catchCause((cause) => Effect.logError(failureMessage, { cause })),
+      Effect.forkDetach,
+      Effect.asVoid,
+    );
   const startSync = Effect.fn("DesktopSession.startSync")(function* (session: AuthSession) {
     const fiber = yield* runSnippetReplicaSync(
       {
@@ -132,17 +139,16 @@ const makeDesktopSession = Effect.gen(function* () {
                 Effect.logError("Could not publish live connection status", { cause }),
               ),
             ),
-        onConnected: Ref.get(connectionRefresh).pipe(
-          Effect.flatten,
-          Effect.catchCause((cause) =>
-            Effect.logError("Could not refresh the reconnected desktop session", { cause }),
-          ),
+        onConnected: refreshSessionDetached("Could not refresh the reconnected desktop session"),
+        onDisconnected: refreshSessionDetached(
+          "Could not refresh credentials after live disconnection",
         ),
       },
     ).pipe(
       Effect.provideService(SnippetReplica, replica),
       Effect.provideService(SnippetRemoteTransport, remote),
       Effect.provideService(ManagedSnippetContent, managedContent),
+      Effect.provideService(SnippetUploadEngine, uploads),
       Effect.forkDetach,
     );
     yield* Ref.set(syncFiber, fiber);

@@ -35,7 +35,7 @@ export const snippetInvalidationStream = <E>(
 
 const eventChunk = (value: string) => new TextEncoder().encode(value);
 
-export const snippetEventBytes = <E>(
+export const snippetInvalidationBytes = <E>(
   notifications: Stream.Stream<string, E>,
   ownerWorkosUserId: string,
 ) => {
@@ -48,11 +48,11 @@ export const snippetEventBytes = <E>(
   return Stream.merge(invalidations, keepAlive);
 };
 
-export const makeSnippetEventsResponse = <E>(
+export const makeSnippetInvalidationsResponse = <E>(
   notifications: Stream.Stream<string, E>,
   ownerWorkosUserId: string,
 ) =>
-  HttpServerResponse.stream(snippetEventBytes(notifications, ownerWorkosUserId), {
+  HttpServerResponse.stream(snippetInvalidationBytes(notifications, ownerWorkosUserId), {
     contentType: "text/event-stream",
     headers: {
       "cache-control": "no-cache, no-transform",
@@ -61,10 +61,10 @@ export const makeSnippetEventsResponse = <E>(
     },
   });
 
-export const SnippetEventsRoute = HttpRouter.use((router) =>
+export const SnippetInvalidationsRoute = HttpRouter.use((router) =>
   Effect.gen(function* () {
     const pg = yield* PgClient.PgClient;
-    yield* router.add("GET", "/api/snippets/events", (request) =>
+    yield* router.add("GET", "/api/snippets/invalidations", (request) =>
       Effect.gen(function* () {
         const currentUser = yield* authenticateRequest(request.headers);
         const notifications = pg
@@ -77,7 +77,7 @@ export const SnippetEventsRoute = HttpRouter.use((router) =>
         yield* Effect.logInfo("Snippet SSE stream connected", {
           ownerWorkosUserId: currentUser.id,
         });
-        return makeSnippetEventsResponse(notifications, currentUser.id).pipe(
+        return makeSnippetInvalidationsResponse(notifications, currentUser.id).pipe(
           HttpServerResponse.setHeader("vary", "authorization"),
         );
       }).pipe(

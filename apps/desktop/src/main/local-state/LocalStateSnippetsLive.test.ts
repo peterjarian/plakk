@@ -2,28 +2,16 @@ import { NodeFileSystem } from "@effect/platform-node";
 import type { User } from "@plakk/shared";
 import type { ApiSnippet } from "@plakk/shared/PlakkApi";
 import { expect, it } from "@effect/vitest";
-import {
-  Context,
-  Effect,
-  Fiber,
-  FileSystem,
-  Layer,
-  ManagedRuntime,
-  Option,
-  PubSub,
-  Stream,
-} from "effect";
+import { Effect, Fiber, FileSystem, Layer, ManagedRuntime, Option, PubSub, Stream } from "effect";
 
 import { ManagedSnippetContent } from "../snippets/content/ManagedSnippetContent.ts";
 import { SnippetHydrationEngine } from "../snippets/hydration/SnippetHydration.ts";
 import { SnippetRemoteTransport } from "../snippets/replica/SnippetRemoteTransport.ts";
 import { SnippetReplica, type SnippetReplicaState } from "../snippets/replica/SnippetReplica.ts";
-import { SnippetReplicaWithUploadCleanupLive } from "../snippets/replica/SnippetReplicaWithUploadCleanupLive.ts";
 import { runSnippetReplicaSync, syncSnippetReplica } from "../snippets/replica/sync.ts";
 import { SnippetUploadEngine } from "../snippets/upload/SnippetUploadEngine.ts";
 import { LocalState } from "./LocalState.ts";
 import { LocalStateLive } from "./LocalStateLive.ts";
-import { LocalStateSnippets } from "./LocalStateSnippets.ts";
 import { LocalStateSnippetsLive } from "./LocalStateSnippetsLive.ts";
 import { makeLocalStateStoreLive } from "./LocalStateStoreLive.ts";
 
@@ -142,12 +130,8 @@ const harness = (options: {
       validateText: () => Effect.succeed("NOT_FOUND"),
     });
     const uploadsLayer = Layer.succeed(SnippetUploadEngine, uploads);
-    const builtReplica = yield* SnippetReplicaWithUploadCleanupLive.pipe(
-      Layer.provide(Layer.merge(Layer.succeed(SnippetReplica, replica), uploadsLayer)),
-      Layer.build,
-    );
-    const replicaLayer = Layer.succeed(SnippetReplica, Context.get(builtReplica, SnippetReplica));
-    const builtLocalStateSnippets = yield* LocalStateSnippetsLive.pipe(
+    const replicaLayer = Layer.succeed(SnippetReplica, replica);
+    const localStateSnippets = LocalStateSnippetsLive.pipe(
       Layer.provide(
         Layer.mergeAll(
           replicaLayer,
@@ -156,11 +140,6 @@ const harness = (options: {
           Layer.succeed(ManagedSnippetContent, desktopContent),
         ),
       ),
-      Layer.build,
-    );
-    const localStateSnippets = Layer.succeed(
-      LocalStateSnippets,
-      Context.get(builtLocalStateSnippets, LocalStateSnippets),
     );
     const runtime = ManagedRuntime.make(
       Layer.merge(
@@ -169,6 +148,7 @@ const harness = (options: {
         ),
         Layer.mergeAll(
           replicaLayer,
+          uploadsLayer,
           Layer.succeed(SnippetRemoteTransport, remote),
           Layer.succeed(ManagedSnippetContent, managed),
         ),

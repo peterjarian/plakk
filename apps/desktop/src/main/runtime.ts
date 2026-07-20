@@ -15,7 +15,6 @@ import { SnippetHydrationLive } from "./snippets/hydration/SnippetHydrationLive.
 import { SnippetHydrationTransportLive } from "./snippets/hydration/SnippetHydrationTransportLive.ts";
 import { makeSnippetRemoteTransportLive } from "./snippets/replica/SnippetRemoteTransportLive.ts";
 import { SnippetReplicaLive } from "./snippets/replica/SnippetReplicaLive.ts";
-import { SnippetReplicaWithUploadCleanupLive } from "./snippets/replica/SnippetReplicaWithUploadCleanupLive.ts";
 import { NativeFileSourcesLive } from "./snippets/sources/NativeFileSourcesLive.ts";
 import { SnippetUploadEngineLive } from "./snippets/upload/SnippetUploadEngineLive.ts";
 import { SnippetUploadOutboxLive } from "./snippets/upload/SnippetUploadOutboxLive.ts";
@@ -47,9 +46,7 @@ const uploadEngineDependencies = Layer.mergeAll(
 const snippetUploadEngineLayer = SnippetUploadEngineLive.pipe(
   Layer.provide(uploadEngineDependencies),
 );
-const snippetReplicaLayer = SnippetReplicaWithUploadCleanupLive.pipe(
-  Layer.provide(Layer.merge(SnippetReplicaLive, snippetUploadEngineLayer)),
-);
+const snippetReplicaLayer = SnippetReplicaLive;
 const hydrationEngineDependencies = Layer.mergeAll(
   managedSnippetContentLayer,
   snippetReplicaLayer,

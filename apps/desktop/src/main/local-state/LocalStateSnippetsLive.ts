@@ -22,6 +22,7 @@ const makeLocalStateSnippets = Effect.gen(function* () {
   );
   const read = Effect.fn("LocalStateSnippets.read")(function* (accountId: string) {
     const replicaItems = (yield* replica.get(accountId))?.items ?? [];
+    // #76 removes this compatibility join when uploads move into the Device Snippet collection.
     yield* uploads.reconcile(accountId, replicaItems);
     const items = yield* uploads.project(accountId, replicaItems);
     const reconciledAvailability = yield* hydration.reconcile(accountId);

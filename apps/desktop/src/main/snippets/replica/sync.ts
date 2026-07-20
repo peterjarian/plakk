@@ -2,6 +2,7 @@ import type { ApiSnippet } from "@plakk/shared/PlakkApi";
 import { Effect, Stream } from "effect";
 
 import { ManagedSnippetContent } from "../content/ManagedSnippetContent.ts";
+import { SnippetUploadEngine } from "../upload/SnippetUploadEngine.ts";
 import { SnippetRemoteTransport, type SnippetSyncAccount } from "./SnippetRemoteTransport.ts";
 import { SnippetReplica, type SnippetReplicaState } from "./SnippetReplica.ts";
 
@@ -34,13 +35,32 @@ export const syncSnippetReplica = Effect.fn("SnippetReplica.sync")(function* (
 ) {
   const replica = yield* SnippetReplica;
   const content = yield* ManagedSnippetContent;
+  const uploads = yield* SnippetUploadEngine;
   const remote = yield* SnippetRemoteTransport;
   const snapshot = yield* remote.snapshot(account);
   const reconciled = reconcileSnippetSnapshot(yield* replica.get(account.id), snapshot);
+  yield* replica.commit(account.id, reconciled.state);
   if (reconciled.stalePublishedIds.length > 0) {
-    yield* content.invalidate(account.id, reconciled.stalePublishedIds);
+    yield* Effect.all(
+      [
+        content.invalidate(account.id, reconciled.stalePublishedIds).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("Could not remove managed content absent from the Snippet snapshot", {
+              cause,
+            }),
+          ),
+        ),
+        uploads.removePublishedRecords(account.id, reconciled.stalePublishedIds).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("Could not remove compatible upload records after reconciliation", {
+              cause,
+            }),
+          ),
+        ),
+      ],
+      { discard: true },
+    );
   }
-  yield* replica.commit(account.id, reconciled.state, reconciled.stalePublishedIds);
   return reconciled.state;
 });
 
@@ -49,7 +69,12 @@ export const runSnippetReplicaSync = Effect.fn("SnippetReplica.run")(function* (
   lifecycle: {
     readonly onConnectionStatus: (status: LiveConnectionStatus) => Effect.Effect<void>;
     readonly onConnected: Effect.Effect<void>;
-  } = { onConnectionStatus: () => Effect.void, onConnected: Effect.void },
+    readonly onDisconnected: Effect.Effect<void>;
+  } = {
+    onConnectionStatus: () => Effect.void,
+    onConnected: Effect.void,
+    onDisconnected: Effect.void,
+  },
 ) {
   const remote = yield* SnippetRemoteTransport;
   let status: LiveConnectionStatus | null = null;
@@ -63,20 +88,16 @@ export const runSnippetReplicaSync = Effect.fn("SnippetReplica.run")(function* (
 
   while (true) {
     yield* publishStatus("RECONNECTING");
-    let connected = false;
+    let receivedInitialInvalidation = false;
     yield* remote.invalidations(account).pipe(
       Stream.runForEach(() =>
         Effect.gen(function* () {
-          if (!connected) {
-            connected = true;
-            yield* publishStatus("CONNECTED");
+          if (!receivedInitialInvalidation) {
+            receivedInitialInvalidation = true;
             yield* lifecycle.onConnected;
           }
-          yield* syncSnippetReplica(account).pipe(
-            Effect.catchCause((cause) =>
-              Effect.logWarning("Complete Snippet refresh failed", { cause }),
-            ),
-          );
+          yield* syncSnippetReplica(account);
+          yield* publishStatus("CONNECTED");
         }),
       ),
       Effect.catchCause((cause) =>
@@ -84,6 +105,7 @@ export const runSnippetReplicaSync = Effect.fn("SnippetReplica.run")(function* (
       ),
     );
     yield* publishStatus("RECONNECTING");
+    yield* lifecycle.onDisconnected;
     yield* Effect.sleep("5 seconds");
   }
 });

@@ -12,11 +12,6 @@ export class SnippetReplicaError extends Schema.TaggedErrorClass<SnippetReplicaE
   { cause: Schema.Defect(), reason: Schema.String },
 ) {}
 
-export class SnippetPublishedCleanupError extends Schema.TaggedErrorClass<SnippetPublishedCleanupError>()(
-  "SnippetPublishedCleanupError",
-  { cause: Schema.Defect(), reason: Schema.String },
-) {}
-
 export class SnippetReplica extends Context.Service<
   SnippetReplica,
   {
@@ -25,11 +20,7 @@ export class SnippetReplica extends Context.Service<
       readonly items: ReadonlyArray<ApiSnippet>;
     }>;
     get(accountId: string): Effect.Effect<SnippetReplicaState | null, SnippetReplicaError>;
-    commit(
-      accountId: string,
-      state: SnippetReplicaState,
-      removedPublishedIds?: ReadonlyArray<string>,
-    ): Effect.Effect<void, SnippetReplicaError | SnippetPublishedCleanupError>;
+    commit(accountId: string, state: SnippetReplicaState): Effect.Effect<void, SnippetReplicaError>;
     purge(accountId: string): Effect.Effect<void, SnippetReplicaError>;
     remove(accountId: string, snippetId: string): Effect.Effect<void, SnippetReplicaError>;
   }

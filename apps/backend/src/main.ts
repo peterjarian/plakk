@@ -9,11 +9,11 @@ import { createServer } from "node:http";
 
 import { RpcRoutes } from "./api/rpc.ts";
 import { ServerRuntimeLive } from "./api/ServerRuntime.ts";
-import { SnippetEventsRoute } from "./api/snippets/snippetInvalidations.ts";
+import { SnippetInvalidationsRoute } from "./api/snippets/snippetInvalidations.ts";
 
 const BackendRoutes = Layer.mergeAll(
   RpcRoutes.pipe(Layer.provide(ServerRuntimeLive)),
-  SnippetEventsRoute.pipe(Layer.provide(PgClientLive)),
+  SnippetInvalidationsRoute.pipe(Layer.provide(PgClientLive)),
   HttpRouter.cors({
     allowedOrigins: ["plakk-app://renderer"],
     allowedMethods: ["GET", "POST", "OPTIONS"],

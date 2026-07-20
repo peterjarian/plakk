@@ -1,13 +1,14 @@
 import type { ApiSnippet } from "@plakk/shared/PlakkApi";
 import { RpcError } from "@plakk/shared/RpcError";
 import { describe, expect, it } from "vite-plus/test";
-import { Effect, Fiber, Layer, Ref, Stream } from "effect";
+import { Deferred, Effect, Fiber, Layer, Ref, Stream } from "effect";
 import { TestClock } from "effect/testing";
 
 import {
   ManagedSnippetContent,
   ManagedSnippetContentError,
 } from "../content/ManagedSnippetContent.ts";
+import { SnippetUploadEngine } from "../upload/SnippetUploadEngine.ts";
 import { SnippetRemoteTransport, type SnippetSyncAccount } from "./SnippetRemoteTransport.ts";
 import { SnippetReplica, SnippetReplicaError, type SnippetReplicaState } from "./SnippetReplica.ts";
 import { reconcileSnippetSnapshot, runSnippetReplicaSync, syncSnippetReplica } from "./sync.ts";
@@ -44,6 +45,7 @@ const harness = (options: {
   let snapshotReads = 0;
   let connections = 0;
   const invalidated: Array<ReadonlyArray<string>> = [];
+  const removedPublished: Array<ReadonlyArray<string>> = [];
   const snapshots = [...(options.snapshots ?? [[]])];
 
   const layer = Layer.mergeAll(
@@ -116,12 +118,22 @@ const harness = (options: {
           ),
       }),
     ),
+    Layer.succeed(
+      SnippetUploadEngine,
+      SnippetUploadEngine.of({
+        removePublishedRecords: (_accountId: string, ids: ReadonlyArray<string>) =>
+          Effect.sync(() => {
+            removedPublished.push(ids);
+          }),
+      } as never),
+    ),
   );
 
   return {
     connections: () => connections,
     invalidated,
     layer,
+    removedPublished,
     snapshotReads: () => snapshotReads,
     state: () => state,
   };
@@ -148,18 +160,17 @@ describe("snippet snapshot reconciliation", () => {
 
     expect(test.state()).toEqual({ items: [local] });
     expect(test.invalidated).toEqual([[published.id]]);
+    expect(test.removedPublished).toEqual([[published.id]]);
   });
 
-  it("leaves the entire collection unchanged when cleanup or commit fails", async () => {
+  it("commits the collection before best-effort cleanup and changes nothing on commit failure", async () => {
     const cleanupFailure = harness({
       initial: { items: [published, local] },
       snapshots: [[]],
       failInvalidateOnce: true,
     });
-    await expect(
-      Effect.runPromise(syncSnippetReplica(account).pipe(Effect.provide(cleanupFailure.layer))),
-    ).rejects.toMatchObject({ _tag: "ManagedSnippetContentError" });
-    expect(cleanupFailure.state()).toEqual({ items: [published, local] });
+    await Effect.runPromise(syncSnippetReplica(account).pipe(Effect.provide(cleanupFailure.layer)));
+    expect(cleanupFailure.state()).toEqual({ items: [local] });
 
     const commitFailure = harness({
       initial: { items: [published, local] },
@@ -170,6 +181,8 @@ describe("snippet snapshot reconciliation", () => {
       Effect.runPromise(syncSnippetReplica(account).pipe(Effect.provide(commitFailure.layer))),
     ).rejects.toMatchObject({ _tag: "SnippetReplicaError" });
     expect(commitFailure.state()).toEqual({ items: [published, local] });
+    expect(commitFailure.invalidated).toEqual([]);
+    expect(commitFailure.removedPublished).toEqual([]);
   });
 
   it("refreshes once for connect, reconnect, and each invalidation while publishing stream status", async () => {
@@ -201,6 +214,7 @@ describe("snippet snapshot reconciliation", () => {
               statuses.push(status);
             }),
           onConnected: Effect.void,
+          onDisconnected: Effect.void,
         }).pipe(Effect.provide(test.layer), Effect.forkChild);
         yield* TestClock.adjust("5 seconds");
         yield* Effect.yieldNow;
@@ -216,5 +230,32 @@ describe("snippet snapshot reconciliation", () => {
     expect(result.connections).toBe(2);
     expect(result.snapshotReads).toBe(3);
     expect(result.statuses).toEqual(["RECONNECTING", "CONNECTED", "RECONNECTING", "CONNECTED"]);
+  });
+
+  it("stays reconnecting and requests credential refresh when the initial snapshot fails", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const disconnected = yield* Deferred.make<void>();
+        const statuses: Array<"CONNECTED" | "RECONNECTING"> = [];
+        const test = harness({
+          snapshots: [],
+          invalidations: Stream.make(undefined).pipe(Stream.concat(Stream.never)),
+        });
+        const fiber = yield* runSnippetReplicaSync(account, {
+          onConnectionStatus: (status) =>
+            Effect.sync(() => {
+              statuses.push(status);
+            }),
+          onConnected: Effect.void,
+          onDisconnected: Deferred.succeed(disconnected, undefined),
+        }).pipe(Effect.provide(test.layer), Effect.forkChild);
+        yield* Deferred.await(disconnected);
+        yield* Fiber.interrupt(fiber);
+        return { statuses, snapshotReads: test.snapshotReads() };
+      }),
+    );
+
+    expect(result.snapshotReads).toBe(1);
+    expect(result.statuses).toEqual(["RECONNECTING"]);
   });
 });

@@ -5,9 +5,9 @@ import { Effect, Fiber, Stream } from "effect";
 import { TestClock } from "effect/testing";
 
 import {
-  makeSnippetEventsResponse,
+  makeSnippetInvalidationsResponse,
   notifySnippetChanges,
-  snippetEventBytes,
+  snippetInvalidationBytes,
   snippetInvalidationStream,
 } from "./snippetInvalidations.ts";
 
@@ -25,7 +25,7 @@ describe("snippet invalidations", () => {
   it("renders a long-lived SSE response with lightweight transport keep-alive", async () => {
     const chunks = await Effect.runPromise(
       Effect.gen(function* () {
-        const fiber = yield* snippetEventBytes(Stream.never, "account-1").pipe(
+        const fiber = yield* snippetInvalidationBytes(Stream.never, "account-1").pipe(
           Stream.take(2),
           Stream.runCollect,
           Effect.forkChild,
@@ -38,9 +38,9 @@ describe("snippet invalidations", () => {
     expect(new Set(Array.from(chunks, (chunk) => new TextDecoder().decode(chunk)))).toEqual(
       new Set([`data: ${SNIPPETS_CHANGED}\n\n`, ": keep-alive\n\n"]),
     );
-    expect(makeSnippetEventsResponse(Stream.never, "account-1").headers["content-type"]).toBe(
-      "text/event-stream",
-    );
+    expect(
+      makeSnippetInvalidationsResponse(Stream.never, "account-1").headers["content-type"],
+    ).toBe("text/event-stream");
   });
 
   it("stages the internal account notification through the supplied transaction", async () => {

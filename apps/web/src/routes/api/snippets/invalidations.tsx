@@ -3,17 +3,19 @@ import { getAuth } from "@workos/authkit-tanstack-react-start";
 import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
 
-const backendEventsUrl = Config.string("PLAKK_RPC_URL").pipe(
+const backendInvalidationsUrl = Config.string("PLAKK_RPC_URL").pipe(
   Config.withDefault("http://localhost:3100/api/rpc"),
   Config.map((rpcUrl) => {
     const url = new URL(rpcUrl);
-    url.pathname = url.pathname.replace(/\/rpc$/, "/snippets/events");
+    url.pathname = url.pathname.replace(/\/rpc$/, "/snippets/invalidations");
     return url.toString();
   }),
 );
 
-const proxySnippetEvents = Effect.fn("proxySnippetEvents")(function* (request: Request) {
-  const url = yield* backendEventsUrl;
+const proxySnippetInvalidations = Effect.fn("proxySnippetInvalidations")(function* (
+  request: Request,
+) {
+  const url = yield* backendInvalidationsUrl;
   const headers = new Headers(request.headers);
   headers.delete("cookie");
   if (!headers.has("authorization")) {
@@ -26,10 +28,10 @@ const proxySnippetEvents = Effect.fn("proxySnippetEvents")(function* (request: R
   return yield* Effect.tryPromise(() => fetch(forwarded));
 });
 
-export const Route = createFileRoute("/api/snippets/events")({
+export const Route = createFileRoute("/api/snippets/invalidations")({
   server: {
     handlers: {
-      GET: ({ request }) => Effect.runPromise(proxySnippetEvents(request)),
+      GET: ({ request }) => Effect.runPromise(proxySnippetInvalidations(request)),
     },
   },
 });

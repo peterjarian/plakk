@@ -8,20 +8,23 @@ import {
   type SnippetSyncAccount,
 } from "./SnippetRemoteTransport.ts";
 
-export type SnippetEventFetch = (input: string | URL, init?: RequestInit) => Promise<Response>;
+export type SnippetInvalidationFetch = (
+  input: string | URL,
+  init?: RequestInit,
+) => Promise<Response>;
 
 const transportError = (cause: unknown, reason: string) =>
   new SnippetRemoteTransportError({ cause, reason });
 
-export const snippetEventsUrlFromRpcUrl = (rpcUrl: string): string => {
+export const snippetInvalidationsUrlFromRpcUrl = (rpcUrl: string): string => {
   const url = new URL(rpcUrl.startsWith("/") ? rpcUrl : rpcUrl, "http://localhost:3100");
   const segments = url.pathname.split("/");
-  segments[segments.length - 1] = "snippets/events";
+  segments[segments.length - 1] = "snippets/invalidations";
   url.pathname = segments.join("/");
   return rpcUrl.startsWith("/") ? `${url.pathname}${url.search}` : url.toString();
 };
 
-export const decodeSnippetEvents = <E>(
+export const decodeSnippetInvalidations = <E>(
   bytes: Stream.Stream<Uint8Array, E>,
 ): Stream.Stream<void, E> =>
   bytes.pipe(
@@ -34,7 +37,11 @@ export const decodeSnippetEvents = <E>(
     ),
   );
 
-const snippetEvents = (fetch: SnippetEventFetch, url: string, account: SnippetSyncAccount) =>
+const snippetInvalidations = (
+  fetch: SnippetInvalidationFetch,
+  url: string,
+  account: SnippetSyncAccount,
+) =>
   Stream.unwrap(
     Effect.tryPromise({
       try: (signal) =>
@@ -64,7 +71,7 @@ const snippetEvents = (fetch: SnippetEventFetch, url: string, account: SnippetSy
           );
         }
         return Effect.succeed(
-          decodeSnippetEvents(
+          decodeSnippetInvalidations(
             Stream.fromReadableStream({
               evaluate: () => response.body!,
               onError: (cause) =>
@@ -76,7 +83,7 @@ const snippetEvents = (fetch: SnippetEventFetch, url: string, account: SnippetSy
     ),
   );
 
-export const makeSnippetRemoteTransportLive = (fetch: SnippetEventFetch) =>
+export const makeSnippetRemoteTransportLive = (fetch: SnippetInvalidationFetch) =>
   Layer.effect(
     SnippetRemoteTransport,
     Effect.gen(function* () {
@@ -84,14 +91,14 @@ export const makeSnippetRemoteTransportLive = (fetch: SnippetEventFetch) =>
       const rpcUrl = yield* Config.string("PLAKK_RPC_URL").pipe(
         Config.withDefault("https://app.plakk.io/api/rpc"),
       );
-      const eventsUrl = snippetEventsUrlFromRpcUrl(rpcUrl);
+      const invalidationsUrl = snippetInvalidationsUrlFromRpcUrl(rpcUrl);
       return SnippetRemoteTransport.of({
         snapshot: Effect.fn("DesktopSnippetRemote.snapshot")(function* (account) {
           return yield* client.GetSnippetSnapshot(undefined, {
             headers: { authorization: `Bearer ${account.accessToken}` },
           });
         }),
-        invalidations: (account) => snippetEvents(fetch, eventsUrl, account),
+        invalidations: (account) => snippetInvalidations(fetch, invalidationsUrl, account),
       });
     }),
   );
