@@ -13,7 +13,6 @@ const snippet: ApiSnippet = {
   fileName: "note.txt",
   storageObjectId: "object-1",
   storageProvider: "GOOGLE_DRIVE",
-  uploadStatus: "UPLOADED",
   createdAt: "2026-07-16T09:00:00.000Z",
   updatedAt: "2026-07-16T09:00:00.000Z",
 };

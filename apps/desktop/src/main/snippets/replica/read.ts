@@ -1,4 +1,3 @@
-import type { SnippetUploadStatus } from "@plakk/shared";
 import { Effect } from "effect";
 
 import { ManagedSnippetContent } from "../content/ManagedSnippetContent.ts";
@@ -8,7 +7,9 @@ export const getReplicaItems = Effect.fn("DesktopSnippetReplica.items")(function
   accountId: string,
 ) {
   const replica = yield* SnippetReplica;
-  return (yield* replica.get(accountId))?.items ?? [];
+  return ((yield* replica.get(accountId))?.items ?? []).flatMap((record) =>
+    record.kind === "PUBLISHED" ? [record.snippet] : [],
+  );
 });
 
 export const getReplicaSnippet = Effect.fn("DesktopSnippetReplica.snippet")(function* (
@@ -29,7 +30,6 @@ export const getManagedSnippetBytes = Effect.fn("DesktopSnippetReplica.content")
     readonly id: string;
     readonly fileName: string;
     readonly byteSize: number;
-    readonly uploadStatus: SnippetUploadStatus | null;
   },
 ) {
   const content = yield* ManagedSnippetContent;

@@ -13,8 +13,6 @@ const uploadedSnippet = (overrides: Partial<SnippetRow> = {}): SnippetRow => ({
   ownerWorkosUserId: "user-1",
   storageProvider: "GOOGLE_DRIVE",
   storageObjectId: "drive-object",
-  uploadStatus: "UPLOADED",
-  uploadHeartbeatExpiresAt: null,
   fileName: "note.md",
   byteSize: 12,
   deletedAt: null,

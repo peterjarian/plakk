@@ -15,8 +15,6 @@ export function TrayRecentItem({
   onDelete,
   onDownload,
   onOpenLink,
-  onRetryUpload,
-  onStopUpload,
 }: {
   snippet: SnippetReadModel | undefined;
   copied: boolean;
@@ -29,8 +27,6 @@ export function TrayRecentItem({
   onDelete: () => void;
   onDownload: () => void;
   onOpenLink: (url: string) => void;
-  onRetryUpload: () => void;
-  onStopUpload: () => void;
 }) {
   if (!snippet) {
     if (readError !== null) {
@@ -72,8 +68,6 @@ export function TrayRecentItem({
           onDelete={onDelete}
           onDownload={onDownload}
           onOpenLink={onOpenLink}
-          onRetryUpload={onRetryUpload}
-          onStopUpload={onStopUpload}
         />
       </ul>
     </section>

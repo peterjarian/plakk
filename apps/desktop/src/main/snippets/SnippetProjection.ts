@@ -6,18 +6,22 @@ import {
 import type { LocalContentAvailability } from "@plakk/shared";
 import { Effect } from "effect";
 
+import type { DesktopSnippet } from "../../ipc/contracts.ts";
 import { ManagedSnippetContent } from "./content/ManagedSnippetContent.ts";
-import type { UploadProjectedSnippet } from "./upload/SnippetUploadEngine.ts";
+
+export type DeviceSnippetProjection = Omit<
+  DesktopSnippet,
+  "localTextPreview" | "localContentAvailability"
+>;
 
 export const projectDesktopManagedContent = Effect.fn(
   "DesktopSnippetProjection.projectManagedContent",
 )(function* (
   accountId: string,
-  snippet: UploadProjectedSnippet,
+  snippet: DeviceSnippetProjection,
   localContentAvailability: LocalContentAvailability,
 ) {
-  const { importingContent, ...metadata } = snippet;
-  if (importingContent !== undefined) return { ...metadata, ...importingContent };
+  const metadata = snippet;
   if (localContentAvailability.status !== "AVAILABLE") {
     return { ...metadata, localTextPreview: null, localContentAvailability };
   }

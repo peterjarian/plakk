@@ -4,7 +4,7 @@ import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 import * as RpcMiddleware from "effect/unstable/rpc/RpcMiddleware";
 
-import { SnippetUploadStatusLiteral, StorageProviderLiteral, type User } from "../index.ts";
+import { StorageProviderLiteral, type User } from "../index.ts";
 import { RpcError } from "./RpcError.ts";
 
 export const AccountBlockedReasonSchema = Schema.Literals(["billing", "storage"] as const);
@@ -78,8 +78,7 @@ export const ApiSnippetSchema = Schema.Struct({
   fileName: Schema.String,
   byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   storageProvider: StorageProviderLiteral,
-  storageObjectId: Schema.NullOr(Schema.String),
-  uploadStatus: SnippetUploadStatusLiteral,
+  storageObjectId: Schema.String,
   createdAt: Schema.String,
   updatedAt: Schema.String,
 });
@@ -88,14 +87,25 @@ export type ApiSnippet = typeof ApiSnippetSchema.Type;
 
 export const SNIPPETS_CHANGED = "SNIPPETS_CHANGED" as const;
 
-export const CreateStoredSnippetPayloadSchema = Schema.Struct({
+export const PrepareSnippetUploadPayloadSchema = Schema.Struct({
   id: SnippetIdSchema,
   fileName: Schema.String,
   byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   storageProvider: StorageProviderLiteral,
+  mediaType: Schema.NullOr(Schema.String),
 });
 
-export type CreateStoredSnippetPayload = typeof CreateStoredSnippetPayloadSchema.Type;
+export type PrepareSnippetUploadPayload = typeof PrepareSnippetUploadPayloadSchema.Type;
+
+export const PublishSnippetPayloadSchema = Schema.Struct({
+  id: SnippetIdSchema,
+  fileName: Schema.String,
+  byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  storageProvider: StorageProviderLiteral,
+  storageObjectId: Schema.String,
+});
+
+export type PublishSnippetPayload = typeof PublishSnippetPayloadSchema.Type;
 
 export class CurrentUser extends Context.Service<CurrentUser, User>()(
   "@plakk/shared/api/PlakkApi/CurrentUser",
@@ -144,16 +154,8 @@ export const StorageRpcs = RpcGroup.make(
 );
 
 export const SnippetRpcs = RpcGroup.make(
-  Rpc.make("CreateStoredSnippet", {
-    payload: CreateStoredSnippetPayloadSchema,
-    success: ApiSnippetSchema,
-    error: RpcError,
-  }),
-  Rpc.make("PrepareStoredSnippetUpload", {
-    payload: {
-      snippetId: SnippetIdSchema,
-      mediaType: Schema.NullOr(Schema.String),
-    },
+  Rpc.make("PrepareSnippetUpload", {
+    payload: PrepareSnippetUploadPayloadSchema,
     success: PreparedStorageUploadSchema,
     error: RpcError,
   }),
@@ -161,23 +163,8 @@ export const SnippetRpcs = RpcGroup.make(
     success: Schema.Array(ApiSnippetSchema),
     error: RpcError,
   }),
-  Rpc.make("HeartbeatStoredSnippetUpload", {
-    payload: { id: SnippetIdSchema },
-    success: Schema.Struct({ expiresAt: Schema.String }),
-    error: RpcError,
-  }),
-  Rpc.make("FailStoredSnippetUpload", {
-    payload: { id: SnippetIdSchema },
-    success: ApiSnippetSchema,
-    error: RpcError,
-  }),
-  Rpc.make("RetryStoredSnippetUpload", {
-    payload: { id: SnippetIdSchema },
-    success: ApiSnippetSchema,
-    error: RpcError,
-  }),
-  Rpc.make("CompleteStoredSnippetUpload", {
-    payload: { id: SnippetIdSchema, storageObjectId: Schema.String },
+  Rpc.make("PublishSnippet", {
+    payload: PublishSnippetPayloadSchema,
     success: ApiSnippetSchema,
     error: RpcError,
   }),

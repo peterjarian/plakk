@@ -94,7 +94,17 @@ const makeDesktopSession = Effect.gen(function* () {
       { discard: true },
     ),
   );
-  const pauseBackgroundWork = Effect.all([uploads.pause, hydration.pause], { discard: true });
+  const pauseAccountWork = Effect.all([uploads.pause, hydration.pause], { discard: true });
+  const normalizeUploads = (accountId: string) =>
+    uploads
+      .normalize(accountId)
+      .pipe(
+        Effect.catchCause((cause) =>
+          Effect.logError("Could not normalize interrupted local uploads", { cause }).pipe(
+            Effect.andThen(publishIssue("Could not restore interrupted local uploads.")),
+          ),
+        ),
+      );
   const stopSync = Effect.gen(function* () {
     const fiber = yield* Ref.getAndSet(syncFiber, null);
     if (fiber !== null) yield* Fiber.interrupt(fiber);
@@ -148,7 +158,6 @@ const makeDesktopSession = Effect.gen(function* () {
       Effect.provideService(SnippetReplica, replica),
       Effect.provideService(SnippetRemoteTransport, remote),
       Effect.provideService(ManagedSnippetContent, managedContent),
-      Effect.provideService(SnippetUploadEngine, uploads),
       Effect.forkDetach,
     );
     yield* Ref.set(syncFiber, fiber);
@@ -170,7 +179,7 @@ const makeDesktopSession = Effect.gen(function* () {
       yield* commandLock.withPermit(
         Effect.gen(function* () {
           yield* stopSync;
-          yield* pauseBackgroundWork;
+          yield* pauseAccountWork;
           yield* clearFileSources;
           yield* localState.update({ kind: "owner-cleanup-pending" });
           if (previous.user !== null) {
@@ -184,6 +193,7 @@ const makeDesktopSession = Effect.gen(function* () {
           }
           if (next.user !== null) {
             yield* localState.update({ kind: "offline", account: next.user });
+            yield* normalizeUploads(next.user.id);
           }
           yield* Ref.set(status, next);
         }),
@@ -192,7 +202,7 @@ const makeDesktopSession = Effect.gen(function* () {
       if (changed) {
         yield* Ref.update(generation, (value) => value + 1);
         yield* stopSync;
-        yield* pauseBackgroundWork;
+        yield* hydration.pause;
       }
       if (next.user !== null && !next.cleanupPending) {
         yield* localState.update({ kind: "offline", account: next.user });
@@ -208,15 +218,6 @@ const makeDesktopSession = Effect.gen(function* () {
   const resumeBackgroundWork = Effect.fn("DesktopSession.resumeBackgroundWork")(function* (
     session: AuthSession,
   ) {
-    yield* uploads
-      .resume({ id: session.user.id, accessToken: session.accessToken })
-      .pipe(
-        Effect.catchCause((cause) =>
-          Effect.logError("Could not resume queued uploads", { cause }).pipe(
-            Effect.andThen(publishIssue("Could not resume queued uploads.")),
-          ),
-        ),
-      );
     yield* hydration
       .resume({ id: session.user.id, accessToken: session.accessToken })
       .pipe(
@@ -253,7 +254,7 @@ const makeDesktopSession = Effect.gen(function* () {
       return;
     }
     if (Result.isFailure(result)) {
-      yield* pauseBackgroundWork;
+      yield* hydration.pause;
       if (Schema.is(RpcError)(result.failure) && result.failure.code === "UNAUTHENTICATED") {
         yield* setStatus({
           accessToken: null,
@@ -288,7 +289,7 @@ const makeDesktopSession = Effect.gen(function* () {
     if (accountCanSyncWithConnection(account, connection)) {
       yield* resumeBackgroundWork({ user: current.user, accessToken: current.accessToken });
     } else {
-      yield* pauseBackgroundWork;
+      yield* hydration.pause;
     }
   });
 
@@ -388,7 +389,7 @@ const makeDesktopSession = Effect.gen(function* () {
             ),
           );
           yield* stopSync;
-          yield* pauseBackgroundWork;
+          yield* pauseAccountWork;
           const localCleanup: Effect.Effect<void, unknown> =
             current.user === null
               ? localState.update({ kind: "signed-out" })
@@ -432,6 +433,7 @@ const makeDesktopSession = Effect.gen(function* () {
         commandsAuthorized: false,
         cleanupPending: cached.cleanupPending,
       });
+      if (!cached.cleanupPending) yield* normalizeUploads(cached.account.id);
     }
     const storedAccount = yield* Effect.result(refreshLock.withPermit(reconcileStoredAccount()));
     if (Result.isFailure(storedAccount)) {

@@ -30,7 +30,9 @@ export function Tray() {
   const { error: snippetReadError, items, reload: reloadSnippets } = useSnippets();
   const latest = items.at(0);
   const copyDisabled =
-    latest === undefined || latest.localContentAvailability.status !== "AVAILABLE";
+    latest === undefined ||
+    latest.kind !== "PUBLISHED" ||
+    latest.localContentAvailability.status !== "AVAILABLE";
   const isCopied = latest !== undefined && copiedId === latest.id;
   const isCopying = latest !== undefined && copyingId === latest.id;
   const currentCopyError =
@@ -194,10 +196,14 @@ export function Tray() {
               {...(currentCopyError === null ? {} : { copyError: currentCopyError })}
               onCopy={copyLatest}
               onDelete={() =>
-                runLatestAction(window.ipc.snippets.delete, "Could not delete this snippet.")
-              }
-              onRetryUpload={() =>
-                runLatestAction(window.ipc.snippets.retry, "Could not retry this upload.")
+                runLatestAction(
+                  latest?.kind === "LOCAL"
+                    ? window.ipc.snippets.discard
+                    : window.ipc.snippets.delete,
+                  latest?.kind === "LOCAL"
+                    ? "Could not dismiss this failed upload."
+                    : "Could not delete this snippet.",
+                )
               }
               onDownload={() =>
                 runLatestAction(window.ipc.snippets.download, "Could not download this snippet.")
@@ -208,9 +214,6 @@ export function Tray() {
                   .openExternal(url)
                   .catch(() => setError("Plakk couldn’t open this link."));
               }}
-              onStopUpload={() =>
-                runLatestAction(window.ipc.snippets.cancel, "Could not stop this upload.")
-              }
             />
             {!ingestionAllowed && (
               <p

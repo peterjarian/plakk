@@ -56,14 +56,12 @@ export type DesktopApi = {
     readonly onRequested: (callback: (view: "home" | "settings") => void) => () => void;
   };
   readonly snippets: {
-    readonly cancel: (id: string) => Promise<void>;
     readonly copy: (id: string) => Promise<void>;
     readonly delete: (id: string) => Promise<void>;
     readonly download: (id: string) => Promise<void>;
     readonly discard: (id: string) => Promise<void>;
     readonly ingest: (payload: RendererSnippetIngestPayload) => Promise<SnippetIngestResult>;
     readonly read: (id: string) => Promise<Uint8Array>;
-    readonly retry: (id: string) => Promise<void>;
   };
   readonly tray: {
     readonly onDroppedItem: (callback: (item: TrayDroppedItem) => void) => () => void;
@@ -105,7 +103,6 @@ export const desktopApi = {
       on(ipcEvents.navigate, callback),
   },
   snippets: {
-    cancel: (snippet) => invoke(ipcMethods.snippetCancel, snippet),
     copy: (snippet) => invoke(ipcMethods.snippetCopy, snippet),
     delete: (snippet) => invoke(ipcMethods.snippetDelete, snippet),
     download: (snippet) => invoke(ipcMethods.snippetDownload, snippet),
@@ -122,7 +119,6 @@ export const desktopApi = {
       return invocation;
     },
     read: (snippet) => invoke(ipcMethods.snippetRead, snippet),
-    retry: (snippet) => invoke(ipcMethods.snippetRetry, snippet),
   },
   tray: {
     onDroppedItem: (callback: (item: TrayDroppedItem) => void) =>

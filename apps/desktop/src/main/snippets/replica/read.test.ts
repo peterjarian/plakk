@@ -14,7 +14,6 @@ const snippet = (id: string): ApiSnippet => ({
   byteSize: 5,
   storageProvider: "GOOGLE_DRIVE",
   storageObjectId: "drive-file-id",
-  uploadStatus: "UPLOADED",
   createdAt: "2026-07-16T00:00:00.000Z",
   updatedAt: "2026-07-16T00:00:00.000Z",
 });
@@ -39,6 +38,7 @@ describe("desktop managed snippet actions", () => {
     const replica = SnippetReplica.of({
       changes: Stream.empty,
       commit: () => Effect.void,
+      update: (_accountId, transform) => Effect.succeed(transform({ items: [] })),
       get: () => Effect.succeed(null),
       purge: () => Effect.void,
       remove: () => Effect.void,

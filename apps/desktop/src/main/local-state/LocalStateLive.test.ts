@@ -25,7 +25,7 @@ const snippet = (id: string, fileName: string): DesktopSnippet => ({
   fileName,
   byteSize: 4,
   storageProvider: "GOOGLE_DRIVE",
-  uploadStatus: "UPLOADED",
+  kind: "PUBLISHED",
   createdAt: "2026-01-01T00:00:00.000Z",
   updatedAt: "2026-01-01T00:00:00.000Z",
   localState: null,

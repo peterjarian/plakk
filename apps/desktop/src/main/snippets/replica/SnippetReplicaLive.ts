@@ -1,14 +1,38 @@
 import ElectronStore from "electron-store";
 import { Effect, Layer, PubSub, Schema, Semaphore, Stream } from "effect";
+import { StorageProviderLiteral } from "@plakk/shared";
+import { SnippetIdSchema } from "@plakk/shared/PlakkApi";
 
 import {
   SnippetReplica,
   SnippetReplicaError,
   SnippetReplicaStateSchema,
+  deviceSnippetRecordId,
   type SnippetReplicaState,
 } from "./SnippetReplica.ts";
 
 const StoredReplicaCodec = Schema.fromJsonString(SnippetReplicaStateSchema);
+const LegacyStoredReplicaCodec = Schema.fromJsonString(
+  Schema.Struct({
+    items: Schema.Array(
+      Schema.Struct({
+        id: SnippetIdSchema,
+        fileName: Schema.String,
+        byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+        storageProvider: StorageProviderLiteral,
+        storageObjectId: Schema.NullOr(Schema.String),
+        uploadStatus: Schema.Literals([
+          "UPLOADING",
+          "FAILED",
+          "CLIENT_UPLOAD_FAILED",
+          "UPLOADED",
+        ] as const),
+        createdAt: Schema.String,
+        updatedAt: Schema.String,
+      }),
+    ),
+  }),
+);
 
 export const SnippetReplicaLive = Layer.effect(
   SnippetReplica,
@@ -36,6 +60,33 @@ export const SnippetReplicaLive = Layer.effect(
       });
       if (json === undefined) return null;
       return yield* Schema.decodeEffect(StoredReplicaCodec)(json).pipe(
+        Effect.catch(() =>
+          Schema.decodeEffect(LegacyStoredReplicaCodec)(json).pipe(
+            Effect.map(
+              (legacy): SnippetReplicaState => ({
+                items: legacy.items.flatMap((snippet) => {
+                  if (snippet.uploadStatus !== "UPLOADED" || snippet.storageObjectId === null) {
+                    return [];
+                  }
+                  return [
+                    {
+                      kind: "PUBLISHED" as const,
+                      snippet: {
+                        id: snippet.id,
+                        fileName: snippet.fileName,
+                        byteSize: snippet.byteSize,
+                        storageProvider: snippet.storageProvider,
+                        storageObjectId: snippet.storageObjectId,
+                        createdAt: snippet.createdAt,
+                        updatedAt: snippet.updatedAt,
+                      },
+                    },
+                  ];
+                }),
+              }),
+            ),
+          ),
+        ),
         Effect.mapError(
           (cause) =>
             new SnippetReplicaError({
@@ -72,6 +123,16 @@ export const SnippetReplicaLive = Layer.effect(
             yield* PubSub.publish(changes, { accountId, items: state.items });
           }),
         ),
+      update: (accountId, transform) =>
+        lock.withPermit(
+          Effect.gen(function* () {
+            const current = (yield* readReplica(accountId)) ?? { items: [] };
+            const next = transform(current);
+            yield* writeReplica(accountId, next);
+            yield* PubSub.publish(changes, { accountId, items: next.items });
+            return next;
+          }),
+        ),
       purge: (accountId) =>
         lock.withPermit(
           Effect.gen(function* () {
@@ -93,9 +154,9 @@ export const SnippetReplicaLive = Layer.effect(
           Effect.gen(function* () {
             const state = yield* readReplica(accountId);
             if (state === null) return;
-            const nextState = {
+            const nextState: SnippetReplicaState = {
               ...state,
-              items: state.items.filter((snippet) => snippet.id !== snippetId),
+              items: state.items.filter((record) => deviceSnippetRecordId(record) !== snippetId),
             };
             yield* writeReplica(accountId, nextState);
             yield* PubSub.publish(changes, { accountId, items: nextState.items });

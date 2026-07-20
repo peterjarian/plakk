@@ -101,18 +101,12 @@ const dependencies = (options: {
     Layer.succeed(
       SnippetUploadEngine,
       SnippetUploadEngine.of({
-        cancel: () => Effect.void,
-        changes: Stream.empty,
         delete: () => Effect.void,
         discard: () => Effect.void,
         ingest: () => Effect.void,
         pause: Effect.void,
-        project: () => Effect.succeed([]),
         purge: () => Effect.void,
-        reconcile: () => Effect.void,
-        removePublishedRecords: () => Effect.void,
-        resume: () => Effect.void,
-        retry: () => Effect.void,
+        normalize: () => Effect.void,
       }),
     ),
     Layer.succeed(
@@ -133,6 +127,7 @@ const dependencies = (options: {
         changes: Stream.empty,
         commit: () => Effect.void,
         get: () => Effect.succeed(null),
+        update: (_accountId, transform) => Effect.succeed(transform({ items: [] })),
         purge: () => Effect.void,
         remove: () => Effect.void,
       }),

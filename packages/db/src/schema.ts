@@ -1,4 +1,4 @@
-import { SNIPPET_UPLOAD_STATUSES, STORAGE_PROVIDERS } from "@plakk/shared";
+import { STORAGE_PROVIDERS } from "@plakk/shared";
 import {
   bigint,
   index,
@@ -10,7 +10,6 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 
-export const snippetUploadStatus = pgEnum("snippet_upload_status", SNIPPET_UPLOAD_STATUSES);
 export const storageProvider = pgEnum("storage_provider", STORAGE_PROVIDERS);
 
 const timestamps = {
@@ -24,9 +23,7 @@ export const snippets = pgTable(
     id: uuid("id").primaryKey(),
     ownerWorkosUserId: text("owner_workos_user_id").notNull(),
     storageProvider: storageProvider("storage_provider").notNull(),
-    storageObjectId: text("storage_object_id"),
-    uploadStatus: snippetUploadStatus("upload_status").notNull(),
-    uploadHeartbeatExpiresAt: timestamp("upload_heartbeat_expires_at", { withTimezone: true }),
+    storageObjectId: text("storage_object_id").notNull(),
     fileName: text("file_name").notNull(),
     byteSize: bigint("byte_size", { mode: "number" }).notNull(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),

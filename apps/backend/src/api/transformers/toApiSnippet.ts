@@ -7,7 +7,6 @@ export const toApiSnippet = (snippet: SnippetRow): ApiSnippet => ({
   byteSize: snippet.byteSize,
   storageProvider: snippet.storageProvider,
   storageObjectId: snippet.storageObjectId,
-  uploadStatus: snippet.uploadStatus,
   createdAt: snippet.createdAt.toISOString(),
   updatedAt: snippet.updatedAt.toISOString(),
 });

@@ -11,8 +11,6 @@ const snippet: SnippetRow = {
   ownerWorkosUserId: "account-1",
   storageProvider: "GOOGLE_DRIVE",
   storageObjectId: "provider-object",
-  uploadStatus: "UPLOADED",
-  uploadHeartbeatExpiresAt: null,
   fileName: "complete.txt",
   byteSize: 12,
   deletedAt: null,
@@ -38,7 +36,6 @@ describe("complete Snippet snapshots", () => {
       expect.objectContaining({
         id: snippet.id,
         storageObjectId: "provider-object",
-        uploadStatus: "UPLOADED",
       }),
     ]);
   });

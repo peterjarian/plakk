@@ -1,5 +1,5 @@
 import { SNIPPET_TEXT_PREVIEW_MAX_BYTES } from "@plakk/shared";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Stream } from "effect";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import type { DesktopSnippet } from "../../ipc/contracts.ts";
@@ -16,7 +16,7 @@ const snippet: DesktopSnippet = {
   fileName: "private-notes.md",
   byteSize: 5,
   storageProvider: "GOOGLE_DRIVE",
-  uploadStatus: "UPLOADED",
+  kind: "PUBLISHED",
   createdAt: "2026-07-16T10:00:00.000Z",
   updatedAt: "2026-07-16T10:00:00.000Z",
   localState: null,
@@ -36,6 +36,7 @@ const contentLayer = (
     ManagedSnippetContent,
     ManagedSnippetContent.of({
       get: () => Effect.succeed(bytes),
+      changes: Stream.empty,
       getPrefix,
       putStream: () => Effect.void,
       available: () => Effect.succeed(bytes !== null),
@@ -50,36 +51,6 @@ const contentLayer = (
 });
 
 describe("desktop snippet content projection", () => {
-  it("preserves the origin importing text projection before managed bytes are committed", async () => {
-    const getPrefix = vi.fn(() => Effect.succeed<Uint8Array | null>(null));
-    const content = contentLayer(null, getPrefix);
-    const {
-      localTextPreview: _localTextPreview,
-      localContentAvailability: _localContentAvailability,
-      ...metadata
-    } = snippet;
-
-    const projected = await Effect.runPromise(
-      projectDesktopManagedContent(
-        accountId,
-        {
-          ...metadata,
-          importingContent: {
-            localTextPreview: "hello from origin",
-            localContentAvailability: { status: "AVAILABLE" },
-          },
-        },
-        { status: "NOT_AVAILABLE" },
-      ).pipe(Effect.provide(content.layer)),
-    );
-
-    expect(projected).toMatchObject({
-      localTextPreview: "hello from origin",
-      localContentAvailability: { status: "AVAILABLE" },
-    });
-    expect(getPrefix).not.toHaveBeenCalled();
-  });
-
   it("reveals text presentation only after complete managed content decodes", async () => {
     const content = contentLayer(new TextEncoder().encode("hello"));
 

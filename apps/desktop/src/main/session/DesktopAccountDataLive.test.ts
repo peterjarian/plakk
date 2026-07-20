@@ -26,6 +26,7 @@ describe("desktop account purge", () => {
               changes: Stream.empty,
               commit: () => Effect.void,
               get: () => Effect.succeed(null),
+              update: (_accountId, transform) => Effect.succeed(transform({ items: [] })),
               purge: () => record("replica"),
               remove: () => Effect.void,
             }),
@@ -33,18 +34,12 @@ describe("desktop account purge", () => {
           Layer.succeed(
             SnippetUploadEngine,
             SnippetUploadEngine.of({
-              cancel: () => Effect.void,
-              changes: Stream.empty,
               delete: () => Effect.void,
               discard: () => Effect.void,
               ingest: () => Effect.void,
               pause: Effect.void,
-              project: () => Effect.succeed([]),
               purge: () => record("uploads"),
-              reconcile: () => Effect.void,
-              removePublishedRecords: () => Effect.void,
-              resume: () => Effect.void,
-              retry: () => Effect.void,
+              normalize: () => Effect.void,
             }),
           ),
           Layer.succeed(
@@ -63,6 +58,7 @@ describe("desktop account purge", () => {
             ManagedSnippetContent,
             ManagedSnippetContent.of({
               available: () => Effect.succeed(false),
+              changes: Stream.empty,
               discard: () => Effect.void,
               get: () => Effect.succeed(null),
               getPrefix: () => Effect.succeed(null),

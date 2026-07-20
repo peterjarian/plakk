@@ -9,14 +9,12 @@ const snippet: SnippetReadModel = {
   fileName: "snippet.txt",
   byteSize: 14,
   storageProvider: "GOOGLE_DRIVE",
-  uploadStatus: "FAILED",
+  kind: "LOCAL",
   createdAt: "2026-07-11T00:00:00.000Z",
   updatedAt: "2026-07-11T00:00:00.000Z",
   localState: {
-    phase: "FAILED",
-    progress: 48,
+    status: "FAILED",
     errorMessage: "The storage upload did not complete.",
-    canRetry: true,
   },
   localTextPreview: "A text snippet",
   localContentAvailability: { status: "AVAILABLE" },
@@ -30,8 +28,6 @@ const handlers = {
   onDownload: () => undefined,
   onOpenLink: () => undefined,
   onReload: () => undefined,
-  onRetryUpload: () => undefined,
-  onStopUpload: () => undefined,
 };
 
 describe("TrayRecentItem", () => {
@@ -53,7 +49,7 @@ describe("TrayRecentItem", () => {
     expect(markup).not.toContain("Nothing added yet");
   });
 
-  it("keeps origin upload failures actionable in the widget", () => {
+  it("keeps origin upload failures dismissible in the widget", () => {
     const markup = renderToStaticMarkup(
       <TrayRecentItem
         snippet={snippet}
@@ -65,17 +61,16 @@ describe("TrayRecentItem", () => {
       />,
     );
 
-    expect(markup).toContain('aria-label="Retry upload"');
-    expect(markup).toContain('aria-label="Delete"');
+    expect(markup).not.toContain('aria-label="Retry upload"');
+    expect(markup).toContain('aria-label="Dismiss failed upload"');
   });
 
-  it("lets the origin stop active upload work from the widget", () => {
+  it("shows active upload work without stop or retry controls", () => {
     const markup = renderToStaticMarkup(
       <TrayRecentItem
         snippet={{
           ...snippet,
-          uploadStatus: "UPLOADING",
-          localState: { ...snippet.localState!, phase: "UPLOADING", canRetry: false },
+          localState: { status: "UPLOADING", errorMessage: null },
         }}
         copied={false}
         copying={false}
@@ -85,7 +80,9 @@ describe("TrayRecentItem", () => {
       />,
     );
 
-    expect(markup).toContain('aria-label="Stop uploading"');
+    expect(markup).toContain('aria-label="Syncing"');
+    expect(markup).not.toContain('aria-label="Stop uploading"');
+    expect(markup).not.toContain('aria-label="Retry upload"');
   });
 
   it("offers the same local download action as the main snippet row", () => {
@@ -93,7 +90,7 @@ describe("TrayRecentItem", () => {
       <TrayRecentItem
         snippet={{
           ...snippet,
-          uploadStatus: "UPLOADED",
+          kind: "PUBLISHED",
           localState: null,
           localTextPreview: null,
           localContentAvailability: { status: "NOT_AVAILABLE" },
@@ -117,7 +114,7 @@ describe("TrayRecentItem", () => {
       <TrayRecentItem
         snippet={{
           ...snippet,
-          uploadStatus: "UPLOADED",
+          kind: "PUBLISHED",
           localState: null,
           localTextPreview: null,
           localContentAvailability: { status: "DOWNLOADING" },
@@ -140,7 +137,7 @@ describe("TrayRecentItem", () => {
       <TrayRecentItem
         snippet={{
           ...snippet,
-          uploadStatus: "UPLOADED",
+          kind: "PUBLISHED",
           localState: null,
           localTextPreview: "https://plakk.app/notes",
           presentation: {

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { NodeFileSystem } from "@effect/platform-node";
 import { describe, expect, it, vi } from "vite-plus/test";
-import { Effect, Fiber, FileSystem, Layer, PlatformError, Stream } from "effect";
+import { Effect, Fiber, FileSystem, Layer, Option, PlatformError, Stream } from "effect";
 
 import { ManagedSnippetContent } from "./ManagedSnippetContent.ts";
 import {
@@ -37,6 +37,32 @@ const withDirectory = async (run: (directory: string) => Promise<void>) => {
 };
 
 describe("managed snippet content ingestion", () => {
+  it("publishes the owning account after managed bytes become available", async () => {
+    await withDirectory(async (root) => {
+      const result = await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const content = yield* ManagedSnippetContent;
+            const changed = yield* content.changes.pipe(Stream.runHead, Effect.forkChild);
+            yield* Effect.yieldNow;
+            yield* content.ingest(accountId, {
+              ...inputMetadata,
+              id: snippetId,
+              byteSize: 3,
+              bytes: new Uint8Array([1, 2, 3]),
+            });
+            return Option.getOrNull(yield* Fiber.join(changed));
+          }),
+        ).pipe(
+          Effect.provide(makeManagedSnippetContentLive(join(root, "content"))),
+          Effect.provide(platformLayer),
+        ),
+      );
+
+      expect(result).toBe(accountId);
+    });
+  });
+
   it("uploads from the managed copy after the original is removed", async () => {
     await withDirectory(async (root) => {
       const original = join(root, "cloud-source.docx");
@@ -88,7 +114,6 @@ describe("managed snippet content ingestion", () => {
                 expiresAt: null,
               },
             },
-            undefined,
             uploadFetch,
           ).pipe(Effect.provide(platformLayer)),
         ),

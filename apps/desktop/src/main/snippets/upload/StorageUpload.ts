@@ -16,7 +16,6 @@ export class StorageUploadError extends Schema.TaggedErrorClass<StorageUploadErr
   {
     cause: Schema.optionalKey(Schema.Defect()),
     message: Schema.String,
-    retryable: Schema.Boolean,
   },
 ) {}
 
@@ -25,7 +24,6 @@ export class StorageUpload extends Context.Service<
   {
     readonly upload: (
       payload: PreparedFileUploadPayload,
-      onProgress: (progress: number) => void,
     ) => Effect.Effect<StorageUploadResult, StorageUploadError>;
   }
 >()("plakk/main/snippets/upload/StorageUpload") {}

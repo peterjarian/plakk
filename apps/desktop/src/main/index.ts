@@ -118,17 +118,25 @@ handle(ipcMethods.snippetIngest, (payload, event) =>
       const engine = yield* SnippetUploadEngine;
       const session = yield* DesktopSession;
       return yield* session
-        .withCurrentAccount((account) =>
-          engine.ingest(account.id, resolvedPayload).pipe(
-            Effect.as({ status: "ENQUEUED" } as const),
-            Effect.catch((error) =>
-              Effect.succeed({
-                status: "FAILED",
-                message: snippetUploadFailureMessage(error),
-              } as const),
-            ),
-          ),
-        )
+        .withCurrentAccount((account) => {
+          if (account.accessToken === null) {
+            return Effect.succeed({
+              status: "FAILED" as const,
+              message: "Reconnect storage before adding snippets.",
+            });
+          }
+          return engine
+            .ingest({ id: account.id, accessToken: account.accessToken }, resolvedPayload)
+            .pipe(
+              Effect.as({ status: "ENQUEUED" } as const),
+              Effect.catch((error) =>
+                Effect.succeed({
+                  status: "FAILED",
+                  message: snippetUploadFailureMessage(error),
+                } as const),
+              ),
+            );
+        })
         .pipe(
           Effect.catchTag("DesktopSessionCommandError", () =>
             Effect.succeed({
@@ -148,26 +156,6 @@ handle(ipcMethods.snippetDiscard, (id) =>
     yield* session
       .withCurrentAccount((account) => engine.discard(account.id, id))
       .pipe(asIpcFailure("Could not discard this local snippet."));
-  }),
-);
-
-handle(ipcMethods.snippetCancel, (id) =>
-  Effect.gen(function* () {
-    const engine = yield* SnippetUploadEngine;
-    const session = yield* DesktopSession;
-    yield* session
-      .withCurrentAccount((account) => engine.cancel(account, id))
-      .pipe(asIpcFailure("Could not stop this upload."));
-  }),
-);
-
-handle(ipcMethods.snippetRetry, (id) =>
-  Effect.gen(function* () {
-    const engine = yield* SnippetUploadEngine;
-    const session = yield* DesktopSession;
-    yield* session
-      .withCurrentAccount((account) => engine.retry(account, id))
-      .pipe(asIpcFailure("Could not retry this upload."));
   }),
 );
 

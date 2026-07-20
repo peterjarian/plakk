@@ -36,7 +36,6 @@ const apiSnippet = (input?: Partial<ApiSnippet>): ApiSnippet => ({
   byteSize: remoteBytes.byteLength,
   storageProvider: "GOOGLE_DRIVE",
   storageObjectId: "drive-object",
-  uploadStatus: "UPLOADED",
   createdAt: DateTime.formatIso(DateTime.makeUnsafe(now)),
   updatedAt: DateTime.formatIso(DateTime.makeUnsafe(now)),
   ...input,
@@ -50,7 +49,10 @@ const hydrationHarness = (input?: {
   readonly availableFailureId?: string;
 }) => {
   let replicaState: SnippetReplicaState = {
-    items: input?.snippets ?? [input?.snippet ?? apiSnippet()],
+    items: (input?.snippets ?? [input?.snippet ?? apiSnippet()]).map((snippet) => ({
+      kind: "PUBLISHED" as const,
+      snippet,
+    })),
   };
   const content = new Map<string, number>();
   const corruptContent = new Set<string>();
@@ -69,11 +71,18 @@ const hydrationHarness = (input?: {
           Effect.sync(() => {
             replicaState = state;
           }),
+        update: (_accountId, transform) =>
+          Effect.sync(() => {
+            replicaState = transform(replicaState);
+            return replicaState;
+          }),
         remove: (_accountId, id) =>
           Effect.sync(() => {
             replicaState = {
               ...replicaState,
-              items: replicaState.items.filter((snippet) => snippet.id !== id),
+              items: replicaState.items.filter((record) =>
+                record.kind === "LOCAL" ? record.id !== id : record.snippet.id !== id,
+              ),
             };
           }),
         purge: () => Effect.void,
@@ -187,14 +196,6 @@ describe("SnippetHydrationEngine", () => {
         yield* uploaded.awaitState(engine, "AVAILABLE");
       }).pipe(Effect.provide(uploaded.layer));
       expect(uploaded.streams()).toBe(1);
-
-      const uploading = hydrationHarness({ snippet: apiSnippet({ uploadStatus: "UPLOADING" }) });
-      yield* Effect.gen(function* () {
-        const engine = yield* SnippetHydrationEngine;
-        yield* engine.resume(account);
-        yield* Effect.sleep("5 millis");
-      }).pipe(Effect.provide(uploading.layer));
-      expect(uploading.streams()).toBe(0);
     }),
   );
 

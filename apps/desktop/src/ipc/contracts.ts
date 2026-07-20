@@ -1,4 +1,4 @@
-import { SnippetUploadStatusLiteral, StorageProviderLiteral, UserSchema } from "@plakk/shared";
+import { StorageProviderLiteral, UserSchema } from "@plakk/shared";
 import { AccountStatusSchema, PipeConnectionSchema, SnippetIdSchema } from "@plakk/shared/PlakkApi";
 import { LocalContentAvailabilitySchema } from "@plakk/shared";
 import { Schema } from "effect";
@@ -113,24 +113,33 @@ const SnippetIngestResultSchema = Schema.Union([
 export type SnippetIngestResult = typeof SnippetIngestResultSchema.Type;
 
 export const DesktopSnippetLocalStateSchema = Schema.Struct({
-  phase: Schema.Literals(["IMPORTING", "QUEUED", "UPLOADING", "FAILED"] as const),
-  progress: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 100 })),
+  status: Schema.Literals(["UPLOADING", "FAILED"] as const),
   errorMessage: Schema.NullOr(Schema.String),
-  canRetry: Schema.Boolean,
 });
 
-export const DesktopSnippetSchema = Schema.Struct({
+const DesktopSnippetBaseSchema = {
   id: SnippetIdSchema,
   fileName: Schema.String,
   byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   storageProvider: StorageProviderLiteral,
-  uploadStatus: Schema.NullOr(SnippetUploadStatusLiteral),
   createdAt: Schema.String,
   updatedAt: Schema.String,
-  localState: Schema.NullOr(DesktopSnippetLocalStateSchema),
   localTextPreview: Schema.NullOr(Schema.String),
   localContentAvailability: LocalContentAvailabilitySchema,
-});
+};
+
+export const DesktopSnippetSchema = Schema.Union([
+  Schema.Struct({
+    ...DesktopSnippetBaseSchema,
+    kind: Schema.Literal("LOCAL"),
+    localState: DesktopSnippetLocalStateSchema,
+  }),
+  Schema.Struct({
+    ...DesktopSnippetBaseSchema,
+    kind: Schema.Literal("PUBLISHED"),
+    localState: Schema.Null,
+  }),
+]);
 
 export type DesktopSnippet = typeof DesktopSnippetSchema.Type;
 
@@ -185,16 +194,6 @@ export const ipcMethods = {
   }),
   snippetDiscard: method({
     channel: "snippet:discard",
-    payload: SnippetIdSchema,
-    result: Schema.Void,
-  }),
-  snippetCancel: method({
-    channel: "snippet:cancel",
-    payload: SnippetIdSchema,
-    result: Schema.Void,
-  }),
-  snippetRetry: method({
-    channel: "snippet:retry",
     payload: SnippetIdSchema,
     result: Schema.Void,
   }),

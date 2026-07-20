@@ -1,4 +1,4 @@
-import { Effect, FileSystem, Layer, Option, PlatformError, Stream } from "effect";
+import { Effect, FileSystem, Layer, Option, PlatformError, PubSub, Stream } from "effect";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 
@@ -102,6 +102,7 @@ export const makeManagedSnippetContentLive = (root: string) =>
     ManagedSnippetContent,
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
+      const changes = yield* PubSub.unbounded<string>();
       const verifiedIntegrity = new Map<string, string>();
       const textValidity = new Map<
         string,
@@ -130,6 +131,7 @@ export const makeManagedSnippetContentLive = (root: string) =>
                 }),
             ),
           );
+        yield* PubSub.publish(changes, accountId);
       });
 
       const commitContent = Effect.fn("ManagedSnippetContent.commitContent")(function* <E>(
@@ -232,12 +234,14 @@ export const makeManagedSnippetContentLive = (root: string) =>
         accountId: string,
         input: ResolvedSnippetIngestPayload,
       ) {
-        return yield* ingestSource(
+        const path = yield* ingestSource(
           accountId,
           "bytes" in input
             ? { id: input.id, byteSize: input.byteSize, bytes: input.bytes }
             : { id: input.id, byteSize: input.byteSize, filePath: input.filePath },
         );
+        yield* PubSub.publish(changes, accountId);
+        return path;
       });
 
       const contentIsValid = Effect.fn("ManagedSnippetContent.contentIsValid")(function* (
@@ -445,6 +449,7 @@ export const makeManagedSnippetContentLive = (root: string) =>
           hydrationWriteError,
           () => hash.digest("hex"),
         );
+        yield* PubSub.publish(changes, accountId);
       });
 
       const invalidate = Effect.fn("ManagedSnippetContent.invalidate")(function* (
@@ -474,10 +479,12 @@ export const makeManagedSnippetContentLive = (root: string) =>
               }),
           ),
         );
+        yield* PubSub.publish(changes, accountId);
       });
 
       return ManagedSnippetContent.of({
         available,
+        changes: Stream.fromPubSub(changes),
         discard,
         get,
         getPrefix,
