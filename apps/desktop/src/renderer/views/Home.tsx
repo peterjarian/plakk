@@ -128,10 +128,6 @@ export function Home({ active = true }: { active?: boolean }) {
     }
   }
 
-  function cancelUpload(id: string) {
-    void runSnippetAction(id, () => window.ipc.snippets.cancel(id));
-  }
-
   function runSnippetAction(id: string, action: () => Promise<void>) {
     setCopyErrors((errors) => {
       const { [id]: _error, ...remaining } = errors;
@@ -419,14 +415,18 @@ export function Home({ active = true }: { active?: boolean }) {
                 copied={copiedId === snippet.id}
                 copying={copyingId === snippet.id}
                 onCopy={() => void copySnippet(snippet)}
-                copyDisabled={snippet.localContentAvailability.status !== "AVAILABLE"}
+                copyDisabled={
+                  snippet.kind !== "PUBLISHED" ||
+                  snippet.localContentAvailability.status !== "AVAILABLE"
+                }
                 copyError={copyErrors[snippet.id]}
                 onDelete={() => {
-                  void runSnippetAction(snippet.id, () => window.ipc.snippets.delete(snippet.id));
+                  void runSnippetAction(snippet.id, () =>
+                    snippet.kind === "LOCAL"
+                      ? window.ipc.snippets.discard(snippet.id)
+                      : window.ipc.snippets.delete(snippet.id),
+                  );
                 }}
-                onRetryUpload={() =>
-                  void runSnippetAction(snippet.id, () => window.ipc.snippets.retry(snippet.id))
-                }
                 onDownload={() =>
                   void runSnippetAction(snippet.id, () => window.ipc.snippets.download(snippet.id))
                 }
@@ -436,7 +436,6 @@ export function Home({ active = true }: { active?: boolean }) {
                       thumbnailUrl: snippet.thumbnailUrl,
                     }
                   : {})}
-                onStopUpload={() => cancelUpload(snippet.id)}
               />
             ))}
           </SnippetList>

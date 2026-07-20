@@ -9,7 +9,7 @@ const state = vi.hoisted(() => {
     fileName: "Alfa Romeo.png",
     byteSize: 61_700,
     storageProvider: "GOOGLE_DRIVE",
-    uploadStatus: "UPLOADED",
+    kind: "PUBLISHED",
     createdAt: "2026-07-11T00:00:00.000Z",
     updatedAt: "2026-07-11T00:00:00.000Z",
     localState: null,

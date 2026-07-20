@@ -31,8 +31,8 @@ const uploadFailureDetail = (cause: unknown) => {
   return details.join("; ");
 };
 
-const uploadError = (message: string, cause?: unknown, retryable = false) =>
-  new StorageUploadError({ ...(cause === undefined ? {} : { cause }), message, retryable });
+const uploadError = (message: string, cause?: unknown) =>
+  new StorageUploadError({ ...(cause === undefined ? {} : { cause }), message });
 
 const uploadHeaders = (
   headers: PreparedStorageUpload["upload"]["headers"],
@@ -190,34 +190,18 @@ const makeUploadPreparedFile = (fileSystem: FileSystem.FileSystem, uploadFetch: 
         return uploadError(
           `Could not reach the upload provider${detail ? ` (${detail})` : ""}.`,
           cause,
-          true,
         );
       },
     });
 
     if (!response.ok && response.status !== 308) {
-      const retryable =
-        response.status === 401 ||
-        response.status === 404 ||
-        response.status === 408 ||
-        response.status === 410 ||
-        response.status === 429 ||
-        response.status >= 500;
-      return yield* uploadError(
-        `The upload provider rejected the file (${response.status}).`,
-        undefined,
-        retryable,
-      );
+      return yield* uploadError(`The upload provider rejected the file (${response.status}).`);
     }
     return response;
   });
 
-  return Effect.fn("StorageUpload.upload")(function* (
-    payload: PreparedFileUploadPayload,
-    onProgress: (progress: number) => void,
-  ) {
+  return Effect.fn("StorageUpload.upload")(function* (payload: PreparedFileUploadPayload) {
     yield* assertUploadSource(payload);
-    yield* Effect.sync(() => onProgress(0));
 
     if (payload.prepared.upload.strategy.type === "single_request") {
       const response = yield* uploadPart({
@@ -227,7 +211,6 @@ const makeUploadPreparedFile = (fileSystem: FileSystem.FileSystem, uploadFetch: 
         range: null,
       });
       const storageObjectId = yield* storageObjectIdFrom(response, payload.prepared);
-      yield* Effect.sync(() => onProgress(100));
       return { storageObjectId };
     }
 
@@ -245,25 +228,18 @@ const makeUploadPreparedFile = (fileSystem: FileSystem.FileSystem, uploadFetch: 
         const nextStart = (yield* confirmedRangeEnd(response)) + 1;
         if (nextStart <= start) return yield* uploadError("The upload session stopped advancing.");
         start = nextStart;
-        yield* Effect.sync(() =>
-          onProgress(Math.min(99, Math.floor((start / payload.byteSize) * 100))),
-        );
         continue;
       }
       if (response.status === 202) {
         const nextStart = yield* nextExpectedStart(response);
         if (nextStart <= start) return yield* uploadError("The upload session stopped advancing.");
         start = nextStart;
-        yield* Effect.sync(() =>
-          onProgress(Math.min(99, Math.floor((start / payload.byteSize) * 100))),
-        );
         continue;
       }
       if (range.end !== payload.byteSize - 1) {
         return yield* uploadError("The upload provider completed before receiving the whole file.");
       }
       const storageObjectId = yield* storageObjectIdFrom(response, payload.prepared);
-      yield* Effect.sync(() => onProgress(100));
       return { storageObjectId };
     }
     return yield* uploadError("The upload session ended before completion.");
@@ -272,11 +248,10 @@ const makeUploadPreparedFile = (fileSystem: FileSystem.FileSystem, uploadFetch: 
 
 export const uploadPreparedFile = Effect.fn("StorageUpload.uploadPreparedFile")(function* (
   payload: PreparedFileUploadPayload,
-  onProgress: (progress: number) => void = () => undefined,
   uploadFetch: UploadFetch = fetch,
 ) {
   const fileSystem = yield* FileSystem.FileSystem;
-  return yield* makeUploadPreparedFile(fileSystem, uploadFetch)(payload, onProgress);
+  return yield* makeUploadPreparedFile(fileSystem, uploadFetch)(payload);
 });
 
 export const makeStorageUploadLive = (uploadFetch: UploadFetch = fetch) =>

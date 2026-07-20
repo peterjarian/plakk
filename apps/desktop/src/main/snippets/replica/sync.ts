@@ -2,16 +2,23 @@ import type { ApiSnippet } from "@plakk/shared/PlakkApi";
 import { Effect, Stream } from "effect";
 
 import { ManagedSnippetContent } from "../content/ManagedSnippetContent.ts";
-import { SnippetUploadEngine } from "../upload/SnippetUploadEngine.ts";
 import { SnippetRemoteTransport, type SnippetSyncAccount } from "./SnippetRemoteTransport.ts";
-import { SnippetReplica, type SnippetReplicaState } from "./SnippetReplica.ts";
+import {
+  SnippetReplica,
+  deviceSnippetRecordId,
+  type DeviceSnippetRecord,
+  type SnippetReplicaState,
+} from "./SnippetReplica.ts";
 
 export type LiveConnectionStatus = "CONNECTED" | "RECONNECTING";
 
-const ordered = (items: Iterable<ApiSnippet>): ReadonlyArray<ApiSnippet> =>
-  Array.from(items).sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+const recordCreatedAt = (record: DeviceSnippetRecord) =>
+  record.kind === "LOCAL" ? record.createdAt : record.snippet.createdAt;
 
-const isPublished = (snippet: ApiSnippet) => snippet.uploadStatus === "UPLOADED";
+const ordered = (items: Iterable<DeviceSnippetRecord>): ReadonlyArray<DeviceSnippetRecord> =>
+  Array.from(items).sort((left, right) =>
+    recordCreatedAt(right).localeCompare(recordCreatedAt(left)),
+  );
 
 export const reconcileSnippetSnapshot = (
   current: SnippetReplicaState | null,
@@ -19,13 +26,21 @@ export const reconcileSnippetSnapshot = (
 ): { readonly state: SnippetReplicaState; readonly stalePublishedIds: ReadonlyArray<string> } => {
   const published = new Map(snapshot.map((snippet) => [snippet.id, snippet]));
   const local = (current?.items ?? []).filter(
-    (snippet) => !isPublished(snippet) && !published.has(snippet.id),
+    (record) => record.kind === "LOCAL" && !published.has(record.id),
   );
   const stalePublishedIds = (current?.items ?? [])
-    .filter((snippet) => isPublished(snippet) && !published.has(snippet.id))
-    .map((snippet) => snippet.id);
+    .filter((record) => record.kind === "PUBLISHED" && !published.has(record.snippet.id))
+    .map((record) => deviceSnippetRecordId(record));
   return {
-    state: { items: ordered([...published.values(), ...local]) },
+    state: {
+      items: ordered([
+        ...Array.from(published.values(), (snippet) => ({
+          kind: "PUBLISHED" as const,
+          snippet,
+        })),
+        ...local,
+      ]),
+    },
     stalePublishedIds,
   };
 };
@@ -35,33 +50,24 @@ export const syncSnippetReplica = Effect.fn("SnippetReplica.sync")(function* (
 ) {
   const replica = yield* SnippetReplica;
   const content = yield* ManagedSnippetContent;
-  const uploads = yield* SnippetUploadEngine;
   const remote = yield* SnippetRemoteTransport;
   const snapshot = yield* remote.snapshot(account);
-  const reconciled = reconcileSnippetSnapshot(yield* replica.get(account.id), snapshot);
-  yield* replica.commit(account.id, reconciled.state);
-  if (reconciled.stalePublishedIds.length > 0) {
-    yield* Effect.all(
-      [
-        content.invalidate(account.id, reconciled.stalePublishedIds).pipe(
-          Effect.catchCause((cause) =>
-            Effect.logWarning("Could not remove managed content absent from the Snippet snapshot", {
-              cause,
-            }),
-          ),
-        ),
-        uploads.removePublishedRecords(account.id, reconciled.stalePublishedIds).pipe(
-          Effect.catchCause((cause) =>
-            Effect.logWarning("Could not remove compatible upload records after reconciliation", {
-              cause,
-            }),
-          ),
-        ),
-      ],
-      { discard: true },
+  let stalePublishedIds: ReadonlyArray<string> = [];
+  const state = yield* replica.update(account.id, (current) => {
+    const reconciled = reconcileSnippetSnapshot(current, snapshot);
+    stalePublishedIds = reconciled.stalePublishedIds;
+    return reconciled.state;
+  });
+  if (stalePublishedIds.length > 0) {
+    yield* content.invalidate(account.id, stalePublishedIds).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Could not remove managed content absent from the Snippet snapshot", {
+          cause,
+        }),
+      ),
     );
   }
-  return reconciled.state;
+  return state;
 });
 
 export const runSnippetReplicaSync = Effect.fn("SnippetReplica.run")(function* (

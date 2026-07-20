@@ -52,7 +52,6 @@ export const prepareSnippetDownload = Effect.fn(
       and(
         eq(snippets.id, snippetId),
         eq(snippets.ownerWorkosUserId, workosUserId),
-        eq(snippets.uploadStatus, "UPLOADED"),
         isNull(snippets.deletedAt),
       ),
     )
@@ -264,46 +263,18 @@ const StorageLive = StorageRpcs.of({
 });
 
 const SnippetsLive = SnippetRpcs.of({
-  CreateStoredSnippet: Effect.fn("rpc.CreateStoredSnippet")(function* (input) {
+  PrepareSnippetUpload: Effect.fn("rpc.PrepareSnippetUpload")(function* (input) {
     const uploads = yield* SnippetUploads;
     const currentUser = yield* CurrentUser;
     return yield* uploads
-      .create(currentUser.id, input)
-      .pipe(Effect.annotateSpans({ id: input.id, byteSize: input.byteSize }));
-  }),
-  PrepareStoredSnippetUpload: Effect.fn("rpc.PrepareStoredSnippetUpload")(function* (input) {
-    const uploads = yield* SnippetUploads;
-    const currentUser = yield* CurrentUser;
-    return yield* uploads
-      .prepare(currentUser.id, { id: input.snippetId, mediaType: input.mediaType })
-      .pipe(Effect.annotateSpans({ id: input.snippetId }));
-  }),
-  HeartbeatStoredSnippetUpload: Effect.fn("rpc.HeartbeatStoredSnippetUpload")(function* (input) {
-    const uploads = yield* SnippetUploads;
-    const currentUser = yield* CurrentUser;
-    return yield* uploads
-      .heartbeat(currentUser.id, input.id)
+      .prepare(currentUser.id, input)
       .pipe(Effect.annotateSpans({ id: input.id }));
   }),
-  FailStoredSnippetUpload: Effect.fn("rpc.FailStoredSnippetUpload")(function* (input) {
+  PublishSnippet: Effect.fn("rpc.PublishSnippet")(function* (input) {
     const uploads = yield* SnippetUploads;
     const currentUser = yield* CurrentUser;
     return yield* uploads
-      .fail(currentUser.id, input.id)
-      .pipe(Effect.annotateSpans({ id: input.id }));
-  }),
-  RetryStoredSnippetUpload: Effect.fn("rpc.RetryStoredSnippetUpload")(function* (input) {
-    const uploads = yield* SnippetUploads;
-    const currentUser = yield* CurrentUser;
-    return yield* uploads
-      .retry(currentUser.id, input.id)
-      .pipe(Effect.annotateSpans({ id: input.id }));
-  }),
-  CompleteStoredSnippetUpload: Effect.fn("rpc.CompleteStoredSnippetUpload")(function* (input) {
-    const uploads = yield* SnippetUploads;
-    const currentUser = yield* CurrentUser;
-    return yield* uploads
-      .complete(currentUser.id, input)
+      .publish(currentUser.id, input)
       .pipe(Effect.annotateSpans({ id: input.id }));
   }),
   GetSnippetSnapshot: Effect.fn("rpc.GetSnippetSnapshot")(function* () {

@@ -19,18 +19,6 @@ export const UserSchema = Schema.Struct({
 
 export type User = typeof UserSchema.Type;
 
-export const SNIPPET_UPLOAD_STATUSES = [
-  "UPLOADING",
-  // Issue #66 replaces this legacy state with the complete failure vocabulary.
-  "FAILED",
-  "CLIENT_UPLOAD_FAILED",
-  "UPLOADED",
-] as const;
-
-export const SnippetUploadStatusLiteral = Schema.Literals(SNIPPET_UPLOAD_STATUSES);
-
-export type SnippetUploadStatus = typeof SnippetUploadStatusLiteral.Type;
-
 export const LocalContentAvailabilitySchema = Schema.Union([
   Schema.Struct({ status: Schema.Literal("AVAILABLE") }),
   Schema.Struct({ status: Schema.Literal("NOT_AVAILABLE") }),

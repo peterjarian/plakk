@@ -47,6 +47,7 @@ describe("DesktopSession", () => {
       const localStateUpdates: Array<LocalStateUpdate> = [];
       const credentialEvents: Array<string> = [];
       const transitionEvents: Array<string> = [];
+      const normalizedAccountIds: Array<string> = [];
       let credentialsPurged = false;
       let accountPurged = false;
       const purgedAccountIds: Array<string> = [];
@@ -114,18 +115,15 @@ describe("DesktopSession", () => {
         Layer.succeed(
           SnippetUploadEngine,
           SnippetUploadEngine.of({
-            cancel: () => Effect.void,
-            changes: Stream.empty,
             delete: () => Effect.void,
             discard: () => Effect.void,
             ingest: () => Effect.void,
             pause: Effect.void,
-            project: () => Effect.succeed([]),
             purge: () => Effect.void,
-            reconcile: () => Effect.void,
-            removePublishedRecords: () => Effect.void,
-            resume: () => Effect.void,
-            retry: () => Effect.void,
+            normalize: (accountId) =>
+              Effect.sync(() => {
+                normalizedAccountIds.push(accountId);
+              }),
           }),
         ),
         Layer.succeed(
@@ -146,6 +144,7 @@ describe("DesktopSession", () => {
             changes: Stream.empty,
             commit: () => Effect.void,
             get: () => Effect.succeed(null),
+            update: (_accountId, transform) => Effect.succeed(transform({ items: [] })),
             purge: () => Effect.void,
             remove: () => Effect.void,
           }),
@@ -183,6 +182,7 @@ describe("DesktopSession", () => {
         const session = yield* DesktopSession;
         const starting = yield* session.start.pipe(Effect.forkChild);
         yield* Fiber.join(starting);
+        const normalizedAtStartup = [...normalizedAccountIds];
         localStateUpdates.length = 0;
         const signingOut = yield* session.signOut.pipe(Effect.forkChild);
         yield* Effect.yieldNow;
@@ -217,6 +217,7 @@ describe("DesktopSession", () => {
           credentialEvents,
           credentialsPurged,
           localStateUpdates,
+          normalizedAtStartup,
           refreshLocalStateUpdates,
           switchPurges: purgedAccountIds.slice(purgesBeforeSwitch),
           switchTransitionEvents: transitionEvents.slice(transitionEventsBeforeSwitch),
@@ -232,6 +233,7 @@ describe("DesktopSession", () => {
       expect(result.account).toMatchObject({ id: secondAccount.id });
       expect(result.accountPurged).toBe(true);
       expect(result.credentialsPurged).toBe(true);
+      expect(result.normalizedAtStartup).toEqual([account.id]);
       expect(result.refreshLocalStateUpdates).not.toContainEqual({ kind: "offline", account });
       expect(result.credentialEvents).toContain("credentials-purged");
       expect(result.updateAfterRaces).toEqual({ kind: "signed-out" });

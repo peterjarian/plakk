@@ -28,7 +28,7 @@ const state = vi.hoisted(() => {
         fileName: "same-local-state.txt",
         byteSize: 4,
         storageProvider: "GOOGLE_DRIVE",
-        uploadStatus: "UPLOADED",
+        kind: "PUBLISHED",
         createdAt: "2026-07-16T00:00:00.000Z",
         updatedAt: "2026-07-16T00:00:00.000Z",
         localState: null,

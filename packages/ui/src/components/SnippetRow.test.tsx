@@ -9,8 +9,7 @@ const snippet = {
   fileName: "snippet.txt",
   byteSize: 14,
   storageProvider: "GOOGLE_DRIVE",
-  storageObjectId: "drive-object",
-  uploadStatus: "UPLOADED",
+  kind: "PUBLISHED",
   createdAt: "2026-07-11T00:00:00.000Z",
   updatedAt: "2026-07-11T00:00:00.000Z",
   localState: null,
@@ -31,7 +30,6 @@ describe("SnippetRow", () => {
         copied={false}
         onCopy={() => undefined}
         onDelete={() => undefined}
-        onStopUpload={() => undefined}
       />,
     );
 
@@ -50,7 +48,6 @@ describe("SnippetRow", () => {
         copying
         onCopy={() => undefined}
         onDelete={() => undefined}
-        onStopUpload={() => undefined}
       />,
     );
 
@@ -58,12 +55,13 @@ describe("SnippetRow", () => {
     expect(markup).toContain("animate-spin");
   });
 
-  it("shows remote uploads as syncing without an origin-only stop action", () => {
+  it("shows local uploads as syncing without stop or retry actions", () => {
     const markup = renderToStaticMarkup(
       <SnippetRow
         snippet={{
           ...snippet,
-          uploadStatus: "UPLOADING",
+          kind: "LOCAL",
+          localState: { status: "UPLOADING", errorMessage: null },
           localContentAvailability: { status: "NOT_AVAILABLE" },
         }}
         presentation={{ type: "text", title: "Text snippet" }}
@@ -71,36 +69,35 @@ describe("SnippetRow", () => {
         copied={false}
         onCopy={() => undefined}
         onDelete={() => undefined}
-        onStopUpload={() => undefined}
       />,
     );
 
     expect(markup).toContain('aria-label="Syncing"');
     expect(markup).not.toContain('aria-label="Stop uploading"');
+    expect(markup).not.toContain('aria-label="Retry upload"');
   });
 
-  it("shows remote failure without an origin-only retry action", () => {
-    for (const uploadStatus of ["FAILED", "CLIENT_UPLOAD_FAILED"] as const) {
-      const markup = renderToStaticMarkup(
-        <SnippetRow
-          snippet={{
-            ...snippet,
-            uploadStatus,
-            localContentAvailability: { status: "NOT_AVAILABLE" },
-          }}
-          presentation={{ type: "text", title: "Text snippet" }}
-          now={now}
-          copied={false}
-          onCopy={() => undefined}
-          onDelete={() => undefined}
-          onRetryUpload={() => undefined}
-          onStopUpload={() => undefined}
-        />,
-      );
+  it("shows failed local uploads with Dismiss and no Retry", () => {
+    const markup = renderToStaticMarkup(
+      <SnippetRow
+        snippet={{
+          ...snippet,
+          kind: "LOCAL",
+          localState: { status: "FAILED", errorMessage: "Upload failed." },
+          localContentAvailability: { status: "AVAILABLE" },
+        }}
+        presentation={{ type: "text", title: "Text snippet" }}
+        now={now}
+        copied={false}
+        onCopy={() => undefined}
+        onDelete={() => undefined}
+      />,
+    );
 
-      expect(markup).toContain("Upload failed on the origin device.");
-      expect(markup).not.toContain('aria-label="Retry upload"');
-    }
+    expect(markup).toContain("Upload failed.");
+    expect(markup).toContain('aria-label="Dismiss failed upload"');
+    expect(markup).not.toContain('aria-label="Retry upload"');
+    expect(markup).not.toContain('aria-label="Copy"');
   });
 
   it("only exposes hyperlink navigation through an explicit surface owner", () => {
@@ -116,7 +113,6 @@ describe("SnippetRow", () => {
         copied={false}
         onCopy={() => undefined}
         onDelete={() => undefined}
-        onStopUpload={() => undefined}
       />,
     );
     const withOwner = renderToStaticMarkup(
@@ -132,7 +128,6 @@ describe("SnippetRow", () => {
         onCopy={() => undefined}
         onDelete={() => undefined}
         onOpenLink={() => undefined}
-        onStopUpload={() => undefined}
       />,
     );
 
@@ -156,7 +151,6 @@ describe("SnippetRow", () => {
         onCopy={() => undefined}
         onDelete={() => undefined}
         onDownload={() => undefined}
-        onStopUpload={() => undefined}
       />,
     );
 
@@ -178,7 +172,6 @@ describe("SnippetRow", () => {
         copied={false}
         onCopy={() => undefined}
         onDelete={() => undefined}
-        onStopUpload={() => undefined}
       />,
     );
 
@@ -198,7 +191,6 @@ describe("SnippetRow", () => {
         copied={false}
         onCopy={() => undefined}
         onDelete={() => undefined}
-        onStopUpload={() => undefined}
       />,
     );
 

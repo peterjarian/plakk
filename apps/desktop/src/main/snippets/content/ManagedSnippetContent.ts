@@ -11,6 +11,7 @@ export type ManagedTextValidation = "VALID" | "INVALID" | "NOT_FOUND";
 export class ManagedSnippetContent extends Context.Service<
   ManagedSnippetContent,
   {
+    readonly changes: Stream.Stream<string>;
     ingest(
       accountId: string,
       input: ResolvedSnippetIngestPayload,

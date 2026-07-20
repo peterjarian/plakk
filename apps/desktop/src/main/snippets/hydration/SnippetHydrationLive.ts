@@ -61,7 +61,10 @@ const makeSnippetHydration = Effect.gen(function* () {
     snippetId: string,
   ) {
     const state = yield* replica.get(accountId);
-    return state?.items.find((snippet) => snippet.id === snippetId) ?? null;
+    const record = state?.items.find(
+      (item) => item.kind === "PUBLISHED" && item.snippet.id === snippetId,
+    );
+    return record?.kind === "PUBLISHED" ? record.snippet : null;
   });
 
   const hydrate = Effect.fn("SnippetHydrationEngine.hydrate")(function* (
@@ -83,7 +86,7 @@ const makeSnippetHydration = Effect.gen(function* () {
       );
 
     const latest = yield* currentSnippet(account.id, snippet.id);
-    if (latest === null || latest.uploadStatus !== "UPLOADED") {
+    if (latest === null) {
       yield* content.invalidate(account.id, [snippet.id]);
       return;
     }
@@ -128,7 +131,9 @@ const makeSnippetHydration = Effect.gen(function* () {
     const account = yield* Ref.get(currentAccount);
     if (account?.id !== accountId) return new Map<string, LocalContentAvailability>();
     const state = yield* replica.get(accountId);
-    const uploaded = (state?.items ?? []).filter((snippet) => snippet.uploadStatus === "UPLOADED");
+    const uploaded = (state?.items ?? []).flatMap((record) =>
+      record.kind === "PUBLISHED" ? [record.snippet] : [],
+    );
     const uploadedKeys = new Set(uploaded.map((snippet) => key(accountId, snippet.id)));
     const accountPrefix = `${accountId}/`;
 
@@ -255,7 +260,7 @@ const makeSnippetHydration = Effect.gen(function* () {
       });
     }
     const snippet = yield* currentSnippet(account.id, snippetId);
-    if (snippet === null || snippet.uploadStatus !== "UPLOADED") {
+    if (snippet === null) {
       return yield* new SnippetHydrationError({
         cause: null,
         reason: "Only uploaded snippets can be downloaded.",

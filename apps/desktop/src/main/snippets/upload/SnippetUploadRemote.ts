@@ -1,7 +1,8 @@
 import type {
   ApiSnippet,
-  CreateStoredSnippetPayload,
   PreparedStorageUpload,
+  PrepareSnippetUploadPayload,
+  PublishSnippetPayload,
 } from "@plakk/shared/PlakkApi";
 import type { RpcError } from "@plakk/shared/RpcError";
 import { Context, type Effect } from "effect";
@@ -12,23 +13,13 @@ export type SnippetUploadRemoteError = RpcError | RpcClientError;
 export class SnippetUploadRemote extends Context.Service<
   SnippetUploadRemote,
   {
-    create(
-      accessToken: string,
-      input: CreateStoredSnippetPayload,
-    ): Effect.Effect<ApiSnippet, SnippetUploadRemoteError>;
     prepare(
       accessToken: string,
-      input: { readonly snippetId: string; readonly mediaType: string | null },
+      input: PrepareSnippetUploadPayload,
     ): Effect.Effect<PreparedStorageUpload, SnippetUploadRemoteError>;
-    heartbeat(
+    publish(
       accessToken: string,
-      id: string,
-    ): Effect.Effect<{ readonly expiresAt: string }, SnippetUploadRemoteError>;
-    fail(accessToken: string, id: string): Effect.Effect<ApiSnippet, SnippetUploadRemoteError>;
-    retry(accessToken: string, id: string): Effect.Effect<ApiSnippet, SnippetUploadRemoteError>;
-    complete(
-      accessToken: string,
-      input: { readonly id: string; readonly storageObjectId: string },
+      input: PublishSnippetPayload,
     ): Effect.Effect<ApiSnippet, SnippetUploadRemoteError>;
     delete(accessToken: string, id: string): Effect.Effect<void, SnippetUploadRemoteError>;
   }

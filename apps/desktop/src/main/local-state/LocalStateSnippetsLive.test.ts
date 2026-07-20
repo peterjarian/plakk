@@ -9,7 +9,6 @@ import { SnippetHydrationEngine } from "../snippets/hydration/SnippetHydration.t
 import { SnippetRemoteTransport } from "../snippets/replica/SnippetRemoteTransport.ts";
 import { SnippetReplica, type SnippetReplicaState } from "../snippets/replica/SnippetReplica.ts";
 import { runSnippetReplicaSync, syncSnippetReplica } from "../snippets/replica/sync.ts";
-import { SnippetUploadEngine } from "../snippets/upload/SnippetUploadEngine.ts";
 import { LocalState } from "./LocalState.ts";
 import { LocalStateLive } from "./LocalStateLive.ts";
 import { LocalStateSnippetsLive } from "./LocalStateSnippetsLive.ts";
@@ -30,7 +29,6 @@ const snippet = (id: string, fileName: string): ApiSnippet => ({
   byteSize: 4,
   storageProvider: "GOOGLE_DRIVE",
   storageObjectId: `provider-${id}`,
-  uploadStatus: "UPLOADED",
   createdAt: "2026-01-01T00:00:00.000Z",
   updatedAt: "2026-01-01T00:00:00.000Z",
 });
@@ -44,10 +42,9 @@ const harness = (options: {
     const fileSystem = yield* FileSystem.FileSystem;
     const cwd = yield* fileSystem.makeTempDirectoryScoped({ prefix: "plakk-local-state-sync-" });
     let state = options.initial ?? null;
-    const removedPublished: Array<ReadonlyArray<string>> = [];
     const replicaChanges = yield* PubSub.unbounded<{
       readonly accountId: string;
-      readonly items: ReadonlyArray<ApiSnippet>;
+      readonly items: SnippetReplicaState["items"];
     }>();
     const replica = SnippetReplica.of({
       changes: Stream.fromPubSub(replicaChanges),
@@ -57,6 +54,13 @@ const harness = (options: {
           Effect.andThen(PubSub.publish(replicaChanges, { accountId, items: next.items })),
           Effect.asVoid,
         ),
+      update: (accountId, transform) =>
+        Effect.sync(() => {
+          state = transform(state ?? { items: [] });
+          return state;
+        }).pipe(
+          Effect.tap((next) => PubSub.publish(replicaChanges, { accountId, items: next.items })),
+        ),
       purge: (accountId) =>
         Effect.sync(() => void (state = null)).pipe(
           Effect.andThen(PubSub.publish(replicaChanges, { accountId, items: [] })),
@@ -64,7 +68,13 @@ const harness = (options: {
         ),
       remove: (accountId, id) =>
         Effect.sync(() => {
-          if (state !== null) state = { items: state.items.filter((item) => item.id !== id) };
+          if (state !== null) {
+            state = {
+              items: state.items.filter((item) =>
+                item.kind === "LOCAL" ? item.id !== id : item.snippet.id !== id,
+              ),
+            };
+          }
         }).pipe(
           Effect.andThen(PubSub.publish(replicaChanges, { accountId, items: state?.items ?? [] })),
           Effect.asVoid,
@@ -85,24 +95,6 @@ const harness = (options: {
       invalidate: () => Effect.void,
       putStream: () => Effect.void,
     } as never);
-    const uploads = SnippetUploadEngine.of({
-      cancel: () => Effect.void,
-      changes: Stream.empty,
-      delete: () => Effect.void,
-      discard: () => Effect.void,
-      ingest: () => Effect.void,
-      pause: Effect.void,
-      project: (_accountId, items) =>
-        Effect.succeed(items.map((item) => ({ ...item, localState: null }))),
-      purge: () => Effect.void,
-      reconcile: () => Effect.void,
-      removePublishedRecords: (_accountId, snippetIds) =>
-        Effect.sync(() => {
-          removedPublished.push(snippetIds);
-        }),
-      resume: () => Effect.void,
-      retry: () => Effect.void,
-    });
     const hydration = SnippetHydrationEngine.of({
       changes: Stream.empty,
       download: () => Effect.void,
@@ -111,7 +103,11 @@ const harness = (options: {
       reconcile: () =>
         Effect.succeed(
           new Map(
-            (state?.items ?? []).map((item) => [item.id, { status: "NOT_AVAILABLE" } as const]),
+            (state?.items ?? []).flatMap((item) =>
+              item.kind === "PUBLISHED"
+                ? [[item.snippet.id, { status: "NOT_AVAILABLE" } as const] as const]
+                : [],
+            ),
           ),
         ),
       resume: () => Effect.void,
@@ -119,6 +115,7 @@ const harness = (options: {
     });
     const desktopContent = ManagedSnippetContent.of({
       available: () => Effect.succeed(false),
+      changes: Stream.empty,
       discard: () => Effect.void,
       get: () => Effect.succeed(null),
       getPrefix: () => Effect.succeed(null),
@@ -129,13 +126,11 @@ const harness = (options: {
       putStream: () => Effect.void,
       validateText: () => Effect.succeed("NOT_FOUND"),
     });
-    const uploadsLayer = Layer.succeed(SnippetUploadEngine, uploads);
     const replicaLayer = Layer.succeed(SnippetReplica, replica);
     const localStateSnippets = LocalStateSnippetsLive.pipe(
       Layer.provide(
         Layer.mergeAll(
           replicaLayer,
-          uploadsLayer,
           Layer.succeed(SnippetHydrationEngine, hydration),
           Layer.succeed(ManagedSnippetContent, desktopContent),
         ),
@@ -148,13 +143,12 @@ const harness = (options: {
         ),
         Layer.mergeAll(
           replicaLayer,
-          uploadsLayer,
           Layer.succeed(SnippetRemoteTransport, remote),
           Layer.succeed(ManagedSnippetContent, managed),
         ),
       ),
     );
-    return { currentState: () => state, removedPublished, runtime };
+    return { currentState: () => state, runtime };
   });
 
 it.layer(NodeFileSystem.layer)("local state snapshot seam", (it) => {
@@ -178,7 +172,9 @@ it.layer(NodeFileSystem.layer)("local state snapshot seam", (it) => {
         ),
       );
 
-      expect(test.currentState()).toEqual({ items: [published] });
+      expect(test.currentState()).toEqual({
+        items: [{ kind: "PUBLISHED", snippet: published }],
+      });
       expect(materialized.snippets).toMatchObject([{ id: published.id }]);
       expect(materialized.snippets[0]).not.toHaveProperty("storageObjectId");
       yield* Effect.promise(() => test.runtime.dispose());
@@ -188,7 +184,10 @@ it.layer(NodeFileSystem.layer)("local state snapshot seam", (it) => {
   it.effect("publishes deletion by absence and cleans compatible upload state", () =>
     Effect.gen(function* () {
       const published = snippet("0d1e2f3a-4567-4890-8abc-def012345678", "published.txt");
-      const test = yield* harness({ initial: { items: [published] }, snapshots: [[]] });
+      const test = yield* harness({
+        initial: { items: [{ kind: "PUBLISHED", snippet: published }] },
+        snapshots: [[]],
+      });
       yield* Effect.promise(() =>
         test.runtime.runPromise(
           LocalState.use((localState) => localState.update({ kind: "offline", account: user })),
@@ -197,7 +196,6 @@ it.layer(NodeFileSystem.layer)("local state snapshot seam", (it) => {
       yield* Effect.promise(() => test.runtime.runPromise(syncSnippetReplica(syncAccount)));
 
       expect(test.currentState()).toEqual({ items: [] });
-      expect(test.removedPublished).toEqual([[published.id]]);
       const localState = yield* Effect.promise(() =>
         test.runtime.runPromise(
           LocalState.use((service) => service.refresh.pipe(Effect.andThen(service.current))),

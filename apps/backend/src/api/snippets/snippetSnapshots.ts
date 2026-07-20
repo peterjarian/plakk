@@ -11,13 +11,7 @@ export const getSnippetSnapshot = Effect.fn("getSnippetSnapshot")(function* (
   const rows = yield* drizzle.db
     .select()
     .from(snippets)
-    .where(
-      and(
-        eq(snippets.ownerWorkosUserId, ownerWorkosUserId),
-        eq(snippets.uploadStatus, "UPLOADED"),
-        isNull(snippets.deletedAt),
-      ),
-    )
+    .where(and(eq(snippets.ownerWorkosUserId, ownerWorkosUserId), isNull(snippets.deletedAt)))
     .orderBy(desc(snippets.createdAt))
     .pipe(Effect.orDie);
 

@@ -10,23 +10,11 @@ export const SnippetUploadRemoteLive = Layer.effect(
   Effect.gen(function* () {
     const client = yield* PlakkRpcClient;
     return SnippetUploadRemote.of({
-      create: Effect.fn("SnippetUploadRemote.create")((accessToken, input) =>
-        client.CreateStoredSnippet(input, { headers: headers(accessToken) }),
-      ),
       prepare: Effect.fn("SnippetUploadRemote.prepare")((accessToken, input) =>
-        client.PrepareStoredSnippetUpload(input, { headers: headers(accessToken) }),
+        client.PrepareSnippetUpload(input, { headers: headers(accessToken) }),
       ),
-      heartbeat: Effect.fn("SnippetUploadRemote.heartbeat")((accessToken, id) =>
-        client.HeartbeatStoredSnippetUpload({ id }, { headers: headers(accessToken) }),
-      ),
-      fail: Effect.fn("SnippetUploadRemote.fail")((accessToken, id) =>
-        client.FailStoredSnippetUpload({ id }, { headers: headers(accessToken) }),
-      ),
-      retry: Effect.fn("SnippetUploadRemote.retry")((accessToken, id) =>
-        client.RetryStoredSnippetUpload({ id }, { headers: headers(accessToken) }),
-      ),
-      complete: Effect.fn("SnippetUploadRemote.complete")((accessToken, input) =>
-        client.CompleteStoredSnippetUpload(input, { headers: headers(accessToken) }),
+      publish: Effect.fn("SnippetUploadRemote.publish")((accessToken, input) =>
+        client.PublishSnippet(input, { headers: headers(accessToken) }),
       ),
       delete: Effect.fn("SnippetUploadRemote.delete")((accessToken, id) =>
         client.DeleteSnippet({ id }, { headers: headers(accessToken) }),

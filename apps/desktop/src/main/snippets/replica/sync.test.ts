@@ -8,10 +8,9 @@ import {
   ManagedSnippetContent,
   ManagedSnippetContentError,
 } from "../content/ManagedSnippetContent.ts";
-import { SnippetUploadEngine } from "../upload/SnippetUploadEngine.ts";
 import { SnippetRemoteTransport, type SnippetSyncAccount } from "./SnippetRemoteTransport.ts";
 import { SnippetReplica, SnippetReplicaError, type SnippetReplicaState } from "./SnippetReplica.ts";
-import { reconcileSnippetSnapshot, runSnippetReplicaSync, syncSnippetReplica } from "./sync.ts";
+import { runSnippetReplicaSync, syncSnippetReplica } from "./sync.ts";
 
 const account: SnippetSyncAccount = { id: "user-1", accessToken: "token" };
 const published: ApiSnippet = {
@@ -20,32 +19,34 @@ const published: ApiSnippet = {
   byteSize: 12,
   storageProvider: "GOOGLE_DRIVE",
   storageObjectId: "drive-id",
-  uploadStatus: "UPLOADED",
   createdAt: "2026-07-10T20:00:00.000Z",
   updatedAt: "2026-07-10T20:00:01.000Z",
 };
-const local: ApiSnippet = {
-  ...published,
+const local = {
+  kind: "LOCAL" as const,
   id: "1e2f3a4b-5678-4901-8bcd-ef0123456789",
   fileName: "local.txt",
-  storageObjectId: null,
-  uploadStatus: "FAILED",
+  byteSize: 4,
+  storageProvider: "GOOGLE_DRIVE" as const,
+  status: "FAILED" as const,
+  errorMessage: "Upload failed.",
+  createdAt: "2026-07-10T21:00:00.000Z",
+  updatedAt: "2026-07-10T21:00:01.000Z",
 };
 
 const harness = (options: {
   initial?: SnippetReplicaState | null;
   snapshots?: ReadonlyArray<ReadonlyArray<ApiSnippet>>;
-  failCommitOnce?: boolean;
+  failUpdateOnce?: boolean;
   failInvalidateOnce?: boolean;
   invalidations?: Stream.Stream<void, RpcError>;
 }) => {
   let state = options.initial ?? null;
-  let commitFailed = false;
+  let updateFailed = false;
   let invalidationFailed = false;
   let snapshotReads = 0;
   let connections = 0;
   const invalidated: Array<ReadonlyArray<string>> = [];
-  const removedPublished: Array<ReadonlyArray<string>> = [];
   const snapshots = [...(options.snapshots ?? [[]])];
 
   const layer = Layer.mergeAll(
@@ -54,32 +55,25 @@ const harness = (options: {
       SnippetReplica.of({
         changes: Stream.empty,
         get: () => Effect.succeed(state),
-        commit: (_accountId, next) =>
+        commit: (_accountId, next) => Effect.sync(() => void (state = next)),
+        update: (_accountId, transform) =>
           Effect.suspend(() => {
-            if (options.failCommitOnce === true && !commitFailed) {
-              commitFailed = true;
+            if (options.failUpdateOnce === true && !updateFailed) {
+              updateFailed = true;
               return Effect.fail(
-                new SnippetReplicaError({ cause: null, reason: "simulated commit failure" }),
+                new SnippetReplicaError({ cause: null, reason: "simulated update failure" }),
               );
             }
-            state = next;
-            return Effect.void;
+            state = transform(state ?? { items: [] });
+            return Effect.succeed(state);
           }),
-        remove: (_accountId, snippetId) =>
-          Effect.sync(() => {
-            if (state !== null) {
-              state = { items: state.items.filter((item) => item.id !== snippetId) };
-            }
-          }),
+        remove: () => Effect.void,
         purge: () => Effect.void,
       }),
     ),
     Layer.succeed(
       ManagedSnippetContent,
       ManagedSnippetContent.of({
-        get: () => Effect.succeed(null),
-        putStream: () => Effect.void,
-        available: () => Effect.succeed(false),
         invalidate: (_accountId: string, ids: ReadonlyArray<string>) =>
           Effect.suspend(() => {
             invalidated.push(ids);
@@ -104,9 +98,7 @@ const harness = (options: {
           Effect.sync(() => {
             snapshotReads += 1;
             const next = snapshots.shift();
-            if (next === undefined) {
-              throw new Error("Missing scripted snapshot");
-            }
+            if (next === undefined) throw new Error("Missing scripted snapshot");
             return next;
           }),
         invalidations: () =>
@@ -118,74 +110,43 @@ const harness = (options: {
           ),
       }),
     ),
-    Layer.succeed(
-      SnippetUploadEngine,
-      SnippetUploadEngine.of({
-        removePublishedRecords: (_accountId: string, ids: ReadonlyArray<string>) =>
-          Effect.sync(() => {
-            removedPublished.push(ids);
-          }),
-      } as never),
-    ),
   );
 
   return {
     connections: () => connections,
     invalidated,
     layer,
-    removedPublished,
     snapshotReads: () => snapshotReads,
     state: () => state,
   };
 };
 
-describe("snippet snapshot reconciliation", () => {
-  it("replaces published records, preserves unmatched local records, and promotes a matching UUID", () => {
-    const replacement = { ...published, fileName: "replacement.txt" };
-
-    expect(reconcileSnippetSnapshot({ items: [published, local] }, [replacement])).toEqual({
-      state: { items: [replacement, local] },
-      stalePublishedIds: [],
+describe("snippet snapshot synchronization", () => {
+  it("commits the whole collection before best-effort deletion cleanup", async () => {
+    const test = harness({
+      initial: { items: [{ kind: "PUBLISHED", snippet: published }, local] },
+      snapshots: [[]],
+      failInvalidateOnce: true,
     });
-    expect(reconcileSnippetSnapshot({ items: [local] }, [{ ...published, id: local.id }])).toEqual({
-      state: { items: [{ ...published, id: local.id }] },
-      stalePublishedIds: [],
-    });
-  });
-
-  it("treats absence from a successful snapshot as deletion and removes managed content", async () => {
-    const test = harness({ initial: { items: [published, local] }, snapshots: [[]] });
 
     await Effect.runPromise(syncSnippetReplica(account).pipe(Effect.provide(test.layer)));
 
     expect(test.state()).toEqual({ items: [local] });
     expect(test.invalidated).toEqual([[published.id]]);
-    expect(test.removedPublished).toEqual([[published.id]]);
   });
 
-  it("commits the collection before best-effort cleanup and changes nothing on commit failure", async () => {
-    const cleanupFailure = harness({
-      initial: { items: [published, local] },
-      snapshots: [[]],
-      failInvalidateOnce: true,
-    });
-    await Effect.runPromise(syncSnippetReplica(account).pipe(Effect.provide(cleanupFailure.layer)));
-    expect(cleanupFailure.state()).toEqual({ items: [local] });
+  it("leaves the entire collection unchanged when the atomic update fails", async () => {
+    const initial = { items: [{ kind: "PUBLISHED" as const, snippet: published }, local] };
+    const test = harness({ initial, snapshots: [[]], failUpdateOnce: true });
 
-    const commitFailure = harness({
-      initial: { items: [published, local] },
-      snapshots: [[published]],
-      failCommitOnce: true,
-    });
     await expect(
-      Effect.runPromise(syncSnippetReplica(account).pipe(Effect.provide(commitFailure.layer))),
+      Effect.runPromise(syncSnippetReplica(account).pipe(Effect.provide(test.layer))),
     ).rejects.toMatchObject({ _tag: "SnippetReplicaError" });
-    expect(commitFailure.state()).toEqual({ items: [published, local] });
-    expect(commitFailure.invalidated).toEqual([]);
-    expect(commitFailure.removedPublished).toEqual([]);
+    expect(test.state()).toEqual(initial);
+    expect(test.invalidated).toEqual([]);
   });
 
-  it("refreshes once for connect, reconnect, and each invalidation while publishing stream status", async () => {
+  it("refreshes once for connect, reconnect, and each invalidation", async () => {
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         const attempt = yield* Ref.make(0);
@@ -232,7 +193,7 @@ describe("snippet snapshot reconciliation", () => {
     expect(result.statuses).toEqual(["RECONNECTING", "CONNECTED", "RECONNECTING", "CONNECTED"]);
   });
 
-  it("stays reconnecting and requests credential refresh when the initial snapshot fails", async () => {
+  it("stays reconnecting when the initial snapshot fails", async () => {
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         const disconnected = yield* Deferred.make<void>();
