@@ -21,6 +21,5 @@ export class SnippetUploadRemote extends Context.Service<
       accessToken: string,
       input: PublishSnippetPayload,
     ): Effect.Effect<ApiSnippet, SnippetUploadRemoteError>;
-    delete(accessToken: string, id: string): Effect.Effect<void, SnippetUploadRemoteError>;
   }
 >()("plakk/main/snippets/upload/SnippetUploadRemote") {}

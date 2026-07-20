@@ -18,7 +18,6 @@ const publication = {
 const row = (overrides: Partial<SnippetRow> = {}): SnippetRow => ({
   ...publication,
   ownerWorkosUserId: "user-1",
-  deletedAt: null,
   createdAt: now,
   updatedAt: now,
   ...overrides,
@@ -89,6 +88,7 @@ const storage = () => {
   return {
     prepareUpload,
     service: StorageProviderService.of({
+      deleteObject: () => Effect.void,
       prepareUpload,
       ensureConnected: () => Effect.void,
       getDestinationUrl: () => Effect.succeed("https://drive.example/folder"),

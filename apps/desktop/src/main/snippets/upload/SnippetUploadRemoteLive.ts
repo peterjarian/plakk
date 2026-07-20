@@ -16,9 +16,6 @@ export const SnippetUploadRemoteLive = Layer.effect(
       publish: Effect.fn("SnippetUploadRemote.publish")((accessToken, input) =>
         client.PublishSnippet(input, { headers: headers(accessToken) }),
       ),
-      delete: Effect.fn("SnippetUploadRemote.delete")((accessToken, id) =>
-        client.DeleteSnippet({ id }, { headers: headers(accessToken) }),
-      ),
     });
   }),
 );

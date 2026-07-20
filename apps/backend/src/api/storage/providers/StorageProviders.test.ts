@@ -155,6 +155,80 @@ describe("storage upload providers", () => {
   });
 });
 
+describe("storage deletion providers", () => {
+  it.each([
+    {
+      name: "Google Drive",
+      deleteObject: GoogleDriveStorageProvider.deleteObject,
+      storageProvider: "GOOGLE_DRIVE" as const,
+      storageObjectId: "drive-id",
+      expectedUrl: "https://www.googleapis.com/drive/v3/files/drive-id",
+    },
+    {
+      name: "OneDrive",
+      deleteObject: OneDriveStorageProvider.deleteObject,
+      storageProvider: "ONE_DRIVE" as const,
+      storageObjectId: "one-id",
+      expectedUrl: "https://graph.microsoft.com/v1.0/me/drive/items/one-id",
+    },
+  ])("deletes one $name object with its connected token", async (provider) => {
+    fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
+
+    await Effect.runPromise(
+      provider
+        .deleteObject({
+          accessToken: "secret-token",
+          storageProvider: provider.storageProvider,
+          storageObjectId: provider.storageObjectId,
+        })
+        .pipe(Effect.provide(FetchHttpClient.layer)),
+    );
+
+    const request = fetchRequest(0);
+    expect(request.method).toBe("DELETE");
+    expect(request.url).toBe(provider.expectedUrl);
+    expect(request.headers.get("authorization")).toBe("Bearer secret-token");
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("deletes one Dropbox object by its exact path", async () => {
+    fetchMock.mockResolvedValue(Response.json({ metadata: {} }));
+
+    await Effect.runPromise(
+      DropboxStorageProvider.deleteObject({
+        accessToken: "secret-token",
+        storageProvider: "DROPBOX",
+        storageObjectId: "/snippet/file.txt",
+      }).pipe(Effect.provide(FetchHttpClient.layer)),
+    );
+
+    const request = fetchRequest(0);
+    expect(request.method).toBe("POST");
+    expect(request.url).toBe("https://api.dropboxapi.com/2/files/delete_v2");
+    expect(request.headers.get("authorization")).toBe("Bearer secret-token");
+    expect(await request.json()).toEqual({ path: "/snippet/file.txt" });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("reports provider deletion failure without retrying", async () => {
+    fetchMock.mockResolvedValue(new Response(null, { status: 503 }));
+
+    await expect(
+      Effect.runPromise(
+        GoogleDriveStorageProvider.deleteObject({
+          accessToken: "token",
+          storageProvider: "GOOGLE_DRIVE",
+          storageObjectId: "drive-id",
+        }).pipe(Effect.provide(FetchHttpClient.layer)),
+      ),
+    ).rejects.toMatchObject({
+      _tag: "StorageProviderError",
+      message: "Stored object deletion failed: 503",
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+});
+
 describe("storage download providers", () => {
   it("returns an authorized Google Drive media target without downloading bytes", async () => {
     await expect(

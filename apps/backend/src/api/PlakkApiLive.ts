@@ -1,4 +1,4 @@
-import { and, Drizzle, eq, isNull, type DrizzleService } from "@plakk/db";
+import { and, Drizzle, eq, type DrizzleService } from "@plakk/db";
 import { snippets } from "@plakk/db/schema";
 import { STORAGE_PROVIDERS, type StorageProvider } from "@plakk/shared";
 import {
@@ -13,7 +13,6 @@ import {
 } from "@plakk/shared/PlakkApi";
 import { RpcError } from "@plakk/shared/RpcError";
 import * as Config from "effect/Config";
-import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
@@ -22,8 +21,8 @@ import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstab
 import { StorageProviderService } from "./storage/StorageProvider.ts";
 import { getProviderSlug } from "./storage/getProviderSlug.ts";
 import { mapStorageErrorsToRpc } from "./storage/mapStorageErrorsToRpc.ts";
-import { notifySnippetChanges } from "./snippets/snippetInvalidations.ts";
 import { getSnippetSnapshot } from "./snippets/snippetSnapshots.ts";
+import { SnippetDeletion } from "./snippets/SnippetDeletion.ts";
 import { SnippetUploads } from "./snippets/SnippetUploads.ts";
 
 const DEFAULT_STORAGE_PROVIDER = "GOOGLE_DRIVE" as const;
@@ -48,17 +47,11 @@ export const prepareSnippetDownload = Effect.fn(
   const [snippet] = yield* drizzle.db
     .select()
     .from(snippets)
-    .where(
-      and(
-        eq(snippets.id, snippetId),
-        eq(snippets.ownerWorkosUserId, workosUserId),
-        isNull(snippets.deletedAt),
-      ),
-    )
+    .where(and(eq(snippets.id, snippetId), eq(snippets.ownerWorkosUserId, workosUserId)))
     .limit(1)
     .pipe(Effect.orDie);
 
-  if (snippet === undefined || snippet.storageObjectId === null) {
+  if (snippet === undefined) {
     return yield* new RpcError({ code: "NOT_FOUND", message: "Uploaded snippet was not found." });
   }
 
@@ -76,35 +69,6 @@ export const prepareSnippetDownload = Effect.fn(
     byteSize: snippet.byteSize,
     download,
   };
-});
-
-export const deleteSnippetRecord = Effect.fn("deleteSnippetRecord")(function* (
-  drizzle: DrizzleService,
-  ownerWorkosUserId: string,
-  snippetId: string,
-) {
-  const now = DateTime.toDateUtc(yield* DateTime.now);
-  return yield* drizzle.db
-    .transaction((tx) =>
-      Effect.gen(function* () {
-        const [deleted] = yield* tx
-          .update(snippets)
-          .set({ deletedAt: now, updatedAt: now })
-          .where(
-            and(
-              eq(snippets.id, snippetId),
-              eq(snippets.ownerWorkosUserId, ownerWorkosUserId),
-              isNull(snippets.deletedAt),
-            ),
-          )
-          .returning();
-        if (deleted !== undefined) {
-          yield* notifySnippetChanges(tx, ownerWorkosUserId);
-        }
-        return deleted !== undefined;
-      }),
-    )
-    .pipe(Effect.orDie);
 });
 
 const getConnectedAccountUrl = (provider: StorageProvider, workosUserId: string) =>
@@ -292,11 +256,11 @@ const SnippetsLive = SnippetRpcs.of({
   }),
   DeleteSnippet: Effect.fn("rpc.DeleteSnippet")(function* (input) {
     return yield* Effect.gen(function* () {
-      const drizzle = yield* Drizzle;
+      const deletion = yield* SnippetDeletion;
       const currentUser = yield* CurrentUser;
 
       yield* Effect.logInfo("Deleting snippet", { id: input.id });
-      yield* deleteSnippetRecord(drizzle, currentUser.id, input.id);
+      yield* deletion.delete(currentUser.id, input.id);
     }).pipe(Effect.annotateSpans({ id: input.id }));
   }),
 });

@@ -34,7 +34,6 @@ describe("desktop account purge", () => {
           Layer.succeed(
             SnippetUploadEngine,
             SnippetUploadEngine.of({
-              delete: () => Effect.void,
               discard: () => Effect.void,
               ingest: () => Effect.void,
               pause: Effect.void,

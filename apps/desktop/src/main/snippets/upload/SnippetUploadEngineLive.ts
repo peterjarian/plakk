@@ -18,7 +18,6 @@ import {
   SnippetUploadEngineError,
   type SnippetUploadEngineFailure,
   type UploadAccount,
-  type UploadOwner,
 } from "./SnippetUploadEngine.ts";
 import { StorageUpload, StorageUploadError } from "./StorageUpload.ts";
 
@@ -237,24 +236,6 @@ export const SnippetUploadEngineLive = Layer.effect(
       yield* replica.remove(accountId, snippetId);
     });
 
-    const remove = Effect.fn("SnippetUploadEngine.delete")(function* (
-      account: UploadOwner,
-      snippetId: string,
-    ) {
-      if (account.accessToken === null) {
-        return yield* new SnippetUploadEngineError({
-          cause: null,
-          reason: "Reconnect before deleting this snippet.",
-        });
-      }
-      const current = yield* replica.get(account.id);
-      const record = current?.items.find((item) => deviceSnippetRecordId(item) === snippetId);
-      if (record?.kind !== "PUBLISHED") return;
-      yield* remote.delete(account.accessToken, snippetId);
-      yield* replica.remove(account.id, snippetId);
-      yield* content.discard(account.id, snippetId);
-    });
-
-    return SnippetUploadEngine.of({ discard, delete: remove, ingest, normalize, pause, purge });
+    return SnippetUploadEngine.of({ discard, ingest, normalize, pause, purge });
   }),
 );

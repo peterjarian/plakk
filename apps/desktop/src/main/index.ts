@@ -31,6 +31,7 @@ import { SnippetHydrationEngine } from "./snippets/hydration/SnippetHydration.ts
 import { getManagedSnippetBytes } from "./snippets/replica/read.ts";
 import { NativeFileSources } from "./snippets/sources/NativeFileSources.ts";
 import { SnippetUploadEngine } from "./snippets/upload/SnippetUploadEngine.ts";
+import { SnippetDeletion } from "./snippets/deletion/SnippetDeletion.ts";
 import { snippetUploadFailureMessage } from "./snippets/upload/SnippetUploadEngineLive.ts";
 import { createTrayWindowController } from "./tray/window.ts";
 
@@ -161,10 +162,10 @@ handle(ipcMethods.snippetDiscard, (id) =>
 
 handle(ipcMethods.snippetDelete, (id) =>
   Effect.gen(function* () {
-    const engine = yield* SnippetUploadEngine;
+    const deletion = yield* SnippetDeletion;
     const session = yield* DesktopSession;
     yield* session
-      .withCurrentAccount((account) => engine.delete(account, id))
+      .withCurrentAccount((account) => deletion.delete(account, id))
       .pipe(asIpcFailure("Could not delete this snippet."));
   }),
 );

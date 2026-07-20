@@ -5,6 +5,7 @@ import type { HttpClient } from "effect/unstable/http";
 
 import { StorageProviderError } from "./types.ts";
 import type {
+  DeleteStorageObjectInput,
   DownloadStorageObjectInput,
   GetStorageObjectUrlInput,
   PreparedStorageUpload,
@@ -37,11 +38,14 @@ export class StorageCredentialsError extends Schema.TaggedErrorClass<StorageCred
   },
 ) {}
 
-export type StorageUploadError =
+export type StorageProviderOperationError =
   | StorageNotConnectedError
   | StorageNeedsReauthorizationError
   | StorageCredentialsError
   | StorageProviderError;
+
+export type StorageUploadError = StorageProviderOperationError;
+export type StorageDeletionError = StorageProviderOperationError;
 
 export type StorageDownloadError = StorageUploadError | StorageObjectNotFoundError;
 
@@ -70,6 +74,9 @@ export type StorageProviderAdapter = {
   readonly getDownloadTarget?: (
     input: GetStorageObjectUrlInput,
   ) => Effect.Effect<StorageDownloadTarget, StorageProviderError, HttpClient.HttpClient>;
+  readonly deleteObject: (
+    input: DeleteStorageObjectInput,
+  ) => Effect.Effect<void, StorageProviderError, HttpClient.HttpClient>;
 };
 
 export class StorageProviderService extends Context.Service<
@@ -96,5 +103,8 @@ export class StorageProviderService extends Context.Service<
     readonly getDownloadTarget: (
       input: Omit<GetStorageObjectUrlInput, "accessToken"> & { readonly workosUserId: string },
     ) => Effect.Effect<StorageDownloadTarget, StorageDownloadError>;
+    readonly deleteObject: (
+      input: Omit<DeleteStorageObjectInput, "accessToken"> & { readonly workosUserId: string },
+    ) => Effect.Effect<void, StorageDeletionError>;
   }
 >()("@plakk/backend/api/storage/StorageProvider/StorageProviderService") {}

@@ -108,7 +108,6 @@ const harness = (
           SnippetUploadRemote.of({
             prepare,
             publish,
-            delete: () => Effect.void,
           }),
         ),
         Layer.succeed(

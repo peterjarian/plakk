@@ -13,7 +13,6 @@ const snippet: SnippetRow = {
   storageObjectId: "provider-object",
   fileName: "complete.txt",
   byteSize: 12,
-  deletedAt: null,
   createdAt: timestamp,
   updatedAt: timestamp,
 };

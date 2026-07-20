@@ -3,6 +3,7 @@ import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 
 import {
+  type DeleteStorageObjectInput,
   StorageProviderError,
   StorageObjectNotFoundError,
   type DownloadStorageObjectInput,
@@ -47,6 +48,20 @@ const providerError = (
 
 export const OneDriveStorageProvider = {
   storageProvider: "ONE_DRIVE",
+  deleteObject: Effect.fn("OneDriveStorageProvider.deleteObject")(function* (
+    input: DeleteStorageObjectInput,
+  ): Effect.fn.Return<void, StorageProviderError, HttpClient.HttpClient> {
+    const request = HttpClientRequest.delete(
+      `${ONE_DRIVE_ITEMS_URL}/${encodeURIComponent(input.storageObjectId)}`,
+    ).pipe(HttpClientRequest.bearerToken(input.accessToken));
+    const response = yield* HttpClient.execute(request).pipe(
+      Effect.mapError((cause) =>
+        providerError(input, "Could not delete the stored object.", cause),
+      ),
+    );
+    if (response.status === 404 || (response.status >= 200 && response.status < 300)) return;
+    return yield* providerError(input, `Stored object deletion failed: ${response.status}`);
+  }),
   getDestination: () =>
     Effect.succeed({ url: "https://onedrive.live.com/" } satisfies StorageProviderDestination),
   prepareUpload: Effect.fn("OneDriveStorageProvider.prepareUpload")(function* (
