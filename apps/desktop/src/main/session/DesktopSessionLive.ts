@@ -69,10 +69,10 @@ const makeDesktopSession = Effect.gen(function* () {
   const generation = yield* Ref.make(0);
   const started = yield* Ref.make(false);
   const syncFiber = yield* Ref.make<Fiber.Fiber<void, unknown> | null>(null);
-  const refreshFiber = yield* Ref.make<Fiber.Fiber<void, DesktopSessionTransitionError> | null>(
-    null,
-  );
   const capabilityFiber = yield* Ref.make<Fiber.Fiber<void, never> | null>(null);
+  const connectionRefresh = yield* Ref.make<Effect.Effect<void, DesktopSessionTransitionError>>(
+    Effect.void,
+  );
   const refreshLock = yield* Semaphore.make(1);
   const commandLock = yield* Semaphore.make(1);
   const issues = yield* PubSub.unbounded<string>();
@@ -98,18 +98,61 @@ const makeDesktopSession = Effect.gen(function* () {
   const stopSync = Effect.gen(function* () {
     const fiber = yield* Ref.getAndSet(syncFiber, null);
     if (fiber !== null) yield* Fiber.interrupt(fiber);
+    const current = yield* Ref.get(status);
+    if (current.user !== null) {
+      yield* localState
+        .update({
+          kind: "live-connection",
+          accountId: current.user.id,
+          status: "RECONNECTING",
+        })
+        .pipe(
+          Effect.catchCause((cause) =>
+            Effect.logError("Could not publish stopped live connection status", { cause }),
+          ),
+        );
+    }
   });
+  const refreshSessionDetached = (failureMessage: string) =>
+    Ref.get(connectionRefresh).pipe(
+      Effect.flatten,
+      Effect.catchCause((cause) => Effect.logError(failureMessage, { cause })),
+      Effect.forkDetach,
+      Effect.asVoid,
+    );
   const startSync = Effect.fn("DesktopSession.startSync")(function* (session: AuthSession) {
-    const fiber = yield* runSnippetReplicaSync({
-      id: session.user.id,
-      accessToken: session.accessToken,
-    }).pipe(
+    const fiber = yield* runSnippetReplicaSync(
+      {
+        id: session.user.id,
+        accessToken: session.accessToken,
+      },
+      {
+        onConnectionStatus: (liveStatus) =>
+          localState
+            .update({
+              kind: "live-connection",
+              accountId: session.user.id,
+              status: liveStatus,
+            })
+            .pipe(
+              Effect.catchCause((cause) =>
+                Effect.logError("Could not publish live connection status", { cause }),
+              ),
+            ),
+        onConnected: refreshSessionDetached("Could not refresh the reconnected desktop session"),
+        onDisconnected: refreshSessionDetached(
+          "Could not refresh credentials after live disconnection",
+        ),
+      },
+    ).pipe(
       Effect.provideService(SnippetReplica, replica),
       Effect.provideService(SnippetRemoteTransport, remote),
       Effect.provideService(ManagedSnippetContent, managedContent),
+      Effect.provideService(SnippetUploadEngine, uploads),
       Effect.forkDetach,
     );
     yield* Ref.set(syncFiber, fiber);
+    yield* Effect.yieldNow;
   });
 
   const setStatus = Effect.fn("DesktopSession.setStatus")(function* (next: SessionStatus) {
@@ -309,6 +352,7 @@ const makeDesktopSession = Effect.gen(function* () {
       yield* refreshCapability();
     }),
   );
+  yield* Ref.set(connectionRefresh, refresh);
 
   const handleCallbackUrl = (rawUrl: string) =>
     refreshLock.withPermit(
@@ -389,12 +433,6 @@ const makeDesktopSession = Effect.gen(function* () {
         cleanupPending: cached.cleanupPending,
       });
     }
-    const fiber = yield* Effect.sleep("30 seconds").pipe(
-      Effect.andThen(refresh),
-      Effect.forever,
-      Effect.forkDetach,
-    );
-    yield* Ref.set(refreshFiber, fiber);
     const storedAccount = yield* Effect.result(refreshLock.withPermit(reconcileStoredAccount()));
     if (Result.isFailure(storedAccount)) {
       const current = yield* Ref.get(status);
@@ -440,9 +478,6 @@ const makeDesktopSession = Effect.gen(function* () {
     Effect.all(
       [
         Ref.get(syncFiber).pipe(
-          Effect.flatMap((fiber) => (fiber === null ? Effect.void : Fiber.interrupt(fiber))),
-        ),
-        Ref.get(refreshFiber).pipe(
           Effect.flatMap((fiber) => (fiber === null ? Effect.void : Fiber.interrupt(fiber))),
         ),
         Ref.get(capabilityFiber).pipe(

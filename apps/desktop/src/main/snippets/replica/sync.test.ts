@@ -1,21 +1,22 @@
+import type { ApiSnippet } from "@plakk/shared/PlakkApi";
+import { RpcError } from "@plakk/shared/RpcError";
 import { describe, expect, it } from "vite-plus/test";
-import { Effect, Fiber, Layer, Ref, Stream } from "effect";
+import { Deferred, Effect, Fiber, Layer, Ref, Stream } from "effect";
 import { TestClock } from "effect/testing";
 
-import type { ApiSnippet, SnippetChangePage } from "@plakk/shared/PlakkApi";
-import { RpcError } from "@plakk/shared/RpcError";
 import {
   ManagedSnippetContent,
   ManagedSnippetContentError,
 } from "../content/ManagedSnippetContent.ts";
+import { SnippetUploadEngine } from "../upload/SnippetUploadEngine.ts";
 import { SnippetRemoteTransport, type SnippetSyncAccount } from "./SnippetRemoteTransport.ts";
 import { SnippetReplica, SnippetReplicaError, type SnippetReplicaState } from "./SnippetReplica.ts";
-import { runSnippetReplicaSync, syncSnippetReplica } from "./sync.ts";
+import { reconcileSnippetSnapshot, runSnippetReplicaSync, syncSnippetReplica } from "./sync.ts";
 
 const account: SnippetSyncAccount = { id: "user-1", accessToken: "token" };
-const snippet: ApiSnippet = {
+const published: ApiSnippet = {
   id: "0d1e2f3a-4567-4890-8abc-def012345678",
-  fileName: "0d1e2f3a-4567-4890-8abc-def012345678.txt",
+  fileName: "published.txt",
   byteSize: 12,
   storageProvider: "GOOGLE_DRIVE",
   storageObjectId: "drive-id",
@@ -23,25 +24,29 @@ const snippet: ApiSnippet = {
   createdAt: "2026-07-10T20:00:00.000Z",
   updatedAt: "2026-07-10T20:00:01.000Z",
 };
+const local: ApiSnippet = {
+  ...published,
+  id: "1e2f3a4b-5678-4901-8bcd-ef0123456789",
+  fileName: "local.txt",
+  storageObjectId: null,
+  uploadStatus: "FAILED",
+};
 
 const harness = (options: {
   initial?: SnippetReplicaState | null;
-  pages?: ReadonlyArray<SnippetChangePage>;
-  snapshot?: SnippetReplicaState;
+  snapshots?: ReadonlyArray<ReadonlyArray<ApiSnippet>>;
   failCommitOnce?: boolean;
   failInvalidateOnce?: boolean;
-  wakes?: Stream.Stream<void, RpcError>;
+  invalidations?: Stream.Stream<void, RpcError>;
 }) => {
   let state = options.initial ?? null;
-  let failed = false;
+  let commitFailed = false;
   let invalidationFailed = false;
-  let pulls = 0;
+  let snapshotReads = 0;
   let connections = 0;
   const invalidated: Array<ReadonlyArray<string>> = [];
-  const committedDeletions: Array<ReadonlyArray<string>> = [];
-  const statesAtInvalidation: Array<SnippetReplicaState | null> = [];
-  const pages = [...(options.pages ?? [])];
-  const snapshot = options.snapshot ?? { cursor: "snapshot", items: [] };
+  const removedPublished: Array<ReadonlyArray<string>> = [];
+  const snapshots = [...(options.snapshots ?? [[]])];
 
   const layer = Layer.mergeAll(
     Layer.succeed(
@@ -49,22 +54,21 @@ const harness = (options: {
       SnippetReplica.of({
         changes: Stream.empty,
         get: () => Effect.succeed(state),
-        commit: (_accountId, next, deletedIds = []) =>
+        commit: (_accountId, next) =>
           Effect.suspend(() => {
-            if (options.failCommitOnce === true && !failed) {
-              failed = true;
+            if (options.failCommitOnce === true && !commitFailed) {
+              commitFailed = true;
               return Effect.fail(
-                new SnippetReplicaError({ cause: null, reason: "simulated crash" }),
+                new SnippetReplicaError({ cause: null, reason: "simulated commit failure" }),
               );
             }
-            committedDeletions.push(deletedIds);
             state = next;
             return Effect.void;
           }),
         remove: (_accountId, snippetId) =>
           Effect.sync(() => {
             if (state !== null) {
-              state = { ...state, items: state.items.filter((item) => item.id !== snippetId) };
+              state = { items: state.items.filter((item) => item.id !== snippetId) };
             }
           }),
         purge: () => Effect.void,
@@ -79,13 +83,12 @@ const harness = (options: {
         invalidate: (_accountId: string, ids: ReadonlyArray<string>) =>
           Effect.suspend(() => {
             invalidated.push(ids);
-            statesAtInvalidation.push(state);
             if (options.failInvalidateOnce === true && !invalidationFailed) {
               invalidationFailed = true;
               return Effect.fail(
                 new ManagedSnippetContentError({
                   cause: null,
-                  reason: "simulated cleanup crash",
+                  reason: "simulated cleanup failure",
                   retryable: true,
                 }),
               );
@@ -97,155 +100,162 @@ const harness = (options: {
     Layer.succeed(
       SnippetRemoteTransport,
       SnippetRemoteTransport.of({
-        pull: () =>
+        snapshot: () =>
           Effect.sync(() => {
-            pulls += 1;
-            return pages.shift() ?? { status: "OK", changes: [], nextCursor: state?.cursor ?? "" };
+            snapshotReads += 1;
+            const next = snapshots.shift();
+            if (next === undefined) {
+              throw new Error("Missing scripted snapshot");
+            }
+            return next;
           }),
-        snapshot: () => Effect.succeed(snapshot),
-        wakes: () =>
+        invalidations: () =>
           Stream.unwrap(
             Effect.sync(() => {
               connections += 1;
-              return options.wakes ?? Stream.never;
+              return options.invalidations ?? Stream.never;
             }),
           ),
       }),
     ),
+    Layer.succeed(
+      SnippetUploadEngine,
+      SnippetUploadEngine.of({
+        removePublishedRecords: (_accountId: string, ids: ReadonlyArray<string>) =>
+          Effect.sync(() => {
+            removedPublished.push(ids);
+          }),
+      } as never),
+    ),
   );
 
   return {
-    invalidated,
-    committedDeletions,
-    statesAtInvalidation,
-    layer,
-    state: () => state,
-    pulls: () => pulls,
     connections: () => connections,
+    invalidated,
+    layer,
+    removedPublished,
+    snapshotReads: () => snapshotReads,
+    state: () => state,
   };
 };
 
-describe("snippet replica synchronization", () => {
-  it("replays an upsert without duplicating metadata", async () => {
-    const page = {
-      status: "OK",
-      changes: [{ type: "UPSERT", snippet }],
-      nextCursor: "next",
-    } as const;
-    const test = harness({
-      initial: { cursor: "old", items: [snippet] },
-      pages: [page, { ...page, changes: [] }],
+describe("snippet snapshot reconciliation", () => {
+  it("replaces published records, preserves unmatched local records, and promotes a matching UUID", () => {
+    const replacement = { ...published, fileName: "replacement.txt" };
+
+    expect(reconcileSnippetSnapshot({ items: [published, local] }, [replacement])).toEqual({
+      state: { items: [replacement, local] },
+      stalePublishedIds: [],
     });
+    expect(reconcileSnippetSnapshot({ items: [local] }, [{ ...published, id: local.id }])).toEqual({
+      state: { items: [{ ...published, id: local.id }] },
+      stalePublishedIds: [],
+    });
+  });
+
+  it("treats absence from a successful snapshot as deletion and removes managed content", async () => {
+    const test = harness({ initial: { items: [published, local] }, snapshots: [[]] });
 
     await Effect.runPromise(syncSnippetReplica(account).pipe(Effect.provide(test.layer)));
 
-    expect(test.state()).toEqual({ cursor: "next", items: [snippet] });
-    expect(test.invalidated).toEqual([]);
+    expect(test.state()).toEqual({ items: [local] });
+    expect(test.invalidated).toEqual([[published.id]]);
+    expect(test.removedPublished).toEqual([[published.id]]);
   });
 
-  it("invalidates managed content only when the snippet is deleted", async () => {
-    const test = harness({
-      initial: { cursor: "old", items: [snippet] },
-      pages: [
-        {
-          status: "OK",
-          changes: [{ type: "DELETE", snippetId: snippet.id }],
-          nextCursor: "next",
-        },
-      ],
-    });
-
-    await Effect.runPromise(syncSnippetReplica(account).pipe(Effect.provide(test.layer)));
-
-    expect(test.state()).toEqual({ cursor: "next", items: [] });
-    expect(test.invalidated).toEqual([[snippet.id]]);
-    expect(test.committedDeletions).toEqual([[snippet.id]]);
-    expect(test.statesAtInvalidation).toEqual([{ cursor: "old", items: [snippet] }]);
-  });
-
-  it("re-pulls the same page after a crash before the cursor commit", async () => {
-    const page = {
-      status: "OK",
-      changes: [{ type: "UPSERT", snippet }],
-      nextCursor: "next",
-    } as const;
-    const test = harness({
-      initial: { cursor: "old", items: [] },
-      pages: [page, page],
-      failCommitOnce: true,
-    });
-
-    await expect(
-      Effect.runPromise(syncSnippetReplica(account).pipe(Effect.provide(test.layer))),
-    ).rejects.toMatchObject({ _tag: "SnippetReplicaError" });
-    expect(test.state()).toEqual({ cursor: "old", items: [] });
-
-    await Effect.runPromise(syncSnippetReplica(account).pipe(Effect.provide(test.layer)));
-    expect(test.state()).toEqual({ cursor: "next", items: [snippet] });
-  });
-
-  it("does not advance a tombstone cursor until managed content cleanup succeeds", async () => {
-    const page = {
-      status: "OK",
-      changes: [{ type: "DELETE", snippetId: snippet.id }],
-      nextCursor: "next",
-    } as const;
-    const test = harness({
-      initial: { cursor: "old", items: [snippet] },
-      pages: [page, page],
+  it("commits the collection before best-effort cleanup and changes nothing on commit failure", async () => {
+    const cleanupFailure = harness({
+      initial: { items: [published, local] },
+      snapshots: [[]],
       failInvalidateOnce: true,
     });
+    await Effect.runPromise(syncSnippetReplica(account).pipe(Effect.provide(cleanupFailure.layer)));
+    expect(cleanupFailure.state()).toEqual({ items: [local] });
 
+    const commitFailure = harness({
+      initial: { items: [published, local] },
+      snapshots: [[published]],
+      failCommitOnce: true,
+    });
     await expect(
-      Effect.runPromise(syncSnippetReplica(account).pipe(Effect.provide(test.layer))),
-    ).rejects.toMatchObject({ _tag: "ManagedSnippetContentError" });
-    expect(test.state()).toEqual({ cursor: "old", items: [snippet] });
-
-    await Effect.runPromise(syncSnippetReplica(account).pipe(Effect.provide(test.layer)));
-    expect(test.state()).toEqual({ cursor: "next", items: [] });
+      Effect.runPromise(syncSnippetReplica(account).pipe(Effect.provide(commitFailure.layer))),
+    ).rejects.toMatchObject({ _tag: "SnippetReplicaError" });
+    expect(commitFailure.state()).toEqual({ items: [published, local] });
+    expect(commitFailure.invalidated).toEqual([]);
+    expect(commitFailure.removedPublished).toEqual([]);
   });
 
-  it("reconnects the wake stream and synchronizes after connectivity returns", async () => {
-    const attempts = await Effect.runPromise(
+  it("refreshes once for connect, reconnect, and each invalidation while publishing stream status", async () => {
+    const result = await Effect.runPromise(
       Effect.gen(function* () {
         const attempt = yield* Ref.make(0);
+        const statuses: Array<"CONNECTED" | "RECONNECTING"> = [];
         const test = harness({
-          initial: { cursor: "cursor", items: [] },
-          wakes: Stream.unwrap(
+          snapshots: [[], [], []],
+          invalidations: Stream.unwrap(
             Ref.getAndUpdate(attempt, (value) => value + 1).pipe(
               Effect.map((value) =>
                 value === 0
-                  ? Stream.fail(new RpcError({ code: "INTERNAL_SERVER_ERROR", message: "offline" }))
-                  : Stream.make(undefined),
+                  ? Stream.make(undefined).pipe(
+                      Stream.concat(
+                        Stream.fail(
+                          new RpcError({ code: "INTERNAL_SERVER_ERROR", message: "offline" }),
+                        ),
+                      ),
+                    )
+                  : Stream.make(undefined, undefined).pipe(Stream.concat(Stream.never)),
               ),
             ),
           ),
         });
-        const fiber = yield* runSnippetReplicaSync(account).pipe(
-          Effect.provide(test.layer),
-          Effect.forkChild,
-        );
+        const fiber = yield* runSnippetReplicaSync(account, {
+          onConnectionStatus: (status) =>
+            Effect.sync(() => {
+              statuses.push(status);
+            }),
+          onConnected: Effect.void,
+          onDisconnected: Effect.void,
+        }).pipe(Effect.provide(test.layer), Effect.forkChild);
         yield* TestClock.adjust("5 seconds");
         yield* Effect.yieldNow;
         yield* Fiber.interrupt(fiber);
-        return { connections: test.connections(), pulls: test.pulls() };
+        return {
+          connections: test.connections(),
+          snapshotReads: test.snapshotReads(),
+          statuses,
+        };
       }).pipe(Effect.provide(TestClock.layer())),
     );
 
-    expect(attempts.connections).toBeGreaterThanOrEqual(2);
-    expect(attempts.pulls).toBeGreaterThanOrEqual(2);
+    expect(result.connections).toBe(2);
+    expect(result.snapshotReads).toBe(3);
+    expect(result.statuses).toEqual(["RECONNECTING", "CONNECTED", "RECONNECTING", "CONNECTED"]);
   });
 
-  it("replaces a stale cursor with a fresh snapshot", async () => {
-    const fresh = { cursor: "fresh", items: [snippet] };
-    const test = harness({
-      initial: { cursor: "stale", items: [] },
-      pages: [{ status: "RESNAPSHOT_REQUIRED" }],
-      snapshot: fresh,
-    });
+  it("stays reconnecting and requests credential refresh when the initial snapshot fails", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const disconnected = yield* Deferred.make<void>();
+        const statuses: Array<"CONNECTED" | "RECONNECTING"> = [];
+        const test = harness({
+          snapshots: [],
+          invalidations: Stream.make(undefined).pipe(Stream.concat(Stream.never)),
+        });
+        const fiber = yield* runSnippetReplicaSync(account, {
+          onConnectionStatus: (status) =>
+            Effect.sync(() => {
+              statuses.push(status);
+            }),
+          onConnected: Effect.void,
+          onDisconnected: Deferred.succeed(disconnected, undefined),
+        }).pipe(Effect.provide(test.layer), Effect.forkChild);
+        yield* Deferred.await(disconnected);
+        yield* Fiber.interrupt(fiber);
+        return { statuses, snapshotReads: test.snapshotReads() };
+      }),
+    );
 
-    await Effect.runPromise(syncSnippetReplica(account).pipe(Effect.provide(test.layer)));
-
-    expect(test.state()).toEqual(fresh);
+    expect(result.snapshotReads).toBe(1);
+    expect(result.statuses).toEqual(["RECONNECTING"]);
   });
 });

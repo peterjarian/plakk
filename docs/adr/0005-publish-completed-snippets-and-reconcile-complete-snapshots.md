@@ -1,0 +1,13 @@
+---
+status: accepted
+---
+
+# Publish completed Snippets and reconcile complete snapshots
+
+A Snippet exists only after the linked storage provider confirms complete content and the backend publishes its authoritative record. Electron main persists one Device Snippet collection for Home and Tray: before publication the record is device-only and either uploading or failed; after publication the same client-owned identity becomes a published Snippet record. Failed local records offer Dismiss rather than Retry. On startup, any record left uploading becomes failed and dismissible without resuming. Plakk creates no authoritative upload state, heartbeat, attempt capability, durable upload outbox, retry generation, or recovery workflow. Publication is idempotent for the same immutable content and rejects a conflicting use of the identity; failed publication may attempt provider cleanup once, while rare orphaned provider content remains an accepted v1 risk.
+
+Every successful refresh returns the complete, unpaginated Snippet snapshot for the account. Electron main atomically replaces the published records in its Device Snippet collection, preserves unmatched local upload records, and promotes a matching local identity when publication succeeded but its response was lost. PostgreSQL `NOTIFY` emits an account-scoped wake only after publication or deletion commits; the authenticated long-lived SSE stream converts that wake into a payload-free invalidation. Stream disconnect publishes reconnecting presentation but does not cancel an active upload or replace command-level connectivity checks. Reconnection refreshes account and provider facts plus the complete Snippet snapshot. There is no timer health poll, durable change feed, cursor, event history, ordering protocol, tombstone, replay, or Redis dependency.
+
+Each device automatically hydrates content for the newest 20 Snippets whose byte size is strictly below 1 GiB, but never automatically evicts complete managed content. Automatic hydration, explicit Download, and origin upload all produce the same local retention fact. Storage usage is derived from managed files; Home warns above 30 GiB, and Settings can free space by removing managed content outside the automatically maintained newest-20 set. A failed or interrupted download discards partial bytes, leaves content unavailable, and creates no durable failure or recovery state. Deletion removes the authoritative Snippet and invalidates other devices before attempting provider cleanup once; cleanup failure cannot restore or delay deletion.
+
+This deliberately trades guaranteed recovery of every interrupted transfer, publication, or provider cleanup for a substantially smaller ownership and synchronization model appropriate to Plakk v1.

@@ -22,14 +22,9 @@ import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstab
 import { StorageProviderService } from "./storage/StorageProvider.ts";
 import { getProviderSlug } from "./storage/getProviderSlug.ts";
 import { mapStorageErrorsToRpc } from "./storage/mapStorageErrorsToRpc.ts";
-import {
-  appendSnippetChange,
-  getSnippetSnapshot,
-  pullSnippetChanges,
-} from "./snippets/changeFeed.ts";
-import { snippetChangeRpcStream } from "./snippets/changeWakes.ts";
+import { notifySnippetChanges } from "./snippets/snippetInvalidations.ts";
+import { getSnippetSnapshot } from "./snippets/snippetSnapshots.ts";
 import { SnippetUploads } from "./snippets/SnippetUploads.ts";
-import { toApiSnippet } from "./transformers/toApiSnippet.ts";
 
 const DEFAULT_STORAGE_PROVIDER = "GOOGLE_DRIVE" as const;
 const WORKOS_BASE_URL = "https://api.workos.com";
@@ -82,6 +77,35 @@ export const prepareSnippetDownload = Effect.fn(
     byteSize: snippet.byteSize,
     download,
   };
+});
+
+export const deleteSnippetRecord = Effect.fn("deleteSnippetRecord")(function* (
+  drizzle: DrizzleService,
+  ownerWorkosUserId: string,
+  snippetId: string,
+) {
+  const now = DateTime.toDateUtc(yield* DateTime.now);
+  return yield* drizzle.db
+    .transaction((tx) =>
+      Effect.gen(function* () {
+        const [deleted] = yield* tx
+          .update(snippets)
+          .set({ deletedAt: now, updatedAt: now })
+          .where(
+            and(
+              eq(snippets.id, snippetId),
+              eq(snippets.ownerWorkosUserId, ownerWorkosUserId),
+              isNull(snippets.deletedAt),
+            ),
+          )
+          .returning();
+        if (deleted !== undefined) {
+          yield* notifySnippetChanges(tx, ownerWorkosUserId);
+        }
+        return deleted !== undefined;
+      }),
+    )
+    .pipe(Effect.orDie);
 });
 
 const getConnectedAccountUrl = (provider: StorageProvider, workosUserId: string) =>
@@ -285,20 +309,8 @@ const SnippetsLive = SnippetRpcs.of({
   GetSnippetSnapshot: Effect.fn("rpc.GetSnippetSnapshot")(function* () {
     const drizzle = yield* Drizzle;
     const currentUser = yield* CurrentUser;
-    const snapshot = yield* getSnippetSnapshot(drizzle, currentUser.id);
-    return {
-      cursor: snapshot.cursor,
-      items: snapshot.rows.map(toApiSnippet),
-    };
+    return yield* getSnippetSnapshot(drizzle, currentUser.id);
   }),
-  PullSnippetChanges: Effect.fn("rpc.PullSnippetChanges")(function* (input) {
-    return yield* Effect.gen(function* () {
-      const drizzle = yield* Drizzle;
-      const currentUser = yield* CurrentUser;
-      return yield* pullSnippetChanges(drizzle, currentUser.id, input.cursor, input.limit);
-    }).pipe(Effect.annotateSpans({ limit: input.limit }));
-  }),
-  SubscribeSnippetChanges: () => snippetChangeRpcStream,
   PrepareSnippetDownload: Effect.fn("rpc.PrepareSnippetDownload")(function* (input) {
     return yield* Effect.gen(function* () {
       const drizzle = yield* Drizzle;
@@ -313,31 +325,7 @@ const SnippetsLive = SnippetRpcs.of({
       const currentUser = yield* CurrentUser;
 
       yield* Effect.logInfo("Deleting snippet", { id: input.id });
-      const now = DateTime.toDateUtc(yield* DateTime.now);
-      yield* drizzle.db
-        .transaction((tx) =>
-          Effect.gen(function* () {
-            const [deleted] = yield* tx
-              .update(snippets)
-              .set({ deletedAt: now, updatedAt: now })
-              .where(
-                and(
-                  eq(snippets.id, input.id),
-                  eq(snippets.ownerWorkosUserId, currentUser.id),
-                  isNull(snippets.deletedAt),
-                ),
-              )
-              .returning();
-            if (deleted !== undefined) {
-              yield* appendSnippetChange(tx, {
-                type: "DELETE",
-                ownerWorkosUserId: currentUser.id,
-                snippetId: deleted.id,
-              });
-            }
-          }),
-        )
-        .pipe(Effect.orDie);
+      yield* deleteSnippetRecord(drizzle, currentUser.id, input.id);
     }).pipe(Effect.annotateSpans({ id: input.id }));
   }),
 });

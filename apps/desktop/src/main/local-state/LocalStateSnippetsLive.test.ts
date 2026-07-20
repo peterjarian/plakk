@@ -1,6 +1,6 @@
 import { NodeFileSystem } from "@effect/platform-node";
 import type { User } from "@plakk/shared";
-import type { ApiSnippet, SnippetChangePage } from "@plakk/shared/PlakkApi";
+import type { ApiSnippet } from "@plakk/shared/PlakkApi";
 import { expect, it } from "@effect/vitest";
 import { Effect, Fiber, FileSystem, Layer, ManagedRuntime, Option, PubSub, Stream } from "effect";
 
@@ -8,10 +8,8 @@ import { ManagedSnippetContent } from "../snippets/content/ManagedSnippetContent
 import { SnippetHydrationEngine } from "../snippets/hydration/SnippetHydration.ts";
 import { SnippetRemoteTransport } from "../snippets/replica/SnippetRemoteTransport.ts";
 import { SnippetReplica, type SnippetReplicaState } from "../snippets/replica/SnippetReplica.ts";
-import { SnippetReplicaWithUploadCleanupLive } from "../snippets/replica/SnippetReplicaWithUploadCleanupLive.ts";
 import { runSnippetReplicaSync, syncSnippetReplica } from "../snippets/replica/sync.ts";
 import { SnippetUploadEngine } from "../snippets/upload/SnippetUploadEngine.ts";
-import { SnippetUploadOutboxError } from "../snippets/upload/SnippetUploadOutbox.ts";
 import { LocalState } from "./LocalState.ts";
 import { LocalStateLive } from "./LocalStateLive.ts";
 import { LocalStateSnippetsLive } from "./LocalStateSnippetsLive.ts";
@@ -26,36 +24,27 @@ const user: User = {
   updatedAt: "2026-01-01T00:00:00.000Z",
 };
 const syncAccount = { id: user.id, accessToken: "token" };
-const snippet = (
-  id: string,
-  fileName: string,
-  uploadStatus: ApiSnippet["uploadStatus"] = "UPLOADED",
-): ApiSnippet => ({
+const snippet = (id: string, fileName: string): ApiSnippet => ({
   id,
   fileName,
   byteSize: 4,
   storageProvider: "GOOGLE_DRIVE",
   storageObjectId: `provider-${id}`,
-  uploadStatus,
+  uploadStatus: "UPLOADED",
   createdAt: "2026-01-01T00:00:00.000Z",
   updatedAt: "2026-01-01T00:00:00.000Z",
 });
 
 const harness = (options: {
   initial?: SnippetReplicaState | null;
-  pages?: Array<SnippetChangePage>;
-  snapshot?: SnippetReplicaState;
-  failTombstoneCleanupOnce?: boolean;
-  wakes?: Stream.Stream<void>;
+  snapshots: Array<ReadonlyArray<ApiSnippet>>;
+  invalidations?: Stream.Stream<void>;
 }) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     const cwd = yield* fileSystem.makeTempDirectoryScoped({ prefix: "plakk-local-state-sync-" });
     let state = options.initial ?? null;
-    const snapshot = options.snapshot ?? { cursor: "snapshot", items: [] };
-    const pages = options.pages ?? [];
-    const tombstoneCleanups: Array<ReadonlyArray<string>> = [];
-    let tombstoneCleanupFailed = false;
+    const removedPublished: Array<ReadonlyArray<string>> = [];
     const replicaChanges = yield* PubSub.unbounded<{
       readonly accountId: string;
       readonly items: ReadonlyArray<ApiSnippet>;
@@ -75,20 +64,20 @@ const harness = (options: {
         ),
       remove: (accountId, id) =>
         Effect.sync(() => {
-          if (state !== null)
-            state = { ...state, items: state.items.filter((item) => item.id !== id) };
+          if (state !== null) state = { items: state.items.filter((item) => item.id !== id) };
         }).pipe(
           Effect.andThen(PubSub.publish(replicaChanges, { accountId, items: state?.items ?? [] })),
           Effect.asVoid,
         ),
     });
     const remote = SnippetRemoteTransport.of({
-      pull: () =>
-        Effect.sync(
-          () => pages.shift() ?? { status: "OK", changes: [], nextCursor: state?.cursor ?? "" },
-        ),
-      snapshot: () => Effect.sync(() => snapshot),
-      wakes: () => options.wakes ?? Stream.never,
+      snapshot: () =>
+        Effect.sync(() => {
+          const next = options.snapshots.shift();
+          if (next === undefined) throw new Error("Missing scripted snapshot");
+          return next;
+        }),
+      invalidations: () => options.invalidations ?? Stream.never,
     });
     const managed = ManagedSnippetContent.of({
       available: () => Effect.succeed(false),
@@ -107,19 +96,9 @@ const harness = (options: {
         Effect.succeed(items.map((item) => ({ ...item, localState: null }))),
       purge: () => Effect.void,
       reconcile: () => Effect.void,
-      removeTombstones: (_accountId, snippetIds) =>
-        Effect.suspend(() => {
-          tombstoneCleanups.push(snippetIds);
-          if (options.failTombstoneCleanupOnce === true && !tombstoneCleanupFailed) {
-            tombstoneCleanupFailed = true;
-            return Effect.fail(
-              new SnippetUploadOutboxError({
-                cause: null,
-                reason: "simulated device-local cleanup failure",
-              }),
-            );
-          }
-          return Effect.void;
+      removePublishedRecords: (_accountId, snippetIds) =>
+        Effect.sync(() => {
+          removedPublished.push(snippetIds);
         }),
       resume: () => Effect.void,
       retry: () => Effect.void,
@@ -151,9 +130,7 @@ const harness = (options: {
       validateText: () => Effect.succeed("NOT_FOUND"),
     });
     const uploadsLayer = Layer.succeed(SnippetUploadEngine, uploads);
-    const replicaLayer = SnippetReplicaWithUploadCleanupLive.pipe(
-      Layer.provide(Layer.merge(Layer.succeed(SnippetReplica, replica), uploadsLayer)),
-    );
+    const replicaLayer = Layer.succeed(SnippetReplica, replica);
     const localStateSnippets = LocalStateSnippetsLive.pipe(
       Layer.provide(
         Layer.mergeAll(
@@ -164,185 +141,79 @@ const harness = (options: {
         ),
       ),
     );
-    const syncLayer = Layer.mergeAll(
-      replicaLayer,
-      Layer.succeed(SnippetRemoteTransport, remote),
-      Layer.succeed(ManagedSnippetContent, managed),
-    );
     const runtime = ManagedRuntime.make(
       Layer.merge(
         LocalStateLive.pipe(
           Layer.provide(Layer.merge(makeLocalStateStoreLive({ cwd }), localStateSnippets)),
         ),
-        syncLayer,
+        Layer.mergeAll(
+          replicaLayer,
+          uploadsLayer,
+          Layer.succeed(SnippetRemoteTransport, remote),
+          Layer.succeed(ManagedSnippetContent, managed),
+        ),
       ),
     );
-    return {
-      currentState: () => state,
-      runtime,
-      tombstoneCleanups,
-    };
+    return { currentState: () => state, removedPublished, runtime };
   });
 
-it.layer(NodeFileSystem.layer)("local state synchronization seam", (it) => {
-  it.effect("publishes authoritative upload failures through replica changes", () =>
+it.layer(NodeFileSystem.layer)("local state snapshot seam", (it) => {
+  it.effect("publishes a complete snapshot through the shared Local State projection", () =>
     Effect.gen(function* () {
-      const first = snippet(
-        "0d1e2f3a-4567-4890-8abc-def012345678",
-        "first.txt",
-        "CLIENT_UPLOAD_FAILED",
-      );
-      const test = yield* harness({ snapshot: { cursor: "snapshot", items: [first] } });
+      const published = snippet("0d1e2f3a-4567-4890-8abc-def012345678", "published.txt");
+      const test = yield* harness({ snapshots: [[published]] });
       yield* Effect.promise(() =>
         test.runtime.runPromise(
-          LocalState.use((localState) => localState.update({ kind: "offline", account: user })),
-        ),
-      );
-
-      const snapshotLocalState = yield* Effect.promise(() =>
-        test.runtime.runPromise(
-          Effect.gen(function* () {
-            const localState = yield* LocalState;
-            const changed = yield* localState.changes.pipe(
-              Stream.filter((value) => value.snippets.some((item) => item.id === first.id)),
-              Stream.runHead,
-              Effect.map(Option.getOrThrow),
-              Effect.forkChild,
-            );
-            yield* Effect.yieldNow;
-            const sync = yield* syncSnippetReplica(syncAccount).pipe(Effect.forkChild);
-            const value = yield* Fiber.join(changed);
-            yield* Fiber.join(sync);
-            return value;
-          }),
-        ),
-      );
-      expect(snapshotLocalState.snippets).toMatchObject([
-        { id: first.id, uploadStatus: "CLIENT_UPLOAD_FAILED" },
-      ]);
-      yield* Effect.promise(() => test.runtime.dispose());
-    }),
-  );
-
-  it.effect("publishes pull tombstones through replica changes", () =>
-    Effect.gen(function* () {
-      const first = snippet("0d1e2f3a-4567-4890-8abc-def012345678", "first.txt");
-      const pull = yield* harness({
-        initial: { cursor: "snapshot", items: [first] },
-        pages: [
-          {
-            status: "OK",
-            changes: [{ type: "DELETE", snippetId: first.id }],
-            nextCursor: "pulled",
-          },
-        ],
-      });
-      yield* Effect.promise(() =>
-        pull.runtime.runPromise(
-          LocalState.use((localState) => localState.update({ kind: "offline", account: user })),
-        ),
-      );
-      const pulledLocalState = yield* Effect.promise(() =>
-        pull.runtime.runPromise(
-          Effect.gen(function* () {
-            const localState = yield* LocalState;
-            const changed = yield* localState.changes.pipe(
-              Stream.filter((value) => value.snippets.length === 0),
-              Stream.runHead,
-              Effect.map(Option.getOrThrow),
-              Effect.forkChild,
-            );
-            yield* Effect.yieldNow;
-            const sync = yield* syncSnippetReplica(syncAccount).pipe(Effect.forkChild);
-            const value = yield* Fiber.join(changed);
-            yield* Fiber.join(sync);
-            return value;
-          }),
-        ),
-      );
-      expect(pull.currentState()).toEqual({ cursor: "pulled", items: [] });
-      expect(pull.tombstoneCleanups).toEqual([[first.id]]);
-      expect(pulledLocalState).toMatchObject({ snippets: [] });
-      yield* Effect.promise(() => pull.runtime.dispose());
-    }),
-  );
-
-  it.effect("retries device-local tombstone cleanup before advancing the cursor", () =>
-    Effect.gen(function* () {
-      const first = snippet("0d1e2f3a-4567-4890-8abc-def012345678", "first.txt");
-      const page = {
-        status: "OK",
-        changes: [{ type: "DELETE", snippetId: first.id }],
-        nextCursor: "pulled",
-      } as const;
-      const test = yield* harness({
-        initial: { cursor: "snapshot", items: [first] },
-        pages: [page, page],
-        failTombstoneCleanupOnce: true,
-      });
-
-      const firstSync = yield* Effect.promise(() =>
-        test.runtime.runPromise(syncSnippetReplica(syncAccount).pipe(Effect.result)),
-      );
-      expect(firstSync._tag).toBe("Failure");
-      expect(test.currentState()).toEqual({ cursor: "snapshot", items: [first] });
-
-      yield* Effect.promise(() => test.runtime.runPromise(syncSnippetReplica(syncAccount)));
-      expect(test.currentState()).toEqual({ cursor: "pulled", items: [] });
-      expect(test.tombstoneCleanups).toEqual([[first.id], [first.id]]);
-      yield* Effect.promise(() => test.runtime.dispose());
-    }),
-  );
-
-  it.effect("publishes required resnapshots through replica changes", () =>
-    Effect.gen(function* () {
-      const second = snippet("1d1e2f3a-4567-4890-8abc-def012345679", "second.txt");
-      const resnapshot = yield* harness({
-        initial: { cursor: "pulled", items: [] },
-        pages: [{ status: "RESNAPSHOT_REQUIRED" }],
-        snapshot: { cursor: "fresh", items: [second] },
-      });
-      yield* Effect.promise(() =>
-        resnapshot.runtime.runPromise(
           LocalState.use((localState) => localState.update({ kind: "offline", account: user })),
         ),
       );
       const materialized = yield* Effect.promise(() =>
-        resnapshot.runtime.runPromise(
+        test.runtime.runPromise(
           Effect.gen(function* () {
             const localState = yield* LocalState;
-            const changed = yield* localState.changes.pipe(
-              Stream.filter((value) => value.snippets.some((item) => item.id === second.id)),
-              Stream.runHead,
-              Effect.map(Option.getOrThrow),
-              Effect.forkChild,
-            );
-            yield* Effect.yieldNow;
-            const sync = yield* syncSnippetReplica(syncAccount).pipe(Effect.forkChild);
-            const value = yield* Fiber.join(changed);
-            yield* Fiber.join(sync);
-            return value;
+            yield* syncSnippetReplica(syncAccount);
+            yield* localState.refresh;
+            return yield* localState.current;
           }),
         ),
       );
-      yield* Effect.promise(() => resnapshot.runtime.dispose());
 
-      expect(resnapshot.currentState()).toEqual({ cursor: "fresh", items: [second] });
-      expect(materialized.snippets).toMatchObject([{ id: second.id }]);
+      expect(test.currentState()).toEqual({ items: [published] });
+      expect(materialized.snippets).toMatchObject([{ id: published.id }]);
       expect(materialized.snippets[0]).not.toHaveProperty("storageObjectId");
+      yield* Effect.promise(() => test.runtime.dispose());
     }),
   );
 
-  it.effect("projects a pull triggered by the desktop wake stream", () =>
+  it.effect("publishes deletion by absence and cleans compatible upload state", () =>
     Effect.gen(function* () {
-      const awakened = snippet("2d1e2f3a-4567-4890-8abc-def012345670", "awakened.txt");
+      const published = snippet("0d1e2f3a-4567-4890-8abc-def012345678", "published.txt");
+      const test = yield* harness({ initial: { items: [published] }, snapshots: [[]] });
+      yield* Effect.promise(() =>
+        test.runtime.runPromise(
+          LocalState.use((localState) => localState.update({ kind: "offline", account: user })),
+        ),
+      );
+      yield* Effect.promise(() => test.runtime.runPromise(syncSnippetReplica(syncAccount)));
+
+      expect(test.currentState()).toEqual({ items: [] });
+      expect(test.removedPublished).toEqual([[published.id]]);
+      const localState = yield* Effect.promise(() =>
+        test.runtime.runPromise(
+          LocalState.use((service) => service.refresh.pipe(Effect.andThen(service.current))),
+        ),
+      );
+      expect(localState.snippets).toEqual([]);
+      yield* Effect.promise(() => test.runtime.dispose());
+    }),
+  );
+
+  it.effect("refreshes Local State for each live invalidation", () =>
+    Effect.gen(function* () {
+      const published = snippet("2d1e2f3a-4567-4901-8abc-def012345670", "awakened.txt");
       const test = yield* harness({
-        initial: { cursor: "old", items: [] },
-        pages: [
-          { status: "OK", changes: [], nextCursor: "old" },
-          { status: "OK", changes: [{ type: "UPSERT", snippet: awakened }], nextCursor: "wake" },
-        ],
-        wakes: Stream.make(undefined),
+        snapshots: [[], [published]],
+        invalidations: Stream.make(undefined, undefined).pipe(Stream.concat(Stream.never)),
       });
       yield* Effect.promise(() =>
         test.runtime.runPromise(
@@ -354,7 +225,7 @@ it.layer(NodeFileSystem.layer)("local state synchronization seam", (it) => {
           Effect.gen(function* () {
             const localState = yield* LocalState;
             const changed = yield* localState.changes.pipe(
-              Stream.filter((value) => value.snippets.some((item) => item.id === awakened.id)),
+              Stream.filter((value) => value.snippets.some((item) => item.id === published.id)),
               Stream.runHead,
               Effect.map(Option.getOrThrow),
               Effect.forkChild,
@@ -367,10 +238,9 @@ it.layer(NodeFileSystem.layer)("local state synchronization seam", (it) => {
           }),
         ),
       );
-      yield* Effect.promise(() => test.runtime.dispose());
 
-      expect(test.currentState()).toEqual({ cursor: "wake", items: [awakened] });
-      expect(materialized.snippets).toMatchObject([{ id: awakened.id }]);
+      expect(materialized.snippets).toMatchObject([{ id: published.id }]);
+      yield* Effect.promise(() => test.runtime.dispose());
     }),
   );
 });

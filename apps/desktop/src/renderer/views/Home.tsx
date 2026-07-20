@@ -16,6 +16,7 @@ import {
 import { SnippetComposer } from "../components/SnippetComposer.tsx";
 import { signOut, useAuth } from "../hooks/useAuth.ts";
 import { useSnippets } from "../hooks/useSnippets.ts";
+import { useLocalState } from "../hooks/useLocalState.tsx";
 import {
   StorageProviderIcon,
   storageProviderLabel,
@@ -32,6 +33,7 @@ export function Home({ active = true }: { active?: boolean }) {
   const auth = useAuth();
   const linkedProvider = useLinkedStorageProvider();
   const storageStatus = useStorageStatus();
+  const liveConnection = useLocalState().localState.liveConnection;
   const [isDragging, setIsDragging] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copyingId, setCopyingId] = useState<string | null>(null);
@@ -328,6 +330,14 @@ export function Home({ active = true }: { active?: boolean }) {
         }
         storageAction={storageAction}
       />
+
+      {liveConnection !== null && (
+        <p className="px-6 text-[11px] text-muted-foreground" role="status" aria-live="polite">
+          {liveConnection.status === "CONNECTED"
+            ? "Live updates connected"
+            : "Live updates reconnecting…"}
+        </p>
+      )}
 
       <div className="scrollbar-hidden flex min-h-0 flex-1 flex-col overflow-y-auto px-6 pb-4">
         <div className="sticky top-0 z-20 bg-background pt-3 pb-5">

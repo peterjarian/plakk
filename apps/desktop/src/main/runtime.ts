@@ -13,9 +13,8 @@ import { DesktopSessionLive } from "./session/DesktopSessionLive.ts";
 import { makeManagedSnippetContentLive } from "./snippets/content/ManagedSnippetContentLive.ts";
 import { SnippetHydrationLive } from "./snippets/hydration/SnippetHydrationLive.ts";
 import { SnippetHydrationTransportLive } from "./snippets/hydration/SnippetHydrationTransportLive.ts";
-import { SnippetRemoteTransportLive } from "./snippets/replica/SnippetRemoteTransportLive.ts";
+import { makeSnippetRemoteTransportLive } from "./snippets/replica/SnippetRemoteTransportLive.ts";
 import { SnippetReplicaLive } from "./snippets/replica/SnippetReplicaLive.ts";
-import { SnippetReplicaWithUploadCleanupLive } from "./snippets/replica/SnippetReplicaWithUploadCleanupLive.ts";
 import { NativeFileSourcesLive } from "./snippets/sources/NativeFileSourcesLive.ts";
 import { SnippetUploadEngineLive } from "./snippets/upload/SnippetUploadEngineLive.ts";
 import { SnippetUploadOutboxLive } from "./snippets/upload/SnippetUploadOutboxLive.ts";
@@ -34,9 +33,9 @@ const storageUploadLayer = makeStorageUploadLive((input, init) => net.fetch(inpu
   Layer.provide(platformLayer),
 );
 const plakkRpcClientLayer = PlakkRpcClientLive.pipe(Layer.provide(plakkRpcProtocolLayer));
-const snippetRemoteTransportLayer = SnippetRemoteTransportLive.pipe(
-  Layer.provide(plakkRpcClientLayer),
-);
+const snippetRemoteTransportLayer = makeSnippetRemoteTransportLive((input, init) =>
+  net.fetch(input instanceof URL ? input.toString() : input, init),
+).pipe(Layer.provide(plakkRpcClientLayer));
 const snippetUploadRemoteLayer = SnippetUploadRemoteLive.pipe(Layer.provide(plakkRpcClientLayer));
 const uploadEngineDependencies = Layer.mergeAll(
   managedSnippetContentLayer,
@@ -47,9 +46,7 @@ const uploadEngineDependencies = Layer.mergeAll(
 const snippetUploadEngineLayer = SnippetUploadEngineLive.pipe(
   Layer.provide(uploadEngineDependencies),
 );
-const snippetReplicaLayer = SnippetReplicaWithUploadCleanupLive.pipe(
-  Layer.provide(Layer.merge(SnippetReplicaLive, snippetUploadEngineLayer)),
-);
+const snippetReplicaLayer = SnippetReplicaLive;
 const hydrationEngineDependencies = Layer.mergeAll(
   managedSnippetContentLayer,
   snippetReplicaLayer,

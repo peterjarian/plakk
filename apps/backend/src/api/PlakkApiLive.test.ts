@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { DateTime, Effect } from "effect";
 
 import type { StorageProviderService } from "./storage/StorageProvider.ts";
-import { prepareSnippetDownload } from "./PlakkApiLive.ts";
+import { deleteSnippetRecord, prepareSnippetDownload } from "./PlakkApiLive.ts";
 
 const timestamp = DateTime.toDateUtc(DateTime.makeUnsafe("2026-07-15T12:00:00Z"));
 
@@ -68,5 +68,43 @@ describe("stored snippet download preparation", () => {
 
     expect(error).toMatchObject({ code: "NOT_FOUND" });
     expect(getDownloadTarget).not.toHaveBeenCalled();
+  });
+});
+
+describe("Snippet deletion transaction", () => {
+  it("stages account invalidation after removal and exposes it only with commit", async () => {
+    const events: Array<"remove" | "notify" | "commit"> = [];
+    const db = {
+      transaction: <A, E, R>(body: (transaction: DrizzleService["db"]) => Effect.Effect<A, E, R>) =>
+        body(db as unknown as DrizzleService["db"]).pipe(
+          Effect.tap(() =>
+            Effect.sync(() => {
+              events.push("commit");
+            }),
+          ),
+        ),
+      update: () => ({
+        set: () => ({
+          where: () => ({
+            returning: () =>
+              Effect.sync(() => {
+                events.push("remove");
+                return [uploadedSnippet()];
+              }),
+          }),
+        }),
+      }),
+      execute: () =>
+        Effect.sync(() => {
+          events.push("notify");
+        }),
+    } as unknown as DrizzleService["db"];
+
+    const deleted = await Effect.runPromise(
+      deleteSnippetRecord({ db }, "user-1", uploadedSnippet().id),
+    );
+
+    expect(deleted).toBe(true);
+    expect(events).toEqual(["remove", "notify", "commit"]);
   });
 });

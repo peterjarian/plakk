@@ -10,7 +10,10 @@ import { LocalState, LocalStateError, type LocalStateUpdate } from "../local-sta
 import { PlakkRpcClient } from "../PlakkRpcClient.ts";
 import { ManagedSnippetContent } from "../snippets/content/ManagedSnippetContent.ts";
 import { SnippetHydrationEngine } from "../snippets/hydration/SnippetHydration.ts";
-import { SnippetRemoteTransport } from "../snippets/replica/SnippetRemoteTransport.ts";
+import {
+  SnippetRemoteTransport,
+  SnippetRemoteTransportError,
+} from "../snippets/replica/SnippetRemoteTransport.ts";
 import { SnippetReplica } from "../snippets/replica/SnippetReplica.ts";
 import { NativeFileSources } from "../snippets/sources/NativeFileSources.ts";
 import { SnippetUploadEngine } from "../snippets/upload/SnippetUploadEngine.ts";
@@ -49,6 +52,7 @@ const dependencies = (options: {
   readonly localStateOwner?: { readonly account: User; readonly cleanupPending: boolean };
   readonly updateLocalState?: (update: LocalStateUpdate) => Effect.Effect<void, LocalStateError>;
   readonly rpc?: PlakkRpcClient["Service"];
+  readonly remote?: SnippetRemoteTransport["Service"];
   readonly signOut?: () => Effect.Effect<void>;
 }) =>
   Layer.mergeAll(
@@ -73,6 +77,7 @@ const dependencies = (options: {
           account: firstAccount,
           provider: { known: true, value: "GOOGLE_DRIVE" },
           capability: { status: "OFFLINE" },
+          liveConnection: null,
           snippets: [],
         }),
         owner: Effect.succeed(
@@ -105,7 +110,7 @@ const dependencies = (options: {
         project: () => Effect.succeed([]),
         purge: () => Effect.void,
         reconcile: () => Effect.void,
-        removeTombstones: () => Effect.void,
+        removePublishedRecords: () => Effect.void,
         resume: () => Effect.void,
         retry: () => Effect.void,
       }),
@@ -134,11 +139,11 @@ const dependencies = (options: {
     ),
     Layer.succeed(
       SnippetRemoteTransport,
-      SnippetRemoteTransport.of({
-        pull: () => Effect.never,
-        snapshot: () => Effect.never,
-        wakes: () => Stream.never,
-      }),
+      options.remote ??
+        SnippetRemoteTransport.of({
+          snapshot: () => Effect.never,
+          invalidations: () => Stream.never,
+        }),
     ),
     Layer.succeed(
       ManagedSnippetContent,
@@ -160,6 +165,60 @@ const dependencies = (options: {
   );
 
 describe("DesktopSession command authority", () => {
+  it.effect(
+    "refreshes credentials and restarts live invalidations after authentication failure",
+    () =>
+      Effect.gen(function* () {
+        const reconnected = yield* Deferred.make<void>();
+        const localStateUpdates: Array<LocalStateUpdate> = [];
+        const connectionTokens: Array<string> = [];
+        let sessionReads = 0;
+        const layer = dependencies({
+          getSession: () =>
+            Effect.sync(() => ({
+              accessToken: sessionReads++ === 0 ? "expired-token" : "fresh-token",
+              user: firstAccount,
+            })),
+          localStateUpdates,
+          purge: () => Effect.void,
+          remote: SnippetRemoteTransport.of({
+            snapshot: () => Effect.never,
+            invalidations: ({ accessToken }) =>
+              Stream.unwrap(
+                Effect.sync(() => {
+                  connectionTokens.push(accessToken);
+                  return accessToken === "expired-token"
+                    ? Stream.fail(
+                        new SnippetRemoteTransportError({
+                          cause: 401,
+                          reason: "authentication interrupted",
+                        }),
+                      )
+                    : Stream.fromEffect(Deferred.succeed(reconnected, undefined)).pipe(
+                        Stream.map(() => undefined),
+                        Stream.concat(Stream.never),
+                      );
+                }),
+              ),
+          }),
+        });
+
+        const current = yield* Effect.gen(function* () {
+          const session = yield* DesktopSession;
+          yield* session.start;
+          yield* Deferred.await(reconnected);
+          return yield* session.currentAccount;
+        }).pipe(
+          Effect.provide(
+            DesktopSessionLive.pipe(Layer.provide(Layer.merge(layer, NodeFileSystem.layer))),
+          ),
+        );
+
+        expect(connectionTokens).toEqual(["expired-token", "fresh-token"]);
+        expect(current).toMatchObject({ accessToken: "fresh-token" });
+      }),
+  );
+
   it.effect("revokes commands before sign-out cleanup and retains the purge owner for retry", () =>
     Effect.gen(function* () {
       const commandStarted = yield* Deferred.make<void>();
@@ -282,6 +341,11 @@ describe("DesktopSession command authority", () => {
       expect(result.account).toBeNull();
       expect(result.command._tag).toBe("Failure");
       expect(localStateUpdates).toEqual([
+        {
+          kind: "live-connection",
+          accountId: firstAccount.id,
+          status: "RECONNECTING",
+        },
         { kind: "owner-cleanup-pending" },
         { kind: "offline", account: secondAccount },
       ]);
@@ -414,8 +478,7 @@ describe("DesktopSession command authority", () => {
       const result = yield* Effect.gen(function* () {
         const session = yield* DesktopSession;
         const started = yield* session.start.pipe(Effect.result);
-        yield* TestClock.adjust("30 seconds");
-        yield* Effect.yieldNow;
+        yield* session.refresh;
         return { account: yield* session.currentAccount, started };
       }).pipe(
         Effect.provide(
@@ -472,8 +535,11 @@ describe("DesktopSession command authority", () => {
       );
 
       expect(current).toMatchObject({ id: firstAccount.id, accessToken: "token" });
-      expect(localStateUpdates.every((update) => update.kind === "offline")).toBe(true);
-      expect(localStateUpdates.length).toBeGreaterThanOrEqual(2);
+      const sessionUpdates = localStateUpdates.filter(
+        (update) => update.kind !== "live-connection",
+      );
+      expect(sessionUpdates.every((update) => update.kind === "offline")).toBe(true);
+      expect(sessionUpdates.length).toBeGreaterThanOrEqual(2);
     }),
   );
 
@@ -504,8 +570,11 @@ describe("DesktopSession command authority", () => {
       );
 
       expect(completed).toBeDefined();
-      expect(localStateUpdates.length).toBeGreaterThanOrEqual(1);
-      expect(localStateUpdates.every((update) => update.kind === "offline")).toBe(true);
+      const sessionUpdates = localStateUpdates.filter(
+        (update) => update.kind !== "live-connection",
+      );
+      expect(sessionUpdates.length).toBeGreaterThanOrEqual(1);
+      expect(sessionUpdates.every((update) => update.kind === "offline")).toBe(true);
     }),
   );
 });

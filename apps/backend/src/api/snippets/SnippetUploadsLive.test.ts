@@ -1,5 +1,5 @@
 import { Drizzle, type DrizzleService } from "@plakk/db";
-import { snippetChangeFeeds, snippetChanges, snippets, type SnippetRow } from "@plakk/db/schema";
+import { snippets, type SnippetRow } from "@plakk/db/schema";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { DateTime, Effect } from "effect";
 import { TestClock } from "effect/testing";
@@ -57,7 +57,8 @@ const scriptedDb = (script: {
   const selects = [...(script.selects ?? [])];
   const snippetInserts = [...(script.snippetInserts ?? [])];
   const snippetUpdates = [...(script.snippetUpdates ?? [])];
-  const changes: Array<unknown> = [];
+  const notifications: Array<unknown> = [];
+  const transactionEvents: Array<"update" | "notify" | "commit"> = [];
   const conditions: Array<ReturnType<typeof inspectCondition>> = [];
   const updates: Array<{
     readonly set: Partial<SnippetRow>;
@@ -66,7 +67,6 @@ const scriptedDb = (script: {
   const locks: Array<{ readonly strength: string; readonly skipLocked: boolean }> = [];
   const limits: Array<number> = [];
   let transactionCount = 0;
-  let latestSequence = 0n;
 
   const next = <A>(queue: Array<A>, operation: string): A => {
     const result = queue.shift();
@@ -94,7 +94,13 @@ const scriptedDb = (script: {
       body: (tx: DrizzleService["db"]) => Effect.Effect<A, E, R>,
     ): Effect.Effect<A, E, R> => {
       transactionCount += 1;
-      return body(db as unknown as DrizzleService["db"]);
+      return body(db as unknown as DrizzleService["db"]).pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            transactionEvents.push("commit");
+          }),
+        ),
+      );
     },
     select: () => ({
       from: (table: unknown) => {
@@ -103,25 +109,13 @@ const scriptedDb = (script: {
       },
     }),
     insert: (table: unknown) => ({
-      values: (values: Record<string, unknown>) => {
+      values: (_values: Record<string, unknown>) => {
         if (table === snippets) {
           return {
             onConflictDoNothing: () => ({
               returning: () => Effect.sync(() => next(snippetInserts, "snippet insert returning")),
             }),
           };
-        }
-        if (table === snippetChangeFeeds) {
-          return {
-            onConflictDoUpdate: () => ({
-              returning: () => Effect.sync(() => [{ latestSequence: (latestSequence += 1n) }]),
-            }),
-          };
-        }
-        if (table === snippetChanges) {
-          return Effect.sync(() => {
-            changes.push(values.snapshot);
-          });
         }
         throw new Error("Unexpected insert table.");
       },
@@ -135,18 +129,28 @@ const scriptedDb = (script: {
             conditions.push(inspected);
             updates.push({ set: values, condition: inspected });
             return {
-              returning: () => Effect.sync(() => next(snippetUpdates, "snippet update returning")),
+              returning: () =>
+                Effect.sync(() => {
+                  transactionEvents.push("update");
+                  return next(snippetUpdates, "snippet update returning");
+                }),
             };
           },
         }),
       };
     },
     delete: () => ({ where: () => Effect.void }),
+    execute: (statement: unknown) =>
+      Effect.sync(() => {
+        notifications.push(statement);
+        transactionEvents.push("notify");
+      }),
   } as unknown as DrizzleService["db"];
 
   return {
     db,
-    changes: () => changes,
+    notifications: () => notifications,
+    transactionEvents: () => transactionEvents,
     conditions: () => conditions,
     updates: () => updates,
     locks: () => locks,
@@ -248,7 +252,7 @@ describe("authoritative snippet uploads", () => {
       uploadStatus: "UPLOADING",
     });
     expect(result.conflict).toMatchObject({ code: "CONFLICT" });
-    expect(store.changes()).toHaveLength(1);
+    expect(store.notifications()).toHaveLength(0);
     expect(store.transactionCount()).toBe(3);
     expect(store.remaining()).toEqual({ selects: 0, snippetInserts: 0, snippetUpdates: 0 });
   });
@@ -272,7 +276,7 @@ describe("authoritative snippet uploads", () => {
 
     expect(results).toEqual([prepared, prepared]);
     expect(storage.prepareUpload).toHaveBeenCalledTimes(2);
-    expect(store.changes()).toHaveLength(0);
+    expect(store.notifications()).toHaveLength(0);
     expect(store.remaining()).toEqual({ selects: 0, snippetInserts: 0, snippetUpdates: 0 });
   });
 
@@ -311,9 +315,7 @@ describe("authoritative snippet uploads", () => {
 
     expect(Date.parse(result.heartbeat.expiresAt)).toBe(heartbeatExpiresAt.getTime());
     expect(result).toMatchObject({ beforeDeadline: 0, expired: 1, replay: 0 });
-    expect(store.changes()).toMatchObject([
-      { id: createInput.id, uploadStatus: "CLIENT_UPLOAD_FAILED" },
-    ]);
+    expect(store.notifications()).toHaveLength(0);
     expect(store.locks()).toEqual([
       { strength: "update", skipLocked: true },
       { strength: "update", skipLocked: true },
@@ -411,14 +413,12 @@ describe("authoritative snippet uploads", () => {
       uploadStatus: "UPLOADED",
       storageObjectId: "provider-object",
     });
-    expect(store.changes()).toMatchObject([
-      { id: createInput.id, uploadStatus: "FAILED" },
-      { id: createInput.id, uploadStatus: "UPLOADING" },
-      {
-        id: createInput.id,
-        uploadStatus: "UPLOADED",
-        storageObjectId: "provider-object",
-      },
+    expect(store.notifications()).toHaveLength(1);
+    const notifyIndex = store.transactionEvents().indexOf("notify");
+    expect(store.transactionEvents().slice(notifyIndex - 1, notifyIndex + 2)).toEqual([
+      "update",
+      "notify",
+      "commit",
     ]);
     expect(store.updates()).toHaveLength(3);
     expectGuard(
@@ -462,7 +462,7 @@ describe("authoritative snippet uploads", () => {
     );
 
     expect(retried.uploadStatus).toBe("UPLOADING");
-    expect(store.changes()).toMatchObject([{ id: createInput.id, uploadStatus: "UPLOADING" }]);
+    expect(store.notifications()).toHaveLength(0);
     expectGuard(
       store.updates()[0]!.condition,
       ["id", "owner_workos_user_id", "upload_status", "deleted_at"],
@@ -494,7 +494,7 @@ describe("authoritative snippet uploads", () => {
 
     expect(result.expired).toMatchObject({ code: "CONFLICT" });
     expect(result.deleted).toMatchObject({ code: "NOT_FOUND" });
-    expect(store.changes()).toHaveLength(0);
+    expect(store.notifications()).toHaveLength(0);
     expect(store.updates()).toHaveLength(0);
     expect(store.remaining()).toEqual({ selects: 0, snippetInserts: 0, snippetUpdates: 0 });
   });
@@ -519,7 +519,7 @@ describe("authoritative snippet uploads", () => {
     );
 
     expect(error).toMatchObject({ code: "CONFLICT" });
-    expect(store.changes()).toHaveLength(0);
+    expect(store.notifications()).toHaveLength(0);
     expect(store.updates()).toHaveLength(1);
     expectGuard(
       store.updates()[0]!.condition,

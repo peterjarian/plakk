@@ -42,7 +42,7 @@ describe("desktop account purge", () => {
               project: () => Effect.succeed([]),
               purge: () => record("uploads"),
               reconcile: () => Effect.void,
-              removeTombstones: () => Effect.void,
+              removePublishedRecords: () => Effect.void,
               resume: () => Effect.void,
               retry: () => Effect.void,
             }),

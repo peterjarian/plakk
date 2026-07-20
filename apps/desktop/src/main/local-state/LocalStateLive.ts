@@ -16,6 +16,7 @@ const emptyLocalState = (): LocalStateValue => ({
   account: null,
   provider: { known: false, value: null },
   capability: { status: "OFFLINE" },
+  liveConnection: null,
   snippets: [],
 });
 
@@ -52,6 +53,7 @@ const makeLocalState = Effect.gen(function* () {
           account: persisted.account,
           provider: persisted.provider,
           capability: { status: "OFFLINE" } as const,
+          liveConnection: { status: "RECONNECTING" } as const,
           snippets: initialItems,
         };
   yield* Schema.decodeUnknownEffect(LocalStateSchema)(initial).pipe(
@@ -90,6 +92,7 @@ const makeLocalState = Effect.gen(function* () {
   const materializeSession = Effect.fn("LocalState.materializeSession")(function* (
     nextSession: CachedLocalStateSession | null,
     capability: LocalStateValue["capability"],
+    liveConnection: LocalStateValue["liveConnection"],
   ) {
     const materializedSnippets =
       nextSession === null ? [] : yield* snippets.read(nextSession.account.id);
@@ -97,6 +100,7 @@ const makeLocalState = Effect.gen(function* () {
       account: nextSession?.account ?? null,
       provider: nextSession?.provider ?? { known: false, value: null },
       capability,
+      liveConnection: nextSession === null ? null : liveConnection,
       snippets: materializedSnippets,
     } satisfies Omit<LocalStateValue, "revision">;
   });
@@ -108,14 +112,14 @@ const makeLocalState = Effect.gen(function* () {
           const currentSession = yield* Ref.get(session);
           const lockedSession =
             currentSession === null ? null : { ...currentSession, cleanupPending: true };
-          const next = yield* materializeSession(null, { status: "OFFLINE" });
+          const next = yield* materializeSession(null, { status: "OFFLINE" }, null);
           yield* store.save(lockedSession);
           yield* Ref.set(session, lockedSession);
           yield* publish(next);
           return;
         }
         if (input.kind === "signed-out") {
-          const next = yield* materializeSession(null, { status: "OFFLINE" });
+          const next = yield* materializeSession(null, { status: "OFFLINE" }, null);
           yield* store.save(null);
           yield* Ref.set(session, null);
           yield* publish(next);
@@ -123,6 +127,16 @@ const makeLocalState = Effect.gen(function* () {
         }
 
         const currentSession = yield* Ref.get(session);
+        const currentState = yield* Ref.get(state);
+        if (input.kind === "live-connection") {
+          if (currentSession?.account.id !== input.accountId || currentSession.cleanupPending)
+            return;
+          const next = yield* materializeSession(currentSession, currentState.capability, {
+            status: input.status,
+          });
+          yield* publish(next);
+          return;
+        }
         if (
           currentSession?.cleanupPending === true &&
           currentSession.account.id === input.account.id
@@ -156,7 +170,14 @@ const makeLocalState = Effect.gen(function* () {
                 connection: input.connection,
               } as const)
             : ({ status: "OFFLINE" } as const);
-        const next = yield* materializeSession(nextSession, capability);
+        const sameAccount = currentSession?.account.id === nextSession.account.id;
+        const next = yield* materializeSession(
+          nextSession,
+          capability,
+          sameAccount && currentState.liveConnection !== null
+            ? currentState.liveConnection
+            : { status: "RECONNECTING" },
+        );
         yield* store.save(nextSession);
         yield* Ref.set(session, nextSession);
         yield* publish(next);
@@ -171,6 +192,7 @@ const makeLocalState = Effect.gen(function* () {
       const next = yield* materializeSession(
         currentSession?.cleanupPending === true ? null : currentSession,
         currentSession?.cleanupPending === true ? { status: "OFFLINE" } : current.capability,
+        currentSession?.cleanupPending === true ? null : current.liveConnection,
       );
       yield* publish(next);
     }),

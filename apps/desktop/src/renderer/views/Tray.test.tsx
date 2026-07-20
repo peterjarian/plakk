@@ -34,6 +34,10 @@ vi.mock("../hooks/useAuth.ts", () => ({
   useAuth: () => ({ user: { email: "reader@example.com" } }),
 }));
 
+vi.mock("../hooks/useLocalState.tsx", () => ({
+  useLocalState: () => ({ localState: { liveConnection: null } }),
+}));
+
 vi.mock("../hooks/useStorageStatus.tsx", () => ({
   StorageProviderIcon: () => null,
   storageProviderLabel: () => "Google Drive",

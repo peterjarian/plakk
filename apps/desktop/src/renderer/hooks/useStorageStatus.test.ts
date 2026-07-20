@@ -8,6 +8,7 @@ const localState = (input: Partial<LocalState> = {}): LocalState => ({
   account: null,
   provider: { known: false, value: null },
   capability: { status: "OFFLINE" },
+  liveConnection: null,
   snippets: [],
   ...input,
 });

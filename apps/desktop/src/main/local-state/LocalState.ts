@@ -28,6 +28,11 @@ export type LocalStateUpdate =
       readonly accountStatus: AccountStatus;
       readonly connection: PipeConnection | null;
     }
+  | {
+      readonly kind: "live-connection";
+      readonly accountId: string;
+      readonly status: "CONNECTED" | "RECONNECTING";
+    }
   | { readonly kind: "owner-cleanup-pending" }
   | { readonly kind: "signed-out" };
 

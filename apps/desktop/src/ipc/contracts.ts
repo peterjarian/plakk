@@ -149,6 +149,9 @@ export const LocalStateSchema = Schema.Struct({
       connection: Schema.NullOr(PipeConnectionSchema),
     }),
   ]),
+  liveConnection: Schema.NullOr(
+    Schema.Struct({ status: Schema.Literals(["CONNECTED", "RECONNECTING"] as const) }),
+  ),
   snippets: Schema.Array(DesktopSnippetSchema),
 });
 

@@ -17,10 +17,12 @@ const makeLocalStateSnippets = Effect.gen(function* () {
 
   const changes = Stream.merge(
     replica.changes.pipe(Stream.map(({ accountId }) => accountId)),
-    Stream.merge(uploads.changes, hydration.changes),
+    Stream.merge(uploads.changes, hydration.changes, { haltStrategy: "both" }),
+    { haltStrategy: "both" },
   );
   const read = Effect.fn("LocalStateSnippets.read")(function* (accountId: string) {
     const replicaItems = (yield* replica.get(accountId))?.items ?? [];
+    // #76 removes this compatibility join when uploads move into the Device Snippet collection.
     yield* uploads.reconcile(accountId, replicaItems);
     const items = yield* uploads.project(accountId, replicaItems);
     const reconciledAvailability = yield* hydration.reconcile(accountId);

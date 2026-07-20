@@ -5,6 +5,7 @@ import { Home } from "./Home.tsx";
 import { Tray } from "./Tray.tsx";
 
 const state = vi.hoisted(() => {
+  let liveConnection: { readonly status: "CONNECTED" | "RECONNECTING" } | null = null;
   const account = {
     id: "user_1",
     email: "reader@example.com",
@@ -18,6 +19,9 @@ const state = vi.hoisted(() => {
     account,
     provider: { known: true, value: "GOOGLE_DRIVE" },
     capability: { status: "OFFLINE" },
+    get liveConnection() {
+      return liveConnection;
+    },
     snippets: [
       {
         id: "0d1e2f3a-4567-4890-8abc-def012345678",
@@ -33,7 +37,13 @@ const state = vi.hoisted(() => {
       },
     ],
   } as const;
-  return { account, localState };
+  return {
+    account,
+    localState,
+    setLiveConnection: (next: typeof liveConnection) => {
+      liveConnection = next;
+    },
+  };
 });
 
 vi.mock("../hooks/useLocalState.tsx", () => ({
@@ -63,5 +73,16 @@ describe("local state views", () => {
     expect(tray).toContain("Google Drive");
     expect(home).toContain("Offline — cached snippets stay available.");
     expect(tray).toContain("Offline — cached snippets stay available");
+  });
+
+  it("presents reconnecting live updates in Home and Tray", () => {
+    state.setLiveConnection({ status: "RECONNECTING" });
+
+    const home = renderToStaticMarkup(<Home />);
+    const tray = renderToStaticMarkup(<Tray />);
+
+    expect(home).toContain("Live updates reconnecting…");
+    expect(tray).toContain("Reconnecting…");
+    state.setLiveConnection(null);
   });
 });
