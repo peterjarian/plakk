@@ -1,12 +1,7 @@
-import {
-  ApiSnippetSchema,
-  SnippetChangeCursorSchema,
-  type ApiSnippet,
-} from "@plakk/shared/PlakkApi";
+import { ApiSnippetSchema, type ApiSnippet } from "@plakk/shared/PlakkApi";
 import { Context, type Effect, Schema, type Stream } from "effect";
 
 export const SnippetReplicaStateSchema = Schema.Struct({
-  cursor: SnippetChangeCursorSchema,
   items: Schema.Array(ApiSnippetSchema),
 });
 
@@ -17,8 +12,8 @@ export class SnippetReplicaError extends Schema.TaggedErrorClass<SnippetReplicaE
   { cause: Schema.Defect(), reason: Schema.String },
 ) {}
 
-export class SnippetRecoveryCleanupError extends Schema.TaggedErrorClass<SnippetRecoveryCleanupError>()(
-  "SnippetRecoveryCleanupError",
+export class SnippetPublishedCleanupError extends Schema.TaggedErrorClass<SnippetPublishedCleanupError>()(
+  "SnippetPublishedCleanupError",
   { cause: Schema.Defect(), reason: Schema.String },
 ) {}
 
@@ -33,8 +28,8 @@ export class SnippetReplica extends Context.Service<
     commit(
       accountId: string,
       state: SnippetReplicaState,
-      deletedIds?: ReadonlyArray<string>,
-    ): Effect.Effect<void, SnippetReplicaError | SnippetRecoveryCleanupError>;
+      removedPublishedIds?: ReadonlyArray<string>,
+    ): Effect.Effect<void, SnippetReplicaError | SnippetPublishedCleanupError>;
     purge(accountId: string): Effect.Effect<void, SnippetReplicaError>;
     remove(accountId: string, snippetId: string): Effect.Effect<void, SnippetReplicaError>;
   }

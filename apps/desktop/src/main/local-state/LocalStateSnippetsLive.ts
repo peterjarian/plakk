@@ -17,7 +17,8 @@ const makeLocalStateSnippets = Effect.gen(function* () {
 
   const changes = Stream.merge(
     replica.changes.pipe(Stream.map(({ accountId }) => accountId)),
-    Stream.merge(uploads.changes, hydration.changes),
+    Stream.merge(uploads.changes, hydration.changes, { haltStrategy: "both" }),
+    { haltStrategy: "both" },
   );
   const read = Effect.fn("LocalStateSnippets.read")(function* (accountId: string) {
     const replicaItems = (yield* replica.get(accountId))?.items ?? [];

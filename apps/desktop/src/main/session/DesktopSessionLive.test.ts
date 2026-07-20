@@ -43,6 +43,7 @@ describe("DesktopSession", () => {
         readonly user: User;
       } | null>();
       const callbackStarted = yield* Deferred.make<void>();
+      const syncStarted = yield* Deferred.make<void>();
       const localStateUpdates: Array<LocalStateUpdate> = [];
       const credentialEvents: Array<string> = [];
       const transitionEvents: Array<string> = [];
@@ -94,6 +95,7 @@ describe("DesktopSession", () => {
               account,
               provider: { known: true, value: "GOOGLE_DRIVE" },
               capability: { status: "OFFLINE" },
+              liveConnection: null,
               snippets: [],
             }),
             owner: Effect.succeed({ account, cleanupPending: false }),
@@ -121,7 +123,7 @@ describe("DesktopSession", () => {
             project: () => Effect.succeed([]),
             purge: () => Effect.void,
             reconcile: () => Effect.void,
-            removeTombstones: () => Effect.void,
+            removePublishedRecords: () => Effect.void,
             resume: () => Effect.void,
             retry: () => Effect.void,
           }),
@@ -151,14 +153,13 @@ describe("DesktopSession", () => {
         Layer.succeed(
           SnippetRemoteTransport,
           SnippetRemoteTransport.of({
-            pull: () => Effect.never,
-            snapshot: () =>
-              Effect.never.pipe(
-                Effect.onInterrupt(() =>
-                  Effect.sync(() => void transitionEvents.push("sync-stopped")),
-                ),
+            snapshot: () => Effect.never,
+            invalidations: () =>
+              Stream.fromEffect(Deferred.succeed(syncStarted, undefined)).pipe(
+                Stream.map(() => undefined),
+                Stream.concat(Stream.never),
+                Stream.ensuring(Effect.sync(() => void transitionEvents.push("sync-stopped"))),
               ),
-            wakes: () => Stream.never,
           }),
         ),
         Layer.succeed(
@@ -205,7 +206,7 @@ describe("DesktopSession", () => {
         const updateAfterRaces = localStateUpdates.at(-1);
 
         yield* session.handleCallbackUrl("plakk-auth://callback");
-        yield* Effect.yieldNow;
+        yield* Deferred.await(syncStarted);
         const purgesBeforeSwitch = purgedAccountIds.length;
         const transitionEventsBeforeSwitch = transitionEvents.length;
         yield* session.handleCallbackUrl("plakk-auth://switch");
@@ -236,7 +237,9 @@ describe("DesktopSession", () => {
       expect(result.updateAfterRaces).toEqual({ kind: "signed-out" });
       expect(result.switchPurges).toEqual([account.id]);
       expect(result.switchTransitionEvents.slice(0, 2)).toEqual(["sync-stopped", "account-purged"]);
-      expect(result.localStateUpdates.slice(-4)).toEqual([
+      expect(
+        result.localStateUpdates.filter((update) => update.kind !== "live-connection").slice(-4),
+      ).toEqual([
         { kind: "owner-cleanup-pending" },
         { kind: "signed-out" },
         { kind: "offline", account: secondAccount },

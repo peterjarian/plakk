@@ -63,7 +63,7 @@ export class SnippetUploadEngine extends Context.Service<
       account: UploadOwner,
       snippetId: string,
     ): Effect.Effect<void, SnippetUploadEngineFailure>;
-    removeTombstones(
+    removePublishedRecords(
       accountId: string,
       snippetIds: ReadonlyArray<string>,
     ): Effect.Effect<void, SnippetUploadOutboxError>;

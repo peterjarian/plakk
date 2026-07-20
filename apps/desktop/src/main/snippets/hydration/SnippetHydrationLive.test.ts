@@ -50,7 +50,6 @@ const hydrationHarness = (input?: {
   readonly availableFailureId?: string;
 }) => {
   let replicaState: SnippetReplicaState = {
-    cursor: "cursor-1",
     items: input?.snippets ?? [input?.snippet ?? apiSnippet()],
   };
   const content = new Map<string, number>();
@@ -536,7 +535,7 @@ describe("SnippetHydrationEngine", () => {
     }),
   );
 
-  it.live("clears an idle hydration failure when the snippet is tombstoned", () =>
+  it.live("clears an idle hydration failure when the snippet is absent", () =>
     Effect.gen(function* () {
       const failure = new SnippetHydrationError({
         cause: null,

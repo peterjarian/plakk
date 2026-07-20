@@ -329,7 +329,7 @@ const harness = (options?: {
     replica: {
       items: () => replicaState?.items ?? [],
       set: (items: ReadonlyArray<ApiSnippet>) => {
-        replicaState = { cursor: "0", items };
+        replicaState = { items };
       },
     },
     run,
@@ -706,7 +706,7 @@ describe("SnippetUploadEngine", () => {
     ]);
   });
 
-  it("does not resurrect retained failed recovery after a tombstone and restart", async () => {
+  it("does not resurrect retained failed recovery after snapshot deletion and restart", async () => {
     const test = harness();
     const uploadingId = "1d1e2f3a-4567-4890-8abc-def012345679";
     test.outbox.set(account.id, [
@@ -745,7 +745,7 @@ describe("SnippetUploadEngine", () => {
     const projection = await test.run(
       SnippetUploadEngine.use((engine) =>
         engine
-          .removeTombstones(account.id, [snippetId, uploadingId])
+          .removePublishedRecords(account.id, [snippetId, uploadingId])
           .pipe(Effect.andThen(engine.project(account.id, []))),
       ),
     );
@@ -845,7 +845,7 @@ describe("SnippetUploadEngine", () => {
     }).pipe(Effect.provide(test.layer), Effect.provide(TestClock.layer()));
   });
 
-  it("waits for the ordered tombstone instead of rewriting the readable replica", async () => {
+  it("waits for complete snapshot confirmation instead of rewriting the readable replica", async () => {
     const test = harness();
     const replica = apiSnippet("UPLOADED");
     test.replica.set([replica]);

@@ -7,7 +7,7 @@ import { DateTime, Effect, Layer } from "effect";
 import { StorageProviderService } from "../storage/StorageProvider.ts";
 import { mapStorageErrorsToRpc } from "../storage/mapStorageErrorsToRpc.ts";
 import { toApiSnippet } from "../transformers/toApiSnippet.ts";
-import { appendSnippetChange } from "./changeFeed.ts";
+import { notifySnippetChanges } from "./snippetInvalidations.ts";
 import {
   type CompleteSnippetUploadInput,
   type PrepareSnippetUploadInput,
@@ -85,7 +85,6 @@ export const SnippetUploadsLive = Layer.effect(
               .onConflictDoNothing()
               .returning();
             if (inserted !== undefined) {
-              yield* appendSnippetChange(tx, { type: "UPSERT", snippet: inserted });
               return { type: "snippet" as const, snippet: inserted };
             }
 
@@ -202,9 +201,6 @@ export const SnippetUploadsLive = Layer.effect(
                 ),
               )
               .returning();
-            if (snippet !== undefined) {
-              yield* appendSnippetChange(tx, { type: "UPSERT", snippet });
-            }
             return snippet;
           }),
         )
@@ -254,9 +250,6 @@ export const SnippetUploadsLive = Layer.effect(
                 ),
               )
               .returning();
-            if (snippet !== undefined) {
-              yield* appendSnippetChange(tx, { type: "UPSERT", snippet });
-            }
             return snippet;
           }),
         )
@@ -305,7 +298,7 @@ export const SnippetUploadsLive = Layer.effect(
               )
               .returning();
             if (snippet !== undefined) {
-              yield* appendSnippetChange(tx, { type: "UPSERT", snippet });
+              yield* notifySnippetChanges(tx, ownerWorkosUserId);
             }
             return snippet;
           }),
@@ -362,11 +355,6 @@ export const SnippetUploadsLive = Layer.effect(
                 ),
               )
               .returning();
-            yield* Effect.forEach(
-              updated,
-              (snippet) => appendSnippetChange(tx, { type: "UPSERT", snippet }),
-              { discard: true },
-            );
             return updated;
           }),
         )

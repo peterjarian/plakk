@@ -78,7 +78,6 @@ export const SnippetReplicaLive = Layer.effect(
             yield* Effect.try({
               try: () => {
                 store.delete(accountId);
-                store.delete(`pending-deletes:${accountId}`);
               },
               catch: (cause) =>
                 new SnippetReplicaError({

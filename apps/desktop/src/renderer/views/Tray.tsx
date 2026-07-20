@@ -2,6 +2,7 @@ import { useEffect, useState, type DragEvent } from "react";
 import type { ClipboardContent, TrayDroppedItem } from "../../ipc/contracts.ts";
 import { useAuth } from "../hooks/useAuth.ts";
 import { useSnippets } from "../hooks/useSnippets.ts";
+import { useLocalState } from "../hooks/useLocalState.tsx";
 import {
   StorageProviderIcon,
   storageProviderLabel,
@@ -23,6 +24,7 @@ export function Tray() {
   const auth = useAuth();
   const provider = useLinkedStorageProvider();
   const storageStatus = useStorageStatus();
+  const liveConnection = useLocalState().localState.liveConnection;
   const ingestionAllowed = storageStatus.kind === "connected" && storageStatus.canSync;
   const ingestionProvider = storageStatus.kind === "connected" ? storageStatus.provider : null;
   const { error: snippetReadError, items, reload: reloadSnippets } = useSnippets();
@@ -133,7 +135,14 @@ export function Tray() {
   return (
     <TrayShell>
       <header className="flex shrink-0 items-center justify-between gap-3 border-b px-4 py-2.5">
-        <p className="min-w-0 truncate text-xs font-medium">{auth.user?.email ?? "Plakk"}</p>
+        <div className="min-w-0">
+          <p className="truncate text-xs font-medium">{auth.user?.email ?? "Plakk"}</p>
+          {liveConnection !== null && (
+            <p className="text-[10px] text-muted-foreground" role="status" aria-live="polite">
+              {liveConnection.status === "CONNECTED" ? "Live" : "Reconnecting…"}
+            </p>
+          )}
+        </div>
         {provider !== null && (
           <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground">
             <StorageProviderIcon provider={provider} className="size-3.5" />

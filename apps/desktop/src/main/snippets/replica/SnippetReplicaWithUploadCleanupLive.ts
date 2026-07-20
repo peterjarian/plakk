@@ -1,7 +1,7 @@
 import { Effect, Layer } from "effect";
 
 import { SnippetUploadEngine } from "../upload/SnippetUploadEngine.ts";
-import { SnippetRecoveryCleanupError, SnippetReplica } from "./SnippetReplica.ts";
+import { SnippetPublishedCleanupError, SnippetReplica } from "./SnippetReplica.ts";
 
 const makeSnippetReplicaWithUploadCleanup = Effect.gen(function* () {
   const replica = yield* SnippetReplica;
@@ -10,16 +10,16 @@ const makeSnippetReplicaWithUploadCleanup = Effect.gen(function* () {
   return SnippetReplica.of({
     changes: replica.changes,
     get: (accountId) => replica.get(accountId),
-    commit: (accountId, state, deletedIds = []) =>
-      uploads.removeTombstones(accountId, deletedIds).pipe(
+    commit: (accountId, state, removedPublishedIds = []) =>
+      uploads.removePublishedRecords(accountId, removedPublishedIds).pipe(
         Effect.mapError(
           (cause) =>
-            new SnippetRecoveryCleanupError({
+            new SnippetPublishedCleanupError({
               cause,
               reason: cause.reason,
             }),
         ),
-        Effect.andThen(replica.commit(accountId, state, deletedIds)),
+        Effect.andThen(replica.commit(accountId, state)),
       ),
     purge: (accountId) => replica.purge(accountId),
     remove: (accountId, snippetId) => replica.remove(accountId, snippetId),

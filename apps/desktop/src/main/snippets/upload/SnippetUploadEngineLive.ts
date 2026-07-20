@@ -571,23 +571,22 @@ export const SnippetUploadEngineLive = Layer.effect(
       yield* publish(accountId);
     });
 
-    const removeTombstones = Effect.fn("SnippetUploadEngine.removeTombstones")(function* (
-      accountId: string,
-      snippetIds: ReadonlyArray<string>,
-    ) {
-      yield* Effect.forEach(
-        snippetIds,
-        (snippetId) => {
-          const fiber = active.get(snippetId);
-          active.delete(snippetId);
-          progressById.delete(snippetId);
-          return (
-            fiber === undefined || fiber === null ? Effect.void : Fiber.interrupt(fiber)
-          ).pipe(Effect.andThen(outbox.remove(accountId, snippetId)));
-        },
-        { discard: true },
-      );
-    });
+    const removePublishedRecords = Effect.fn("SnippetUploadEngine.removePublishedRecords")(
+      function* (accountId: string, snippetIds: ReadonlyArray<string>) {
+        yield* Effect.forEach(
+          snippetIds,
+          (snippetId) => {
+            const fiber = active.get(snippetId);
+            active.delete(snippetId);
+            progressById.delete(snippetId);
+            return (
+              fiber === undefined || fiber === null ? Effect.void : Fiber.interrupt(fiber)
+            ).pipe(Effect.andThen(outbox.remove(accountId, snippetId)));
+          },
+          { discard: true },
+        );
+      },
+    );
 
     const remove = Effect.fn("SnippetUploadEngine.delete")(function* (
       account: UploadOwner,
@@ -669,7 +668,7 @@ export const SnippetUploadEngineLive = Layer.effect(
       project,
       purge,
       reconcile,
-      removeTombstones,
+      removePublishedRecords,
       resume,
       retry,
     });

@@ -1,41 +1,33 @@
-import type { ApiSnippet, SnippetChangePage } from "@plakk/shared/PlakkApi";
-import { Effect, Schedule, Stream } from "effect";
+import type { ApiSnippet } from "@plakk/shared/PlakkApi";
+import { Effect, Stream } from "effect";
 
 import { ManagedSnippetContent } from "../content/ManagedSnippetContent.ts";
 import { SnippetRemoteTransport, type SnippetSyncAccount } from "./SnippetRemoteTransport.ts";
 import { SnippetReplica, type SnippetReplicaState } from "./SnippetReplica.ts";
 
+export type LiveConnectionStatus = "CONNECTED" | "RECONNECTING";
+
 const ordered = (items: Iterable<ApiSnippet>): ReadonlyArray<ApiSnippet> =>
   Array.from(items).sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 
-const applyChanges = (
-  items: ReadonlyArray<ApiSnippet>,
-  page: Extract<SnippetChangePage, { readonly status: "OK" }>,
-): ReadonlyArray<ApiSnippet> => {
-  const next = new Map(items.map((snippet) => [snippet.id, snippet]));
-  for (const change of page.changes) {
-    if (change.type === "DELETE") next.delete(change.snippetId);
-    else next.set(change.snippet.id, change.snippet);
-  }
-  return ordered(next.values());
-};
+const isPublished = (snippet: ApiSnippet) => snippet.uploadStatus === "UPLOADED";
 
-const replaceWithSnapshot = Effect.fn("SnippetReplica.replaceWithSnapshot")(function* (
-  accountId: string,
+export const reconcileSnippetSnapshot = (
   current: SnippetReplicaState | null,
-  snapshot: SnippetReplicaState,
-) {
-  const replica = yield* SnippetReplica;
-  const content = yield* ManagedSnippetContent;
-  const freshIds = new Set(snapshot.items.map((snippet) => snippet.id));
-  const staleIds =
-    current?.items.filter((snippet) => !freshIds.has(snippet.id)).map((snippet) => snippet.id) ??
-    [];
-  const normalized = { cursor: snapshot.cursor, items: ordered(snapshot.items) };
-  yield* content.invalidate(accountId, staleIds);
-  yield* replica.commit(accountId, normalized, staleIds);
-  return normalized;
-});
+  snapshot: ReadonlyArray<ApiSnippet>,
+): { readonly state: SnippetReplicaState; readonly stalePublishedIds: ReadonlyArray<string> } => {
+  const published = new Map(snapshot.map((snippet) => [snippet.id, snippet]));
+  const local = (current?.items ?? []).filter(
+    (snippet) => !isPublished(snippet) && !published.has(snippet.id),
+  );
+  const stalePublishedIds = (current?.items ?? [])
+    .filter((snippet) => isPublished(snippet) && !published.has(snippet.id))
+    .map((snippet) => snippet.id);
+  return {
+    state: { items: ordered([...published.values(), ...local]) },
+    stalePublishedIds,
+  };
+};
 
 export const syncSnippetReplica = Effect.fn("SnippetReplica.sync")(function* (
   account: SnippetSyncAccount,
@@ -43,62 +35,55 @@ export const syncSnippetReplica = Effect.fn("SnippetReplica.sync")(function* (
   const replica = yield* SnippetReplica;
   const content = yield* ManagedSnippetContent;
   const remote = yield* SnippetRemoteTransport;
-  let state = yield* replica.get(account.id);
-
-  if (state === null) {
-    const snapshot = yield* remote.snapshot(account);
-    state = yield* replaceWithSnapshot(account.id, null, snapshot);
+  const snapshot = yield* remote.snapshot(account);
+  const reconciled = reconcileSnippetSnapshot(yield* replica.get(account.id), snapshot);
+  if (reconciled.stalePublishedIds.length > 0) {
+    yield* content.invalidate(account.id, reconciled.stalePublishedIds);
   }
-
-  while (true) {
-    const page: SnippetChangePage = yield* remote.pull(account, state.cursor);
-    if (page.status === "RESNAPSHOT_REQUIRED") {
-      const snapshot = yield* remote.snapshot(account);
-      state = yield* replaceWithSnapshot(account.id, state, snapshot);
-      continue;
-    }
-
-    if (page.changes.length === 0) {
-      if (page.nextCursor !== state.cursor) {
-        state = { ...state, cursor: page.nextCursor };
-        yield* replica.commit(account.id, state);
-      }
-      return;
-    }
-
-    const deletedIds = page.changes.flatMap((change) =>
-      change.type === "DELETE" ? [change.snippetId] : [],
-    );
-    state = { cursor: page.nextCursor, items: applyChanges(state.items, page) };
-    if (deletedIds.length > 0) yield* content.invalidate(account.id, deletedIds);
-    yield* replica.commit(account.id, state, deletedIds);
-  }
-});
-
-const syncAndKeepRunning = Effect.fn("SnippetReplica.syncAndKeepRunning")(function* (
-  account: SnippetSyncAccount,
-) {
-  yield* syncSnippetReplica(account).pipe(
-    Effect.catch((error) => Effect.logWarning("Snippet replica synchronization paused", { error })),
-  );
+  yield* replica.commit(account.id, reconciled.state, reconciled.stalePublishedIds);
+  return reconciled.state;
 });
 
 export const runSnippetReplicaSync = Effect.fn("SnippetReplica.run")(function* (
   account: SnippetSyncAccount,
+  lifecycle: {
+    readonly onConnectionStatus: (status: LiveConnectionStatus) => Effect.Effect<void>;
+    readonly onConnected: Effect.Effect<void>;
+  } = { onConnectionStatus: () => Effect.void, onConnected: Effect.void },
 ) {
   const remote = yield* SnippetRemoteTransport;
-  const wakes = remote.wakes(account).pipe(
-    Stream.tapError((error) =>
-      Effect.logWarning("Snippet change wake stream disconnected", { error }),
-    ),
-    Stream.retry(Schedule.spaced("5 seconds")),
-  );
-  const healthChecks = Stream.fromSchedule(Schedule.spaced("5 minutes")).pipe(
-    Stream.map(() => undefined),
-  );
+  let status: LiveConnectionStatus | null = null;
+  const publishStatus = Effect.fn("SnippetReplica.publishConnectionStatus")(function* (
+    next: LiveConnectionStatus,
+  ) {
+    if (status === next) return;
+    status = next;
+    yield* lifecycle.onConnectionStatus(next);
+  });
 
-  yield* syncAndKeepRunning(account);
-  yield* Stream.merge(wakes, healthChecks).pipe(
-    Stream.runForEach(() => syncAndKeepRunning(account)),
-  );
+  while (true) {
+    yield* publishStatus("RECONNECTING");
+    let connected = false;
+    yield* remote.invalidations(account).pipe(
+      Stream.runForEach(() =>
+        Effect.gen(function* () {
+          if (!connected) {
+            connected = true;
+            yield* publishStatus("CONNECTED");
+            yield* lifecycle.onConnected;
+          }
+          yield* syncSnippetReplica(account).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("Complete Snippet refresh failed", { cause }),
+            ),
+          );
+        }),
+      ),
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Snippet invalidation stream disconnected", { cause }),
+      ),
+    );
+    yield* publishStatus("RECONNECTING");
+    yield* Effect.sleep("5 seconds");
+  }
 });
