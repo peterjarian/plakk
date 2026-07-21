@@ -29,11 +29,15 @@ import { ipcActionErrorMessage } from "../lib/ipcActionErrorMessage.ts";
 import { ingestFileSnippet, ingestTextSnippet } from "../lib/snippetIngestion.ts";
 
 const accountSetupUrl = "https://app.plakk.io/account/setup";
+export const STORAGE_WARNING_BYTES = 30 * 1024 * 1024 * 1024;
+export const shouldWarnForStorageUsage = (bytes: number) => bytes > STORAGE_WARNING_BYTES;
+
 export function Home({ active = true }: { active?: boolean }) {
   const auth = useAuth();
   const linkedProvider = useLinkedStorageProvider();
   const storageStatus = useStorageStatus();
-  const liveConnection = useLocalState().localState.liveConnection;
+  const localState = useLocalState().localState;
+  const liveConnection = localState.liveConnection;
   const [isDragging, setIsDragging] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copyingId, setCopyingId] = useState<string | null>(null);
@@ -337,6 +341,15 @@ export function Home({ active = true }: { active?: boolean }) {
 
       <div className="scrollbar-hidden flex min-h-0 flex-1 flex-col overflow-y-auto px-6 pb-4">
         <div className="sticky top-0 z-20 bg-background pt-3 pb-5">
+          {shouldWarnForStorageUsage(localState.storageUsageBytes) && (
+            <div className="mb-2 flex items-center gap-2 rounded-md bg-muted px-2.5 py-1.5 text-xs text-muted-foreground">
+              <TriangleAlert className="size-3.5 shrink-0 text-amber-600" aria-hidden="true" />
+              <span className="min-w-0 flex-1">Plakk is using over 30 GB on this device.</span>
+              <Button type="button" variant="ghost" size="xs" onClick={() => navigate("settings")}>
+                Manage storage
+              </Button>
+            </div>
+          )}
           {auth.issue !== null && (
             <div className="mb-2 flex items-center gap-2 rounded-md bg-muted px-2.5 py-1.5 text-xs text-muted-foreground">
               <TriangleAlert className="size-3.5 shrink-0 text-amber-600" aria-hidden="true" />

@@ -8,6 +8,7 @@ export interface LocalStateSnippetsShape {
   readonly read: (
     accountId: string,
   ) => Effect.Effect<ReadonlyArray<DesktopSnippet>, LocalStateError>;
+  readonly storageUsageBytes: (accountId: string) => Effect.Effect<number, LocalStateError>;
 }
 
 export class LocalStateSnippets extends Context.Service<

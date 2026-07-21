@@ -63,6 +63,9 @@ export type DesktopApi = {
     readonly ingest: (payload: RendererSnippetIngestPayload) => Promise<SnippetIngestResult>;
     readonly read: (id: string) => Promise<Uint8Array>;
   };
+  readonly storage: {
+    readonly freeUp: () => Promise<void>;
+  };
   readonly tray: {
     readonly onDroppedItem: (callback: (item: TrayDroppedItem) => void) => () => void;
     readonly selectFiles: () => Promise<
@@ -119,6 +122,9 @@ export const desktopApi = {
       return invocation;
     },
     read: (snippet) => invoke(ipcMethods.snippetRead, snippet),
+  },
+  storage: {
+    freeUp: () => invoke(ipcMethods.storageFreeUp, undefined),
   },
   tray: {
     onDroppedItem: (callback: (item: TrayDroppedItem) => void) =>

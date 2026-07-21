@@ -37,6 +37,46 @@ const withDirectory = async (run: (directory: string) => Promise<void>) => {
 };
 
 describe("managed snippet content ingestion", () => {
+  it("derives usage from managed files and removes only content outside the retained set", async () => {
+    await withDirectory(async (root) => {
+      const contentRoot = join(root, "content");
+      const retainedId = snippetId;
+      const removedId = "1d1e2f3a-4567-4890-8abc-def012345679";
+      const layer = makeManagedSnippetContentLive(contentRoot).pipe(Layer.provide(platformLayer));
+
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          const content = yield* ManagedSnippetContent;
+          yield* content.ingest(accountId, {
+            ...inputMetadata,
+            id: retainedId,
+            byteSize: 3,
+            bytes: new Uint8Array([1, 2, 3]),
+          });
+          yield* content.ingest(accountId, {
+            ...inputMetadata,
+            id: removedId,
+            byteSize: 2,
+            bytes: new Uint8Array([4, 5]),
+          });
+          const before = yield* content.storageUsageBytes(accountId);
+          yield* content.removeExcept(accountId, new Set([retainedId]));
+          return { before, after: yield* content.storageUsageBytes(accountId) };
+        }).pipe(Effect.provide(layer)),
+      );
+
+      expect(result).toEqual({ before: 5, after: 3 });
+      await expect(
+        readFile(managedSnippetContentPath(contentRoot, accountId, retainedId)),
+      ).resolves.toEqual(Buffer.from([1, 2, 3]));
+      await expect(
+        readFile(managedSnippetContentPath(contentRoot, accountId, removedId)),
+      ).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    });
+  });
+
   it("publishes the owning account after managed bytes become available", async () => {
     await withDirectory(async (root) => {
       const result = await Effect.runPromise(
@@ -138,6 +178,29 @@ describe("managed snippet content ingestion", () => {
 
       expect(managedPath).toBe(managedSnippetContentPath(contentRoot, accountId, snippetId));
       await expect(readFile(managedPath)).resolves.toEqual(Buffer.from([4, 5, 6]));
+    });
+  });
+
+  it("invalidates same-size corruption of origin-upload content", async () => {
+    await withDirectory(async (root) => {
+      const contentRoot = join(root, "content");
+      const layer = makeManagedSnippetContentLive(contentRoot).pipe(Layer.provide(platformLayer));
+
+      const available = await Effect.runPromise(
+        Effect.gen(function* () {
+          const content = yield* ManagedSnippetContent;
+          const path = yield* content.ingest(accountId, {
+            ...inputMetadata,
+            id: snippetId,
+            byteSize: 3,
+            bytes: new Uint8Array([1, 2, 3]),
+          });
+          yield* Effect.promise(() => writeFile(path, new Uint8Array([3, 2, 1])));
+          return yield* content.available(accountId, snippetId, 3);
+        }).pipe(Effect.provide(layer)),
+      );
+
+      expect(available).toBe(false);
     });
   });
 

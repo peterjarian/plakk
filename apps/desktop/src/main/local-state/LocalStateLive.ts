@@ -17,6 +17,7 @@ const emptyLocalState = (): LocalStateValue => ({
   provider: { known: false, value: null },
   capability: { status: "OFFLINE" },
   liveConnection: null,
+  storageUsageBytes: 0,
   snippets: [],
 });
 
@@ -45,6 +46,10 @@ const makeLocalState = Effect.gen(function* () {
     persisted === null || persisted.cleanupPending
       ? []
       : yield* snippets.read(persisted.account.id);
+  const initialStorageUsageBytes =
+    persisted === null || persisted.cleanupPending
+      ? 0
+      : yield* snippets.storageUsageBytes(persisted.account.id);
   const initial =
     persisted === null || persisted.cleanupPending
       ? emptyLocalState()
@@ -54,6 +59,7 @@ const makeLocalState = Effect.gen(function* () {
           provider: persisted.provider,
           capability: { status: "OFFLINE" } as const,
           liveConnection: { status: "RECONNECTING" } as const,
+          storageUsageBytes: initialStorageUsageBytes,
           snippets: initialItems,
         };
   yield* Schema.decodeUnknownEffect(LocalStateSchema)(initial).pipe(
@@ -96,11 +102,14 @@ const makeLocalState = Effect.gen(function* () {
   ) {
     const materializedSnippets =
       nextSession === null ? [] : yield* snippets.read(nextSession.account.id);
+    const storageUsageBytes =
+      nextSession === null ? 0 : yield* snippets.storageUsageBytes(nextSession.account.id);
     return {
       account: nextSession?.account ?? null,
       provider: nextSession?.provider ?? { known: false, value: null },
       capability,
       liveConnection: nextSession === null ? null : liveConnection,
+      storageUsageBytes,
       snippets: materializedSnippets,
     } satisfies Omit<LocalStateValue, "revision">;
   });

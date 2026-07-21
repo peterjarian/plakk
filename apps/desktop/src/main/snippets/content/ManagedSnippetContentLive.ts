@@ -109,15 +109,46 @@ export const makeManagedSnippetContentLive = (root: string) =>
         { readonly fingerprint: string; readonly valid: boolean }
       >();
 
+      const accountSnippetIds = Effect.fn("ManagedSnippetContent.accountSnippetIds")(function* (
+        accountId: string,
+      ) {
+        return yield* fileSystem.readDirectory(accountContentDirectory(root, accountId)).pipe(
+          Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed([])),
+          Effect.mapError(
+            (cause) =>
+              new ManagedSnippetContentError({
+                cause,
+                reason: "Could not inspect managed snippet content.",
+                retryable: true,
+              }),
+          ),
+        );
+      });
+
+      const clearCachedValidation = (accountId: string, snippetId: string) => {
+        const filePath = managedSnippetContentPath(root, accountId, snippetId);
+        verifiedIntegrity.delete(filePath);
+        textValidity.delete(filePath);
+      };
+
       const discard = Effect.fn("ManagedSnippetContent.discard")(function* (
         accountId: string,
         snippetId: string,
       ) {
-        const filePath = managedSnippetContentPath(root, accountId, snippetId);
-        verifiedIntegrity.delete(filePath);
-        textValidity.delete(filePath);
+        const directory = contentDirectory(root, accountId, snippetId);
+        const existed = yield* fileSystem.exists(directory).pipe(
+          Effect.mapError(
+            (cause) =>
+              new ManagedSnippetContentError({
+                cause,
+                reason: "Could not inspect managed snippet content.",
+                retryable: true,
+              }),
+          ),
+        );
+        clearCachedValidation(accountId, snippetId);
         yield* fileSystem
-          .remove(contentDirectory(root, accountId, snippetId), {
+          .remove(directory, {
             force: true,
             recursive: true,
           })
@@ -131,7 +162,19 @@ export const makeManagedSnippetContentLive = (root: string) =>
                 }),
             ),
           );
-        yield* PubSub.publish(changes, accountId);
+        if (existed) yield* PubSub.publish(changes, accountId);
+      });
+
+      const hashFile = Effect.fn("ManagedSnippetContent.hashFile")(function* (path: string) {
+        const hash = createHash("sha256");
+        yield* fileSystem.stream(path).pipe(
+          Stream.runForEach((chunk) =>
+            Effect.sync(() => {
+              hash.update(chunk);
+            }),
+          ),
+        );
+        return hash.digest("hex");
       });
 
       const commitContent = Effect.fn("ManagedSnippetContent.commitContent")(function* <E>(
@@ -141,7 +184,6 @@ export const makeManagedSnippetContentLive = (root: string) =>
         write: (temporary: string) => Effect.Effect<void, E>,
         mismatchReason: string,
         mapPlatformError: (cause: PlatformError.PlatformError) => ManagedSnippetContentError,
-        integrity?: () => string,
       ) {
         const directory = contentDirectory(root, accountId, snippetId);
         const destination = managedSnippetContentPath(root, accountId, snippetId);
@@ -150,7 +192,15 @@ export const makeManagedSnippetContentLive = (root: string) =>
             Effect.map((info) => (validFile(info, byteSize) ? info : null)),
             Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(null)),
           );
-          if (existing !== null && integrity === undefined) return destination;
+          if (existing !== null) {
+            const expected = yield* fileSystem
+              .readFileString(managedSnippetIntegrityPath(root, accountId, snippetId))
+              .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(null)));
+            if (expected !== null && (yield* hashFile(destination)) === expected.trim()) {
+              verifiedIntegrity.set(destination, fileFingerprint(existing));
+              return destination;
+            }
+          }
 
           yield* fileSystem.remove(directory, { force: true, recursive: true });
           yield* fileSystem.makeDirectory(directory, { recursive: true });
@@ -176,21 +226,17 @@ export const makeManagedSnippetContentLive = (root: string) =>
                   yield* file.sync;
                 }),
               );
-              if (integrity !== undefined) {
-                const integrityFile = managedSnippetIntegrityPath(root, accountId, snippetId);
-                yield* fileSystem.writeFileString(integrityFile, integrity());
-                yield* Effect.scoped(
-                  Effect.gen(function* () {
-                    const file = yield* fileSystem.open(integrityFile);
-                    yield* file.sync;
-                  }),
-                );
-              }
+              const integrityFile = managedSnippetIntegrityPath(root, accountId, snippetId);
+              yield* fileSystem.writeFileString(integrityFile, yield* hashFile(temporary));
+              yield* Effect.scoped(
+                Effect.gen(function* () {
+                  const file = yield* fileSystem.open(integrityFile);
+                  yield* file.sync;
+                }),
+              );
               yield* fileSystem.rename(temporary, destination);
-              if (integrity !== undefined) {
-                const committed = yield* fileSystem.stat(destination);
-                verifiedIntegrity.set(destination, fileFingerprint(committed));
-              }
+              const committed = yield* fileSystem.stat(destination);
+              verifiedIntegrity.set(destination, fileFingerprint(committed));
               textValidity.delete(destination);
             }),
           );
@@ -261,7 +307,11 @@ export const makeManagedSnippetContentLive = (root: string) =>
         const expected = yield* fileSystem
           .readFileString(managedSnippetIntegrityPath(root, accountId, snippetId))
           .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(null)));
-        if (expected === null) return true;
+        if (expected === null) {
+          verifiedIntegrity.delete(filePath);
+          textValidity.delete(filePath);
+          return false;
+        }
         if (verifiedIntegrity.get(filePath) === fingerprint) return true;
 
         const hash = createHash("sha256");
@@ -429,25 +479,13 @@ export const makeManagedSnippetContentLive = (root: string) =>
         byteSize: number,
         source: Stream.Stream<Uint8Array, E>,
       ) {
-        const hash = createHash("sha256");
         yield* commitContent(
           accountId,
           snippetId,
           byteSize,
-          (temporary) =>
-            Stream.run(
-              source.pipe(
-                Stream.tap((chunk) =>
-                  Effect.sync(() => {
-                    hash.update(chunk);
-                  }),
-                ),
-              ),
-              fileSystem.sink(temporary),
-            ),
+          (temporary) => Stream.run(source, fileSystem.sink(temporary)),
           "Hydrated content does not match its metadata.",
           hydrationWriteError,
-          () => hash.digest("hex"),
         );
         yield* PubSub.publish(changes, accountId);
       });
@@ -459,6 +497,59 @@ export const makeManagedSnippetContentLive = (root: string) =>
         yield* Effect.forEach(snippetIds, (snippetId) => discard(accountId, snippetId), {
           discard: true,
         });
+      });
+
+      const storageUsageBytes = Effect.fn("ManagedSnippetContent.storageUsageBytes")(function* (
+        accountId: string,
+      ) {
+        const snippetIds = yield* accountSnippetIds(accountId);
+        const sizes = yield* Effect.forEach(snippetIds, (snippetId) =>
+          fileSystem.stat(managedSnippetContentPath(root, accountId, snippetId)).pipe(
+            Effect.map((info) => (info.type === "File" ? Number(info.size) : 0)),
+            Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(0)),
+            Effect.mapError(
+              (cause) =>
+                new ManagedSnippetContentError({
+                  cause,
+                  reason: "Could not inspect managed snippet storage usage.",
+                  retryable: true,
+                }),
+            ),
+          ),
+        );
+        return sizes.reduce((total, size) => total + size, 0);
+      });
+
+      const removeExcept = Effect.fn("ManagedSnippetContent.removeExcept")(function* (
+        accountId: string,
+        retainedSnippetIds: ReadonlySet<string>,
+      ) {
+        const snippetIds = (yield* accountSnippetIds(accountId)).filter(
+          (snippetId) => !retainedSnippetIds.has(snippetId),
+        );
+        yield* Effect.forEach(
+          snippetIds,
+          (snippetId) => {
+            clearCachedValidation(accountId, snippetId);
+            return fileSystem
+              .remove(contentDirectory(root, accountId, snippetId), {
+                force: true,
+                recursive: true,
+              })
+              .pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new ManagedSnippetContentError({
+                      cause,
+                      reason: "Could not free managed snippet content.",
+                      retryable: true,
+                    }),
+                ),
+              );
+          },
+          { discard: true },
+        );
+        if (snippetIds.length > 0) yield* PubSub.publish(changes, accountId);
       });
 
       const purge = Effect.fn("ManagedSnippetContent.purge")(function* (accountId: string) {
@@ -493,6 +584,8 @@ export const makeManagedSnippetContentLive = (root: string) =>
         path,
         purge,
         putStream,
+        removeExcept,
+        storageUsageBytes,
         validateText,
       });
     }),

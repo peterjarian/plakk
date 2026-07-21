@@ -1,11 +1,13 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { Home } from "./Home.tsx";
+import { Home, STORAGE_WARNING_BYTES } from "./Home.tsx";
+import { Settings } from "./Settings.tsx";
 import { Tray } from "./Tray.tsx";
 
 const state = vi.hoisted(() => {
   let liveConnection: { readonly status: "CONNECTED" | "RECONNECTING" } | null = null;
+  let storageUsageBytes = 0;
   const account = {
     id: "user_1",
     email: "reader@example.com",
@@ -21,6 +23,9 @@ const state = vi.hoisted(() => {
     capability: { status: "OFFLINE" },
     get liveConnection() {
       return liveConnection;
+    },
+    get storageUsageBytes() {
+      return storageUsageBytes;
     },
     snippets: [
       {
@@ -42,6 +47,9 @@ const state = vi.hoisted(() => {
     localState,
     setLiveConnection: (next: typeof liveConnection) => {
       liveConnection = next;
+    },
+    setStorageUsageBytes: (next: number) => {
+      storageUsageBytes = next;
     },
   };
 });
@@ -84,5 +92,20 @@ describe("local state views", () => {
     expect(home).toContain("Live updates reconnecting…");
     expect(tray).toContain("Reconnecting…");
     state.setLiveConnection(null);
+  });
+
+  it("warns above 30 GiB and links Home to the Settings storage controls", () => {
+    state.setStorageUsageBytes(STORAGE_WARNING_BYTES);
+    expect(renderToStaticMarkup(<Home />)).not.toContain("Manage storage");
+
+    state.setStorageUsageBytes(STORAGE_WARNING_BYTES + 1024 ** 3);
+    const home = renderToStaticMarkup(<Home />);
+    const settings = renderToStaticMarkup(<Settings />);
+
+    expect(home).toContain("Plakk is using over 30 GB on this device.");
+    expect(home).toContain("Manage storage");
+    expect(settings).toContain("31.0 GB used by Plakk");
+    expect(settings).toContain("Free up space");
+    state.setStorageUsageBytes(0);
   });
 });

@@ -201,6 +201,16 @@ handle(ipcMethods.snippetDownload, (id) =>
   }),
 );
 
+handle(ipcMethods.storageFreeUp, () =>
+  Effect.gen(function* () {
+    const hydration = yield* SnippetHydrationEngine;
+    const session = yield* DesktopSession;
+    yield* session
+      .withCurrentAccount((account) => hydration.freeUpSpace(account.id))
+      .pipe(asIpcFailure("Could not free up Plakk storage."));
+  }),
+);
+
 const findSnippet = Effect.fn("LocalState.findSnippet")(function* (id: string) {
   const localState = yield* LocalState;
   const session = yield* DesktopSession;

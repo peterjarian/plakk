@@ -50,6 +50,11 @@ export class ManagedSnippetContent extends Context.Service<
       accountId: string,
       snippetIds: ReadonlyArray<string>,
     ): Effect.Effect<void, ManagedSnippetContentError>;
+    storageUsageBytes(accountId: string): Effect.Effect<number, ManagedSnippetContentError>;
+    removeExcept(
+      accountId: string,
+      retainedSnippetIds: ReadonlySet<string>,
+    ): Effect.Effect<void, ManagedSnippetContentError>;
     purge(accountId: string): Effect.Effect<void, ManagedSnippetContentError>;
   }
 >()("plakk/main/snippets/content/ManagedSnippetContent") {}

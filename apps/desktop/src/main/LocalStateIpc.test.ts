@@ -89,7 +89,11 @@ describe("Local State IPC", () => {
               makeLocalStateStoreLive({ cwd }),
               Layer.succeed(
                 LocalStateSnippets,
-                LocalStateSnippets.of({ changes: Stream.empty, read: () => Effect.succeed([]) }),
+                LocalStateSnippets.of({
+                  changes: Stream.empty,
+                  read: () => Effect.succeed([]),
+                  storageUsageBytes: () => Effect.succeed(0),
+                }),
               ),
             ),
           ),

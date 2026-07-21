@@ -161,6 +161,7 @@ export const LocalStateSchema = Schema.Struct({
   liveConnection: Schema.NullOr(
     Schema.Struct({ status: Schema.Literals(["CONNECTED", "RECONNECTING"] as const) }),
   ),
+  storageUsageBytes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   snippets: Schema.Array(DesktopSnippetSchema),
 });
 
@@ -215,6 +216,11 @@ export const ipcMethods = {
   snippetDownload: method({
     channel: "snippet:download",
     payload: SnippetIdSchema,
+    result: Schema.Void,
+  }),
+  storageFreeUp: method({
+    channel: "storage:free-up",
+    payload: Schema.Void,
     result: Schema.Void,
   }),
   clipboardRead: method({

@@ -1,10 +1,12 @@
 import { useState } from "react";
+import { formatFileSize } from "@plakk/shared";
 import {
   ArrowLeft,
   ArrowUpRight,
   CloudOff,
   CreditCard,
   FileText,
+  HardDrive,
   Keyboard,
   MessageCircle,
   RefreshCw,
@@ -25,6 +27,7 @@ import {
 } from "@plakk/ui/components/settings";
 import { getInitials } from "@plakk/ui/lib/getInitials";
 import { useAuth } from "../hooks/useAuth.ts";
+import { useLocalState } from "../hooks/useLocalState.tsx";
 import {
   StorageProviderIcon,
   storageProviderLabel,
@@ -38,10 +41,13 @@ export function Settings() {
   const auth = useAuth();
   const linkedProvider = useLinkedStorageProvider();
   const storageStatus = useStorageStatus();
+  const storageUsageBytes = useLocalState().localState.storageUsageBytes;
   const [autoUpdate, setAutoUpdate] = useState(true);
   const [globalHotkey, setGlobalHotkey] = useState(true);
   const [toolbarWidget, setToolbarWidget] = useState(true);
   const [updateStatus, setUpdateStatus] = useState("Up to date");
+  const [freeingStorage, setFreeingStorage] = useState(false);
+  const [storageError, setStorageError] = useState<string | null>(null);
   const user = auth.user;
 
   if (user === null) return null;
@@ -198,6 +204,45 @@ export function Settings() {
                     <ArrowUpRight />
                   </Button>
                 </SettingsRow>
+              )}
+            </SettingsSectionBody>
+          </SettingsSection>
+
+          <SettingsSection>
+            <SettingsSectionTitle>Device storage</SettingsSectionTitle>
+            <SettingsSectionBody>
+              <SettingsRow>
+                <SettingsRowMain>
+                  <HardDrive className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                  <SettingsRowText
+                    title={`${formatFileSize(storageUsageBytes)} used by Plakk`}
+                    description="Freeing space keeps your newest 20 eligible snippets available and removes older device copies only."
+                  />
+                </SettingsRowMain>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={freeingStorage}
+                  onClick={() => {
+                    setStorageError(null);
+                    setFreeingStorage(true);
+                    void window.ipc.storage.freeUp().then(
+                      () => setFreeingStorage(false),
+                      () => {
+                        setFreeingStorage(false);
+                        setStorageError("Could not free up Plakk storage.");
+                      },
+                    );
+                  }}
+                >
+                  {freeingStorage ? "Freeing…" : "Free up space"}
+                </Button>
+              </SettingsRow>
+              {storageError !== null && (
+                <p className="px-4 py-2 text-xs text-destructive" role="alert">
+                  {storageError}
+                </p>
               )}
             </SettingsSectionBody>
           </SettingsSection>
