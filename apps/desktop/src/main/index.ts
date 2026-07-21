@@ -35,6 +35,11 @@ import { SnippetDeletion } from "./snippets/deletion/SnippetDeletion.ts";
 import { snippetUploadFailureMessage } from "./snippets/upload/SnippetUploadEngineLive.ts";
 import { createTrayWindowController } from "./tray/window.ts";
 
+const linuxDesktopName = process.env.PLAKK_LINUX_DESKTOP_NAME;
+if (process.platform === "linux" && linuxDesktopName !== undefined) {
+  app.setDesktopName(linuxDesktopName);
+}
+
 const handle = makeHandle(runtime);
 
 const asIpcFailure =
