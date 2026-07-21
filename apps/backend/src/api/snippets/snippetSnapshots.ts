@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, type DrizzleService } from "@plakk/db";
+import { desc, eq, type DrizzleService } from "@plakk/db";
 import { snippets } from "@plakk/db/schema";
 import * as Effect from "effect/Effect";
 
@@ -11,7 +11,7 @@ export const getSnippetSnapshot = Effect.fn("getSnippetSnapshot")(function* (
   const rows = yield* drizzle.db
     .select()
     .from(snippets)
-    .where(and(eq(snippets.ownerWorkosUserId, ownerWorkosUserId), isNull(snippets.deletedAt)))
+    .where(eq(snippets.ownerWorkosUserId, ownerWorkosUserId))
     .orderBy(desc(snippets.createdAt))
     .pipe(Effect.orDie);
 

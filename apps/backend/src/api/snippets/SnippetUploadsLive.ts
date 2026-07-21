@@ -1,4 +1,4 @@
-import { and, Drizzle, eq, isNull } from "@plakk/db";
+import { and, Drizzle, eq } from "@plakk/db";
 import { snippets, type SnippetRow } from "@plakk/db/schema";
 import type { PrepareSnippetUploadPayload, PublishSnippetPayload } from "@plakk/shared/PlakkApi";
 import { RpcError } from "@plakk/shared/RpcError";
@@ -58,7 +58,6 @@ export const SnippetUploadsLive = Layer.effect(
               .values({
                 ...input,
                 ownerWorkosUserId,
-                deletedAt: null,
                 createdAt: now,
                 updatedAt: now,
               })
@@ -73,11 +72,7 @@ export const SnippetUploadsLive = Layer.effect(
               .select()
               .from(snippets)
               .where(
-                and(
-                  eq(snippets.id, input.id),
-                  eq(snippets.ownerWorkosUserId, ownerWorkosUserId),
-                  isNull(snippets.deletedAt),
-                ),
+                and(eq(snippets.id, input.id), eq(snippets.ownerWorkosUserId, ownerWorkosUserId)),
               )
               .limit(1);
             if (existing === undefined || !samePublication(existing, input)) {

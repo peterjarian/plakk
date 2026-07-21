@@ -26,7 +26,6 @@ export const snippets = pgTable(
     storageObjectId: text("storage_object_id").notNull(),
     fileName: text("file_name").notNull(),
     byteSize: bigint("byte_size", { mode: "number" }).notNull(),
-    deletedAt: timestamp("deleted_at", { withTimezone: true }),
     ...timestamps,
   },
   (table) => [

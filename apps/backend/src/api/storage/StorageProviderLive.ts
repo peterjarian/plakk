@@ -12,6 +12,7 @@ import { OneDriveStorageProvider } from "./providers/OneDriveStorageProvider.ts"
 import {
   type ConnectedStorageInput,
   StorageCredentialsError,
+  type StorageDeletionError,
   type StorageDownloadError,
   StorageNeedsReauthorizationError,
   StorageNotConnectedError,
@@ -21,6 +22,7 @@ import {
 } from "./StorageProvider.ts";
 import { StorageProviderError } from "./types.ts";
 import type {
+  DeleteStorageObjectInput,
   PreparedStorageUpload,
   PrepareStorageUploadInput,
   DownloadStorageObjectInput,
@@ -153,7 +155,17 @@ export const StorageProviderLive = Layer.effect(
       return { url, headers: [] };
     });
 
+    const deleteObject = Effect.fn("StorageProviderService.deleteObject")(function* (
+      input: Omit<DeleteStorageObjectInput, "accessToken"> & { readonly workosUserId: string },
+    ): Effect.fn.Return<void, StorageDeletionError> {
+      const token = yield* getConnectedToken(input);
+      return yield* storageProviderAdapters[input.storageProvider]
+        .deleteObject({ ...input, accessToken: token.accessToken })
+        .pipe(Effect.provideService(HttpClient.HttpClient, httpClient));
+    });
+
     return StorageProviderService.of({
+      deleteObject,
       ensureConnected,
       prepareUpload,
       getDestinationUrl,

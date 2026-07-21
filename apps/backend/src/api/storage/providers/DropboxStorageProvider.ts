@@ -3,6 +3,7 @@ import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 
 import {
+  type DeleteStorageObjectInput,
   StorageProviderError,
   StorageObjectNotFoundError,
   type DownloadStorageObjectInput,
@@ -18,6 +19,7 @@ const DROPBOX_TEMPORARY_UPLOAD_LINK_URL =
   "https://api.dropboxapi.com/2/files/get_temporary_upload_link";
 const DROPBOX_DOWNLOAD_URL = "https://content.dropboxapi.com/2/files/download";
 const DROPBOX_TEMPORARY_LINK_URL = "https://api.dropboxapi.com/2/files/get_temporary_link";
+const DROPBOX_DELETE_URL = "https://api.dropboxapi.com/2/files/delete_v2";
 const DropboxTemporaryUploadLinkRequest = Schema.fromJsonString(
   Schema.Struct({
     commit_info: Schema.Struct({
@@ -33,6 +35,7 @@ const DropboxTemporaryUploadLink = Schema.Struct({ link: Schema.String });
 const DropboxDownloadArg = Schema.fromJsonString(Schema.Struct({ path: Schema.String }));
 const DropboxTemporaryLinkRequest = Schema.fromJsonString(Schema.Struct({ path: Schema.String }));
 const DropboxTemporaryLink = Schema.Struct({ link: Schema.String });
+const DropboxDeleteRequest = Schema.fromJsonString(Schema.Struct({ path: Schema.String }));
 const DropboxDownloadError = Schema.Struct({ error_summary: Schema.String });
 
 const asDropboxPath = (snippetId: string, fileName: string) =>
@@ -47,6 +50,28 @@ const providerError = (
 
 export const DropboxStorageProvider = {
   storageProvider: "DROPBOX",
+  deleteObject: Effect.fn("DropboxStorageProvider.deleteObject")(function* (
+    input: DeleteStorageObjectInput,
+  ): Effect.fn.Return<void, StorageProviderError, HttpClient.HttpClient> {
+    const body = yield* Schema.encodeEffect(DropboxDeleteRequest)({
+      path: input.storageObjectId,
+    }).pipe(
+      Effect.mapError((cause) =>
+        providerError(input, "Stored object deletion request was invalid.", cause),
+      ),
+    );
+    const request = HttpClientRequest.post(DROPBOX_DELETE_URL).pipe(
+      HttpClientRequest.bearerToken(input.accessToken),
+      HttpClientRequest.bodyText(body, "application/json"),
+    );
+    const response = yield* HttpClient.execute(request).pipe(
+      Effect.mapError((cause) =>
+        providerError(input, "Could not delete the stored object.", cause),
+      ),
+    );
+    if (response.status >= 200 && response.status < 300) return;
+    return yield* providerError(input, `Stored object deletion failed: ${response.status}`);
+  }),
   getDestination: () =>
     Effect.succeed({ url: "https://www.dropbox.com/home" } satisfies StorageProviderDestination),
   prepareUpload: Effect.fn("DropboxStorageProvider.prepareUpload")(function* (

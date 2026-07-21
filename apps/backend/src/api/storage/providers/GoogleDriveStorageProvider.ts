@@ -4,6 +4,7 @@ import * as Schema from "effect/Schema";
 import { Headers, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 
 import {
+  type DeleteStorageObjectInput,
   StorageProviderError,
   StorageObjectNotFoundError,
   type DownloadStorageObjectInput,
@@ -129,6 +130,20 @@ const getPlakkFolder = Effect.fn("GoogleDriveStorageProvider.getPlakkFolder")(fu
 
 export const GoogleDriveStorageProvider = {
   storageProvider: "GOOGLE_DRIVE",
+  deleteObject: Effect.fn("GoogleDriveStorageProvider.deleteObject")(function* (
+    input: DeleteStorageObjectInput,
+  ): Effect.fn.Return<void, StorageProviderError, HttpClient.HttpClient> {
+    const request = HttpClientRequest.delete(
+      `${GOOGLE_DRIVE_FILES_URL}/${encodeURIComponent(input.storageObjectId)}`,
+    ).pipe(HttpClientRequest.bearerToken(input.accessToken));
+    const response = yield* HttpClient.execute(request).pipe(
+      Effect.mapError((cause) =>
+        providerError(input, "Could not delete the stored object.", cause),
+      ),
+    );
+    if (response.status === 404 || (response.status >= 200 && response.status < 300)) return;
+    return yield* providerError(input, `Stored object deletion failed: ${response.status}`);
+  }),
   getDestination: Effect.fn("GoogleDriveStorageProvider.getDestination")(function* (input: {
     readonly accessToken: string;
   }) {

@@ -11,6 +11,7 @@ import { PlakkRpcClientLive, plakkRpcProtocolLayer } from "./PlakkRpcClientLive.
 import { DesktopAccountDataLive } from "./session/DesktopAccountDataLive.ts";
 import { DesktopSessionLive } from "./session/DesktopSessionLive.ts";
 import { makeManagedSnippetContentLive } from "./snippets/content/ManagedSnippetContentLive.ts";
+import { SnippetDeletionLive } from "./snippets/deletion/SnippetDeletion.ts";
 import { SnippetHydrationLive } from "./snippets/hydration/SnippetHydrationLive.ts";
 import { SnippetHydrationTransportLive } from "./snippets/hydration/SnippetHydrationTransportLive.ts";
 import { makeSnippetRemoteTransportLive } from "./snippets/replica/SnippetRemoteTransportLive.ts";
@@ -45,6 +46,11 @@ const uploadEngineDependencies = Layer.mergeAll(
 );
 const snippetUploadEngineLayer = SnippetUploadEngineLive.pipe(
   Layer.provide(uploadEngineDependencies),
+);
+const snippetDeletionLayer = SnippetDeletionLive.pipe(
+  Layer.provide(
+    Layer.mergeAll(managedSnippetContentLayer, snippetReplicaLayer, plakkRpcClientLayer),
+  ),
 );
 const hydrationEngineDependencies = Layer.mergeAll(
   managedSnippetContentLayer,
@@ -106,6 +112,7 @@ const MainLayer = Layer.mergeAll(
   snippetRemoteTransportLayer,
   storageUploadLayer,
   snippetUploadEngineLayer,
+  snippetDeletionLayer,
   snippetHydrationEngineLayer,
   localStateSnippetsLayer,
   localStateLayer,
