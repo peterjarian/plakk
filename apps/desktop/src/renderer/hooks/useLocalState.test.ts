@@ -9,6 +9,7 @@ const localState = (revision: number): LocalState => ({
   provider: { known: false, value: null },
   capability: { status: "OFFLINE" },
   liveConnection: null,
+  storageUsageBytes: 0,
   snippets: [],
 });
 

@@ -60,6 +60,7 @@ const makeRuntime = (
     LocalStateSnippets.of({
       changes: Stream.empty,
       read: (accountId) => Effect.succeed(items[accountId] ?? []),
+      storageUsageBytes: () => Effect.succeed(0),
     }),
   );
   const store = makeLocalStateStoreLive({ cwd });
@@ -283,6 +284,7 @@ it.layer(NodeFileSystem.layer)("local state", (it) => {
                   }),
                 )
               : Effect.succeed([firstSnippet]),
+          storageUsageBytes: () => Effect.succeed(0),
         }),
       );
       const runtime = ManagedRuntime.make(
@@ -321,6 +323,7 @@ it.layer(NodeFileSystem.layer)("local state", (it) => {
         provider: { known: false, value: null },
         capability: { status: "OFFLINE" },
         liveConnection: null,
+        storageUsageBytes: 0,
         snippets: [],
       });
     }),
@@ -452,6 +455,7 @@ it.layer(NodeFileSystem.layer)("local state", (it) => {
         provider: { known: false, value: null },
         capability: { status: "OFFLINE" },
         liveConnection: null,
+        storageUsageBytes: 0,
         snippets: [],
       });
       expect(store.get("session")).toBeNull();

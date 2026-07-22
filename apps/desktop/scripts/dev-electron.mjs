@@ -9,22 +9,37 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const appName = "Plakk (Dev)";
 const bundleId = "app.plakk.dev";
 const deeplinkProtocol = "plakk-dev";
+const linuxDesktopEntryName = "plakk-dev.desktop";
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const desktopDir = resolve(scriptDir, "..");
 const runtimeDir = join(desktopDir, ".electron-runtime");
 const metadataPath = join(runtimeDir, "metadata.json");
 const iconPath = join(desktopDir, "resources", "icon.icns");
+const linuxIconPath = join(desktopDir, "resources", "icon.png");
 
 function run(command, args) {
   const result = spawnSync(command, args, { encoding: "utf8" });
   if (result.status === 0) return;
-  throw new Error([result.stderr, result.stdout].filter(Boolean).join("\n").trim());
+  throw new Error(
+    [result.error?.message, result.stderr, result.stdout].filter(Boolean).join("\n").trim() ||
+      `${command} failed.`,
+  );
+}
+
+function output(command, args) {
+  const result = spawnSync(command, args, { encoding: "utf8" });
+  if (result.status === 0) return result.stdout.trim();
+  throw new Error(
+    [result.error?.message, result.stderr, result.stdout].filter(Boolean).join("\n").trim() ||
+      `${command} failed.`,
+  );
 }
 
 function setPlistString(plistPath, key, value) {
@@ -97,12 +112,86 @@ function resolveElectronExecPath() {
   return targetExecPath;
 }
 
+function quoteDesktopExecArgument(value) {
+  return '"' + value.replaceAll(/(["`$\\])/g, "\\$1") + '"';
+}
+
+function resolveLinuxElectronArgs() {
+  if (process.platform !== "linux") return [];
+
+  const require = createRequire(import.meta.url);
+  const electronExecPath = require("electron");
+  const sandboxPath = join(dirname(electronExecPath), "chrome-sandbox");
+  if (existsSync(sandboxPath)) {
+    const sandbox = statSync(sandboxPath);
+    if (sandbox.uid === 0 && (sandbox.mode & 0o4000) !== 0) return [];
+  }
+
+  return ["--no-sandbox"];
+}
+
+function registerLinuxProtocolHandler(electronArgs) {
+  if (process.platform !== "linux") return undefined;
+
+  const require = createRequire(import.meta.url);
+  const electronExecPath = require("electron");
+  const dataHome = process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share");
+  const applicationsDir = join(dataHome, "applications");
+  const desktopEntryPath = join(applicationsDir, linuxDesktopEntryName);
+  const desktopExec = [electronExecPath, ...electronArgs, desktopDir]
+    .map(quoteDesktopExecArgument)
+    .join(" ");
+  const desktopEntry = [
+    "[Desktop Entry]",
+    "Type=Application",
+    `Name=${appName}`,
+    `Exec=${desktopExec} %u`,
+    `Icon=${linuxIconPath}`,
+    "Terminal=false",
+    "NoDisplay=true",
+    `MimeType=x-scheme-handler/${deeplinkProtocol};`,
+    "",
+  ].join("\n");
+
+  mkdirSync(applicationsDir, { recursive: true });
+  if (!existsSync(desktopEntryPath) || readFileSync(desktopEntryPath, "utf8") !== desktopEntry) {
+    writeFileSync(desktopEntryPath, desktopEntry, { mode: 0o644 });
+  }
+
+  run("update-desktop-database", [applicationsDir]);
+  run("xdg-mime", ["default", linuxDesktopEntryName, `x-scheme-handler/${deeplinkProtocol}`]);
+
+  const registeredEntry = output("xdg-mime", [
+    "query",
+    "default",
+    `x-scheme-handler/${deeplinkProtocol}`,
+  ]);
+  if (registeredEntry !== linuxDesktopEntryName) {
+    throw new Error(
+      `Could not register ${linuxDesktopEntryName} as the ${deeplinkProtocol} protocol handler.`,
+    );
+  }
+
+  return linuxDesktopEntryName;
+}
+
 const electronExecPath = resolveElectronExecPath();
-const child = spawn("electron-vite", ["dev", ...process.argv.slice(2)], {
+const linuxElectronArgs = resolveLinuxElectronArgs();
+const linuxDesktopName = registerLinuxProtocolHandler(linuxElectronArgs);
+const electronViteArgs = ["dev", ...process.argv.slice(2)];
+if (linuxElectronArgs.some((argument) => !electronViteArgs.includes(argument))) {
+  if (!electronViteArgs.includes("--")) electronViteArgs.push("--");
+  for (const argument of linuxElectronArgs) {
+    if (!electronViteArgs.includes(argument)) electronViteArgs.push(argument);
+  }
+}
+
+const child = spawn("electron-vite", electronViteArgs, {
   cwd: desktopDir,
   env: {
     ...process.env,
     ...(electronExecPath ? { ELECTRON_EXEC_PATH: electronExecPath } : {}),
+    ...(linuxDesktopName ? { PLAKK_LINUX_DESKTOP_NAME: linuxDesktopName } : {}),
   },
   stdio: "inherit",
 });

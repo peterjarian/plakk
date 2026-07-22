@@ -98,6 +98,7 @@ const harness = (options: {
     const hydration = SnippetHydrationEngine.of({
       changes: Stream.empty,
       download: () => Effect.void,
+      freeUpSpace: () => Effect.void,
       pause: Effect.void,
       purge: () => Effect.void,
       reconcile: () =>
@@ -124,6 +125,8 @@ const harness = (options: {
       path: () => Effect.succeed("/managed/content"),
       purge: () => Effect.void,
       putStream: () => Effect.void,
+      removeExcept: () => Effect.void,
+      storageUsageBytes: () => Effect.succeed(0),
       validateText: () => Effect.succeed("NOT_FOUND"),
     });
     const replicaLayer = Layer.succeed(SnippetReplica, replica);

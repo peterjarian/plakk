@@ -34,6 +34,7 @@ export const initialLocalStateSubscription: LocalStateSubscription = {
     provider: { known: false, value: null },
     capability: { status: "OFFLINE" },
     liveConnection: null,
+    storageUsageBytes: 0,
     snippets: [],
   },
   isLoading: true,

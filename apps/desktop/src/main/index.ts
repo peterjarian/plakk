@@ -35,6 +35,11 @@ import { SnippetDeletion } from "./snippets/deletion/SnippetDeletion.ts";
 import { snippetUploadFailureMessage } from "./snippets/upload/SnippetUploadEngineLive.ts";
 import { createTrayWindowController } from "./tray/window.ts";
 
+const linuxDesktopName = process.env.PLAKK_LINUX_DESKTOP_NAME;
+if (process.platform === "linux" && linuxDesktopName !== undefined) {
+  app.setDesktopName(linuxDesktopName);
+}
+
 const handle = makeHandle(runtime);
 
 const asIpcFailure =
@@ -198,6 +203,16 @@ handle(ipcMethods.snippetDownload, (id) =>
               }),
         ),
       );
+  }),
+);
+
+handle(ipcMethods.storageFreeUp, () =>
+  Effect.gen(function* () {
+    const hydration = yield* SnippetHydrationEngine;
+    const session = yield* DesktopSession;
+    yield* session
+      .withCurrentAccount((account) => hydration.freeUpSpace(account.id))
+      .pipe(asIpcFailure("Could not free up Plakk storage."));
   }),
 );
 

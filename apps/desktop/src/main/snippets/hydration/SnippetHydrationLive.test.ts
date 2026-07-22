@@ -4,8 +4,10 @@ import { DateTime, Effect, Layer, Schedule, Stream } from "effect";
 import { TestClock } from "effect/testing";
 
 import {
+  AUTOMATIC_HYDRATION_LIMIT,
   AUTOMATIC_HYDRATION_MAX_BYTES,
   SnippetHydrationLive,
+  automaticHydrationSnippets,
   shouldHydrateAutomatically,
 } from "./SnippetHydrationLive.ts";
 import { SnippetHydrationEngine, SnippetHydrationError } from "./SnippetHydration.ts";
@@ -23,6 +25,31 @@ describe("automatic snippet hydration", () => {
     expect(shouldHydrateAutomatically({ byteSize: AUTOMATIC_HYDRATION_MAX_BYTES - 1 })).toBe(true);
     expect(shouldHydrateAutomatically({ byteSize: AUTOMATIC_HYDRATION_MAX_BYTES })).toBe(false);
     expect(shouldHydrateAutomatically({ byteSize: AUTOMATIC_HYDRATION_MAX_BYTES + 1 })).toBe(false);
+  });
+
+  it("selects the newest 20 eligible snippets before considering older content", () => {
+    const snippets = Array.from({ length: AUTOMATIC_HYDRATION_LIMIT + 3 }, (_, index) =>
+      apiSnippet({
+        id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+        createdAt: new Date(now + index * 1_000).toISOString(),
+      }),
+    );
+    snippets.push(
+      apiSnippet({
+        id: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+        byteSize: AUTOMATIC_HYDRATION_MAX_BYTES,
+        createdAt: new Date(now + 100_000).toISOString(),
+      }),
+    );
+
+    const selected = automaticHydrationSnippets(snippets);
+
+    expect(selected).toHaveLength(AUTOMATIC_HYDRATION_LIMIT);
+    expect(selected[0]?.id).toBe("00000000-0000-4000-8000-000000000022");
+    expect(selected.at(-1)?.id).toBe("00000000-0000-4000-8000-000000000003");
+    expect(selected).not.toContainEqual(
+      expect.objectContaining({ id: "ffffffff-ffff-4fff-8fff-ffffffffffff" }),
+    );
   });
 });
 
@@ -132,6 +159,15 @@ const hydrationHarness = (input?: {
               corruptContent.delete(key(accountId, id));
             }
           }),
+        removeExcept: (accountId: string, retainedSnippetIds: ReadonlySet<string>) =>
+          Effect.sync(() => {
+            for (const contentKey of content.keys()) {
+              const [owner, id] = contentKey.split("/");
+              if (owner === accountId && id !== undefined && !retainedSnippetIds.has(id)) {
+                content.delete(contentKey);
+              }
+            }
+          }),
       } as never),
     ),
     Layer.succeed(
@@ -171,6 +207,11 @@ const hydrationHarness = (input?: {
     setStream: (stream: Stream.Stream<Uint8Array, SnippetHydrationError>) => {
       currentStream = stream;
     },
+    setSnippets: (snippets: ReadonlyArray<ApiSnippet>) => {
+      replicaState = {
+        items: snippets.map((snippet) => ({ kind: "PUBLISHED" as const, snippet })),
+      };
+    },
     seedContent: (byteSize: number) => {
       content.set(key(account.id, snippetId), byteSize);
     },
@@ -182,6 +223,7 @@ const hydrationHarness = (input?: {
     streams: () => streams,
     putAttempts: () => putAttempts,
     invalidations: () => invalidations,
+    records: () => replicaState.items,
     awaitState,
   };
 };
@@ -317,7 +359,7 @@ describe("SnippetHydrationEngine", () => {
       }),
   );
 
-  it.live("keeps failures local and allows an explicit retry", () =>
+  it.live("discards a failed download and allows an ordinary explicit download", () =>
     Effect.gen(function* () {
       const failure = new SnippetHydrationError({
         cause: null,
@@ -328,11 +370,7 @@ describe("SnippetHydrationEngine", () => {
       yield* Effect.gen(function* () {
         const engine = yield* SnippetHydrationEngine;
         yield* engine.resume(account);
-        const failed = yield* retryable.awaitState(engine, "FAILED");
-        expect(failed).toEqual({
-          status: "FAILED",
-          message: "Storage is temporarily unavailable.",
-        });
+        yield* retryable.awaitState(engine, "NOT_AVAILABLE");
         retryable.setStream(Stream.succeed(remoteBytes));
         yield* engine.download(account, snippetId);
         yield* retryable.awaitState(engine, "AVAILABLE");
@@ -341,7 +379,7 @@ describe("SnippetHydrationEngine", () => {
     }),
   );
 
-  it.effect("retries local hydration after connectivity recovers", () =>
+  it.effect("does not schedule a retry after connectivity recovers", () =>
     Effect.gen(function* () {
       const offline = new SnippetHydrationError({
         cause: null,
@@ -360,8 +398,8 @@ describe("SnippetHydrationEngine", () => {
         return yield* engine.state(account.id, snippetId, remoteBytes.byteLength);
       }).pipe(Effect.provide(recovering.layer));
 
-      expect(state).toEqual({ status: "AVAILABLE" });
-      expect(recovering.streams()).toBe(2);
+      expect(state).toEqual({ status: "NOT_AVAILABLE" });
+      expect(recovering.streams()).toBe(1);
     }),
   );
 
@@ -379,8 +417,7 @@ describe("SnippetHydrationEngine", () => {
         yield* engine.resume(account);
         yield* Effect.yieldNow;
         expect(yield* engine.state(account.id, snippetId, remoteBytes.byteLength)).toEqual({
-          status: "FAILED",
-          message: "Storage access was denied.",
+          status: "NOT_AVAILABLE",
         });
         permanent.setStream(Stream.succeed(remoteBytes));
         yield* TestClock.adjust("5 minutes");
@@ -388,7 +425,7 @@ describe("SnippetHydrationEngine", () => {
         return yield* engine.state(account.id, snippetId, remoteBytes.byteLength);
       }).pipe(Effect.provide(permanent.layer));
 
-      expect(state).toEqual({ status: "FAILED", message: "Storage access was denied." });
+      expect(state).toEqual({ status: "NOT_AVAILABLE" });
       expect(permanent.streams()).toBe(1);
     }),
   );
@@ -408,8 +445,7 @@ describe("SnippetHydrationEngine", () => {
         yield* engine.resume(account);
         yield* Effect.yieldNow;
         expect(yield* engine.state(account.id, snippetId, remoteBytes.byteLength)).toEqual({
-          status: "FAILED",
-          message: "Hydrated content does not match its metadata.",
+          status: "NOT_AVAILABLE",
         });
         expect(mismatch.putAttempts()).toBe(1);
         yield* TestClock.adjust("5 minutes");
@@ -441,10 +477,7 @@ describe("SnippetHydrationEngine", () => {
         return yield* engine.reconcile(account.id);
       }).pipe(Effect.provide(isolated.layer));
 
-      expect(availability.get(snippetId)).toEqual({
-        status: "FAILED",
-        message: "Could not inspect managed snippet content.",
-      });
+      expect(availability.get(snippetId)).toEqual({ status: "NOT_AVAILABLE" });
       expect(availability.get(retainedId)).toEqual({ status: "NOT_AVAILABLE" });
     }),
   );
@@ -465,7 +498,7 @@ describe("SnippetHydrationEngine", () => {
     }),
   );
 
-  it.live("recovers unfinished hydration when a fresh engine resumes after restart", () =>
+  it.live("uses ordinary automatic selection without persisted recovery state after restart", () =>
     Effect.gen(function* () {
       const failure = new SnippetHydrationError({
         cause: null,
@@ -477,7 +510,7 @@ describe("SnippetHydrationEngine", () => {
       yield* Effect.gen(function* () {
         const engine = yield* SnippetHydrationEngine;
         yield* engine.resume(account);
-        yield* restarted.awaitState(engine, "FAILED");
+        yield* restarted.awaitState(engine, "NOT_AVAILABLE");
       }).pipe(Effect.provide(restarted.layer));
 
       restarted.setStream(Stream.succeed(remoteBytes));
@@ -491,7 +524,7 @@ describe("SnippetHydrationEngine", () => {
     }),
   );
 
-  it.live("continues interrupted work after account reauthorization", () =>
+  it.live("returns interrupted work to Download after account reauthorization", () =>
     Effect.gen(function* () {
       const reauthorized = hydrationHarness({ stream: Stream.never });
 
@@ -514,6 +547,8 @@ describe("SnippetHydrationEngine", () => {
         yield* engine.pause;
         reauthorized.setStream(Stream.succeed(remoteBytes));
         yield* engine.resume({ ...account, accessToken: "renewed-access-token" });
+        yield* reauthorized.awaitState(engine, "NOT_AVAILABLE");
+        yield* engine.download({ ...account, accessToken: "renewed-access-token" }, snippetId);
         yield* reauthorized.awaitState(engine, "AVAILABLE");
       }).pipe(Effect.provide(reauthorized.layer));
 
@@ -536,7 +571,59 @@ describe("SnippetHydrationEngine", () => {
     }),
   );
 
-  it.live("clears an idle hydration failure when the snippet is absent", () =>
+  it.live("frees content outside the newest-20 set without removing snippet records", () =>
+    Effect.gen(function* () {
+      const snippets = Array.from({ length: AUTOMATIC_HYDRATION_LIMIT + 2 }, (_, index) =>
+        apiSnippet({
+          id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+          createdAt: new Date(now + index * 1_000).toISOString(),
+        }),
+      );
+      const storage = hydrationHarness({ snippets });
+      for (const snippet of snippets) {
+        storage.content.set(`${account.id}/${snippet.id}`, snippet.byteSize);
+      }
+
+      yield* SnippetHydrationEngine.use((engine) => engine.freeUpSpace(account.id)).pipe(
+        Effect.provide(storage.layer),
+      );
+
+      expect(storage.content.size).toBe(AUTOMATIC_HYDRATION_LIMIT);
+      expect(storage.content.has(`${account.id}/${snippets.at(-1)?.id}`)).toBe(true);
+      expect(storage.content.has(`${account.id}/${snippets[0]?.id}`)).toBe(false);
+      expect(storage.records()).toEqual(
+        snippets.map((snippet) => ({ kind: "PUBLISHED", snippet })),
+      );
+    }),
+  );
+
+  it.live("does not evict complete content when a snippet leaves the newest-20 window", () =>
+    Effect.gen(function* () {
+      const retained = apiSnippet();
+      const storage = hydrationHarness({ snippet: retained });
+      storage.seedContent(retained.byteSize);
+      const newer = Array.from({ length: AUTOMATIC_HYDRATION_LIMIT + 1 }, (_, index) =>
+        apiSnippet({
+          id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+          createdAt: new Date(now + (index + 1) * 1_000).toISOString(),
+        }),
+      );
+      storage.setSnippets([...newer, retained]);
+      for (const snippet of newer) {
+        storage.content.set(`${account.id}/${snippet.id}`, snippet.byteSize);
+      }
+
+      yield* Effect.gen(function* () {
+        const engine = yield* SnippetHydrationEngine;
+        yield* engine.resume(account);
+        yield* engine.reconcile(account.id);
+      }).pipe(Effect.provide(storage.layer));
+
+      expect(storage.content.has(`${account.id}/${retained.id}`)).toBe(true);
+    }),
+  );
+
+  it.live("keeps an absent snippet metadata-free after a failed download", () =>
     Effect.gen(function* () {
       const failure = new SnippetHydrationError({
         cause: null,
@@ -548,7 +635,7 @@ describe("SnippetHydrationEngine", () => {
       yield* Effect.gen(function* () {
         const engine = yield* SnippetHydrationEngine;
         yield* engine.resume(account);
-        yield* failed.awaitState(engine, "FAILED");
+        yield* failed.awaitState(engine, "NOT_AVAILABLE");
         failed.removeSnippet();
         yield* engine.reconcile(account.id);
         expect(yield* engine.state(account.id, snippetId, remoteBytes.byteLength)).toEqual({

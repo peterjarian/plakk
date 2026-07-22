@@ -84,6 +84,16 @@ const makeLocalStateSnippets = Effect.gen(function* () {
             }),
         ),
       ),
+    storageUsageBytes: (accountId) =>
+      managedContent.storageUsageBytes(accountId).pipe(
+        Effect.mapError(
+          (cause) =>
+            new LocalStateError({
+              cause,
+              reason: "Could not derive managed snippet storage usage.",
+            }),
+        ),
+      ),
   } satisfies LocalStateSnippetsShape;
 });
 

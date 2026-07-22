@@ -78,6 +78,7 @@ const dependencies = (options: {
           provider: { known: true, value: "GOOGLE_DRIVE" },
           capability: { status: "OFFLINE" },
           liveConnection: null,
+          storageUsageBytes: 0,
           snippets: [],
         }),
         owner: Effect.succeed(
@@ -113,6 +114,7 @@ const dependencies = (options: {
       SnippetHydrationEngine.of({
         changes: Stream.empty,
         download: () => Effect.void,
+        freeUpSpace: () => Effect.void,
         pause: Effect.void,
         purge: () => Effect.void,
         reconcile: () => Effect.succeed(new Map()),

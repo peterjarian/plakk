@@ -33,6 +33,7 @@ export interface SnippetHydrationShape {
     account: SnippetSyncAccount,
     snippetId: string,
   ) => Effect.Effect<void, SnippetHydrationEngineFailure>;
+  readonly freeUpSpace: (accountId: string) => Effect.Effect<void, SnippetHydrationEngineFailure>;
   readonly state: (
     accountId: string,
     snippetId: string,
