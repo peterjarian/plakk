@@ -10,10 +10,14 @@ const electron = vi.hoisted(() => ({
   getPath: vi.fn(() => "/tmp"),
 }));
 
-const fs = vi.hoisted(() => ({ writeFileSync: vi.fn() }));
+const fs = vi.hoisted(() => ({
+  mkdtempSync: vi.fn(() => "/tmp/plakk-snippet-unique"),
+  writeFileSync: vi.fn(),
+}));
 
 vi.mock("node:fs", async (importOriginal) => ({
   ...(await importOriginal<typeof import("node:fs")>()),
+  mkdtempSync: fs.mkdtempSync,
   writeFileSync: fs.writeFileSync,
 }));
 
@@ -73,16 +77,18 @@ describe("stored snippet clipboard writes", () => {
       }),
     );
 
+    expect(fs.mkdtempSync).toHaveBeenCalledWith("/tmp/plakk-snippet-");
     expect(fs.writeFileSync).toHaveBeenCalledWith(
-      expect.stringContaining("-report.pdf"),
+      "/tmp/plakk-snippet-unique/report.pdf",
       new Uint8Array([1, 2]),
     );
     expect(electron.clear).toHaveBeenCalled();
     const fileList = electron.writeBuffer.mock.calls.find(
       ([format]) => format === "NSFilenamesPboardType",
     )?.[1];
-    expect(fileList?.toString()).toContain("<array><string>/tmp/plakk-snippet-");
-    expect(fileList?.toString()).toContain("-report.pdf</string></array>");
+    expect(fileList?.toString()).toContain(
+      "<array><string>/tmp/plakk-snippet-unique/report.pdf</string></array>",
+    );
     expect(electron.writeBuffer).not.toHaveBeenCalledWith("application/pdf", Buffer.from([1, 2]));
     platform.mockRestore();
   });

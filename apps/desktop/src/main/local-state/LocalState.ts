@@ -31,7 +31,7 @@ export type LocalStateUpdate =
   | {
       readonly kind: "live-connection";
       readonly accountId: string;
-      readonly status: "CONNECTED" | "RECONNECTING";
+      readonly status: "CONNECTED" | "RECONNECTING" | null;
     }
   | { readonly kind: "owner-cleanup-pending" }
   | { readonly kind: "signed-out" };

@@ -1,4 +1,4 @@
-import { statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, statSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { basename, extname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -247,7 +247,8 @@ const windowsFileDrop = (path: string) => {
 
 const writeSnippetFile = (content: SnippetContent) => {
   const fileName = basename(content.fileName);
-  const path = join(app.getPath("temp"), `plakk-snippet-${crypto.randomUUID()}-${fileName}`);
+  const directory = mkdtempSync(join(app.getPath("temp"), "plakk-snippet-"));
+  const path = join(directory, fileName);
   const url = pathToFileURL(path).toString();
 
   writeFileSync(path, content.bytes);

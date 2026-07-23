@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import type { LocalState } from "../../ipc/contracts.ts";
 import { Home, STORAGE_WARNING_BYTES } from "./Home.tsx";
 import { Settings } from "./Settings.tsx";
 import { Tray } from "./Tray.tsx";
@@ -8,6 +9,7 @@ import { Tray } from "./Tray.tsx";
 const state = vi.hoisted(() => {
   let liveConnection: { readonly status: "CONNECTED" | "RECONNECTING" } | null = null;
   let storageUsageBytes = 0;
+  let capability: LocalState["capability"] = { status: "OFFLINE" };
   const account = {
     id: "user_1",
     email: "reader@example.com",
@@ -20,7 +22,9 @@ const state = vi.hoisted(() => {
     revision: 7,
     account,
     provider: { known: true, value: "GOOGLE_DRIVE" },
-    capability: { status: "OFFLINE" },
+    get capability() {
+      return capability;
+    },
     get liveConnection() {
       return liveConnection;
     },
@@ -47,6 +51,9 @@ const state = vi.hoisted(() => {
     localState,
     setLiveConnection: (next: typeof liveConnection) => {
       liveConnection = next;
+    },
+    setCapability: (next: LocalState["capability"]) => {
+      capability = next;
     },
     setStorageUsageBytes: (next: number) => {
       storageUsageBytes = next;
@@ -79,19 +86,47 @@ describe("local state views", () => {
     expect(tray).toContain("reader@example.com");
     expect(home).toContain("Google Drive");
     expect(tray).toContain("Google Drive");
-    expect(home).toContain("Offline — cached snippets stay available.");
-    expect(tray).toContain("Offline — cached snippets stay available");
+    expect(home).toContain('aria-label="Offline"');
+    expect(tray).toContain('aria-label="Offline"');
+    expect(home).not.toContain("Offline — cached snippets stay available.");
+    expect(tray).not.toContain("Offline — cached snippets stay available");
   });
 
-  it("presents reconnecting live updates in Home and Tray", () => {
+  it("presents live state compactly without visible connection copy", () => {
+    state.setCapability({
+      status: "ONLINE",
+      account: {
+        canSync: true,
+        storageProvider: "GOOGLE_DRIVE",
+        blockedReasons: [],
+      },
+      connection: {
+        storageProvider: "GOOGLE_DRIVE",
+        status: "CONNECTED",
+        externalDestinationUrl: "https://drive.google.com/drive/folders/plakk",
+      },
+    });
     state.setLiveConnection({ status: "RECONNECTING" });
 
-    const home = renderToStaticMarkup(<Home />);
-    const tray = renderToStaticMarkup(<Tray />);
+    const reconnectingHome = renderToStaticMarkup(<Home />);
+    const reconnectingTray = renderToStaticMarkup(<Tray />);
 
-    expect(home).toContain("Live updates reconnecting…");
-    expect(tray).toContain("Reconnecting…");
+    expect(reconnectingHome).toContain('aria-label="Reconnecting"');
+    expect(reconnectingTray).toContain('aria-label="Reconnecting"');
+    expect(reconnectingHome).not.toContain(">Live updates reconnecting…<");
+    expect(reconnectingTray).not.toContain(">Reconnecting…<");
+
+    state.setLiveConnection({ status: "CONNECTED" });
+    const connectedHome = renderToStaticMarkup(<Home />);
+    const connectedTray = renderToStaticMarkup(<Tray />);
+
+    expect(connectedHome).toContain('aria-label="Up to date"');
+    expect(connectedTray).toContain('aria-label="Up to date"');
+    expect(connectedHome).not.toContain(">Live updates connected<");
+    expect(connectedTray).not.toContain(">Live<");
+
     state.setLiveConnection(null);
+    state.setCapability({ status: "OFFLINE" });
   });
 
   it("warns above 30 GiB and links Home to the Settings storage controls", () => {

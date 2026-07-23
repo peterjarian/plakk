@@ -69,6 +69,7 @@ const makeDesktopSession = Effect.gen(function* () {
   const generation = yield* Ref.make(0);
   const started = yield* Ref.make(false);
   const syncFiber = yield* Ref.make<Fiber.Fiber<void, unknown> | null>(null);
+  const syncConnectionStatus = yield* Ref.make<"CONNECTED" | "RECONNECTING" | null>(null);
   const capabilityFiber = yield* Ref.make<Fiber.Fiber<void, never> | null>(null);
   const connectionRefresh = yield* Ref.make<Effect.Effect<void, DesktopSessionTransitionError>>(
     Effect.void,
@@ -107,6 +108,7 @@ const makeDesktopSession = Effect.gen(function* () {
       );
   const stopSync = Effect.gen(function* () {
     const fiber = yield* Ref.getAndSet(syncFiber, null);
+    yield* Ref.set(syncConnectionStatus, null);
     if (fiber !== null) yield* Fiber.interrupt(fiber);
     const current = yield* Ref.get(status);
     if (current.user !== null) {
@@ -114,7 +116,7 @@ const makeDesktopSession = Effect.gen(function* () {
         .update({
           kind: "live-connection",
           accountId: current.user.id,
-          status: "RECONNECTING",
+          status: null,
         })
         .pipe(
           Effect.catchCause((cause) =>
@@ -131,6 +133,16 @@ const makeDesktopSession = Effect.gen(function* () {
       Effect.asVoid,
     );
   const startSync = Effect.fn("DesktopSession.startSync")(function* (session: AuthSession) {
+    if ((yield* Ref.get(syncFiber)) !== null) return;
+    const currentSyncAccount = Ref.get(status).pipe(
+      Effect.map((current) => ({
+        id: session.user.id,
+        accessToken:
+          current.user?.id === session.user.id && current.accessToken !== null
+            ? current.accessToken
+            : session.accessToken,
+      })),
+    );
     const fiber = yield* runSnippetReplicaSync(
       {
         id: session.user.id,
@@ -138,22 +150,27 @@ const makeDesktopSession = Effect.gen(function* () {
       },
       {
         onConnectionStatus: (liveStatus) =>
-          localState
-            .update({
-              kind: "live-connection",
-              accountId: session.user.id,
-              status: liveStatus,
-            })
-            .pipe(
-              Effect.catchCause((cause) =>
-                Effect.logError("Could not publish live connection status", { cause }),
-              ),
+          Ref.set(syncConnectionStatus, liveStatus).pipe(
+            Effect.andThen(
+              localState
+                .update({
+                  kind: "live-connection",
+                  accountId: session.user.id,
+                  status: liveStatus,
+                })
+                .pipe(
+                  Effect.catchCause((cause) =>
+                    Effect.logError("Could not publish live connection status", { cause }),
+                  ),
+                ),
             ),
+          ),
         onConnected: refreshSessionDetached("Could not refresh the reconnected desktop session"),
         onDisconnected: refreshSessionDetached(
           "Could not refresh credentials after live disconnection",
         ),
       },
+      currentSyncAccount,
     ).pipe(
       Effect.provideService(SnippetReplica, replica),
       Effect.provideService(SnippetRemoteTransport, remote),
@@ -167,7 +184,7 @@ const makeDesktopSession = Effect.gen(function* () {
   const setStatus = Effect.fn("DesktopSession.setStatus")(function* (next: SessionStatus) {
     const previous = yield* Ref.get(status);
     const accountChanged = previous.user?.id !== next.user?.id;
-    const changed = previous.accessToken !== next.accessToken || accountChanged;
+    const accessTokenChanged = previous.accessToken !== next.accessToken;
     if (accountChanged) {
       yield* Ref.update(generation, (value) => value + 1);
       yield* Ref.set(status, {
@@ -199,19 +216,30 @@ const makeDesktopSession = Effect.gen(function* () {
         }),
       );
     } else {
-      if (changed) {
+      const canRotateCredentialsInPlace =
+        previous.accessToken !== null &&
+        next.accessToken !== null &&
+        previous.commandsAuthorized &&
+        next.commandsAuthorized &&
+        !previous.cleanupPending &&
+        !next.cleanupPending &&
+        (yield* Ref.get(syncConnectionStatus)) === "CONNECTED";
+      if (accessTokenChanged) {
         yield* Ref.update(generation, (value) => value + 1);
-        yield* stopSync;
-        yield* hydration.pause;
+        if (!canRotateCredentialsInPlace) {
+          yield* stopSync;
+          yield* hydration.pause;
+        }
       }
-      if (next.user !== null && !next.cleanupPending) {
+      if (
+        accessTokenChanged &&
+        !canRotateCredentialsInPlace &&
+        next.user !== null &&
+        !next.cleanupPending
+      ) {
         yield* localState.update({ kind: "offline", account: next.user });
       }
       yield* Ref.set(status, next);
-    }
-    if (!changed) return;
-    if (next.user !== null && next.accessToken !== null && next.commandsAuthorized) {
-      yield* startSync({ user: next.user, accessToken: next.accessToken });
     }
   });
 
@@ -274,6 +302,8 @@ const makeDesktopSession = Effect.gen(function* () {
       return;
     }
     const { account, connection } = result.success;
+    const canSync = accountCanSyncWithConnection(account, connection);
+    if (!canSync) yield* stopSync;
     yield* localState
       .update({
         kind: "online",
@@ -286,7 +316,8 @@ const makeDesktopSession = Effect.gen(function* () {
           Effect.logError("Could not confirm the local state capability", { cause }),
         ),
       );
-    if (accountCanSyncWithConnection(account, connection)) {
+    if (canSync) {
+      yield* startSync({ user: current.user, accessToken: current.accessToken });
       yield* resumeBackgroundWork({ user: current.user, accessToken: current.accessToken });
     } else {
       yield* hydration.pause;

@@ -197,6 +197,20 @@ describe("DesktopSession command authority", () => {
                 }),
               ),
           }),
+          rpc: PlakkRpcClient.of({
+            GetAccountStatus: () =>
+              Effect.succeed({
+                canSync: true,
+                storageProvider: "GOOGLE_DRIVE",
+                blockedReasons: [],
+              }),
+            GetPipeConnectionStatus: () =>
+              Effect.succeed({
+                storageProvider: "GOOGLE_DRIVE",
+                status: "CONNECTED",
+                externalDestinationUrl: "https://drive.google.com/drive/folders/plakk",
+              }),
+          } as never),
         });
 
         const current = yield* Effect.gen(function* () {
@@ -213,6 +227,158 @@ describe("DesktopSession command authority", () => {
         expect(connectionTokens).toEqual(["expired-token", "fresh-token"]);
         expect(current).toMatchObject({ accessToken: "fresh-token" });
       }),
+  );
+
+  it.effect("does not retry live invalidations while storage needs reauthorization", () =>
+    Effect.gen(function* () {
+      const capabilityChecked = yield* Deferred.make<void>();
+      const localStateUpdates: Array<LocalStateUpdate> = [];
+      let invalidationAttempts = 0;
+      const layer = dependencies({
+        getSession: () => Effect.succeed({ accessToken: "token", user: firstAccount }),
+        localStateUpdates,
+        purge: () => Effect.void,
+        remote: SnippetRemoteTransport.of({
+          snapshot: () => Effect.never,
+          invalidations: () =>
+            Stream.unwrap(
+              Effect.sync(() => {
+                invalidationAttempts += 1;
+                return Stream.fail(
+                  new SnippetRemoteTransportError({
+                    cause: null,
+                    reason: "storage is not connected",
+                  }),
+                );
+              }),
+            ),
+        }),
+        rpc: PlakkRpcClient.of({
+          GetAccountStatus: () =>
+            Effect.succeed({
+              canSync: true,
+              storageProvider: "GOOGLE_DRIVE",
+              blockedReasons: [],
+            }),
+          GetPipeConnectionStatus: () =>
+            Deferred.succeed(capabilityChecked, undefined).pipe(
+              Effect.as({
+                storageProvider: "GOOGLE_DRIVE",
+                status: "NEEDS_REAUTHORIZATION",
+                externalDestinationUrl: null,
+              }),
+            ),
+        } as never),
+      });
+
+      const updates = yield* Effect.gen(function* () {
+        const session = yield* DesktopSession;
+        yield* session.start;
+        yield* Deferred.await(capabilityChecked);
+        yield* Effect.yieldNow;
+        yield* TestClock.adjust("15 seconds");
+        yield* Effect.yieldNow;
+        return [...localStateUpdates];
+      }).pipe(
+        Effect.provide(
+          DesktopSessionLive.pipe(Layer.provide(Layer.merge(layer, NodeFileSystem.layer))),
+        ),
+      );
+
+      expect(invalidationAttempts).toBe(0);
+      expect(updates).toContainEqual({
+        kind: "online",
+        account: firstAccount,
+        accountStatus: {
+          canSync: true,
+          storageProvider: "GOOGLE_DRIVE",
+          blockedReasons: [],
+        },
+        connection: {
+          storageProvider: "GOOGLE_DRIVE",
+          status: "NEEDS_REAUTHORIZATION",
+          externalDestinationUrl: null,
+        },
+      });
+      expect(updates).toContainEqual({
+        kind: "live-connection",
+        accountId: firstAccount.id,
+        status: null,
+      });
+    }),
+  );
+
+  it.effect("keeps an active live connection stable across same-account token rotation", () =>
+    Effect.gen(function* () {
+      const connected = yield* Deferred.make<void>();
+      const backgroundRefreshCompleted = yield* Deferred.make<void>();
+      const localStateUpdates: Array<LocalStateUpdate> = [];
+      let capabilityChecks = 0;
+      let invalidationAttempts = 0;
+      let sessionReads = 0;
+      const layer = dependencies({
+        getSession: () =>
+          Effect.sync(() => ({
+            accessToken: `token-${++sessionReads}`,
+            user: firstAccount,
+          })),
+        localStateUpdates,
+        purge: () => Effect.void,
+        remote: SnippetRemoteTransport.of({
+          snapshot: () => Effect.succeed([]),
+          invalidations: () =>
+            Stream.unwrap(
+              Effect.sync(() => {
+                invalidationAttempts += 1;
+                return Stream.fromEffect(Deferred.succeed(connected, undefined)).pipe(
+                  Stream.map(() => undefined),
+                  Stream.concat(Stream.never),
+                );
+              }),
+            ),
+        }),
+        rpc: PlakkRpcClient.of({
+          GetAccountStatus: () =>
+            Effect.gen(function* () {
+              capabilityChecks += 1;
+              if (capabilityChecks === 2) {
+                yield* Deferred.succeed(backgroundRefreshCompleted, undefined);
+              }
+              return {
+                canSync: true,
+                storageProvider: "GOOGLE_DRIVE",
+                blockedReasons: [],
+              } as const;
+            }),
+          GetPipeConnectionStatus: () =>
+            Effect.succeed({
+              storageProvider: "GOOGLE_DRIVE",
+              status: "CONNECTED",
+              externalDestinationUrl: "https://drive.google.com/drive/folders/plakk",
+            }),
+        } as never),
+      });
+
+      const updates = yield* Effect.gen(function* () {
+        const session = yield* DesktopSession;
+        yield* session.start;
+        yield* Deferred.await(connected);
+        yield* Deferred.await(backgroundRefreshCompleted);
+        yield* Effect.yieldNow;
+        localStateUpdates.length = 0;
+        yield* session.refresh;
+        yield* Effect.yieldNow;
+        return [...localStateUpdates];
+      }).pipe(
+        Effect.provide(
+          DesktopSessionLive.pipe(Layer.provide(Layer.merge(layer, NodeFileSystem.layer))),
+        ),
+      );
+
+      expect(invalidationAttempts).toBe(1);
+      expect(updates.some((update) => update.kind === "offline")).toBe(false);
+      expect(updates.some((update) => update.kind === "live-connection")).toBe(false);
+    }),
   );
 
   it.effect("revokes commands before sign-out cleanup and retains the purge owner for retry", () =>
@@ -340,7 +506,7 @@ describe("DesktopSession command authority", () => {
         {
           kind: "live-connection",
           accountId: firstAccount.id,
-          status: "RECONNECTING",
+          status: null,
         },
         { kind: "owner-cleanup-pending" },
         { kind: "offline", account: secondAccount },

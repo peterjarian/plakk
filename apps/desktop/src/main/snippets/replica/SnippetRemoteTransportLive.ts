@@ -16,14 +16,6 @@ export type SnippetInvalidationFetch = (
 const transportError = (cause: unknown, reason: string) =>
   new SnippetRemoteTransportError({ cause, reason });
 
-export const snippetInvalidationsUrlFromRpcUrl = (rpcUrl: string): string => {
-  const url = new URL(rpcUrl.startsWith("/") ? rpcUrl : rpcUrl, "http://localhost:3100");
-  const segments = url.pathname.split("/");
-  segments[segments.length - 1] = "snippets/invalidations";
-  url.pathname = segments.join("/");
-  return rpcUrl.startsWith("/") ? `${url.pathname}${url.search}` : url.toString();
-};
-
 export const decodeSnippetInvalidations = <E>(
   bytes: Stream.Stream<Uint8Array, E>,
 ): Stream.Stream<void, E> =>
@@ -88,10 +80,9 @@ export const makeSnippetRemoteTransportLive = (fetch: SnippetInvalidationFetch) 
     SnippetRemoteTransport,
     Effect.gen(function* () {
       const client = yield* PlakkRpcClient;
-      const rpcUrl = yield* Config.string("PLAKK_RPC_URL").pipe(
-        Config.withDefault("https://app.plakk.io/api/rpc"),
+      const invalidationsUrl = yield* Config.string("PLAKK_SNIPPET_INVALIDATIONS_URL").pipe(
+        Config.withDefault("http://localhost:3100/api/snippets/invalidations"),
       );
-      const invalidationsUrl = snippetInvalidationsUrlFromRpcUrl(rpcUrl);
       return SnippetRemoteTransport.of({
         snapshot: Effect.fn("DesktopSnippetRemote.snapshot")(function* (account) {
           return yield* client.GetSnippetSnapshot(undefined, {

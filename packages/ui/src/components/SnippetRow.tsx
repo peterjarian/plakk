@@ -14,6 +14,7 @@ import {
   RotateCw,
   Trash2,
   Type,
+  X,
 } from "lucide-react";
 import { Button } from "./primitives/button.tsx";
 
@@ -114,9 +115,12 @@ export function SnippetRow(props: {
     snippet.kind === "PUBLISHED" &&
     (snippet.localContentAvailability.status === "NOT_AVAILABLE" ||
       snippet.localContentAvailability.status === "FAILED");
-  const isAvailableOffline =
-    snippet.kind === "PUBLISHED" && snippet.localContentAvailability.status === "AVAILABLE";
   const title = presentation.title;
+  const time = formatSnippetDate(snippet.createdAt, now);
+  const metadata =
+    presentation.type === "file" || presentation.type === "image"
+      ? `${fileSubtitle(snippet)} · ${time}`
+      : `${formatFileSize(snippet.byteSize)} · ${time}`;
   const subtitle =
     copyError !== undefined
       ? copyError
@@ -124,24 +128,7 @@ export function SnippetRow(props: {
         ? (localState?.errorMessage ?? "Upload failed. Dismiss it and add the content again.")
         : snippet.localContentAvailability.status === "FAILED"
           ? snippet.localContentAvailability.message
-          : isDownloading
-            ? "Downloading for offline access…"
-            : presentation.type === "file" || presentation.type === "image"
-              ? `${fileSubtitle(snippet)}${isAvailableOffline ? " · Available offline" : snippet.localContentAvailability.status === "NOT_AVAILABLE" ? " · Not on this device" : ""}`
-              : snippet.localContentAvailability.status === "NOT_AVAILABLE" &&
-                  snippet.kind === "PUBLISHED"
-                ? "Not on this device"
-                : isAvailableOffline
-                  ? `Available offline · ${formatFileSize(snippet.byteSize)}`
-                  : localState !== null
-                    ? ""
-                    : formatFileSize(snippet.byteSize);
-  const time =
-    localState !== null
-      ? localState.status === "FAILED"
-        ? "Failed"
-        : ""
-      : formatSnippetDate(snippet.createdAt, now);
+          : metadata;
 
   return (
     <li>
@@ -164,9 +151,9 @@ export function SnippetRow(props: {
         </div>
 
         <div className="flex shrink-0 items-center justify-end">
-          {isUploading || isDownloading ? (
-            <div
-              className="flex items-center gap-1"
+          {(isUploading || isDownloading) && (
+            <span
+              className="flex size-7 items-center justify-center"
               role="status"
               aria-label={isDownloading ? "Downloading for offline access" : "Syncing"}
             >
@@ -174,84 +161,81 @@ export function SnippetRow(props: {
                 className="size-4 animate-spin text-muted-foreground"
                 aria-hidden="true"
               />
-            </div>
-          ) : (
-            <>
-              <span
-                className={`text-[11px] tabular-nums text-muted-foreground ${showActions ? "group-hover:hidden group-focus-within:hidden" : ""}`}
-              >
-                {time}
-              </span>
+            </span>
+          )}
 
-              <div
-                className={
-                  showActions
-                    ? "hidden items-center gap-0.5 group-hover:flex group-focus-within:flex"
-                    : "hidden"
-                }
-              >
-                {needsDownload && onDownload && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label={
-                      snippet.localContentAvailability.status === "FAILED"
-                        ? "Retry download"
-                        : "Download to this device"
-                    }
-                    onClick={onDownload}
-                  >
-                    {snippet.localContentAvailability.status === "FAILED" ? (
-                      <RotateCw />
-                    ) : (
-                      <Download />
-                    )}
-                  </Button>
-                )}
-                {snippet.kind === "PUBLISHED" && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label={copying ? "Copying" : copied ? "Copied" : "Copy"}
-                    disabled={copying || copyDisabled}
-                    onClick={onCopy}
-                  >
-                    {copying ? (
-                      <LoaderCircle className="animate-spin" />
-                    ) : copied ? (
-                      <Check className="text-emerald-500" />
-                    ) : (
-                      <Copy />
-                    )}
-                  </Button>
-                )}
-                {snippet.kind === "PUBLISHED" &&
-                  presentation.type === "hyperlink" &&
-                  onOpenLink && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      aria-label="Open link"
-                      onClick={() => onOpenLink(presentation.url)}
-                    >
-                      <ArrowUpRight />
-                    </Button>
-                  )}
+          {needsDownload && onDownload && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              data-persistent-action="download"
+              aria-label={
+                snippet.localContentAvailability.status === "FAILED"
+                  ? "Retry download"
+                  : "Download to this device"
+              }
+              onClick={onDownload}
+            >
+              {snippet.localContentAvailability.status === "FAILED" ? <RotateCw /> : <Download />}
+            </Button>
+          )}
+
+          {isFailed && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              data-persistent-action="dismiss"
+              aria-label="Dismiss failed upload"
+              onClick={onDelete}
+            >
+              <X />
+            </Button>
+          )}
+
+          {showActions && snippet.kind === "PUBLISHED" && (
+            <div className="invisible flex items-center gap-0.5 group-hover:visible group-focus-within:visible">
+              {!needsDownload && !isDownloading && (
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon-sm"
-                  aria-label={isFailed ? "Dismiss failed upload" : "Delete"}
-                  className="hover:bg-destructive/10 hover:text-destructive"
-                  onClick={onDelete}
+                  aria-label={copying ? "Copying" : copied ? "Copied" : "Copy"}
+                  disabled={copying || copyDisabled}
+                  onClick={onCopy}
                 >
-                  <Trash2 />
+                  {copying ? (
+                    <LoaderCircle className="animate-spin" />
+                  ) : copied ? (
+                    <Check className="text-emerald-500" />
+                  ) : (
+                    <Copy />
+                  )}
                 </Button>
-              </div>
-            </>
+              )}
+              {presentation.type === "hyperlink" && onOpenLink && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Open link"
+                  onClick={() => onOpenLink(presentation.url)}
+                >
+                  <ArrowUpRight />
+                </Button>
+              )}
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Delete"
+                className="hover:bg-destructive/10 hover:text-destructive"
+                onClick={onDelete}
+              >
+                <Trash2 />
+              </Button>
+            </div>
           )}
         </div>
         {copyError && (

@@ -11,6 +11,7 @@ import {
 } from "../hooks/useStorageStatus.tsx";
 import { ipcActionErrorMessage } from "../lib/ipcActionErrorMessage.ts";
 import { ingestFileSnippet, ingestTextSnippet } from "../lib/snippetIngestion.ts";
+import { SyncStatusIndicator, type SyncStatus } from "../components/SyncStatusIndicator.tsx";
 import { TrayActions } from "./tray/TrayActions.tsx";
 import { TrayRecentItem } from "./tray/TrayRecentItem.tsx";
 import { TrayShell } from "./tray/TrayShell.tsx";
@@ -26,6 +27,16 @@ export function Tray() {
   const storageStatus = useStorageStatus();
   const liveConnection = useLocalState().localState.liveConnection;
   const ingestionAllowed = storageStatus.kind === "connected" && storageStatus.canSync;
+  const syncStatus: SyncStatus =
+    storageStatus.kind === "loading"
+      ? "CHECKING"
+      : storageStatus.kind === "offline" || storageStatus.kind === "failed"
+        ? "OFFLINE"
+        : storageStatus.kind !== "connected" || !storageStatus.canSync
+          ? "PAUSED"
+          : liveConnection?.status === "CONNECTED"
+            ? "CONNECTED"
+            : "RECONNECTING";
   const ingestionProvider = storageStatus.kind === "connected" ? storageStatus.provider : null;
   const { error: snippetReadError, items, reload: reloadSnippets } = useSnippets();
   const latest = items.at(0);
@@ -137,13 +148,9 @@ export function Tray() {
   return (
     <TrayShell>
       <header className="flex shrink-0 items-center justify-between gap-3 border-b px-4 py-2.5">
-        <div className="min-w-0">
+        <div className="flex min-w-0 items-center gap-1">
           <p className="truncate text-xs font-medium">{auth.user?.email ?? "Plakk"}</p>
-          {liveConnection !== null && (
-            <p className="text-[10px] text-muted-foreground" role="status" aria-live="polite">
-              {liveConnection.status === "CONNECTED" ? "Live" : "Reconnecting…"}
-            </p>
-          )}
+          <SyncStatusIndicator status={syncStatus} />
         </div>
         {provider !== null && (
           <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground">
@@ -215,15 +222,18 @@ export function Tray() {
                   .catch(() => setError("Plakk couldn’t open this link."));
               }}
             />
-            {!ingestionAllowed && (
-              <p
-                className="px-4 pb-2 text-[11px] text-muted-foreground"
-                role="status"
-                aria-live="polite"
-              >
-                {pausedMessage}
-              </p>
-            )}
+            {!ingestionAllowed &&
+              storageStatus.kind !== "loading" &&
+              storageStatus.kind !== "offline" &&
+              storageStatus.kind !== "failed" && (
+                <p
+                  className="px-4 pb-2 text-[11px] text-muted-foreground"
+                  role="status"
+                  aria-live="polite"
+                >
+                  {pausedMessage}
+                </p>
+              )}
             {error !== null && (
               <p className="px-4 pb-2 text-[11px] text-destructive" role="alert">
                 {error}

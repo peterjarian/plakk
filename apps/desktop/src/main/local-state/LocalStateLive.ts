@@ -58,7 +58,7 @@ const makeLocalState = Effect.gen(function* () {
           account: persisted.account,
           provider: persisted.provider,
           capability: { status: "OFFLINE" } as const,
-          liveConnection: { status: "RECONNECTING" } as const,
+          liveConnection: null,
           storageUsageBytes: initialStorageUsageBytes,
           snippets: initialItems,
         };
@@ -140,9 +140,11 @@ const makeLocalState = Effect.gen(function* () {
         if (input.kind === "live-connection") {
           if (currentSession?.account.id !== input.accountId || currentSession.cleanupPending)
             return;
-          const next = yield* materializeSession(currentSession, currentState.capability, {
-            status: input.status,
-          });
+          const next = yield* materializeSession(
+            currentSession,
+            currentState.capability,
+            input.status === null ? null : { status: input.status },
+          );
           yield* publish(next);
           return;
         }
@@ -183,9 +185,7 @@ const makeLocalState = Effect.gen(function* () {
         const next = yield* materializeSession(
           nextSession,
           capability,
-          sameAccount && currentState.liveConnection !== null
-            ? currentState.liveConnection
-            : { status: "RECONNECTING" },
+          sameAccount ? currentState.liveConnection : null,
         );
         yield* store.save(nextSession);
         yield* Ref.set(session, nextSession);

@@ -24,7 +24,7 @@ pnpm --filter @plakk/web typecheck
 
 ## Environment
 
-WorkOS Pipes RPCs require:
+WorkOS browser authentication requires:
 
 ```bash
 WORKOS_API_KEY=sk_...
@@ -33,7 +33,10 @@ WORKOS_REDIRECT_URI=http://localhost:3000/api/auth/callback
 WORKOS_COOKIE_PASSWORD=32+ chars
 ```
 
-## RPC
+## Backend ownership
 
-The shared Effect RPC contract lives in `packages/shared/src/api/PlakkApi.ts`.
-The web handler is `src/api/rpc.ts`, exposed through the TanStack server route at `src/routes/api/rpc.ts`.
+The web app owns the WorkOS browser authentication routes under `/api/auth/*`. It does not proxy
+product RPC commands or live updates.
+
+Desktop connects directly to the independently deployed backend using `PLAKK_RPC_URL` for commands
+and `PLAKK_SNIPPET_INVALIDATIONS_URL` for live Snippet invalidations.

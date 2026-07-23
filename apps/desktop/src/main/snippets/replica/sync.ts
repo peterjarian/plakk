@@ -1,5 +1,5 @@
 import type { ApiSnippet } from "@plakk/shared/PlakkApi";
-import { Effect, Stream } from "effect";
+import { Cause, Effect, Stream } from "effect";
 
 import { ManagedSnippetContent } from "../content/ManagedSnippetContent.ts";
 import { SnippetRemoteTransport, type SnippetSyncAccount } from "./SnippetRemoteTransport.ts";
@@ -81,6 +81,7 @@ export const runSnippetReplicaSync = Effect.fn("SnippetReplica.run")(function* (
     onConnected: Effect.void,
     onDisconnected: Effect.void,
   },
+  currentAccount: Effect.Effect<SnippetSyncAccount> = Effect.succeed(account),
 ) {
   const remote = yield* SnippetRemoteTransport;
   let status: LiveConnectionStatus | null = null;
@@ -94,20 +95,22 @@ export const runSnippetReplicaSync = Effect.fn("SnippetReplica.run")(function* (
 
   while (true) {
     yield* publishStatus("RECONNECTING");
+    const connectionAccount = yield* currentAccount;
     let receivedInitialInvalidation = false;
-    yield* remote.invalidations(account).pipe(
+    yield* remote.invalidations(connectionAccount).pipe(
       Stream.runForEach(() =>
         Effect.gen(function* () {
-          if (!receivedInitialInvalidation) {
-            receivedInitialInvalidation = true;
-            yield* lifecycle.onConnected;
-          }
-          yield* syncSnippetReplica(account);
+          const isInitialInvalidation = !receivedInitialInvalidation;
+          receivedInitialInvalidation = true;
+          yield* syncSnippetReplica(yield* currentAccount);
           yield* publishStatus("CONNECTED");
+          if (isInitialInvalidation) yield* lifecycle.onConnected;
         }),
       ),
       Effect.catchCause((cause) =>
-        Effect.logWarning("Snippet invalidation stream disconnected", { cause }),
+        Effect.logWarning("Snippet invalidation stream disconnected", {
+          cause: Cause.pretty(cause),
+        }),
       ),
     );
     yield* publishStatus("RECONNECTING");

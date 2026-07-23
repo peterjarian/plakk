@@ -1,19 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
 import { Effect, Stream } from "effect";
 
-import {
-  decodeSnippetInvalidations,
-  snippetInvalidationsUrlFromRpcUrl,
-} from "./SnippetRemoteTransportLive.ts";
+import { decodeSnippetInvalidations } from "./SnippetRemoteTransportLive.ts";
 
 describe("Snippet SSE transport", () => {
-  it("derives the events endpoint beside the configured RPC endpoint", () => {
-    expect(snippetInvalidationsUrlFromRpcUrl("http://localhost:3100/api/rpc")).toBe(
-      "http://localhost:3100/api/snippets/invalidations",
-    );
-    expect(snippetInvalidationsUrlFromRpcUrl("/api/rpc")).toBe("/api/snippets/invalidations");
-  });
-
   it("decodes fragmented payload-free invalidations and ignores keep-alive comments", async () => {
     const encode = (value: string) => new TextEncoder().encode(value);
     const events = await Effect.runPromise(

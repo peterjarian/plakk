@@ -175,7 +175,17 @@ describe("DesktopSession", () => {
           PlakkRpcClient,
           PlakkRpcClient.of({
             GetAccountStatus: () =>
-              Effect.succeed({ canSync: false, storageProvider: null, blockedReasons: [] }),
+              Effect.succeed({
+                canSync: true,
+                storageProvider: "GOOGLE_DRIVE",
+                blockedReasons: [],
+              }),
+            GetPipeConnectionStatus: () =>
+              Effect.succeed({
+                storageProvider: "GOOGLE_DRIVE",
+                status: "CONNECTED",
+                externalDestinationUrl: "https://drive.google.com/drive/folders/plakk",
+              }),
           } as never),
         ),
       );
@@ -249,8 +259,16 @@ describe("DesktopSession", () => {
         {
           kind: "online",
           account: secondAccount,
-          accountStatus: { canSync: false, storageProvider: null, blockedReasons: [] },
-          connection: null,
+          accountStatus: {
+            canSync: true,
+            storageProvider: "GOOGLE_DRIVE",
+            blockedReasons: [],
+          },
+          connection: {
+            storageProvider: "GOOGLE_DRIVE",
+            status: "CONNECTED",
+            externalDestinationUrl: "https://drive.google.com/drive/folders/plakk",
+          },
         },
       ]);
     }),

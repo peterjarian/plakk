@@ -14,6 +14,7 @@ import {
   DialogTitle,
 } from "@plakk/ui/components/primitives/dialog";
 import { SnippetComposer } from "../components/SnippetComposer.tsx";
+import { SyncStatusIndicator, type SyncStatus } from "../components/SyncStatusIndicator.tsx";
 import { signOut, useAuth } from "../hooks/useAuth.ts";
 import { useSnippets } from "../hooks/useSnippets.ts";
 import { useLocalState } from "../hooks/useLocalState.tsx";
@@ -62,6 +63,16 @@ export function Home({ active = true }: { active?: boolean }) {
     reload: reloadSnippets,
   } = useSnippets();
   const accountBlocked = !storageStatus.canSync;
+  const syncStatus: SyncStatus =
+    storageStatus.kind === "loading"
+      ? "CHECKING"
+      : storageStatus.kind === "offline" || storageStatus.kind === "failed"
+        ? "OFFLINE"
+        : storageStatus.kind !== "connected" || !storageStatus.canSync
+          ? "PAUSED"
+          : liveConnection?.status === "CONNECTED"
+            ? "CONNECTED"
+            : "RECONNECTING";
   const user = auth.user;
   const syncPausedMessage =
     storageStatus.kind === "failed" || storageStatus.kind === "offline"
@@ -329,15 +340,8 @@ export function Home({ active = true }: { active?: boolean }) {
           })
         }
         storageAction={storageAction}
+        statusIndicator={<SyncStatusIndicator status={syncStatus} />}
       />
-
-      {liveConnection !== null && (
-        <p className="px-6 text-[11px] text-muted-foreground" role="status" aria-live="polite">
-          {liveConnection.status === "CONNECTED"
-            ? "Live updates connected"
-            : "Live updates reconnecting…"}
-        </p>
-      )}
 
       <div className="scrollbar-hidden flex min-h-0 flex-1 flex-col overflow-y-auto px-6 pb-4">
         <div className="sticky top-0 z-20 bg-background pt-3 pb-5">
@@ -356,11 +360,13 @@ export function Home({ active = true }: { active?: boolean }) {
               <span className="min-w-0 flex-1 truncate">{auth.issue.message}</span>
             </div>
           )}
-          {accountBlocked && storageStatus.kind !== "loading" && (
-            <div className="mb-2 flex items-center gap-2 rounded-md bg-muted px-2.5 py-1.5 text-xs text-muted-foreground">
-              <TriangleAlert className="size-3.5 shrink-0 text-amber-600" aria-hidden="true" />
-              <span className="min-w-0 flex-1 truncate">{syncPausedMessage}</span>
-              {storageStatus.kind !== "failed" && storageStatus.kind !== "offline" && (
+          {accountBlocked &&
+            storageStatus.kind !== "loading" &&
+            storageStatus.kind !== "offline" &&
+            storageStatus.kind !== "failed" && (
+              <div className="mb-2 flex items-center gap-2 rounded-md bg-muted px-2.5 py-1.5 text-xs text-muted-foreground">
+                <TriangleAlert className="size-3.5 shrink-0 text-amber-600" aria-hidden="true" />
+                <span className="min-w-0 flex-1 truncate">{syncPausedMessage}</span>
                 <Button
                   type="button"
                   variant="ghost"
@@ -370,9 +376,8 @@ export function Home({ active = true }: { active?: boolean }) {
                   Finish on web
                   <ArrowUpRight />
                 </Button>
-              )}
-            </div>
-          )}
+              </div>
+            )}
           <SnippetComposer
             disabled={accountBlocked}
             onSubmit={addTextSnippet}

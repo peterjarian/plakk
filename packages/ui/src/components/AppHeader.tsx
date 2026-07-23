@@ -15,11 +15,13 @@ import { cn } from "../lib/utils.ts";
 export function AppHeader(props: {
   user: User;
   storageAction: ReactNode;
+  statusIndicator?: ReactNode;
   className?: string;
   onSettingsClick?: () => void;
   onSignOutClick?: () => void;
 }) {
-  const { user, storageAction, className, onSettingsClick, onSignOutClick } = props;
+  const { user, storageAction, statusIndicator, className, onSettingsClick, onSignOutClick } =
+    props;
   const name = [user.firstName, user.lastName].filter(Boolean).join(" ");
   const displayName = name || user.email || user.id;
   const fallback = user.email || user.id;
@@ -31,6 +33,7 @@ export function AppHeader(props: {
         <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] leading-none font-semibold tracking-wide text-muted-foreground">
           BETA
         </span>
+        {statusIndicator}
       </div>
 
       <div className="flex items-center gap-1.5">

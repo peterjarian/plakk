@@ -109,7 +109,7 @@ describe("TrayRecentItem", () => {
     expect(markup).not.toContain("Loading text");
   });
 
-  it("shows the same explicit offline-download status as the main window", () => {
+  it("shows download progress without replacing snippet metadata", () => {
     const markup = renderToStaticMarkup(
       <TrayRecentItem
         snippet={{
@@ -129,7 +129,8 @@ describe("TrayRecentItem", () => {
     );
 
     expect(markup).toContain('aria-label="Downloading for offline access"');
-    expect(markup).toContain("Downloading for offline access…");
+    expect(markup).toContain("14 B · a week ago");
+    expect(markup).not.toContain("Downloading for offline access…");
   });
 
   it("offers the same hydrated hyperlink action as the main snippet row", () => {

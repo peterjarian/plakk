@@ -96,6 +96,7 @@ describe("SnippetRow", () => {
 
     expect(markup).toContain("Upload failed.");
     expect(markup).toContain('aria-label="Dismiss failed upload"');
+    expect(markup).toContain('data-persistent-action="dismiss"');
     expect(markup).not.toContain('aria-label="Retry upload"');
     expect(markup).not.toContain('aria-label="Copy"');
   });
@@ -158,9 +159,10 @@ describe("SnippetRow", () => {
     expect(markup).toContain("Couldn’t download this text. Try again.");
     expect(markup).not.toContain("Loading text");
     expect(markup).toContain('aria-label="Retry download"');
+    expect(markup).toContain('data-persistent-action="download"');
   });
 
-  it("presents automatic and manual hydration as an explicit offline download", () => {
+  it("keeps hydration progress visible without replacing content metadata", () => {
     const markup = renderToStaticMarkup(
       <SnippetRow
         snippet={{
@@ -177,12 +179,13 @@ describe("SnippetRow", () => {
 
     expect(markup).toContain('role="status"');
     expect(markup).toContain('aria-label="Downloading for offline access"');
-    expect(markup).toContain("Downloading for offline access…");
+    expect(markup).toContain("14 B · 12 hours ago");
     expect(markup).toContain("animate-spin");
+    expect(markup).not.toContain("Downloading for offline access…");
     expect(markup).not.toContain("Saving on this device");
   });
 
-  it("identifies uploaded managed content as available offline", () => {
+  it("shows size and date without describing local availability", () => {
     const markup = renderToStaticMarkup(
       <SnippetRow
         snippet={snippet}
@@ -194,7 +197,33 @@ describe("SnippetRow", () => {
       />,
     );
 
-    expect(markup).toContain("Available offline");
+    expect(markup).toContain("14 B · 12 hours ago");
+    expect(markup).not.toContain("Available offline");
+    expect(markup).not.toContain("Not on this device");
+  });
+
+  it("keeps download available while ordinary actions wait for row interaction", () => {
+    const markup = renderToStaticMarkup(
+      <SnippetRow
+        snippet={{
+          ...snippet,
+          localContentAvailability: { status: "NOT_AVAILABLE" },
+        }}
+        presentation={{ type: "text", title: "A text snippet" }}
+        now={now}
+        copied={false}
+        copyDisabled
+        onCopy={() => undefined}
+        onDelete={() => undefined}
+        onDownload={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain('data-persistent-action="download"');
+    expect(markup).toContain('aria-label="Download to this device"');
+    expect(markup).toContain('aria-label="Delete"');
+    expect(markup).toContain("group-hover:visible");
+    expect(markup).not.toContain('aria-label="Copy"');
   });
 });
 

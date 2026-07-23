@@ -8,7 +8,7 @@ export const PlakkRpcClientLive = Layer.effect(PlakkRpcClient, RpcClient.make(Pl
 
 export const plakkRpcProtocolLayer = Layer.unwrap(
   Config.string("PLAKK_RPC_URL").pipe(
-    Config.withDefault("https://app.plakk.io/api/rpc"),
+    Config.withDefault("http://localhost:3100/api/rpc"),
     Effect.orDie,
     Effect.map((configuredRpcUrl) => {
       const url = configuredRpcUrl.startsWith("/")

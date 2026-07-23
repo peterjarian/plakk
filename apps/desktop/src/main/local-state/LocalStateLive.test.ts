@@ -102,7 +102,7 @@ it.layer(NodeFileSystem.layer)("local state", (it) => {
         account,
         provider: { known: true, value: "GOOGLE_DRIVE" },
         capability: { status: "OFFLINE" },
-        liveConnection: { status: "RECONNECTING" },
+        liveConnection: null,
         snippets: [firstSnippet],
       });
     }),
@@ -191,10 +191,25 @@ it.layer(NodeFileSystem.layer)("local state", (it) => {
       const connectedState = yield* Effect.promise(() =>
         runtime.runPromise(LocalState.use((localState) => localState.current)),
       );
+      yield* Effect.promise(() =>
+        runtime.runPromise(
+          LocalState.use((localState) =>
+            localState.update({
+              kind: "live-connection",
+              accountId: firstAccount.id,
+              status: null,
+            }),
+          ),
+        ),
+      );
+      const pausedState = yield* Effect.promise(() =>
+        runtime.runPromise(LocalState.use((localState) => localState.current)),
+      );
       yield* Effect.promise(() => runtime.dispose());
 
-      expect(ignored.liveConnection).toEqual({ status: "RECONNECTING" });
+      expect(ignored.liveConnection).toBeNull();
       expect(connectedState.liveConnection).toEqual({ status: "CONNECTED" });
+      expect(pausedState.liveConnection).toBeNull();
     }),
   );
 
@@ -491,7 +506,7 @@ it.layer(NodeFileSystem.layer)("local state", (it) => {
         account,
         provider: { known: true, value: "GOOGLE_DRIVE" },
         capability: { status: "OFFLINE" },
-        liveConnection: { status: "RECONNECTING" },
+        liveConnection: null,
       });
       expect(legacyStore.get("session")).toBeNull();
     }),
@@ -519,7 +534,7 @@ it.layer(NodeFileSystem.layer)("local state", (it) => {
         account,
         provider: { known: false, value: null },
         capability: { status: "OFFLINE" },
-        liveConnection: { status: "RECONNECTING" },
+        liveConnection: null,
       });
       expect(legacyStore.get("active")).toBeNull();
     }),
