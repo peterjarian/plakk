@@ -29,7 +29,7 @@ export default defineConfig({
     ],
     jsPlugins: [
       { name: "vite-plus", specifier: "vite-plus/oxlint-plugin" },
-      "./tooling/oxlint-plugin-plakk.ts",
+      "./oxlint-plugin-plakk/index.ts",
       "oxlint-tailwindcss",
     ],
     settings: {
