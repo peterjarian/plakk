@@ -63,6 +63,8 @@ describe("stored snippet clipboard writes", () => {
   });
 
   it("materializes files and writes a native macOS file clipboard item", async () => {
+    const platform = vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
+
     await Effect.runPromise(
       writeSnippetToClipboard({
         bytes: new Uint8Array([1, 2]),
@@ -82,5 +84,6 @@ describe("stored snippet clipboard writes", () => {
     expect(fileList?.toString()).toContain("<array><string>/tmp/plakk-snippet-");
     expect(fileList?.toString()).toContain("-report.pdf</string></array>");
     expect(electron.writeBuffer).not.toHaveBeenCalledWith("application/pdf", Buffer.from([1, 2]));
+    platform.mockRestore();
   });
 });

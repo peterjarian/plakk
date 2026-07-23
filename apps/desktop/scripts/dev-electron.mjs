@@ -135,10 +135,17 @@ function registerLinuxProtocolHandler(electronArgs) {
 
   const require = createRequire(import.meta.url);
   const electronExecPath = require("electron");
+  const configuredProfilePath = process.env.PLAKK_DESKTOP_USER_DATA_PATH?.trim();
+  const profilePath = configuredProfilePath ? resolve(configuredProfilePath) : undefined;
   const dataHome = process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share");
   const applicationsDir = join(dataHome, "applications");
   const desktopEntryPath = join(applicationsDir, linuxDesktopEntryName);
-  const desktopExec = [electronExecPath, ...electronArgs, desktopDir]
+  const desktopExec = [
+    ...(profilePath ? ["env", `PLAKK_DESKTOP_USER_DATA_PATH=${profilePath}`] : []),
+    electronExecPath,
+    ...electronArgs,
+    desktopDir,
+  ]
     .map(quoteDesktopExecArgument)
     .join(" ");
   const desktopEntry = [

@@ -1,4 +1,5 @@
 import type { User } from "@plakk/shared";
+import { resolve } from "node:path";
 
 export type DesktopAuthState = {
   readonly user: User | null;
@@ -8,6 +9,14 @@ type TrayAuthController = {
   disable(): void;
   setup(): void;
 };
+
+export function resolveDesktopUserDataPath(
+  defaultPath: string,
+  configuredPath: string | undefined,
+) {
+  const value = configuredPath?.trim();
+  return value ? resolve(value) : defaultPath;
+}
 
 export function reconcileTrayAuth(
   status: DesktopAuthState,
