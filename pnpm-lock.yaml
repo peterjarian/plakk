@@ -42,6 +42,9 @@ importers:
       '@effect/tsgo':
         specifier: 'catalog:'
         version: 0.15.0
+      '@oxlint/plugins':
+        specifier: 1.68.0
+        version: 1.68.0
       '@typescript/native-preview':
         specifier: 'catalog:'
         version: 7.0.0-dev.20260701.1
@@ -94,9 +97,6 @@ importers:
 
   apps/desktop:
     dependencies:
-      '@effect/atom-react':
-        specifier: 4.0.0-beta.92
-        version: 4.0.0-beta.92(effect@4.0.0-beta.92)(react@19.2.7)(scheduler@0.27.0)
       '@effect/platform-node':
         specifier: 4.0.0-beta.92
         version: 4.0.0-beta.92(effect@4.0.0-beta.92)(ioredis@5.11.1)
@@ -127,9 +127,6 @@ importers:
       react-dom:
         specifier: ^19.2.7
         version: 19.2.7(react@19.2.7)
-      scheduler:
-        specifier: ^0.27.0
-        version: 0.27.0
     devDependencies:
       '@effect/vitest':
         specifier: 4.0.0-beta.92
@@ -220,16 +217,6 @@ importers:
         specifier: 4.1.9
         version: 4.1.9(@types/node@24.13.2)(@vitest/browser-preview@4.1.9)(@voidzero-dev/vite-plus-core@0.2.2(@types/node@24.13.2)(jiti@2.7.0)(typescript@6.0.3)(yaml@2.9.0))
 
-  oxlint-plugin-plakk:
-    dependencies:
-      '@oxlint/plugins':
-        specifier: 1.68.0
-        version: 1.68.0
-    devDependencies:
-      vite-plus:
-        specifier: 'catalog:'
-        version: 0.2.2(@types/node@25.9.4)(jiti@2.7.0)(typescript@6.0.3)(vite@8.1.0(@types/node@25.9.4)(jiti@2.7.0)(yaml@2.9.0))(yaml@2.9.0)
-
   packages/db:
     dependencies:
       '@effect/sql-pg':
@@ -276,9 +263,6 @@ importers:
       '@base-ui/react':
         specifier: ^1.6.0
         version: 1.6.0(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      '@effect/atom-react':
-        specifier: 4.0.0-beta.92
-        version: 4.0.0-beta.92(effect@4.0.0-beta.92)(react@19.2.7)(scheduler@0.27.0)
       '@plakk/shared':
         specifier: workspace:*
         version: link:../shared
@@ -300,9 +284,6 @@ importers:
       react-dom:
         specifier: ^19.2.7
         version: 19.2.7(react@19.2.7)
-      scheduler:
-        specifier: ^0.27.0
-        version: 0.27.0
       shadcn:
         specifier: ^4.12.0
         version: 4.12.0(typescript@6.0.3)
@@ -510,13 +491,6 @@ packages:
 
   '@drizzle-team/brocli@0.12.0':
     resolution: {integrity: sha512-mlUE+rZ8CatQekLhnaiN91Iemdd+e2gFKooGlnRB3oPTL3VghLfX24dx7HrzMNeC1JrIB/0kpsfyty3f5HNfxQ==}
-
-  '@effect/atom-react@4.0.0-beta.92':
-    resolution: {integrity: sha512-C3KfrgtD550d2o5vjWwnElkCAz3dzYS9uZMYjsS208cxuMsg/sKYyCaGdh9P8oC1wZ+AL5hbboaPsCpP7dawPg==}
-    peerDependencies:
-      effect: ^4.0.0-beta.92
-      react: ^19.2.4
-      scheduler: '*'
 
   '@effect/language-service@0.86.2':
     resolution: {integrity: sha512-SaPln+8srOqDJDUwNTDmP5e+IYpEDr9+1epGznnsLqu8xvo6VnxyWARdeLpqvZJlb0Pgy9ca7ppqvvdWbHPXAg==}
@@ -4319,12 +4293,6 @@ snapshots:
   '@dotenvx/primitives@0.8.0': {}
 
   '@drizzle-team/brocli@0.12.0': {}
-
-  '@effect/atom-react@4.0.0-beta.92(effect@4.0.0-beta.92)(react@19.2.7)(scheduler@0.27.0)':
-    dependencies:
-      effect: 4.0.0-beta.92
-      react: 19.2.7
-      scheduler: 0.27.0
 
   '@effect/language-service@0.86.2': {}
 

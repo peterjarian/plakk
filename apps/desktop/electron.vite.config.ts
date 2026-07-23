@@ -22,10 +22,5 @@ export default defineConfig({
   renderer: {
     plugins: [tailwindcss()],
     root: resolve("src/renderer"),
-    server: {
-      proxy: {
-        "/api": "http://localhost:3100",
-      },
-    },
   },
 });
