@@ -745,5 +745,5 @@ app.on("before-quit", () => {
 });
 
 app.on("window-all-closed", () => {
-  // Keep the tray and durable upload outbox running until the user explicitly quits.
+  // Keep the tray and Electron-main work running until the user explicitly quits.
 });

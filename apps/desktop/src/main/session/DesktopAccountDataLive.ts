@@ -35,7 +35,7 @@ const purgeWith = Effect.fn("DesktopAccountData.purgeWith")(function* (
 
   yield* Effect.all(
     [
-      attempt("upload recovery", owners.uploads.purge(accountId)),
+      attempt("local upload records", owners.uploads.purge(accountId)),
       attempt("hydration", owners.hydration.purge(accountId)),
       attempt("readable mirror", owners.replica.purge(accountId)),
       attempt("managed content", owners.content.purge(accountId)),

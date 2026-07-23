@@ -1,7 +1,8 @@
 import { NodeCrypto, NodeFileSystem } from "@effect/platform-node";
 import { app, net } from "electron";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { Layer, ManagedRuntime } from "effect";
+import { Config, Effect, Layer, ManagedRuntime, Option } from "effect";
 import { AuthServiceLive } from "./auth/AuthServiceLive.ts";
 import { AuthStoreLive } from "./auth/AuthStoreLive.ts";
 import { LocalStateLive } from "./local-state/LocalStateLive.ts";
@@ -21,7 +22,19 @@ import { SnippetUploadEngineLive } from "./snippets/upload/SnippetUploadEngineLi
 import { SnippetUploadRemoteLive } from "./snippets/upload/SnippetUploadRemoteLive.ts";
 import { makeStorageUploadLive } from "./snippets/upload/StorageUploadLive.ts";
 import { UserConfigStoreLive } from "./UserConfigStoreLive.ts";
+import { resolveDesktopUserDataPath } from "./lifecycle.ts";
 
+const configuredUserDataPath = Effect.runSync(
+  Config.option(Config.string("PLAKK_DESKTOP_USER_DATA_PATH")),
+);
+if (Option.isSome(configuredUserDataPath)) {
+  const userDataPath = resolveDesktopUserDataPath(
+    app.getPath("userData"),
+    configuredUserDataPath.value,
+  );
+  Effect.runSync(Effect.sync(() => mkdirSync(userDataPath, { recursive: true })));
+  app.setPath("userData", userDataPath);
+}
 export const managedSnippetContentRoot = join(app.getPath("userData"), "snippet-content");
 const platformLayer = NodeFileSystem.layer;
 const authServiceLayer = AuthServiceLive.pipe(Layer.provideMerge(AuthStoreLive));

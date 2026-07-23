@@ -1,7 +1,5 @@
 import ElectronStore from "electron-store";
 import { Effect, Layer, PubSub, Schema, Semaphore, Stream } from "effect";
-import { StorageProviderLiteral } from "@plakk/shared";
-import { SnippetIdSchema } from "@plakk/shared/PlakkApi";
 
 import {
   SnippetReplica,
@@ -12,27 +10,17 @@ import {
 } from "./SnippetReplica.ts";
 
 const StoredReplicaCodec = Schema.fromJsonString(SnippetReplicaStateSchema);
-const LegacyStoredReplicaCodec = Schema.fromJsonString(
-  Schema.Struct({
-    items: Schema.Array(
-      Schema.Struct({
-        id: SnippetIdSchema,
-        fileName: Schema.String,
-        byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-        storageProvider: StorageProviderLiteral,
-        storageObjectId: Schema.NullOr(Schema.String),
-        uploadStatus: Schema.Literals([
-          "UPLOADING",
-          "FAILED",
-          "CLIENT_UPLOAD_FAILED",
-          "UPLOADED",
-        ] as const),
-        createdAt: Schema.String,
-        updatedAt: Schema.String,
-      }),
+
+export const decodeStoredSnippetReplica = (json: string) =>
+  Schema.decodeEffect(StoredReplicaCodec)(json).pipe(
+    Effect.mapError(
+      (cause) =>
+        new SnippetReplicaError({
+          cause,
+          reason: "Stored snippet replica is invalid.",
+        }),
     ),
-  }),
-);
+  );
 
 export const SnippetReplicaLive = Layer.effect(
   SnippetReplica,
@@ -59,42 +47,7 @@ export const SnippetReplicaLive = Layer.effect(
           new SnippetReplicaError({ cause, reason: "Could not read the snippet replica." }),
       });
       if (json === undefined) return null;
-      return yield* Schema.decodeEffect(StoredReplicaCodec)(json).pipe(
-        Effect.catch(() =>
-          Schema.decodeEffect(LegacyStoredReplicaCodec)(json).pipe(
-            Effect.map(
-              (legacy): SnippetReplicaState => ({
-                items: legacy.items.flatMap((snippet) => {
-                  if (snippet.uploadStatus !== "UPLOADED" || snippet.storageObjectId === null) {
-                    return [];
-                  }
-                  return [
-                    {
-                      kind: "PUBLISHED" as const,
-                      snippet: {
-                        id: snippet.id,
-                        fileName: snippet.fileName,
-                        byteSize: snippet.byteSize,
-                        storageProvider: snippet.storageProvider,
-                        storageObjectId: snippet.storageObjectId,
-                        createdAt: snippet.createdAt,
-                        updatedAt: snippet.updatedAt,
-                      },
-                    },
-                  ];
-                }),
-              }),
-            ),
-          ),
-        ),
-        Effect.mapError(
-          (cause) =>
-            new SnippetReplicaError({
-              cause,
-              reason: "Stored snippet replica is invalid.",
-            }),
-        ),
-      );
+      return yield* decodeStoredSnippetReplica(json);
     });
 
     const writeReplica = Effect.fn("DesktopSnippetReplica.write")(function* (

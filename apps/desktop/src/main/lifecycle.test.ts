@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vite-plus/test";
-import { isReloadShortcut, reconcileTrayAuth, type DesktopAuthState } from "./lifecycle.ts";
+import {
+  isReloadShortcut,
+  reconcileTrayAuth,
+  resolveDesktopUserDataPath,
+  type DesktopAuthState,
+} from "./lifecycle.ts";
 
 const signedIn: DesktopAuthState = {
   user: {
@@ -13,6 +18,17 @@ const signedIn: DesktopAuthState = {
 };
 
 describe("desktop lifecycle", () => {
+  it("isolates explicitly configured validation profiles", () => {
+    expect(resolveDesktopUserDataPath("/default/profile", undefined)).toBe("/default/profile");
+    expect(resolveDesktopUserDataPath("/default/profile", "  ")).toBe("/default/profile");
+    expect(resolveDesktopUserDataPath("/default/profile", "/profiles/origin")).toBe(
+      "/profiles/origin",
+    );
+    expect(resolveDesktopUserDataPath("/default/profile", "/profiles/replica")).toBe(
+      "/profiles/replica",
+    );
+  });
+
   it("blocks reload accelerators without blocking ordinary shortcuts", () => {
     expect(
       isReloadShortcut({ type: "keyDown", key: "r", meta: true, control: false }, "darwin"),
