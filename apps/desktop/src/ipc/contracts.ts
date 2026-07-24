@@ -167,6 +167,13 @@ export const LocalStateSchema = Schema.Struct({
 
 export type LocalState = typeof LocalStateSchema.Type;
 
+export const StorageFreeUpResultSchema = Schema.Struct({
+  reclaimedBytes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  storageUsageBytes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+});
+
+export type StorageFreeUpResult = typeof StorageFreeUpResultSchema.Type;
+
 export const ipcMethods = {
   authSignIn: method({
     channel: "auth:sign-in",
@@ -221,7 +228,7 @@ export const ipcMethods = {
   storageFreeUp: method({
     channel: "storage:free-up",
     payload: Schema.Void,
-    result: Schema.Void,
+    result: StorageFreeUpResultSchema,
   }),
   clipboardRead: method({
     channel: "clipboard:read",

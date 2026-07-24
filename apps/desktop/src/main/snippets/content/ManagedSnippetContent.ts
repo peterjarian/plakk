@@ -54,7 +54,7 @@ export class ManagedSnippetContent extends Context.Service<
     removeExcept(
       accountId: string,
       retainedSnippetIds: ReadonlySet<string>,
-    ): Effect.Effect<void, ManagedSnippetContentError>;
+    ): Effect.Effect<number, ManagedSnippetContentError>;
     purge(accountId: string): Effect.Effect<void, ManagedSnippetContentError>;
   }
 >()("plakk/main/snippets/content/ManagedSnippetContent") {}

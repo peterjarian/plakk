@@ -60,12 +60,16 @@ describe("managed snippet content ingestion", () => {
             bytes: new Uint8Array([4, 5]),
           });
           const before = yield* content.storageUsageBytes(accountId);
-          yield* content.removeExcept(accountId, new Set([retainedId]));
-          return { before, after: yield* content.storageUsageBytes(accountId) };
+          const reclaimedBytes = yield* content.removeExcept(accountId, new Set([retainedId]));
+          return {
+            before,
+            reclaimedBytes,
+            after: yield* content.storageUsageBytes(accountId),
+          };
         }).pipe(Effect.provide(layer)),
       );
 
-      expect(result).toEqual({ before: 5, after: 3 });
+      expect(result).toEqual({ before: 5, reclaimedBytes: 2, after: 3 });
       await expect(
         readFile(managedSnippetContentPath(contentRoot, accountId, retainedId)),
       ).resolves.toEqual(Buffer.from([1, 2, 3]));

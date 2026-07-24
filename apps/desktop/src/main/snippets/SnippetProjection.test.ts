@@ -39,7 +39,7 @@ const contentLayer = (
       changes: Stream.empty,
       getPrefix,
       putStream: () => Effect.void,
-      removeExcept: () => Effect.void,
+      removeExcept: () => Effect.succeed(0),
       storageUsageBytes: () => Effect.succeed(0),
       available: () => Effect.succeed(bytes !== null),
       invalidate: () => Effect.void,

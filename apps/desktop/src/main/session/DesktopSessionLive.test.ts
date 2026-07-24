@@ -131,7 +131,7 @@ describe("DesktopSession", () => {
           SnippetHydrationEngine.of({
             changes: Stream.empty,
             download: () => Effect.void,
-            freeUpSpace: () => Effect.void,
+            freeUpSpace: () => Effect.succeed({ reclaimedBytes: 0, storageUsageBytes: 0 }),
             pause: Effect.void,
             purge: () => Effect.void,
             reconcile: () => Effect.succeed(new Map()),

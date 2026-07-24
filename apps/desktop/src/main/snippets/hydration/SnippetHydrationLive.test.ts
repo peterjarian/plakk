@@ -74,6 +74,7 @@ const hydrationHarness = (input?: {
   readonly stream?: Stream.Stream<Uint8Array, SnippetHydrationError>;
   readonly putStreamFailure?: ManagedSnippetContentError;
   readonly availableFailureId?: string;
+  readonly removeExceptFailure?: ManagedSnippetContentError;
 }) => {
   let replicaState: SnippetReplicaState = {
     items: (input?.snippets ?? [input?.snippet ?? apiSnippet()]).map((snippet) => ({
@@ -160,13 +161,26 @@ const hydrationHarness = (input?: {
             }
           }),
         removeExcept: (accountId: string, retainedSnippetIds: ReadonlySet<string>) =>
+          input?.removeExceptFailure === undefined
+            ? Effect.sync(() => {
+                let reclaimedBytes = 0;
+                for (const [contentKey, byteSize] of content) {
+                  const [owner, id] = contentKey.split("/");
+                  if (owner === accountId && id !== undefined && !retainedSnippetIds.has(id)) {
+                    reclaimedBytes += byteSize;
+                    content.delete(contentKey);
+                  }
+                }
+                return reclaimedBytes;
+              })
+            : Effect.fail(input.removeExceptFailure),
+        storageUsageBytes: (accountId: string) =>
           Effect.sync(() => {
-            for (const contentKey of content.keys()) {
-              const [owner, id] = contentKey.split("/");
-              if (owner === accountId && id !== undefined && !retainedSnippetIds.has(id)) {
-                content.delete(contentKey);
-              }
+            let storageUsageBytes = 0;
+            for (const [contentKey, byteSize] of content) {
+              if (contentKey.startsWith(`${accountId}/`)) storageUsageBytes += byteSize;
             }
+            return storageUsageBytes;
           }),
       } as never),
     ),
@@ -584,16 +598,66 @@ describe("SnippetHydrationEngine", () => {
         storage.content.set(`${account.id}/${snippet.id}`, snippet.byteSize);
       }
 
-      yield* SnippetHydrationEngine.use((engine) => engine.freeUpSpace(account.id)).pipe(
-        Effect.provide(storage.layer),
-      );
+      const result = yield* SnippetHydrationEngine.use((engine) =>
+        engine.freeUpSpace(account.id),
+      ).pipe(Effect.provide(storage.layer));
 
       expect(storage.content.size).toBe(AUTOMATIC_HYDRATION_LIMIT);
+      expect(result).toEqual({
+        reclaimedBytes: remoteBytes.byteLength * 2,
+        storageUsageBytes: remoteBytes.byteLength * AUTOMATIC_HYDRATION_LIMIT,
+      });
       expect(storage.content.has(`${account.id}/${snippets.at(-1)?.id}`)).toBe(true);
       expect(storage.content.has(`${account.id}/${snippets[0]?.id}`)).toBe(false);
       expect(storage.records()).toEqual(
         snippets.map((snippet) => ({ kind: "PUBLISHED", snippet })),
       );
+    }),
+  );
+
+  it.live("reports when no older device copies are eligible for removal", () =>
+    Effect.gen(function* () {
+      const snippets = Array.from({ length: AUTOMATIC_HYDRATION_LIMIT }, (_, index) =>
+        apiSnippet({
+          id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+          createdAt: new Date(now + index * 1_000).toISOString(),
+        }),
+      );
+      const storage = hydrationHarness({ snippets });
+      for (const snippet of snippets) {
+        storage.content.set(`${account.id}/${snippet.id}`, snippet.byteSize);
+      }
+
+      const result = yield* SnippetHydrationEngine.use((engine) =>
+        engine.freeUpSpace(account.id),
+      ).pipe(Effect.provide(storage.layer));
+
+      expect(result).toEqual({
+        reclaimedBytes: 0,
+        storageUsageBytes: remoteBytes.byteLength * AUTOMATIC_HYDRATION_LIMIT,
+      });
+      expect(storage.content.size).toBe(AUTOMATIC_HYDRATION_LIMIT);
+    }),
+  );
+
+  it.live("fails without reporting an optimistic storage result", () =>
+    Effect.gen(function* () {
+      const failure = new ManagedSnippetContentError({
+        cause: null,
+        reason: "Could not free managed snippet content.",
+        retryable: true,
+      });
+      const storage = hydrationHarness({ removeExceptFailure: failure });
+      storage.seedContent(remoteBytes.byteLength);
+
+      const result = yield* Effect.flip(
+        SnippetHydrationEngine.use((engine) => engine.freeUpSpace(account.id)).pipe(
+          Effect.provide(storage.layer),
+        ),
+      );
+
+      expect(result).toBe(failure);
+      expect(storage.content.size).toBe(1);
     }),
   );
 

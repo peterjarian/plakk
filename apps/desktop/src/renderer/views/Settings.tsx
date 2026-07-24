@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { formatFileSize } from "@plakk/shared";
 import {
   ArrowLeft,
@@ -35,19 +35,36 @@ import {
   useLinkedStorageProvider,
   useStorageStatus,
 } from "../hooks/useStorageStatus.tsx";
+import { ipcActionErrorMessage } from "../lib/ipcActionErrorMessage.ts";
 import { navigate } from "../lib/navigate.ts";
+
+type StorageFeedback =
+  | { readonly kind: "reclaimed"; readonly reclaimedBytes: number }
+  | { readonly kind: "no-op" }
+  | { readonly kind: "failed"; readonly message: string };
 
 export function Settings() {
   const auth = useAuth();
   const linkedProvider = useLinkedStorageProvider();
   const storageStatus = useStorageStatus();
-  const storageUsageBytes = useLocalState().localState.storageUsageBytes;
+  const { localState } = useLocalState();
   const [autoUpdate, setAutoUpdate] = useState(true);
   const [globalHotkey, setGlobalHotkey] = useState(true);
   const [toolbarWidget, setToolbarWidget] = useState(true);
   const [updateStatus, setUpdateStatus] = useState("Up to date");
   const [freeingStorage, setFreeingStorage] = useState(false);
-  const [storageError, setStorageError] = useState<string | null>(null);
+  const [storageFeedback, setStorageFeedback] = useState<StorageFeedback | null>(null);
+  const [storageResult, setStorageResult] = useState<{
+    readonly localStateRevision: number;
+    readonly storageUsageBytes: number;
+  } | null>(null);
+  const freeingStorageRef = useRef(false);
+  const localStateRevisionRef = useRef(localState.revision);
+  localStateRevisionRef.current = localState.revision;
+  const storageUsageBytes =
+    storageResult !== null && localState.revision <= storageResult.localStateRevision
+      ? storageResult.storageUsageBytes
+      : localState.storageUsageBytes;
   const user = auth.user;
 
   if (user === null) return null;
@@ -211,9 +228,12 @@ export function Settings() {
           <SettingsSection>
             <SettingsSectionTitle>Device storage</SettingsSectionTitle>
             <SettingsSectionBody>
-              <SettingsRow>
-                <SettingsRowMain>
-                  <HardDrive className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+              <SettingsRow className="items-start">
+                <SettingsRowMain className="flex-1 items-start">
+                  <HardDrive
+                    className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+                    aria-hidden="true"
+                  />
                   <SettingsRowText
                     title={`${formatFileSize(storageUsageBytes)} used by Plakk`}
                     description="Freeing space keeps your newest 20 eligible snippets available and removes older device copies only."
@@ -225,13 +245,34 @@ export function Settings() {
                   size="sm"
                   disabled={freeingStorage}
                   onClick={() => {
-                    setStorageError(null);
+                    if (freeingStorageRef.current) return;
+                    freeingStorageRef.current = true;
+                    setStorageFeedback(null);
                     setFreeingStorage(true);
                     void window.ipc.storage.freeUp().then(
-                      () => setFreeingStorage(false),
-                      () => {
+                      (result) => {
+                        freeingStorageRef.current = false;
                         setFreeingStorage(false);
-                        setStorageError("Could not free up Plakk storage.");
+                        setStorageResult({
+                          localStateRevision: localStateRevisionRef.current,
+                          storageUsageBytes: result.storageUsageBytes,
+                        });
+                        setStorageFeedback(
+                          result.reclaimedBytes === 0
+                            ? { kind: "no-op" }
+                            : { kind: "reclaimed", reclaimedBytes: result.reclaimedBytes },
+                        );
+                      },
+                      (cause: unknown) => {
+                        freeingStorageRef.current = false;
+                        setFreeingStorage(false);
+                        setStorageFeedback({
+                          kind: "failed",
+                          message: ipcActionErrorMessage(
+                            cause,
+                            "Plakk couldn’t free device space. Try again.",
+                          ),
+                        });
                       },
                     );
                   }}
@@ -239,9 +280,21 @@ export function Settings() {
                   {freeingStorage ? "Freeing…" : "Free up space"}
                 </Button>
               </SettingsRow>
-              {storageError !== null && (
-                <p className="px-4 py-2 text-xs text-destructive" role="alert">
-                  {storageError}
+              {storageFeedback !== null && (
+                <p
+                  className={
+                    storageFeedback.kind === "failed"
+                      ? "px-4 py-2 text-xs text-destructive"
+                      : "px-4 py-2 text-xs text-muted-foreground"
+                  }
+                  role={storageFeedback.kind === "failed" ? "alert" : "status"}
+                  aria-live={storageFeedback.kind === "failed" ? undefined : "polite"}
+                >
+                  {storageFeedback.kind === "reclaimed"
+                    ? `Reclaimed ${formatFileSize(storageFeedback.reclaimedBytes)} on this device.`
+                    : storageFeedback.kind === "no-op"
+                      ? "No older device copies are available to remove."
+                      : storageFeedback.message}
                 </p>
               )}
             </SettingsSectionBody>

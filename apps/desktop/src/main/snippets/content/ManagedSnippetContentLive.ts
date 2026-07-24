@@ -527,11 +527,24 @@ export const makeManagedSnippetContentLive = (root: string) =>
         const snippetIds = (yield* accountSnippetIds(accountId)).filter(
           (snippetId) => !retainedSnippetIds.has(snippetId),
         );
-        yield* Effect.forEach(
-          snippetIds,
-          (snippetId) => {
+        const removedSizes = yield* Effect.forEach(snippetIds, (snippetId) =>
+          Effect.gen(function* () {
+            const byteSize = yield* fileSystem
+              .stat(managedSnippetContentPath(root, accountId, snippetId))
+              .pipe(
+                Effect.map((info) => (info.type === "File" ? Number(info.size) : 0)),
+                Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(0)),
+                Effect.mapError(
+                  (cause) =>
+                    new ManagedSnippetContentError({
+                      cause,
+                      reason: "Could not inspect managed snippet storage usage.",
+                      retryable: true,
+                    }),
+                ),
+              );
             clearCachedValidation(accountId, snippetId);
-            return fileSystem
+            yield* fileSystem
               .remove(contentDirectory(root, accountId, snippetId), {
                 force: true,
                 recursive: true,
@@ -546,10 +559,11 @@ export const makeManagedSnippetContentLive = (root: string) =>
                     }),
                 ),
               );
-          },
-          { discard: true },
+            return byteSize;
+          }),
         );
         if (snippetIds.length > 0) yield* PubSub.publish(changes, accountId);
+        return removedSizes.reduce((total, byteSize) => total + byteSize, 0);
       });
 
       const purge = Effect.fn("ManagedSnippetContent.purge")(function* (accountId: string) {

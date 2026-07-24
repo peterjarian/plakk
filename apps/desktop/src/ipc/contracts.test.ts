@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import { Schema } from "effect";
 
-import { DesktopSnippetSchema } from "./contracts.ts";
+import { DesktopSnippetSchema, StorageFreeUpResultSchema } from "./contracts.ts";
 
 describe("DesktopSnippetSchema", () => {
   it("encodes local state containing an active text upload synchronously", () => {
@@ -46,5 +46,16 @@ describe("DesktopSnippetSchema", () => {
     });
 
     expect(snippet).not.toHaveProperty("storageObjectId");
+  });
+});
+
+describe("StorageFreeUpResultSchema", () => {
+  it("accepts an authoritative storage reclamation measurement", () => {
+    const decode = Schema.decodeUnknownSync(StorageFreeUpResultSchema);
+
+    expect(decode({ reclaimedBytes: 2048, storageUsageBytes: 4096 })).toEqual({
+      reclaimedBytes: 2048,
+      storageUsageBytes: 4096,
+    });
   });
 });
