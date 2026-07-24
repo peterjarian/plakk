@@ -5,7 +5,7 @@ import { rm, stat } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { decodeSnippetText, deriveSnippetPresentation, isHttpUrl } from "@plakk/shared";
 import { accountCanSyncWithConnection } from "@plakk/shared/PlakkApi";
-import { app, BrowserWindow, dialog, Menu, net, protocol, shell } from "electron";
+import { app, BrowserWindow, dialog, Menu, nativeTheme, net, protocol, shell } from "electron";
 import { Effect, PlatformError, Result, Stream } from "effect";
 import type {
   ClipboardContent,
@@ -23,6 +23,7 @@ import {
   type NativeClipboardContent,
 } from "./clipboard.ts";
 import { UserConfigStore } from "./UserConfigStore.ts";
+import { createAppearanceController } from "./appearance.ts";
 import { isReloadShortcut, reconcileTrayAuth } from "./lifecycle.ts";
 import { LocalState } from "./local-state/LocalState.ts";
 import { runEffect, runtime } from "./runtime.ts";
@@ -351,6 +352,22 @@ handle(ipcMethods.authSignOut, () =>
   ),
 );
 
+handle(ipcMethods.appearanceGet, () =>
+  Effect.sync(() => appearanceController.getState()).pipe(
+    asIpcFailure("Could not load desktop appearance."),
+  ),
+);
+
+handle(ipcMethods.appearanceSet, (preference) =>
+  UserConfigStore.use((store) => store.set({ appearance: preference })).pipe(
+    Effect.tap((config) =>
+      Effect.sync(() => appearanceController.setPreference(config.appearance)),
+    ),
+    Effect.map(() => appearanceController.getState()),
+    asIpcFailure("Could not save desktop appearance."),
+  ),
+);
+
 handle(ipcMethods.userConfigGet, () =>
   UserConfigStore.use((store) => store.get).pipe(
     asIpcFailure("Could not load desktop preferences."),
@@ -365,6 +382,9 @@ handle(ipcMethods.userConfigSet, (patch) =>
 
 handle(ipcMethods.userConfigReset, () =>
   UserConfigStore.use((store) => store.reset).pipe(
+    Effect.tap((config) =>
+      Effect.sync(() => appearanceController.setPreference(config.appearance)),
+    ),
     asIpcFailure("Could not reset desktop preferences."),
   ),
 );
@@ -373,6 +393,9 @@ type RendererView = "home" | "settings" | "tray" | "welcome";
 
 let mainWindow: BrowserWindow | undefined;
 let trayWindowController: ReturnType<typeof createTrayWindowController> | undefined;
+let appearanceController: ReturnType<
+  typeof createAppearanceController<BrowserWindow["webContents"]>
+>;
 let isQuitting = false;
 
 app.setName(app.isPackaged ? "Plakk" : "Plakk (Dev)");
@@ -387,12 +410,12 @@ function loadRenderer(window: BrowserWindow, view?: RendererView) {
     } else {
       url.searchParams.set("view", view);
     }
-    return window.loadURL(url.toString());
+    return window.loadURL(appearanceController.addToRendererUrl(url).toString());
   }
 
   const url = new URL(`${rendererScheme}://${rendererHost}/index.html`);
   if (view !== undefined) url.searchParams.set("view", view);
-  return window.loadURL(url.toString());
+  return window.loadURL(appearanceController.addToRendererUrl(url).toString());
 }
 
 function registerRendererProtocol(): void {
@@ -466,6 +489,7 @@ const createWindow = (view?: RendererView): void => {
   }
 
   mainWindow = new BrowserWindow({
+    backgroundColor: appearanceController.getBackgroundColor(),
     width: 680,
     height: 620,
     minWidth: 520,
@@ -652,6 +676,13 @@ if (!hasSingleInstanceLock) {
 
   void app.whenReady().then(async () => {
     registerRendererProtocol();
+    const initialUserConfig = await runEffect(UserConfigStore.use((store) => store.get));
+    appearanceController = createAppearanceController({
+      getWindows: () => BrowserWindow.getAllWindows(),
+      initialPreference: initialUserConfig.appearance,
+      nativeTheme,
+      sendState: (webContents, state) => send(webContents, ipcEvents.appearanceChanged, state),
+    });
 
     // Reconcile the locally persisted account owner before any renderer can read cached Local State.
     // Network credential refresh continues in the background so it cannot prevent the UI opening.
@@ -706,6 +737,7 @@ if (!hasSingleInstanceLock) {
     );
 
     trayWindowController = createTrayWindowController({
+      getBackgroundColor: appearanceController.getBackgroundColor,
       guardExternalWindows,
       loadTrayRenderer: (window) => loadRenderer(window, "tray"),
       onAccountRefreshRequested: () =>
