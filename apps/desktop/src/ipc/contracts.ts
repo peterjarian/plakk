@@ -169,6 +169,7 @@ export type LocalState = typeof LocalStateSchema.Type;
 
 export const StorageFreeUpResultSchema = Schema.Struct({
   reclaimedBytes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  removedCopies: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   storageUsageBytes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 });
 

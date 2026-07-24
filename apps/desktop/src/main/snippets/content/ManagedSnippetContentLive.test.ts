@@ -60,16 +60,20 @@ describe("managed snippet content ingestion", () => {
             bytes: new Uint8Array([4, 5]),
           });
           const before = yield* content.storageUsageBytes(accountId);
-          const reclaimedBytes = yield* content.removeExcept(accountId, new Set([retainedId]));
+          const reclamation = yield* content.removeExcept(accountId, new Set([retainedId]));
           return {
             before,
-            reclaimedBytes,
+            reclamation,
             after: yield* content.storageUsageBytes(accountId),
           };
         }).pipe(Effect.provide(layer)),
       );
 
-      expect(result).toEqual({ before: 5, reclaimedBytes: 2, after: 3 });
+      expect(result).toEqual({
+        before: 5,
+        reclamation: { reclaimedBytes: 2, removedCopies: 1 },
+        after: 3,
+      });
       await expect(
         readFile(managedSnippetContentPath(contentRoot, accountId, retainedId)),
       ).resolves.toEqual(Buffer.from([1, 2, 3]));
@@ -78,6 +82,29 @@ describe("managed snippet content ingestion", () => {
       ).rejects.toMatchObject({
         code: "ENOENT",
       });
+    });
+  });
+
+  it("distinguishes removing a zero-byte managed copy from a no-op", async () => {
+    await withDirectory(async (root) => {
+      const layer = makeManagedSnippetContentLive(join(root, "content")).pipe(
+        Layer.provide(platformLayer),
+      );
+
+      const reclamation = await Effect.runPromise(
+        Effect.gen(function* () {
+          const content = yield* ManagedSnippetContent;
+          yield* content.ingest(accountId, {
+            ...inputMetadata,
+            id: snippetId,
+            byteSize: 0,
+            bytes: new Uint8Array(),
+          });
+          return yield* content.removeExcept(accountId, new Set());
+        }).pipe(Effect.provide(layer)),
+      );
+
+      expect(reclamation).toEqual({ reclaimedBytes: 0, removedCopies: 1 });
     });
   });
 

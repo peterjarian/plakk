@@ -48,16 +48,22 @@ function SettingsRowIcon({ className, children, ...props }: ComponentProps<"span
 function SettingsRowText({
   title,
   description,
+  descriptionClassName,
   className,
   ...props
 }: ComponentProps<"div"> & {
   title: ReactNode;
   description?: ReactNode;
+  descriptionClassName?: string;
 }) {
   return (
     <div className={cn("min-w-0", className)} {...props}>
       <h3 className="truncate text-sm font-semibold">{title}</h3>
-      {description ? <p className="text-xs text-muted-foreground">{description}</p> : null}
+      {description ? (
+        <p className={cn("truncate text-xs text-muted-foreground", descriptionClassName)}>
+          {description}
+        </p>
+      ) : null}
     </div>
   );
 }

@@ -53,8 +53,9 @@ describe("StorageFreeUpResultSchema", () => {
   it("accepts an authoritative storage reclamation measurement", () => {
     const decode = Schema.decodeUnknownSync(StorageFreeUpResultSchema);
 
-    expect(decode({ reclaimedBytes: 2048, storageUsageBytes: 4096 })).toEqual({
+    expect(decode({ reclaimedBytes: 2048, removedCopies: 1, storageUsageBytes: 4096 })).toEqual({
       reclaimedBytes: 2048,
+      removedCopies: 1,
       storageUsageBytes: 4096,
     });
   });

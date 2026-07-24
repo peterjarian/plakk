@@ -98,7 +98,8 @@ const harness = (options: {
     const hydration = SnippetHydrationEngine.of({
       changes: Stream.empty,
       download: () => Effect.void,
-      freeUpSpace: () => Effect.succeed({ reclaimedBytes: 0, storageUsageBytes: 0 }),
+      freeUpSpace: () =>
+        Effect.succeed({ reclaimedBytes: 0, removedCopies: 0, storageUsageBytes: 0 }),
       pause: Effect.void,
       purge: () => Effect.void,
       reconcile: () =>
@@ -125,7 +126,7 @@ const harness = (options: {
       path: () => Effect.succeed("/managed/content"),
       purge: () => Effect.void,
       putStream: () => Effect.void,
-      removeExcept: () => Effect.succeed(0),
+      removeExcept: () => Effect.succeed({ reclaimedBytes: 0, removedCopies: 0 }),
       storageUsageBytes: () => Effect.succeed(0),
       validateText: () => Effect.succeed("NOT_FOUND"),
     });

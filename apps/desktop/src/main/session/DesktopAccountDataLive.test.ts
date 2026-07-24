@@ -46,7 +46,12 @@ describe("desktop account purge", () => {
             SnippetHydrationEngine.of({
               changes: Stream.empty,
               download: () => Effect.void,
-              freeUpSpace: () => Effect.succeed({ reclaimedBytes: 0, storageUsageBytes: 0 }),
+              freeUpSpace: () =>
+                Effect.succeed({
+                  reclaimedBytes: 0,
+                  removedCopies: 0,
+                  storageUsageBytes: 0,
+                }),
               pause: Effect.void,
               purge: () => record("hydration"),
               reconcile: () => Effect.succeed(new Map()),
@@ -78,7 +83,7 @@ describe("desktop account purge", () => {
                   ),
                 ),
               putStream: () => Effect.void,
-              removeExcept: () => Effect.succeed(0),
+              removeExcept: () => Effect.succeed({ reclaimedBytes: 0, removedCopies: 0 }),
               storageUsageBytes: () => Effect.succeed(0),
               validateText: () => Effect.succeed("NOT_FOUND"),
             }),

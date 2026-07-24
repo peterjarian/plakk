@@ -98,7 +98,11 @@ afterEach(async () => {
 
 describe("Device storage settings", () => {
   it("prevents concurrent actions and immediately shows reclaimed usage", async () => {
-    const request = deferred<{ reclaimedBytes: number; storageUsageBytes: number }>();
+    const request = deferred<{
+      reclaimedBytes: number;
+      removedCopies: number;
+      storageUsageBytes: number;
+    }>();
     state.freeUp.mockReturnValue(request.promise);
     const { button, container } = await renderSettings();
 
@@ -112,7 +116,7 @@ describe("Device storage settings", () => {
     expect(button.textContent).toBe("Freeing…");
 
     await act(async () => {
-      request.resolve({ reclaimedBytes: 1024, storageUsageBytes: 1024 });
+      request.resolve({ reclaimedBytes: 1024, removedCopies: 1, storageUsageBytes: 1024 });
       await request.promise;
     });
 
@@ -122,7 +126,11 @@ describe("Device storage settings", () => {
   });
 
   it("explains when no older device copies can be removed", async () => {
-    state.freeUp.mockResolvedValue({ reclaimedBytes: 0, storageUsageBytes: 2048 });
+    state.freeUp.mockResolvedValue({
+      reclaimedBytes: 0,
+      removedCopies: 0,
+      storageUsageBytes: 2048,
+    });
     const { button, container } = await renderSettings();
 
     await act(async () => button.click());
@@ -130,8 +138,26 @@ describe("Device storage settings", () => {
     expect(container.textContent).toContain("No older device copies are available to remove.");
   });
 
+  it("confirms a zero-byte older copy was removed instead of reporting a no-op", async () => {
+    state.freeUp.mockResolvedValue({
+      reclaimedBytes: 0,
+      removedCopies: 1,
+      storageUsageBytes: 2048,
+    });
+    const { button, container } = await renderSettings();
+
+    await act(async () => button.click());
+
+    expect(container.textContent).toContain("Removed 1 older device copy from this device.");
+    expect(container.textContent).not.toContain("No older device copies");
+  });
+
   it("restores the control and leaves usage unchanged after a useful error", async () => {
-    const request = deferred<{ reclaimedBytes: number; storageUsageBytes: number }>();
+    const request = deferred<{
+      reclaimedBytes: number;
+      removedCopies: number;
+      storageUsageBytes: number;
+    }>();
     state.freeUp.mockReturnValue(request.promise);
     const { button, container } = await renderSettings();
 

@@ -499,12 +499,9 @@ export const makeManagedSnippetContentLive = (root: string) =>
         });
       });
 
-      const storageUsageBytes = Effect.fn("ManagedSnippetContent.storageUsageBytes")(function* (
-        accountId: string,
-      ) {
-        const snippetIds = yield* accountSnippetIds(accountId);
-        const sizes = yield* Effect.forEach(snippetIds, (snippetId) =>
-          fileSystem.stat(managedSnippetContentPath(root, accountId, snippetId)).pipe(
+      const managedSnippetByteSize = Effect.fn("ManagedSnippetContent.managedSnippetByteSize")(
+        function* (accountId: string, snippetId: string) {
+          return yield* fileSystem.stat(managedSnippetContentPath(root, accountId, snippetId)).pipe(
             Effect.map((info) => (info.type === "File" ? Number(info.size) : 0)),
             Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(0)),
             Effect.mapError(
@@ -515,7 +512,16 @@ export const makeManagedSnippetContentLive = (root: string) =>
                   retryable: true,
                 }),
             ),
-          ),
+          );
+        },
+      );
+
+      const storageUsageBytes = Effect.fn("ManagedSnippetContent.storageUsageBytes")(function* (
+        accountId: string,
+      ) {
+        const snippetIds = yield* accountSnippetIds(accountId);
+        const sizes = yield* Effect.forEach(snippetIds, (snippetId) =>
+          managedSnippetByteSize(accountId, snippetId),
         );
         return sizes.reduce((total, size) => total + size, 0);
       });
@@ -527,22 +533,9 @@ export const makeManagedSnippetContentLive = (root: string) =>
         const snippetIds = (yield* accountSnippetIds(accountId)).filter(
           (snippetId) => !retainedSnippetIds.has(snippetId),
         );
-        const removedSizes = yield* Effect.forEach(snippetIds, (snippetId) =>
+        return yield* Effect.forEach(snippetIds, (snippetId) =>
           Effect.gen(function* () {
-            const byteSize = yield* fileSystem
-              .stat(managedSnippetContentPath(root, accountId, snippetId))
-              .pipe(
-                Effect.map((info) => (info.type === "File" ? Number(info.size) : 0)),
-                Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(0)),
-                Effect.mapError(
-                  (cause) =>
-                    new ManagedSnippetContentError({
-                      cause,
-                      reason: "Could not inspect managed snippet storage usage.",
-                      retryable: true,
-                    }),
-                ),
-              );
+            const byteSize = yield* managedSnippetByteSize(accountId, snippetId);
             clearCachedValidation(accountId, snippetId);
             yield* fileSystem
               .remove(contentDirectory(root, accountId, snippetId), {
@@ -561,9 +554,17 @@ export const makeManagedSnippetContentLive = (root: string) =>
               );
             return byteSize;
           }),
+        ).pipe(
+          Effect.map((removedSizes) => ({
+            reclaimedBytes: removedSizes.reduce((total, byteSize) => total + byteSize, 0),
+            removedCopies: removedSizes.length,
+          })),
+          Effect.ensuring(
+            snippetIds.length === 0
+              ? Effect.void
+              : PubSub.publish(changes, accountId).pipe(Effect.asVoid),
+          ),
         );
-        if (snippetIds.length > 0) yield* PubSub.publish(changes, accountId);
-        return removedSizes.reduce((total, byteSize) => total + byteSize, 0);
       });
 
       const purge = Effect.fn("ManagedSnippetContent.purge")(function* (accountId: string) {

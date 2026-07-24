@@ -39,7 +39,11 @@ import { ipcActionErrorMessage } from "../lib/ipcActionErrorMessage.ts";
 import { navigate } from "../lib/navigate.ts";
 
 type StorageFeedback =
-  | { readonly kind: "reclaimed"; readonly reclaimedBytes: number }
+  | {
+      readonly kind: "reclaimed";
+      readonly reclaimedBytes: number;
+      readonly removedCopies: number;
+    }
   | { readonly kind: "no-op" }
   | { readonly kind: "failed"; readonly message: string };
 
@@ -237,6 +241,7 @@ export function Settings() {
                   <SettingsRowText
                     title={`${formatFileSize(storageUsageBytes)} used by Plakk`}
                     description="Freeing space keeps your newest 20 eligible snippets available and removes older device copies only."
+                    descriptionClassName="overflow-visible text-clip whitespace-normal"
                   />
                 </SettingsRowMain>
                 <Button
@@ -258,9 +263,13 @@ export function Settings() {
                           storageUsageBytes: result.storageUsageBytes,
                         });
                         setStorageFeedback(
-                          result.reclaimedBytes === 0
+                          result.removedCopies === 0
                             ? { kind: "no-op" }
-                            : { kind: "reclaimed", reclaimedBytes: result.reclaimedBytes },
+                            : {
+                                kind: "reclaimed",
+                                reclaimedBytes: result.reclaimedBytes,
+                                removedCopies: result.removedCopies,
+                              },
                         );
                       },
                       (cause: unknown) => {
@@ -291,7 +300,11 @@ export function Settings() {
                   aria-live={storageFeedback.kind === "failed" ? undefined : "polite"}
                 >
                   {storageFeedback.kind === "reclaimed"
-                    ? `Reclaimed ${formatFileSize(storageFeedback.reclaimedBytes)} on this device.`
+                    ? storageFeedback.reclaimedBytes > 0
+                      ? `Reclaimed ${formatFileSize(storageFeedback.reclaimedBytes)} on this device.`
+                      : `Removed ${storageFeedback.removedCopies} older device ${
+                          storageFeedback.removedCopies === 1 ? "copy" : "copies"
+                        } from this device.`
                     : storageFeedback.kind === "no-op"
                       ? "No older device copies are available to remove."
                       : storageFeedback.message}

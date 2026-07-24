@@ -65,9 +65,9 @@ const makeSnippetHydration = Effect.gen(function* () {
       record.kind === "PUBLISHED" ? [record.snippet] : [],
     );
     const retained = new Set(automaticHydrationSnippets(published).map(({ id }) => id));
-    const reclaimedBytes = yield* content.removeExcept(accountId, retained);
+    const reclamation = yield* content.removeExcept(accountId, retained);
     const storageUsageBytes = yield* content.storageUsageBytes(accountId);
-    return { reclaimedBytes, storageUsageBytes };
+    return { ...reclamation, storageUsageBytes };
   });
 
   const hydrate = Effect.fn("SnippetHydrationEngine.hydrate")(function* (
