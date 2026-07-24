@@ -11,6 +11,7 @@ type TrayNativeEvent = {
 };
 
 type TrayWindowControllerOptions = {
+  getBackgroundColor: () => string;
   guardExternalWindows: (window: BrowserWindow) => void;
   loadTrayRenderer: (window: BrowserWindow) => void | Promise<void>;
   onAccountRefreshRequested?: () => void;
@@ -24,6 +25,7 @@ type TrayWindowControllerOptions = {
 };
 
 export function createTrayWindowController({
+  getBackgroundColor,
   guardExternalWindows,
   loadTrayRenderer,
   onAccountRefreshRequested,
@@ -92,6 +94,7 @@ export function createTrayWindowController({
   function createWindow() {
     window = new BrowserWindow({
       ...trayWindowSize,
+      backgroundColor: getBackgroundColor(),
       show: false,
       frame: false,
       resizable: false,

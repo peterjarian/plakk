@@ -58,17 +58,29 @@ export const ClipboardContentSchema = Schema.Union([
 
 export type ClipboardContent = typeof ClipboardContentSchema.Type;
 
+export const AppearancePreferenceSchema = Schema.Literals(["light", "dark", "system"] as const);
+
+export type AppearancePreference = typeof AppearancePreferenceSchema.Type;
+
+export const AppearanceStateSchema = Schema.Struct({
+  preference: AppearancePreferenceSchema,
+  effective: Schema.Literals(["light", "dark"] as const),
+});
+
+export type AppearanceState = typeof AppearanceStateSchema.Type;
+
 export const UserConfigSchema = Schema.Struct({
+  appearance: AppearancePreferenceSchema,
   showExternalLinkWarning: Schema.Boolean,
 });
 
 export type UserConfig = typeof UserConfigSchema.Type;
 
-export type UserConfigPatch = Partial<UserConfig>;
-
 export const UserConfigPatchSchema = Schema.Struct({
   showExternalLinkWarning: Schema.optionalKey(Schema.Boolean),
 });
+
+export type UserConfigPatch = typeof UserConfigPatchSchema.Type;
 
 export const TrayDroppedItemSchema = Schema.Union([
   Schema.Struct({
@@ -178,6 +190,16 @@ export const ipcMethods = {
     payload: Schema.Void,
     result: Schema.Void,
   }),
+  appearanceGet: method({
+    channel: "appearance:get",
+    payload: Schema.Void,
+    result: AppearanceStateSchema,
+  }),
+  appearanceSet: method({
+    channel: "appearance:set",
+    payload: AppearancePreferenceSchema,
+    result: AppearanceStateSchema,
+  }),
   localStateGet: method({
     channel: "local-state:get",
     payload: Schema.Void,
@@ -253,6 +275,10 @@ export const ipcMethods = {
 } as const;
 
 export const ipcEvents = {
+  appearanceChanged: event({
+    channel: "appearance:changed",
+    payload: AppearanceStateSchema,
+  }),
   authError: event({
     channel: "auth:error",
     payload: AuthErrorSchema,
