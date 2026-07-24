@@ -7,7 +7,6 @@ import {
   CreditCard,
   FileText,
   HardDrive,
-  Keyboard,
   MessageCircle,
   RefreshCw,
   SunMoon,
@@ -18,7 +17,6 @@ import { Button } from "@plakk/ui/components/primitives/button";
 import { Switch } from "@plakk/ui/components/primitives/switch";
 import {
   SettingsRow,
-  SettingsRowAction,
   SettingsRowIcon,
   SettingsRowMain,
   SettingsRowText,
@@ -56,7 +54,6 @@ export function Settings() {
   const { localState } = useLocalState();
   const appearance = useAppearance();
   const [autoUpdate, setAutoUpdate] = useState(true);
-  const [globalHotkey, setGlobalHotkey] = useState(true);
   const [toolbarWidget, setToolbarWidget] = useState(true);
   const [updateStatus, setUpdateStatus] = useState("Up to date");
   const [freeingStorage, setFreeingStorage] = useState(false);
@@ -358,25 +355,6 @@ export function Settings() {
                   {appearanceError}
                 </p>
               )}
-
-              <SettingsRow>
-                <SettingsRowMain>
-                  <Keyboard className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                  <SettingsRowText title="Global hotkey" description="Open Plakk from anywhere." />
-                </SettingsRowMain>
-                <SettingsRowAction>
-                  <select
-                    className="h-7 rounded-md border bg-background px-2 text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-                    disabled={!globalHotkey}
-                    defaultValue="CommandOrControl+Shift+V"
-                  >
-                    <option value="CommandOrControl+Shift+V">⌘⇧V</option>
-                    <option value="CommandOrControl+Shift+Space">⌘⇧Space</option>
-                    <option value="CommandOrControl+Option+V">⌘⌥V</option>
-                  </select>
-                  <Switch checked={globalHotkey} onCheckedChange={setGlobalHotkey} />
-                </SettingsRowAction>
-              </SettingsRow>
 
               <SettingsRow>
                 <SettingsRowMain>
