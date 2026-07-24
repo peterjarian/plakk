@@ -21,6 +21,10 @@ const electron = vi.hoisted(() => {
       };
       return this.on(event, wrapped);
     }
+    removeAllListeners() {
+      this.listeners.clear();
+      return this;
+    }
   }
 
   class WebContents extends EventEmitter {}
@@ -66,6 +70,8 @@ const electron = vi.hoisted(() => {
   class Tray extends EventEmitter {
     static instances: Tray[] = [];
     destroyed = false;
+    readonly images: unknown[] = [];
+    toolTip = "";
 
     constructor() {
       super();
@@ -78,16 +84,22 @@ const electron = vi.hoisted(() => {
     getBounds() {
       return { x: 20, y: 10, width: 16, height: 16 };
     }
-    setToolTip() {}
+    setImage(image: unknown) {
+      this.images.push(image);
+    }
+    setToolTip(toolTip: string) {
+      this.toolTip = toolTip;
+    }
   }
 
-  return { BrowserWindow, Tray };
+  return { BrowserWindow, transparentImage: { transparent: true }, Tray };
 });
 
 vi.mock("electron", () => ({
   app: { name: "Plakk" },
   BrowserWindow: electron.BrowserWindow,
   nativeImage: {
+    createFromBuffer: () => electron.transparentImage,
     createFromPath: () => ({
       resize() {
         return this;
@@ -118,6 +130,7 @@ describe("tray window lifecycle", () => {
     const controller = createTrayWindowController({
       guardExternalWindows: vi.fn(),
       loadTrayRenderer,
+      platform: "win32",
       preloadPath: "/preload.cjs",
     });
 
@@ -148,6 +161,7 @@ describe("tray window lifecycle", () => {
       onDragEnter,
       onDropFiles,
       onDropText,
+      platform: "win32",
       preloadPath: "/preload.cjs",
     });
 
@@ -174,6 +188,29 @@ describe("tray window lifecycle", () => {
     expect(controller.isIngestionEnabled()).toBe(false);
   });
 
+  it("clears Linux SNI pixels before destroying the native tray", () => {
+    vi.useFakeTimers();
+    const controller = createTrayWindowController({
+      guardExternalWindows: vi.fn(),
+      loadTrayRenderer: vi.fn(),
+      platform: "linux",
+      preloadPath: "/preload.cjs",
+    });
+
+    controller.setup();
+    const tray = electron.Tray.instances[0]!;
+    controller.disable();
+
+    expect(tray.images).toEqual([electron.transparentImage]);
+    expect(tray.toolTip).toBe("");
+    expect(tray.destroyed).toBe(false);
+    tray.emit("click", {}, tray.getBounds());
+    expect(electron.BrowserWindow.instances).toHaveLength(1);
+
+    vi.runAllTimers();
+    expect(tray.destroyed).toBe(true);
+  });
+
   it("fails closed and refreshes before revealing stale content", () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);
@@ -182,6 +219,7 @@ describe("tray window lifecycle", () => {
       guardExternalWindows: vi.fn(),
       loadTrayRenderer: vi.fn(),
       onAccountRefreshRequested,
+      platform: "win32",
       preloadPath: "/preload.cjs",
     });
 
@@ -206,6 +244,7 @@ describe("tray window lifecycle", () => {
     const controller = createTrayWindowController({
       guardExternalWindows: vi.fn(),
       loadTrayRenderer,
+      platform: "win32",
       preloadPath: "/preload.cjs",
     });
 
@@ -231,6 +270,7 @@ describe("tray window lifecycle", () => {
     const controller = createTrayWindowController({
       guardExternalWindows: vi.fn(),
       loadTrayRenderer: vi.fn(),
+      platform: "win32",
       preloadPath: "/preload.cjs",
     });
     const lifecycle = createToolbarWidgetLifecycle(controller, false);
