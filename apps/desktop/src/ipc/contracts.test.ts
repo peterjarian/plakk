@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 import { Schema } from "effect";
 
-import { AppearancePreferenceSchema, DesktopSnippetSchema } from "./contracts.ts";
+import {
+  AppearancePreferenceSchema,
+  DesktopSnippetSchema,
+  StorageFreeUpResultSchema,
+} from "./contracts.ts";
 
 describe("AppearancePreferenceSchema", () => {
   it("accepts exactly Light, Dark, and System preferences", () => {
@@ -59,5 +63,17 @@ describe("DesktopSnippetSchema", () => {
     });
 
     expect(snippet).not.toHaveProperty("storageObjectId");
+  });
+});
+
+describe("StorageFreeUpResultSchema", () => {
+  it("accepts an authoritative storage reclamation measurement", () => {
+    const decode = Schema.decodeUnknownSync(StorageFreeUpResultSchema);
+
+    expect(decode({ reclaimedBytes: 2048, removedCopies: 1, storageUsageBytes: 4096 })).toEqual({
+      reclaimedBytes: 2048,
+      removedCopies: 1,
+      storageUsageBytes: 4096,
+    });
   });
 });

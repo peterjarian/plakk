@@ -74,6 +74,8 @@ const hydrationHarness = (input?: {
   readonly stream?: Stream.Stream<Uint8Array, SnippetHydrationError>;
   readonly putStreamFailure?: ManagedSnippetContentError;
   readonly availableFailureId?: string;
+  readonly removeExceptFailure?: ManagedSnippetContentError;
+  readonly removeExceptFailureAfterCopies?: number;
 }) => {
   let replicaState: SnippetReplicaState = {
     items: (input?.snippets ?? [input?.snippet ?? apiSnippet()]).map((snippet) => ({
@@ -160,13 +162,38 @@ const hydrationHarness = (input?: {
             }
           }),
         removeExcept: (accountId: string, retainedSnippetIds: ReadonlySet<string>) =>
-          Effect.sync(() => {
-            for (const contentKey of content.keys()) {
+          Effect.gen(function* () {
+            if (
+              input?.removeExceptFailure !== undefined &&
+              input.removeExceptFailureAfterCopies === undefined
+            ) {
+              return yield* input.removeExceptFailure;
+            }
+            let reclaimedBytes = 0;
+            let removedCopies = 0;
+            for (const [contentKey, byteSize] of content) {
               const [owner, id] = contentKey.split("/");
               if (owner === accountId && id !== undefined && !retainedSnippetIds.has(id)) {
+                reclaimedBytes += byteSize;
+                removedCopies += 1;
                 content.delete(contentKey);
+                if (
+                  input?.removeExceptFailure !== undefined &&
+                  removedCopies === input.removeExceptFailureAfterCopies
+                ) {
+                  return yield* input.removeExceptFailure;
+                }
               }
             }
+            return { reclaimedBytes, removedCopies };
+          }),
+        storageUsageBytes: (accountId: string) =>
+          Effect.sync(() => {
+            let storageUsageBytes = 0;
+            for (const [contentKey, byteSize] of content) {
+              if (contentKey.startsWith(`${accountId}/`)) storageUsageBytes += byteSize;
+            }
+            return storageUsageBytes;
           }),
       } as never),
     ),
@@ -584,16 +611,101 @@ describe("SnippetHydrationEngine", () => {
         storage.content.set(`${account.id}/${snippet.id}`, snippet.byteSize);
       }
 
-      yield* SnippetHydrationEngine.use((engine) => engine.freeUpSpace(account.id)).pipe(
-        Effect.provide(storage.layer),
-      );
+      const result = yield* SnippetHydrationEngine.use((engine) =>
+        engine.freeUpSpace(account.id),
+      ).pipe(Effect.provide(storage.layer));
 
       expect(storage.content.size).toBe(AUTOMATIC_HYDRATION_LIMIT);
+      expect(result).toEqual({
+        reclaimedBytes: remoteBytes.byteLength * 2,
+        removedCopies: 2,
+        storageUsageBytes: remoteBytes.byteLength * AUTOMATIC_HYDRATION_LIMIT,
+      });
       expect(storage.content.has(`${account.id}/${snippets.at(-1)?.id}`)).toBe(true);
       expect(storage.content.has(`${account.id}/${snippets[0]?.id}`)).toBe(false);
       expect(storage.records()).toEqual(
         snippets.map((snippet) => ({ kind: "PUBLISHED", snippet })),
       );
+    }),
+  );
+
+  it.live("reports when no older device copies are eligible for removal", () =>
+    Effect.gen(function* () {
+      const snippets = Array.from({ length: AUTOMATIC_HYDRATION_LIMIT }, (_, index) =>
+        apiSnippet({
+          id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+          createdAt: new Date(now + index * 1_000).toISOString(),
+        }),
+      );
+      const storage = hydrationHarness({ snippets });
+      for (const snippet of snippets) {
+        storage.content.set(`${account.id}/${snippet.id}`, snippet.byteSize);
+      }
+
+      const result = yield* SnippetHydrationEngine.use((engine) =>
+        engine.freeUpSpace(account.id),
+      ).pipe(Effect.provide(storage.layer));
+
+      expect(result).toEqual({
+        reclaimedBytes: 0,
+        removedCopies: 0,
+        storageUsageBytes: remoteBytes.byteLength * AUTOMATIC_HYDRATION_LIMIT,
+      });
+      expect(storage.content.size).toBe(AUTOMATIC_HYDRATION_LIMIT);
+    }),
+  );
+
+  it.live("fails honestly after a partial removal without returning stale usage", () =>
+    Effect.gen(function* () {
+      const failure = new ManagedSnippetContentError({
+        cause: null,
+        reason: "Could not free managed snippet content.",
+        retryable: true,
+      });
+      const snippets = Array.from({ length: AUTOMATIC_HYDRATION_LIMIT + 2 }, (_, index) =>
+        apiSnippet({
+          id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+          createdAt: new Date(now + index * 1_000).toISOString(),
+        }),
+      );
+      const storage = hydrationHarness({
+        snippets,
+        removeExceptFailure: failure,
+        removeExceptFailureAfterCopies: 1,
+      });
+      for (const snippet of snippets) {
+        storage.content.set(`${account.id}/${snippet.id}`, snippet.byteSize);
+      }
+
+      const result = yield* Effect.flip(
+        SnippetHydrationEngine.use((engine) => engine.freeUpSpace(account.id)).pipe(
+          Effect.provide(storage.layer),
+        ),
+      );
+
+      expect(result).toBe(failure);
+      expect(storage.content.size).toBe(AUTOMATIC_HYDRATION_LIMIT + 1);
+    }),
+  );
+
+  it.live("fails without reporting an optimistic storage result", () =>
+    Effect.gen(function* () {
+      const failure = new ManagedSnippetContentError({
+        cause: null,
+        reason: "Could not free managed snippet content.",
+        retryable: true,
+      });
+      const storage = hydrationHarness({ removeExceptFailure: failure });
+      storage.seedContent(remoteBytes.byteLength);
+
+      const result = yield* Effect.flip(
+        SnippetHydrationEngine.use((engine) => engine.freeUpSpace(account.id)).pipe(
+          Effect.provide(storage.layer),
+        ),
+      );
+
+      expect(result).toBe(failure);
+      expect(storage.content.size).toBe(1);
     }),
   );
 

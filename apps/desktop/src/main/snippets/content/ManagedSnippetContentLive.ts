@@ -499,12 +499,9 @@ export const makeManagedSnippetContentLive = (root: string) =>
         });
       });
 
-      const storageUsageBytes = Effect.fn("ManagedSnippetContent.storageUsageBytes")(function* (
-        accountId: string,
-      ) {
-        const snippetIds = yield* accountSnippetIds(accountId);
-        const sizes = yield* Effect.forEach(snippetIds, (snippetId) =>
-          fileSystem.stat(managedSnippetContentPath(root, accountId, snippetId)).pipe(
+      const managedSnippetByteSize = Effect.fn("ManagedSnippetContent.managedSnippetByteSize")(
+        function* (accountId: string, snippetId: string) {
+          return yield* fileSystem.stat(managedSnippetContentPath(root, accountId, snippetId)).pipe(
             Effect.map((info) => (info.type === "File" ? Number(info.size) : 0)),
             Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(0)),
             Effect.mapError(
@@ -515,7 +512,16 @@ export const makeManagedSnippetContentLive = (root: string) =>
                   retryable: true,
                 }),
             ),
-          ),
+          );
+        },
+      );
+
+      const storageUsageBytes = Effect.fn("ManagedSnippetContent.storageUsageBytes")(function* (
+        accountId: string,
+      ) {
+        const snippetIds = yield* accountSnippetIds(accountId);
+        const sizes = yield* Effect.forEach(snippetIds, (snippetId) =>
+          managedSnippetByteSize(accountId, snippetId),
         );
         return sizes.reduce((total, size) => total + size, 0);
       });
@@ -527,11 +533,11 @@ export const makeManagedSnippetContentLive = (root: string) =>
         const snippetIds = (yield* accountSnippetIds(accountId)).filter(
           (snippetId) => !retainedSnippetIds.has(snippetId),
         );
-        yield* Effect.forEach(
-          snippetIds,
-          (snippetId) => {
+        return yield* Effect.forEach(snippetIds, (snippetId) =>
+          Effect.gen(function* () {
+            const byteSize = yield* managedSnippetByteSize(accountId, snippetId);
             clearCachedValidation(accountId, snippetId);
-            return fileSystem
+            yield* fileSystem
               .remove(contentDirectory(root, accountId, snippetId), {
                 force: true,
                 recursive: true,
@@ -546,10 +552,19 @@ export const makeManagedSnippetContentLive = (root: string) =>
                     }),
                 ),
               );
-          },
-          { discard: true },
+            return byteSize;
+          }),
+        ).pipe(
+          Effect.map((removedSizes) => ({
+            reclaimedBytes: removedSizes.reduce((total, byteSize) => total + byteSize, 0),
+            removedCopies: removedSizes.length,
+          })),
+          Effect.ensuring(
+            snippetIds.length === 0
+              ? Effect.void
+              : PubSub.publish(changes, accountId).pipe(Effect.asVoid),
+          ),
         );
-        if (snippetIds.length > 0) yield* PubSub.publish(changes, accountId);
       });
 
       const purge = Effect.fn("ManagedSnippetContent.purge")(function* (accountId: string) {

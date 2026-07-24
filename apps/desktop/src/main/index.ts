@@ -211,9 +211,9 @@ handle(ipcMethods.storageFreeUp, () =>
   Effect.gen(function* () {
     const hydration = yield* SnippetHydrationEngine;
     const session = yield* DesktopSession;
-    yield* session
+    return yield* session
       .withCurrentAccount((account) => hydration.freeUpSpace(account.id))
-      .pipe(asIpcFailure("Could not free up Plakk storage."));
+      .pipe(asIpcFailure("Plakk couldn’t free device space. Try again."));
   }),
 );
 

@@ -7,6 +7,7 @@ import type {
   LocalState,
   SnippetIngestPayload,
   SnippetIngestResult,
+  StorageFreeUpResult,
   TrayDroppedItem,
   UserConfig,
   UserConfigPatch,
@@ -71,7 +72,7 @@ export type DesktopApi = {
     readonly read: (id: string) => Promise<Uint8Array>;
   };
   readonly storage: {
-    readonly freeUp: () => Promise<void>;
+    readonly freeUp: () => Promise<StorageFreeUpResult>;
   };
   readonly tray: {
     readonly onDroppedItem: (callback: (item: TrayDroppedItem) => void) => () => void;

@@ -1,4 +1,5 @@
 import type { LocalContentAvailability } from "@plakk/shared";
+import type { StorageFreeUpResult } from "../../../ipc/contracts.ts";
 import type { SnippetReplicaError } from "../replica/SnippetReplica.ts";
 import type { ManagedSnippetContentError } from "../content/ManagedSnippetContent.ts";
 import type { SnippetSyncAccount } from "../replica/SnippetRemoteTransport.ts";
@@ -33,7 +34,9 @@ export interface SnippetHydrationShape {
     account: SnippetSyncAccount,
     snippetId: string,
   ) => Effect.Effect<void, SnippetHydrationEngineFailure>;
-  readonly freeUpSpace: (accountId: string) => Effect.Effect<void, SnippetHydrationEngineFailure>;
+  readonly freeUpSpace: (
+    accountId: string,
+  ) => Effect.Effect<StorageFreeUpResult, SnippetHydrationEngineFailure>;
   readonly state: (
     accountId: string,
     snippetId: string,
