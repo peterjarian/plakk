@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatFileSize } from "@plakk/shared";
 import {
   ArrowLeft,
@@ -54,7 +54,9 @@ export function Settings() {
   const { localState } = useLocalState();
   const appearance = useAppearance();
   const [autoUpdate, setAutoUpdate] = useState(true);
-  const [toolbarWidget, setToolbarWidget] = useState(true);
+  const [toolbarWidget, setToolbarWidget] = useState<boolean | null>(null);
+  const [toolbarWidgetSaving, setToolbarWidgetSaving] = useState(false);
+  const [toolbarWidgetError, setToolbarWidgetError] = useState<string | null>(null);
   const [updateStatus, setUpdateStatus] = useState("Up to date");
   const [freeingStorage, setFreeingStorage] = useState(false);
   const [storageFeedback, setStorageFeedback] = useState<StorageFeedback | null>(null);
@@ -72,6 +74,40 @@ export function Settings() {
   const [appearanceError, setAppearanceError] = useState<string | null>(null);
   const [savingAppearance, setSavingAppearance] = useState(false);
   const user = auth.user;
+
+  useEffect(() => {
+    let active = true;
+    void window.ipc.userConfig.get().then(
+      (config) => {
+        if (active) setToolbarWidget(config.toolbarWidgetEnabled);
+      },
+      () => {
+        if (active) setToolbarWidgetError("Could not load this preference.");
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  function updateToolbarWidget(enabled: boolean) {
+    if (toolbarWidget === null || toolbarWidgetSaving) return;
+    const previous = toolbarWidget;
+    setToolbarWidget(enabled);
+    setToolbarWidgetSaving(true);
+    setToolbarWidgetError(null);
+    void window.ipc.userConfig.set({ toolbarWidgetEnabled: enabled }).then(
+      (config) => {
+        setToolbarWidget(config.toolbarWidgetEnabled);
+        setToolbarWidgetSaving(false);
+      },
+      () => {
+        setToolbarWidget(previous);
+        setToolbarWidgetSaving(false);
+        setToolbarWidgetError("Could not save this preference.");
+      },
+    );
+  }
 
   if (user === null) return null;
 
@@ -364,10 +400,17 @@ export function Settings() {
                   />
                   <SettingsRowText
                     title="Toolbar widget"
-                    description="Show quick access from the desktop toolbar."
+                    description={
+                      toolbarWidgetError ?? "Show quick access from the desktop toolbar."
+                    }
                   />
                 </SettingsRowMain>
-                <Switch checked={toolbarWidget} onCheckedChange={setToolbarWidget} />
+                <Switch
+                  aria-label="Toolbar widget"
+                  checked={toolbarWidget ?? false}
+                  disabled={toolbarWidget === null || toolbarWidgetSaving}
+                  onCheckedChange={updateToolbarWidget}
+                />
               </SettingsRow>
             </SettingsSectionBody>
           </SettingsSection>

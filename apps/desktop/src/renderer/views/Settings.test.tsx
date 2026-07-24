@@ -16,6 +16,8 @@ const state = vi.hoisted(() => {
   return {
     account,
     freeUp: vi.fn(),
+    userConfigGet: vi.fn(),
+    userConfigSet: vi.fn(),
     localState: {
       revision: 7,
       account,
@@ -80,11 +82,26 @@ const renderSettings = async () => {
 
 beforeEach(() => {
   state.freeUp.mockReset();
+  state.userConfigGet.mockReset();
+  state.userConfigSet.mockReset();
+  state.userConfigGet.mockResolvedValue({
+    appearance: "system",
+    showExternalLinkWarning: true,
+    toolbarWidgetEnabled: true,
+  });
+  state.userConfigSet.mockImplementation(
+    async (patch: { readonly toolbarWidgetEnabled?: boolean }) => ({
+      appearance: "system",
+      showExternalLinkWarning: true,
+      toolbarWidgetEnabled: patch.toolbarWidgetEnabled ?? true,
+    }),
+  );
   Object.defineProperty(window, "ipc", {
     configurable: true,
     value: {
       openExternal: vi.fn(),
       storage: { freeUp: state.freeUp },
+      userConfig: { get: state.userConfigGet, set: state.userConfigSet },
     },
   });
 });
@@ -102,6 +119,25 @@ describe("Desktop settings", () => {
 
     expect(container.textContent).not.toContain("Global hotkey");
     expect(container.querySelector('select[aria-label="Appearance"]')).not.toBeNull();
+  });
+
+  it("restores and updates the Toolbar widget preference", async () => {
+    state.userConfigGet.mockResolvedValue({
+      appearance: "system",
+      showExternalLinkWarning: true,
+      toolbarWidgetEnabled: false,
+    });
+    const { container } = await renderSettings();
+    const toolbarWidget = container.querySelector<HTMLElement>('[aria-label="Toolbar widget"]');
+    if (toolbarWidget === null) throw new Error("Toolbar widget switch was not rendered.");
+
+    expect(toolbarWidget.getAttribute("aria-checked")).toBe("false");
+    expect(toolbarWidget.hasAttribute("disabled")).toBe(false);
+
+    await act(async () => toolbarWidget.click());
+
+    expect(state.userConfigSet).toHaveBeenCalledWith({ toolbarWidgetEnabled: true });
+    expect(toolbarWidget.getAttribute("aria-checked")).toBe("true");
   });
 });
 

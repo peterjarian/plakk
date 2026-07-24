@@ -31,12 +31,13 @@ const runWithStore = <A>(effect: Effect.Effect<A, unknown, UserConfigStore>) =>
 describe("desktop user config persistence", () => {
   beforeEach(() => stores.clear());
 
-  it("defaults missing appearance choices to System", async () => {
+  it("defaults missing appearance and Toolbar widget choices", async () => {
     stores.set("user-config", { showExternalLinkWarning: false });
 
     await expect(runWithStore(UserConfigStore.use((store) => store.get))).resolves.toEqual({
       appearance: "system",
       showExternalLinkWarning: false,
+      toolbarWidgetEnabled: true,
     });
   });
 
@@ -46,6 +47,17 @@ describe("desktop user config persistence", () => {
     await expect(runWithStore(UserConfigStore.use((store) => store.get))).resolves.toEqual({
       appearance: "dark",
       showExternalLinkWarning: true,
+      toolbarWidgetEnabled: true,
+    });
+  });
+
+  it("restores a disabled Toolbar widget after recreating the store", async () => {
+    await runWithStore(UserConfigStore.use((store) => store.set({ toolbarWidgetEnabled: false })));
+
+    await expect(runWithStore(UserConfigStore.use((store) => store.get))).resolves.toEqual({
+      appearance: "system",
+      showExternalLinkWarning: true,
+      toolbarWidgetEnabled: false,
     });
   });
 });

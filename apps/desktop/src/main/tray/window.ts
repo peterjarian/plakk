@@ -5,6 +5,7 @@ import type { Rectangle } from "electron";
 
 const trayWindowSize = { width: 360, height: 172 };
 const accountStateMaxAgeMs = 5 * 60 * 1000;
+const linuxTrayDestroyDelayMs = 100;
 
 type TrayNativeEvent = {
   bounds: Rectangle;
@@ -21,6 +22,7 @@ type TrayWindowControllerOptions = {
   onDragLeave?: (event: TrayNativeEvent) => void;
   onDropFiles?: (event: TrayNativeEvent & { files: string[] }) => void;
   onDropText?: (event: TrayNativeEvent & { text: string }) => void;
+  platform?: NodeJS.Platform;
   preloadPath: string;
 };
 
@@ -35,6 +37,7 @@ export function createTrayWindowController({
   onDragLeave,
   onDropFiles,
   onDropText,
+  platform = process.platform,
   preloadPath,
 }: TrayWindowControllerOptions) {
   let tray: Tray | undefined;
@@ -53,7 +56,7 @@ export function createTrayWindowController({
       width: 16,
       height: 16,
     });
-    image.setTemplateImage(process.platform === "darwin");
+    image.setTemplateImage(platform === "darwin");
 
     tray = new Tray(image);
     tray.setToolTip(app.name);
@@ -201,8 +204,23 @@ export function createTrayWindowController({
     freshnessTimer = undefined;
     window?.destroy();
     window = undefined;
-    tray?.destroy();
+    const disabledTray = tray;
     tray = undefined;
+    if (disabledTray === undefined) return;
+
+    // Electron can leave the first Linux SNI's last image rendered after destroy().
+    // Replacing its pixels first keeps the dead native item from remaining visibly stuck.
+    if (platform === "linux") {
+      disabledTray.removeAllListeners();
+      disabledTray.setToolTip("");
+      disabledTray.setImage(
+        nativeImage.createFromBuffer(Buffer.alloc(16 * 16 * 4), { height: 16, width: 16 }),
+      );
+      setTimeout(() => disabledTray.destroy(), linuxTrayDestroyDelayMs);
+      return;
+    }
+
+    disabledTray.destroy();
   }
 
   function accountStateIsCurrent() {
@@ -221,7 +239,7 @@ export function createTrayWindowController({
 
   function keepLayered(target: BrowserWindow) {
     target.setAlwaysOnTop(true, "pop-up-menu");
-    if (process.platform === "darwin") {
+    if (platform === "darwin") {
       target.setVisibleOnAllWorkspaces(true, {
         visibleOnFullScreen: true,
         skipTransformProcessType: true,

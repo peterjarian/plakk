@@ -11,6 +11,7 @@ import type {
   ClipboardContent,
   LocalState as LocalStateValue,
   TrayDroppedItem,
+  UserConfig,
 } from "../ipc/contracts.ts";
 import { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
 import { IpcHandlerError, makeHandle, send } from "../ipc/main.ts";
@@ -24,7 +25,7 @@ import {
 } from "./clipboard.ts";
 import { UserConfigStore } from "./UserConfigStore.ts";
 import { createAppearanceController } from "./appearance.ts";
-import { isReloadShortcut, reconcileTrayAuth } from "./lifecycle.ts";
+import { createToolbarWidgetLifecycle, isReloadShortcut } from "./lifecycle.ts";
 import { LocalState } from "./local-state/LocalState.ts";
 import { runEffect, runtime } from "./runtime.ts";
 import { DesktopSession } from "./session/DesktopSession.ts";
@@ -73,6 +74,17 @@ handle(ipcMethods.openExternal, (url) =>
 );
 
 const getLocalState = LocalState.use((localState) => localState.current);
+
+const applyUserConfigToTray = (config: UserConfig) =>
+  Effect.try({
+    try: () => {
+      if (toolbarWidgetLifecycle === undefined) {
+        throw new Error("Toolbar widget lifecycle is not ready.");
+      }
+      toolbarWidgetLifecycle.applyToolbarWidgetPreference(config.toolbarWidgetEnabled);
+    },
+    catch: (cause) => cause,
+  });
 
 handle(ipcMethods.localStateGet, () => getLocalState);
 
@@ -376,6 +388,7 @@ handle(ipcMethods.userConfigGet, () =>
 
 handle(ipcMethods.userConfigSet, (patch) =>
   UserConfigStore.use((store) => store.set(patch)).pipe(
+    Effect.tap(applyUserConfigToTray),
     asIpcFailure("Could not save desktop preferences."),
   ),
 );
@@ -385,6 +398,7 @@ handle(ipcMethods.userConfigReset, () =>
     Effect.tap((config) =>
       Effect.sync(() => appearanceController.setPreference(config.appearance)),
     ),
+    Effect.tap(applyUserConfigToTray),
     asIpcFailure("Could not reset desktop preferences."),
   ),
 );
@@ -393,6 +407,7 @@ type RendererView = "home" | "settings" | "tray" | "welcome";
 
 let mainWindow: BrowserWindow | undefined;
 let trayWindowController: ReturnType<typeof createTrayWindowController> | undefined;
+let toolbarWidgetLifecycle: ReturnType<typeof createToolbarWidgetLifecycle> | undefined;
 let appearanceController: ReturnType<
   typeof createAppearanceController<BrowserWindow["webContents"]>
 >;
@@ -558,8 +573,10 @@ function broadcastLocalState(localState: LocalStateValue): void {
   const canSync =
     localState.capability.status === "ONLINE" &&
     accountCanSyncWithConnection(localState.capability.account, localState.capability.connection);
-  reconcileTrayAuth({ user: localState.account }, trayWindowController);
-  trayWindowController?.setAccountState(localState.account !== null, canSync);
+  toolbarWidgetLifecycle?.applyAccountState({
+    canIngest: canSync,
+    user: localState.account,
+  });
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed()) {
       send(window.webContents, ipcEvents.localStateChanged, localState);
@@ -676,19 +693,27 @@ if (!hasSingleInstanceLock) {
 
   void app.whenReady().then(async () => {
     registerRendererProtocol();
-    const initialUserConfig = await runEffect(UserConfigStore.use((store) => store.get));
+    // Reconcile the locally persisted account owner before any renderer can read cached Local State.
+    // Network credential refresh continues in the background so it cannot prevent the UI opening.
+    const [initialSession, initialUserConfig] = await Promise.all([
+      runEffect(Effect.result(DesktopSession.use((session) => session.start))),
+      runEffect(Effect.result(UserConfigStore.use((store) => store.get))),
+    ]);
+    if (Result.isFailure(initialUserConfig)) {
+      await runEffect(
+        Effect.logError("Could not load the Toolbar widget preference; leaving the Tray disabled", {
+          cause: initialUserConfig.failure,
+        }),
+      );
+    }
     appearanceController = createAppearanceController({
       getWindows: () => BrowserWindow.getAllWindows(),
-      initialPreference: initialUserConfig.appearance,
+      initialPreference: Result.isSuccess(initialUserConfig)
+        ? initialUserConfig.success.appearance
+        : "system",
       nativeTheme,
       sendState: (webContents, state) => send(webContents, ipcEvents.appearanceChanged, state),
     });
-
-    // Reconcile the locally persisted account owner before any renderer can read cached Local State.
-    // Network credential refresh continues in the background so it cannot prevent the UI opening.
-    const initialSession = await runEffect(
-      Effect.result(DesktopSession.use((session) => session.start)),
-    );
 
     runtime.runFork(
       LocalState.use((localState) =>
@@ -753,6 +778,10 @@ if (!hasSingleInstanceLock) {
       },
       preloadPath: join(__dirname, "../preload/index.cjs"),
     });
+    toolbarWidgetLifecycle = createToolbarWidgetLifecycle(
+      trayWindowController,
+      Result.isSuccess(initialUserConfig) ? initialUserConfig.success.toolbarWidgetEnabled : false,
+    );
     createWindow();
     runtime.runFork(
       LocalState.use((localState) =>

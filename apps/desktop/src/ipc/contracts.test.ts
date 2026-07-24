@@ -5,6 +5,8 @@ import {
   AppearancePreferenceSchema,
   DesktopSnippetSchema,
   StorageFreeUpResultSchema,
+  UserConfigPatchSchema,
+  UserConfigSchema,
 } from "./contracts.ts";
 
 describe("AppearancePreferenceSchema", () => {
@@ -17,6 +19,28 @@ describe("AppearancePreferenceSchema", () => {
       "system",
     ]);
     expect(() => decode("sepia")).toThrow();
+  });
+});
+
+describe("UserConfigSchema", () => {
+  it("carries the persisted Toolbar widget preference across the desktop boundary", () => {
+    const decodeConfig = Schema.decodeUnknownSync(UserConfigSchema);
+    const decodePatch = Schema.decodeUnknownSync(UserConfigPatchSchema);
+
+    expect(
+      decodeConfig({
+        appearance: "system",
+        showExternalLinkWarning: true,
+        toolbarWidgetEnabled: false,
+      }),
+    ).toEqual({
+      appearance: "system",
+      showExternalLinkWarning: true,
+      toolbarWidgetEnabled: false,
+    });
+    expect(decodePatch({ toolbarWidgetEnabled: true })).toEqual({
+      toolbarWidgetEnabled: true,
+    });
   });
 });
 

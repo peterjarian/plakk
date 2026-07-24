@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import {
+  createToolbarWidgetLifecycle,
   isReloadShortcut,
-  reconcileTrayAuth,
   resolveDesktopUserDataPath,
-  type DesktopAuthState,
+  type DesktopTrayState,
 } from "./lifecycle.ts";
 
-const signedIn: DesktopAuthState = {
+const signedIn = {
   user: {
     id: "user_1",
     email: "user@example.com",
@@ -15,7 +15,8 @@ const signedIn: DesktopAuthState = {
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
   },
-};
+  canIngest: true,
+} satisfies DesktopTrayState;
 
 describe("desktop lifecycle", () => {
   it("isolates explicitly configured validation profiles", () => {
@@ -47,20 +48,42 @@ describe("desktop lifecycle", () => {
     ).toBe(false);
   });
 
-  it("keeps the tray for a known offline account and removes it on sign-out", () => {
-    const controller = { setup: vi.fn(), disable: vi.fn() };
+  it("restores the preference and applies live toggles to a signed-in account", () => {
+    const controller = { setup: vi.fn(), disable: vi.fn(), setAccountState: vi.fn() };
+    const lifecycle = createToolbarWidgetLifecycle(controller, false);
 
-    reconcileTrayAuth({ user: null }, controller);
+    lifecycle.applyAccountState(signedIn);
     expect(controller.disable).toHaveBeenCalledOnce();
     expect(controller.setup).not.toHaveBeenCalled();
+    expect(controller.setAccountState).not.toHaveBeenCalled();
 
-    reconcileTrayAuth(signedIn, controller);
+    lifecycle.applyToolbarWidgetPreference(true);
     expect(controller.setup).toHaveBeenCalledOnce();
+    expect(controller.setAccountState).toHaveBeenLastCalledWith(true, true);
 
-    reconcileTrayAuth({ user: signedIn.user }, controller);
+    lifecycle.applyAccountState({ ...signedIn, canIngest: false });
     expect(controller.setup).toHaveBeenCalledTimes(2);
+    expect(controller.setAccountState).toHaveBeenLastCalledWith(true, false);
 
-    reconcileTrayAuth({ user: null }, controller);
+    lifecycle.applyToolbarWidgetPreference(false);
     expect(controller.disable).toHaveBeenCalledTimes(2);
+  });
+
+  it("removes the tray on sign-out and restores it after sign-in only while enabled", () => {
+    const controller = { setup: vi.fn(), disable: vi.fn(), setAccountState: vi.fn() };
+    const lifecycle = createToolbarWidgetLifecycle(controller, true);
+
+    lifecycle.applyAccountState(signedIn);
+    lifecycle.applyAccountState({ canIngest: false, user: null });
+    lifecycle.applyToolbarWidgetPreference(false);
+    lifecycle.applyAccountState(signedIn);
+
+    expect(controller.disable).toHaveBeenCalledTimes(3);
+    expect(controller.setup).toHaveBeenCalledOnce();
+    expect(controller.setAccountState).toHaveBeenCalledOnce();
+
+    lifecycle.applyToolbarWidgetPreference(true);
+    expect(controller.setup).toHaveBeenCalledTimes(2);
+    expect(controller.setAccountState).toHaveBeenLastCalledWith(true, true);
   });
 });

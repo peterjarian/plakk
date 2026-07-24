@@ -72,12 +72,14 @@ export type AppearanceState = typeof AppearanceStateSchema.Type;
 export const UserConfigSchema = Schema.Struct({
   appearance: AppearancePreferenceSchema,
   showExternalLinkWarning: Schema.Boolean,
+  toolbarWidgetEnabled: Schema.Boolean,
 });
 
 export type UserConfig = typeof UserConfigSchema.Type;
 
 export const UserConfigPatchSchema = Schema.Struct({
   showExternalLinkWarning: Schema.optionalKey(Schema.Boolean),
+  toolbarWidgetEnabled: Schema.optionalKey(Schema.Boolean),
 });
 
 export type UserConfigPatch = typeof UserConfigPatchSchema.Type;

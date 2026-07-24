@@ -1,12 +1,14 @@
 import type { User } from "@plakk/shared";
 import { resolve } from "node:path";
 
-export type DesktopAuthState = {
+export type DesktopTrayState = {
+  readonly canIngest: boolean;
   readonly user: User | null;
 };
 
-type TrayAuthController = {
+type TrayWindowController = {
   disable(): void;
+  setAccountState(resolved: boolean, canIngest: boolean): void;
   setup(): void;
 };
 
@@ -18,15 +20,32 @@ export function resolveDesktopUserDataPath(
   return value ? resolve(value) : defaultPath;
 }
 
-export function reconcileTrayAuth(
-  status: DesktopAuthState,
-  controller: TrayAuthController | undefined,
+export function createToolbarWidgetLifecycle(
+  controller: TrayWindowController,
+  initialToolbarWidgetEnabled: boolean,
 ) {
-  if (status.user === null) {
-    controller?.disable();
-    return;
+  let accountState: DesktopTrayState = { canIngest: false, user: null };
+  let toolbarWidgetEnabled = initialToolbarWidgetEnabled;
+
+  function reconcile() {
+    if (!toolbarWidgetEnabled || accountState.user === null) {
+      controller.disable();
+      return;
+    }
+    controller.setup();
+    controller.setAccountState(true, accountState.canIngest);
   }
-  controller?.setup();
+
+  return {
+    applyAccountState(state: DesktopTrayState) {
+      accountState = state;
+      reconcile();
+    },
+    applyToolbarWidgetPreference(enabled: boolean) {
+      toolbarWidgetEnabled = enabled;
+      reconcile();
+    },
+  };
 }
 
 export function isReloadShortcut(
