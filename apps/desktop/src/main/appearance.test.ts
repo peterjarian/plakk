@@ -7,26 +7,25 @@ type Listener = () => void;
 
 function makeNativeTheme(initialDark: boolean) {
   const listeners = new Set<Listener>();
-  let shouldUseDarkColors = initialDark;
+  let systemShouldUseDarkColors = initialDark;
   let themeSource: AppearancePreference = "system";
 
   return {
     get shouldUseDarkColors() {
-      return shouldUseDarkColors;
+      return themeSource === "system" ? systemShouldUseDarkColors : themeSource === "dark";
     },
     get themeSource() {
       return themeSource;
     },
     set themeSource(value: AppearancePreference) {
       themeSource = value;
-      shouldUseDarkColors = value === "dark" || (value === "system" && shouldUseDarkColors);
     },
     on: (_event: "updated", listener: Listener) => {
       listeners.add(listener);
     },
     useSystemDarkColors(value: boolean) {
+      systemShouldUseDarkColors = value;
       if (themeSource !== "system") return;
-      shouldUseDarkColors = value;
       for (const listener of listeners) listener();
     },
   };
@@ -108,5 +107,25 @@ describe("desktop appearance", () => {
     expect(main.setBackgroundColor).toHaveBeenLastCalledWith("#0a0a0a");
     expect(tray.setBackgroundColor).toHaveBeenLastCalledWith("#0a0a0a");
     expect(sendState).toHaveBeenCalledTimes(2);
+  });
+
+  it("removes an explicit override when the user returns to System", () => {
+    const nativeTheme = makeNativeTheme(false);
+    const main = makeWindow();
+    const tray = makeWindow();
+    const controller = createAppearanceController({
+      getWindows: () => [main, tray],
+      initialPreference: "dark",
+      nativeTheme,
+      sendState: vi.fn(),
+    });
+
+    nativeTheme.useSystemDarkColors(false);
+    controller.setPreference("system");
+
+    expect(nativeTheme.themeSource).toBe("system");
+    expect(controller.getState()).toEqual({ preference: "system", effective: "light" });
+    expect(main.setBackgroundColor).toHaveBeenLastCalledWith("#ffffff");
+    expect(tray.setBackgroundColor).toHaveBeenLastCalledWith("#ffffff");
   });
 });

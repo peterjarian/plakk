@@ -58,6 +58,8 @@ export function createAppearanceController<WebContents>({
     }
   };
 
+  // This controller is created once after app readiness and owns the subscription
+  // for the remaining Electron process lifetime.
   nativeTheme.on("updated", reconcile);
 
   return {
