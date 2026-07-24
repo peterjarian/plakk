@@ -83,6 +83,16 @@ beforeEach(() => {
   Object.defineProperty(window, "ipc", {
     configurable: true,
     value: {
+      globalHotkey: {
+        beginRecording: vi.fn(),
+        cancelRecording: vi.fn(),
+        get: vi.fn().mockResolvedValue({
+          enabled: true,
+          shortcut: "Mod+Shift+V",
+          errorMessage: null,
+        }),
+        update: vi.fn(),
+      },
       openExternal: vi.fn(),
       storage: { freeUp: state.freeUp },
     },

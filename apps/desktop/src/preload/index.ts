@@ -4,6 +4,8 @@ import type {
   AppearanceState,
   AuthError,
   ClipboardContent,
+  GlobalHotkeyStatus,
+  GlobalHotkeyUpdate,
   LocalState,
   SnippetIngestPayload,
   SnippetIngestResult,
@@ -54,6 +56,12 @@ export type DesktopApi = {
   readonly clipboard: {
     readonly read: () => Promise<ClipboardContent>;
     readonly onPaste: (callback: (content: ClipboardContent) => void) => () => void;
+  };
+  readonly globalHotkey: {
+    readonly beginRecording: () => Promise<void>;
+    readonly cancelRecording: () => Promise<GlobalHotkeyStatus>;
+    readonly get: () => Promise<GlobalHotkeyStatus>;
+    readonly update: (patch: GlobalHotkeyUpdate) => Promise<GlobalHotkeyStatus>;
   };
   readonly openExternal: (url: string) => Promise<void>;
   readonly localState: {
@@ -108,6 +116,12 @@ export const desktopApi = {
     read: () => invoke(ipcMethods.clipboardRead, undefined),
     onPaste: (callback: (content: ClipboardContent) => void) =>
       on(ipcEvents.clipboardPaste, callback),
+  },
+  globalHotkey: {
+    beginRecording: () => invoke(ipcMethods.globalHotkeyBeginRecording, undefined),
+    cancelRecording: () => invoke(ipcMethods.globalHotkeyCancelRecording, undefined),
+    get: () => invoke(ipcMethods.globalHotkeyGet, undefined),
+    update: (patch: GlobalHotkeyUpdate) => invoke(ipcMethods.globalHotkeyUpdate, patch),
   },
   openExternal: (url: string) => invoke(ipcMethods.openExternal, url),
   localState: {

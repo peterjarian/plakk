@@ -7,6 +7,10 @@ import { UserConfigStore, UserConfigStoreError } from "./UserConfigStore.ts";
 const defaultUserConfig: UserConfig = {
   appearance: "system",
   showExternalLinkWarning: true,
+  globalHotkey: {
+    enabled: true,
+    shortcut: "Mod+Shift+V",
+  },
 };
 
 const decodeUserConfig = (input: unknown) =>
@@ -20,40 +24,44 @@ const readUserConfig = (store: ElectronStore<UserConfig>) =>
     catch: (cause) => new UserConfigStoreError({ cause }),
   }).pipe(Effect.flatMap(decodeUserConfig));
 
-export const UserConfigStoreLive = Layer.effect(
-  UserConfigStore,
-  Effect.try({
-    try: () => {
-      const store = new ElectronStore<UserConfig>({
-        name: "user-config",
-        defaults: defaultUserConfig,
-      });
+export const makeUserConfigStoreLive = (options: { readonly cwd?: string } = {}) =>
+  Layer.effect(
+    UserConfigStore,
+    Effect.try({
+      try: () => {
+        const store = new ElectronStore<UserConfig>({
+          ...options,
+          name: "user-config",
+          defaults: defaultUserConfig,
+        });
 
-      const get = readUserConfig(store);
+        const get = readUserConfig(store);
 
-      const set = Effect.fn("UserConfigStore.set")(function* (patch: Partial<UserConfig>) {
-        const config = yield* decodeUserConfig({ ...(yield* get), ...patch });
+        const set = Effect.fn("UserConfigStore.set")(function* (patch: Partial<UserConfig>) {
+          const config = yield* decodeUserConfig({ ...(yield* get), ...patch });
 
-        yield* Effect.try({
+          yield* Effect.try({
+            try: () => {
+              store.store = config;
+            },
+            catch: (cause) => new UserConfigStoreError({ cause }),
+          });
+
+          return config;
+        });
+
+        const reset = Effect.try({
           try: () => {
-            store.store = config;
+            store.store = defaultUserConfig;
+            return defaultUserConfig;
           },
           catch: (cause) => new UserConfigStoreError({ cause }),
         });
 
-        return config;
-      });
+        return UserConfigStore.of({ get, reset, set });
+      },
+      catch: (cause) => new UserConfigStoreError({ cause }),
+    }),
+  );
 
-      const reset = Effect.try({
-        try: () => {
-          store.store = defaultUserConfig;
-          return defaultUserConfig;
-        },
-        catch: (cause) => new UserConfigStoreError({ cause }),
-      });
-
-      return UserConfigStore.of({ get, reset, set });
-    },
-    catch: (cause) => new UserConfigStoreError({ cause }),
-  }),
-);
+export const UserConfigStoreLive = makeUserConfigStoreLive();

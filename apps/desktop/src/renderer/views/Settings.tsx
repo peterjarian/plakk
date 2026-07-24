@@ -1,4 +1,9 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import {
+  formatForDisplay,
+  normalizeHotkeyFromEvent,
+  useHotkeyRecorder,
+} from "@tanstack/react-hotkeys";
 import { formatFileSize } from "@plakk/shared";
 import {
   ArrowLeft,
@@ -27,6 +32,7 @@ import {
   SettingsSectionTitle,
 } from "@plakk/ui/components/settings";
 import { getInitials } from "@plakk/ui/lib/getInitials";
+import type { GlobalHotkeyStatus, GlobalHotkeyUpdate } from "../../ipc/contracts.ts";
 import { useAuth } from "../hooks/useAuth.ts";
 import { setAppearancePreference, useAppearance } from "../hooks/useAppearance.ts";
 import { useLocalState } from "../hooks/useLocalState.tsx";
@@ -49,14 +55,117 @@ type StorageFeedback =
   | { readonly kind: "no-op" }
   | { readonly kind: "failed"; readonly message: string };
 
-export function Settings() {
+const shiftedKeyBase: Readonly<Record<string, string>> = {
+  "!": "1",
+  '"': "'",
+  "#": "3",
+  $: "4",
+  "%": "5",
+  "&": "7",
+  "(": "9",
+  ")": "0",
+  "*": "8",
+  "+": "=",
+  ":": ";",
+  "<": ",",
+  ">": ".",
+  "?": "/",
+  "@": "2",
+  "^": "6",
+  _: "-",
+  "{": "[",
+  "|": "\\",
+  "}": "]",
+  "~": "`",
+};
+
+export function normalizeRecordedHotkey(shortcut: string) {
+  const recordsPlusKey = shortcut.endsWith("++");
+  const separator = recordsPlusKey ? shortcut.length - 2 : shortcut.lastIndexOf("+");
+  if (separator < 0) return shortcut;
+
+  const modifiers = shortcut.slice(0, separator).split("+");
+  const key = recordsPlusKey ? "+" : shortcut.slice(separator + 1);
+  const baseKey = modifiers.includes("Shift") ? shiftedKeyBase[key] : undefined;
+  return baseKey === undefined ? shortcut : `${modifiers.join("+")}+${baseKey}`;
+}
+
+export function GlobalHotkeyControl({
+  busy,
+  error,
+  isRecording,
+  onBeginRecording,
+  onCancelRecording,
+  onUpdate,
+  status,
+}: {
+  readonly busy: boolean;
+  readonly error: string | null;
+  readonly isRecording: boolean;
+  readonly onBeginRecording: () => void;
+  readonly onCancelRecording: () => void;
+  readonly onUpdate: (patch: GlobalHotkeyUpdate) => void;
+  readonly status: GlobalHotkeyStatus | null;
+}) {
+  return (
+    <>
+      <SettingsRow>
+        <SettingsRowMain>
+          <Keyboard className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <SettingsRowText title="Global hotkey" description="Open Plakk from anywhere." />
+        </SettingsRowMain>
+        <SettingsRowAction>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            aria-label={isRecording ? "Listening for a global hotkey" : "Record global hotkey"}
+            disabled={busy || status === null || !status.enabled}
+            onClick={onBeginRecording}
+          >
+            {isRecording
+              ? "Press shortcut…"
+              : status === null
+                ? "Loading…"
+                : formatForDisplay(status.shortcut)}
+          </Button>
+          {isRecording && (
+            <Button type="button" variant="ghost" size="sm" onClick={onCancelRecording}>
+              Cancel
+            </Button>
+          )}
+          <Switch
+            aria-label="Enable global hotkey"
+            checked={status?.enabled ?? false}
+            disabled={busy || status === null || isRecording}
+            onCheckedChange={(enabled) => onUpdate({ enabled })}
+          />
+        </SettingsRowAction>
+      </SettingsRow>
+      {isRecording && (
+        <p className="px-4 py-2 text-xs text-muted-foreground" role="status">
+          Listening… Press a shortcut, or press Escape to cancel.
+        </p>
+      )}
+      {error !== null && (
+        <p className="px-4 py-2 text-xs text-destructive" role="alert">
+          {error}
+        </p>
+      )}
+    </>
+  );
+}
+
+export function Settings({ active = true }: { readonly active?: boolean }) {
   const auth = useAuth();
   const linkedProvider = useLinkedStorageProvider();
   const storageStatus = useStorageStatus();
   const { localState } = useLocalState();
   const appearance = useAppearance();
   const [autoUpdate, setAutoUpdate] = useState(true);
-  const [globalHotkey, setGlobalHotkey] = useState(true);
+  const [globalHotkeyStatus, setGlobalHotkeyStatus] = useState<GlobalHotkeyStatus | null>(null);
+  const [globalHotkeyBusy, setGlobalHotkeyBusy] = useState(false);
+  const [globalHotkeyError, setGlobalHotkeyError] = useState<string | null>(null);
   const [toolbarWidget, setToolbarWidget] = useState(true);
   const [updateStatus, setUpdateStatus] = useState("Up to date");
   const [freeingStorage, setFreeingStorage] = useState(false);
@@ -76,7 +185,97 @@ export function Settings() {
   const [savingAppearance, setSavingAppearance] = useState(false);
   const user = auth.user;
 
+  const recorder = useHotkeyRecorder({
+    ignoreInputs: false,
+    onRecord: (shortcut) => {
+      if (!shortcut) {
+        void cancelGlobalHotkeyRecording();
+        return;
+      }
+      void updateGlobalHotkey({ shortcut: normalizeRecordedHotkey(shortcut) });
+    },
+    onCancel: () => {
+      void cancelGlobalHotkeyRecording();
+    },
+  });
+
+  useEffect(() => {
+    window.ipc.globalHotkey.get().then(
+      (status) => {
+        setGlobalHotkeyStatus(status);
+        setGlobalHotkeyError(status.errorMessage);
+      },
+      (cause) =>
+        setGlobalHotkeyError(ipcActionErrorMessage(cause, "Could not load the global hotkey.")),
+    );
+  }, []);
+
+  useEffect(() => {
+    if (!active && recorder.isRecording) recorder.cancelRecording();
+  }, [active, recorder]);
+
+  useEffect(() => {
+    if (!recorder.isRecording) return;
+    const cancelOnBlur = () => recorder.cancelRecording();
+    const recordShiftedPlus = (event: KeyboardEvent) => {
+      if (event.key !== "+" || !event.shiftKey) return;
+      event.preventDefault();
+      event.stopPropagation();
+      recorder.stopRecording();
+      void updateGlobalHotkey({
+        shortcut: normalizeRecordedHotkey(normalizeHotkeyFromEvent(event)),
+      });
+    };
+    window.addEventListener("blur", cancelOnBlur);
+    window.addEventListener("keydown", recordShiftedPlus, true);
+    return () => {
+      window.removeEventListener("blur", cancelOnBlur);
+      window.removeEventListener("keydown", recordShiftedPlus, true);
+    };
+  }, [recorder]);
+
   if (user === null) return null;
+
+  async function beginGlobalHotkeyRecording() {
+    setGlobalHotkeyBusy(true);
+    setGlobalHotkeyError(null);
+    try {
+      await window.ipc.globalHotkey.beginRecording();
+      recorder.startRecording();
+    } catch (cause) {
+      setGlobalHotkeyError(ipcActionErrorMessage(cause, "Could not start recording a shortcut."));
+    } finally {
+      setGlobalHotkeyBusy(false);
+    }
+  }
+
+  async function cancelGlobalHotkeyRecording() {
+    setGlobalHotkeyBusy(true);
+    try {
+      const status = await window.ipc.globalHotkey.cancelRecording();
+      setGlobalHotkeyStatus(status);
+      setGlobalHotkeyError(status.errorMessage);
+    } catch (cause) {
+      setGlobalHotkeyError(ipcActionErrorMessage(cause, "Could not restore the global hotkey."));
+    } finally {
+      setGlobalHotkeyBusy(false);
+    }
+  }
+
+  async function updateGlobalHotkey(patch: GlobalHotkeyUpdate) {
+    setGlobalHotkeyBusy(true);
+    setGlobalHotkeyError(null);
+    try {
+      const status = await window.ipc.globalHotkey.update(patch);
+      setGlobalHotkeyStatus(status);
+      setGlobalHotkeyError(status.errorMessage);
+    } catch (cause) {
+      setGlobalHotkeyError(ipcActionErrorMessage(cause, "Could not update the global hotkey."));
+      void window.ipc.globalHotkey.get().then(setGlobalHotkeyStatus, () => {});
+    } finally {
+      setGlobalHotkeyBusy(false);
+    }
+  }
 
   const fallback = user.email || user.id;
   const name = [user.firstName, user.lastName].filter(Boolean).join(" ") || fallback;
@@ -359,24 +558,15 @@ export function Settings() {
                 </p>
               )}
 
-              <SettingsRow>
-                <SettingsRowMain>
-                  <Keyboard className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                  <SettingsRowText title="Global hotkey" description="Open Plakk from anywhere." />
-                </SettingsRowMain>
-                <SettingsRowAction>
-                  <select
-                    className="h-7 rounded-md border bg-background px-2 text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-                    disabled={!globalHotkey}
-                    defaultValue="CommandOrControl+Shift+V"
-                  >
-                    <option value="CommandOrControl+Shift+V">⌘⇧V</option>
-                    <option value="CommandOrControl+Shift+Space">⌘⇧Space</option>
-                    <option value="CommandOrControl+Option+V">⌘⌥V</option>
-                  </select>
-                  <Switch checked={globalHotkey} onCheckedChange={setGlobalHotkey} />
-                </SettingsRowAction>
-              </SettingsRow>
+              <GlobalHotkeyControl
+                busy={globalHotkeyBusy}
+                error={globalHotkeyError}
+                isRecording={recorder.isRecording}
+                onBeginRecording={() => void beginGlobalHotkeyRecording()}
+                onCancelRecording={recorder.cancelRecording}
+                onUpdate={(patch) => void updateGlobalHotkey(patch)}
+                status={globalHotkeyStatus}
+              />
 
               <SettingsRow>
                 <SettingsRowMain>

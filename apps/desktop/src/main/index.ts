@@ -26,6 +26,7 @@ import { UserConfigStore } from "./UserConfigStore.ts";
 import { createAppearanceController } from "./appearance.ts";
 import { isReloadShortcut, reconcileTrayAuth } from "./lifecycle.ts";
 import { LocalState } from "./local-state/LocalState.ts";
+import { GlobalHotkey, GlobalHotkeyError } from "./global-hotkey/GlobalHotkey.ts";
 import { runEffect, runtime } from "./runtime.ts";
 import { DesktopSession } from "./session/DesktopSession.ts";
 import { SnippetHydrationEngine } from "./snippets/hydration/SnippetHydration.ts";
@@ -381,11 +382,52 @@ handle(ipcMethods.userConfigSet, (patch) =>
 );
 
 handle(ipcMethods.userConfigReset, () =>
-  UserConfigStore.use((store) => store.reset).pipe(
-    Effect.tap((config) =>
-      Effect.sync(() => appearanceController.setPreference(config.appearance)),
+  Effect.gen(function* () {
+    const config = yield* UserConfigStore.use((store) => store.reset);
+    yield* Effect.sync(() => appearanceController.setPreference(config.appearance));
+    yield* GlobalHotkey.use((hotkey) => hotkey.start(revealMainWindow));
+    return config;
+  }).pipe(asIpcFailure("Could not reset desktop preferences.")),
+);
+
+const withGlobalHotkeyIpcError = Effect.fn("withGlobalHotkeyIpcError")(
+  <A, E, R>(
+    effect: Effect.Effect<A, E, R>,
+    fallback: string,
+  ): Effect.Effect<A, IpcHandlerError, R> =>
+    effect.pipe(
+      Effect.mapError(
+        (cause) =>
+          new IpcHandlerError({
+            cause,
+            message: cause instanceof GlobalHotkeyError ? cause.reason : fallback,
+          }),
+      ),
     ),
-    asIpcFailure("Could not reset desktop preferences."),
+);
+
+handle(ipcMethods.globalHotkeyGet, () =>
+  withGlobalHotkeyIpcError(
+    GlobalHotkey.use((hotkey) => hotkey.status),
+    "Could not load the global hotkey.",
+  ),
+);
+
+handle(ipcMethods.globalHotkeyBeginRecording, () =>
+  GlobalHotkey.use((hotkey) => hotkey.beginRecording),
+);
+
+handle(ipcMethods.globalHotkeyCancelRecording, () =>
+  withGlobalHotkeyIpcError(
+    GlobalHotkey.use((hotkey) => hotkey.cancelRecording),
+    "Could not restore the global hotkey.",
+  ),
+);
+
+handle(ipcMethods.globalHotkeyUpdate, (patch) =>
+  withGlobalHotkeyIpcError(
+    GlobalHotkey.use((hotkey) => hotkey.update(patch)),
+    "Could not update the global hotkey.",
   ),
 );
 
@@ -683,6 +725,13 @@ if (!hasSingleInstanceLock) {
       nativeTheme,
       sendState: (webContents, state) => send(webContents, ipcEvents.appearanceChanged, state),
     });
+    await runEffect(
+      GlobalHotkey.use((hotkey) => hotkey.start(revealMainWindow)).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logError("Could not restore the global hotkey", { cause }),
+        ),
+      ),
+    );
 
     // Reconcile the locally persisted account owner before any renderer can read cached Local State.
     // Network credential refresh continues in the background so it cannot prevent the UI opening.
@@ -774,6 +823,10 @@ if (!hasSingleInstanceLock) {
 
 app.on("before-quit", () => {
   isQuitting = true;
+});
+
+app.on("will-quit", () => {
+  runtime.runSync(GlobalHotkey.use((hotkey) => hotkey.stop));
 });
 
 app.on("window-all-closed", () => {

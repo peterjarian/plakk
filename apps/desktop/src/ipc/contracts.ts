@@ -69,9 +69,31 @@ export const AppearanceStateSchema = Schema.Struct({
 
 export type AppearanceState = typeof AppearanceStateSchema.Type;
 
+export const GlobalHotkeyPreferencesSchema = Schema.Struct({
+  enabled: Schema.Boolean,
+  shortcut: Schema.String,
+});
+
+export type GlobalHotkeyPreferences = typeof GlobalHotkeyPreferencesSchema.Type;
+
+export const GlobalHotkeyStatusSchema = Schema.Struct({
+  ...GlobalHotkeyPreferencesSchema.fields,
+  errorMessage: Schema.NullOr(Schema.String),
+});
+
+export type GlobalHotkeyStatus = typeof GlobalHotkeyStatusSchema.Type;
+
+export const GlobalHotkeyUpdateSchema = Schema.Struct({
+  enabled: Schema.optionalKey(Schema.Boolean),
+  shortcut: Schema.optionalKey(Schema.String),
+});
+
+export type GlobalHotkeyUpdate = typeof GlobalHotkeyUpdateSchema.Type;
+
 export const UserConfigSchema = Schema.Struct({
   appearance: AppearancePreferenceSchema,
   showExternalLinkWarning: Schema.Boolean,
+  globalHotkey: GlobalHotkeyPreferencesSchema,
 });
 
 export type UserConfig = typeof UserConfigSchema.Type;
@@ -257,6 +279,26 @@ export const ipcMethods = {
     channel: "clipboard:read",
     payload: Schema.Void,
     result: ClipboardContentSchema,
+  }),
+  globalHotkeyBeginRecording: method({
+    channel: "global-hotkey:begin-recording",
+    payload: Schema.Void,
+    result: Schema.Void,
+  }),
+  globalHotkeyCancelRecording: method({
+    channel: "global-hotkey:cancel-recording",
+    payload: Schema.Void,
+    result: GlobalHotkeyStatusSchema,
+  }),
+  globalHotkeyGet: method({
+    channel: "global-hotkey:get",
+    payload: Schema.Void,
+    result: GlobalHotkeyStatusSchema,
+  }),
+  globalHotkeyUpdate: method({
+    channel: "global-hotkey:update",
+    payload: GlobalHotkeyUpdateSchema,
+    result: GlobalHotkeyStatusSchema,
   }),
   traySelectFiles: method({
     channel: "tray:select-files",

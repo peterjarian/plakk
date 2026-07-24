@@ -37,6 +37,10 @@ describe("desktop user config persistence", () => {
     await expect(runWithStore(UserConfigStore.use((store) => store.get))).resolves.toEqual({
       appearance: "system",
       showExternalLinkWarning: false,
+      globalHotkey: {
+        enabled: true,
+        shortcut: "Mod+Shift+V",
+      },
     });
   });
 
@@ -46,6 +50,30 @@ describe("desktop user config persistence", () => {
     await expect(runWithStore(UserConfigStore.use((store) => store.get))).resolves.toEqual({
       appearance: "dark",
       showExternalLinkWarning: true,
+      globalHotkey: {
+        enabled: true,
+        shortcut: "Mod+Shift+V",
+      },
+    });
+  });
+
+  it("restores the global hotkey and enabled state after recreating the store", async () => {
+    await runWithStore(
+      UserConfigStore.use((store) =>
+        store.set({
+          globalHotkey: {
+            enabled: false,
+            shortcut: "Mod+Alt+F8",
+          },
+        }),
+      ),
+    );
+
+    await expect(runWithStore(UserConfigStore.use((store) => store.get))).resolves.toMatchObject({
+      globalHotkey: {
+        enabled: false,
+        shortcut: "Mod+Alt+F8",
+      },
     });
   });
 });

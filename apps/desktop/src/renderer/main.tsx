@@ -75,7 +75,7 @@ function DesktopViews() {
         <Home active={view === "home"} />
       </div>
       <div hidden={view !== "settings"}>
-        <Settings />
+        <Settings active={view === "settings"} />
       </div>
     </>
   );

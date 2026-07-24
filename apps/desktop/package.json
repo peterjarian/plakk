@@ -13,6 +13,8 @@
     "@effect/platform-node": "4.0.0-beta.92",
     "@plakk/shared": "workspace:*",
     "@plakk/ui": "workspace:*",
+    "@tanstack/hotkeys": "^0.8.0",
+    "@tanstack/react-hotkeys": "^0.10.0",
     "@workos-inc/node": "^10.7.0",
     "dotenv": "^17.4.2",
     "effect": "catalog:",

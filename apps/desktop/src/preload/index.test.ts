@@ -68,4 +68,25 @@ describe("snippet ingestion preload boundary", () => {
     expect(boundary.api?.appearance.onChanged).toBeTypeOf("function");
     expect(boundary.api).not.toHaveProperty("runtimeConfig");
   });
+
+  it("exposes the bounded global hotkey lifecycle", async () => {
+    boundary.invoke.mockResolvedValue({
+      enabled: true,
+      shortcut: "Mod+Shift+V",
+      errorMessage: null,
+    });
+
+    await boundary.api?.globalHotkey.beginRecording();
+    await boundary.api?.globalHotkey.cancelRecording();
+    await boundary.api?.globalHotkey.get();
+    await boundary.api?.globalHotkey.update({ shortcut: "Mod+Alt+F8" });
+
+    expect(boundary.api?.globalHotkey).toMatchObject({
+      beginRecording: expect.any(Function),
+      cancelRecording: expect.any(Function),
+      get: expect.any(Function),
+      update: expect.any(Function),
+    });
+    expect(boundary.invoke).toHaveBeenCalledTimes(4);
+  });
 });

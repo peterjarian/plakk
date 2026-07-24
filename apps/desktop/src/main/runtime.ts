@@ -1,10 +1,11 @@
 import { NodeCrypto, NodeFileSystem } from "@effect/platform-node";
-import { app, net } from "electron";
+import { app, globalShortcut, net } from "electron";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { Config, Effect, Layer, ManagedRuntime, Option } from "effect";
 import { AuthServiceLive } from "./auth/AuthServiceLive.ts";
 import { AuthStoreLive } from "./auth/AuthStoreLive.ts";
+import { makeGlobalHotkeyLive, type DesktopPlatform } from "./global-hotkey/GlobalHotkey.ts";
 import { LocalStateLive } from "./local-state/LocalStateLive.ts";
 import { LocalStateSnippetsLive } from "./local-state/LocalStateSnippetsLive.ts";
 import { LocalStateStoreLive } from "./local-state/LocalStateStoreLive.ts";
@@ -114,9 +115,15 @@ const desktopSessionLayer = DesktopSessionLive.pipe(
     ),
   ),
 );
+const desktopPlatform: DesktopPlatform =
+  process.platform === "darwin" ? "mac" : process.platform === "win32" ? "windows" : "linux";
+const globalHotkeyLayer = makeGlobalHotkeyLive(globalShortcut, desktopPlatform).pipe(
+  Layer.provide(UserConfigStoreLive),
+);
 
 const MainLayer = Layer.mergeAll(
   UserConfigStoreLive,
+  globalHotkeyLayer,
   authServiceLayer,
   snippetReplicaLayer,
   plakkRpcClientLayer,
