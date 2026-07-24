@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import {
   isReloadShortcut,
-  reconcileTrayAuth,
+  reconcileTrayLifecycle,
   resolveDesktopUserDataPath,
-  type DesktopAuthState,
+  type DesktopTrayState,
 } from "./lifecycle.ts";
 
-const signedIn: DesktopAuthState = {
+const signedIn = {
   user: {
     id: "user_1",
     email: "user@example.com",
@@ -15,7 +15,9 @@ const signedIn: DesktopAuthState = {
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
   },
-};
+  canIngest: true,
+  toolbarWidgetEnabled: true,
+} satisfies DesktopTrayState;
 
 describe("desktop lifecycle", () => {
   it("isolates explicitly configured validation profiles", () => {
@@ -47,20 +49,31 @@ describe("desktop lifecycle", () => {
     ).toBe(false);
   });
 
-  it("keeps the tray for a known offline account and removes it on sign-out", () => {
-    const controller = { setup: vi.fn(), disable: vi.fn() };
+  it("creates the enabled tray only for a signed-in account and applies readiness", () => {
+    const controller = { setup: vi.fn(), disable: vi.fn(), setAccountState: vi.fn() };
 
-    reconcileTrayAuth({ user: null }, controller);
+    reconcileTrayLifecycle({ ...signedIn, user: null }, controller);
     expect(controller.disable).toHaveBeenCalledOnce();
     expect(controller.setup).not.toHaveBeenCalled();
+    expect(controller.setAccountState).not.toHaveBeenCalled();
 
-    reconcileTrayAuth(signedIn, controller);
+    reconcileTrayLifecycle(signedIn, controller);
     expect(controller.setup).toHaveBeenCalledOnce();
+    expect(controller.setAccountState).toHaveBeenLastCalledWith(true, true);
 
-    reconcileTrayAuth({ user: signedIn.user }, controller);
+    reconcileTrayLifecycle({ ...signedIn, canIngest: false }, controller);
     expect(controller.setup).toHaveBeenCalledTimes(2);
+    expect(controller.setAccountState).toHaveBeenLastCalledWith(true, false);
+  });
 
-    reconcileTrayAuth({ user: null }, controller);
+  it("removes the tray when signed out or disabled without applying stale readiness", () => {
+    const controller = { setup: vi.fn(), disable: vi.fn(), setAccountState: vi.fn() };
+
+    reconcileTrayLifecycle({ ...signedIn, toolbarWidgetEnabled: false }, controller);
+    reconcileTrayLifecycle({ ...signedIn, user: null }, controller);
+
     expect(controller.disable).toHaveBeenCalledTimes(2);
+    expect(controller.setup).not.toHaveBeenCalled();
+    expect(controller.setAccountState).not.toHaveBeenCalled();
   });
 });

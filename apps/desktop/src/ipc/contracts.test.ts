@@ -1,7 +1,27 @@
 import { describe, expect, it } from "vite-plus/test";
 import { Schema } from "effect";
 
-import { DesktopSnippetSchema } from "./contracts.ts";
+import { DesktopSnippetSchema, UserConfigPatchSchema, UserConfigSchema } from "./contracts.ts";
+
+describe("UserConfigSchema", () => {
+  it("carries the persisted Toolbar widget preference across the desktop boundary", () => {
+    const decodeConfig = Schema.decodeUnknownSync(UserConfigSchema);
+    const decodePatch = Schema.decodeUnknownSync(UserConfigPatchSchema);
+
+    expect(
+      decodeConfig({
+        showExternalLinkWarning: true,
+        toolbarWidgetEnabled: false,
+      }),
+    ).toEqual({
+      showExternalLinkWarning: true,
+      toolbarWidgetEnabled: false,
+    });
+    expect(decodePatch({ toolbarWidgetEnabled: true })).toEqual({
+      toolbarWidgetEnabled: true,
+    });
+  });
+});
 
 describe("DesktopSnippetSchema", () => {
   it("encodes local state containing an active text upload synchronously", () => {

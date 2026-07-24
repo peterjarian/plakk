@@ -137,9 +137,13 @@ describe("tray window lifecycle", () => {
 
   it("gates native drops and destroys all tray ownership on sign-out", () => {
     const onDropFiles = vi.fn();
+    const onDragEnter = vi.fn(() => {
+      expect(electron.BrowserWindow.instances[0]!.visible).toBe(true);
+    });
     const controller = createTrayWindowController({
       guardExternalWindows: vi.fn(),
       loadTrayRenderer: vi.fn(),
+      onDragEnter,
       onDropFiles,
       preloadPath: "/preload.cjs",
     });
@@ -155,7 +159,9 @@ describe("tray window lifecycle", () => {
     electron.BrowserWindow.instances[0]!.hide();
     tray.emit("drag-enter");
     tray.emit("drop-files", {}, ["ready.txt"]);
+    expect(onDragEnter).toHaveBeenCalledOnce();
     expect(onDropFiles).toHaveBeenCalledWith(expect.objectContaining({ files: ["ready.txt"] }));
+    expect(electron.BrowserWindow.instances[0]!.visible).toBe(true);
 
     controller.disable();
     expect(tray.destroyed).toBe(true);
@@ -188,5 +194,31 @@ describe("tray window lifecycle", () => {
 
     controller.setAccountState(true, true);
     expect(window.visible).toBe(true);
+  });
+
+  it("keeps repeated enable and disable transitions idempotent", () => {
+    const loadTrayRenderer = vi.fn();
+    const controller = createTrayWindowController({
+      guardExternalWindows: vi.fn(),
+      loadTrayRenderer,
+      preloadPath: "/preload.cjs",
+    });
+
+    controller.setup();
+    controller.setup();
+    expect(electron.Tray.instances).toHaveLength(1);
+    expect(electron.BrowserWindow.instances).toHaveLength(1);
+    expect(loadTrayRenderer).toHaveBeenCalledOnce();
+
+    controller.disable();
+    controller.disable();
+    controller.setup();
+    controller.setup();
+
+    expect(electron.Tray.instances).toHaveLength(2);
+    expect(electron.BrowserWindow.instances).toHaveLength(2);
+    expect(electron.Tray.instances[0]!.destroyed).toBe(true);
+    expect(electron.BrowserWindow.instances[0]!.destroyed).toBe(true);
+    expect(loadTrayRenderer).toHaveBeenCalledTimes(2);
   });
 });

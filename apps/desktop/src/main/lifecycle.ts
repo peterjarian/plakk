@@ -1,12 +1,15 @@
 import type { User } from "@plakk/shared";
 import { resolve } from "node:path";
 
-export type DesktopAuthState = {
+export type DesktopTrayState = {
+  readonly canIngest: boolean;
+  readonly toolbarWidgetEnabled: boolean;
   readonly user: User | null;
 };
 
-type TrayAuthController = {
+type TrayLifecycleController = {
   disable(): void;
+  setAccountState(resolved: boolean, canIngest: boolean): void;
   setup(): void;
 };
 
@@ -18,15 +21,16 @@ export function resolveDesktopUserDataPath(
   return value ? resolve(value) : defaultPath;
 }
 
-export function reconcileTrayAuth(
-  status: DesktopAuthState,
-  controller: TrayAuthController | undefined,
+export function reconcileTrayLifecycle(
+  state: DesktopTrayState,
+  controller: TrayLifecycleController | undefined,
 ) {
-  if (status.user === null) {
+  if (!state.toolbarWidgetEnabled || state.user === null) {
     controller?.disable();
     return;
   }
   controller?.setup();
+  controller?.setAccountState(true, state.canIngest);
 }
 
 export function isReloadShortcut(

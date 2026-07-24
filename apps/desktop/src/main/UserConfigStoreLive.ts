@@ -6,6 +6,7 @@ import { UserConfigStore, UserConfigStoreError } from "./UserConfigStore.ts";
 
 const defaultUserConfig: UserConfig = {
   showExternalLinkWarning: true,
+  toolbarWidgetEnabled: true,
 };
 
 const decodeUserConfig = (input: unknown) =>

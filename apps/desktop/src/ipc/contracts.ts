@@ -60,6 +60,7 @@ export type ClipboardContent = typeof ClipboardContentSchema.Type;
 
 export const UserConfigSchema = Schema.Struct({
   showExternalLinkWarning: Schema.Boolean,
+  toolbarWidgetEnabled: Schema.Boolean,
 });
 
 export type UserConfig = typeof UserConfigSchema.Type;
@@ -68,6 +69,7 @@ export type UserConfigPatch = Partial<UserConfig>;
 
 export const UserConfigPatchSchema = Schema.Struct({
   showExternalLinkWarning: Schema.optionalKey(Schema.Boolean),
+  toolbarWidgetEnabled: Schema.optionalKey(Schema.Boolean),
 });
 
 export const TrayDroppedItemSchema = Schema.Union([
