@@ -1,10 +1,11 @@
 import ElectronStore from "electron-store";
 import { Effect, Layer, Schema } from "effect";
 
-import { UserConfigSchema, type UserConfig, type UserConfigPatch } from "../ipc/contracts.ts";
+import { UserConfigSchema, type UserConfig } from "../ipc/contracts.ts";
 import { UserConfigStore, UserConfigStoreError } from "./UserConfigStore.ts";
 
 const defaultUserConfig: UserConfig = {
+  appearance: "system",
   showExternalLinkWarning: true,
   toolbarWidgetEnabled: true,
 };
@@ -31,7 +32,7 @@ export const UserConfigStoreLive = Layer.effect(
 
       const get = readUserConfig(store);
 
-      const set = Effect.fn("UserConfigStore.set")(function* (patch: UserConfigPatch) {
+      const set = Effect.fn("UserConfigStore.set")(function* (patch: Partial<UserConfig>) {
         const config = yield* decodeUserConfig({ ...(yield* get), ...patch });
 
         yield* Effect.try({

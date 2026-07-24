@@ -128,6 +128,7 @@ describe("tray window lifecycle", () => {
   it("preloads hidden and waits for renderer and account readiness before showing", () => {
     const loadTrayRenderer = vi.fn();
     const controller = createTrayWindowController({
+      getBackgroundColor: () => "#0a0a0a",
       guardExternalWindows: vi.fn(),
       loadTrayRenderer,
       platform: "win32",
@@ -139,6 +140,7 @@ describe("tray window lifecycle", () => {
     expect(electron.Tray.instances).toHaveLength(1);
     expect(electron.BrowserWindow.instances).toHaveLength(1);
     expect(window.options.show).toBe(false);
+    expect(window.options.backgroundColor).toBe("#0a0a0a");
     expect(loadTrayRenderer).toHaveBeenCalledOnce();
 
     controller.show();
@@ -156,6 +158,7 @@ describe("tray window lifecycle", () => {
       expect(electron.BrowserWindow.instances[0]!.visible).toBe(true);
     });
     const controller = createTrayWindowController({
+      getBackgroundColor: () => "#ffffff",
       guardExternalWindows: vi.fn(),
       loadTrayRenderer: vi.fn(),
       onDragEnter,
@@ -191,6 +194,7 @@ describe("tray window lifecycle", () => {
   it("clears Linux SNI pixels before destroying the native tray", () => {
     vi.useFakeTimers();
     const controller = createTrayWindowController({
+      getBackgroundColor: () => "#ffffff",
       guardExternalWindows: vi.fn(),
       loadTrayRenderer: vi.fn(),
       platform: "linux",
@@ -216,6 +220,7 @@ describe("tray window lifecycle", () => {
     vi.setSystemTime(0);
     const onAccountRefreshRequested = vi.fn();
     const controller = createTrayWindowController({
+      getBackgroundColor: () => "#ffffff",
       guardExternalWindows: vi.fn(),
       loadTrayRenderer: vi.fn(),
       onAccountRefreshRequested,
@@ -242,6 +247,7 @@ describe("tray window lifecycle", () => {
   it("keeps repeated enable and disable transitions idempotent", () => {
     const loadTrayRenderer = vi.fn();
     const controller = createTrayWindowController({
+      getBackgroundColor: () => "#ffffff",
       guardExternalWindows: vi.fn(),
       loadTrayRenderer,
       platform: "win32",
@@ -268,6 +274,7 @@ describe("tray window lifecycle", () => {
 
   it("applies live preference and account transitions to native Tray ownership", () => {
     const controller = createTrayWindowController({
+      getBackgroundColor: () => "#ffffff",
       guardExternalWindows: vi.fn(),
       loadTrayRenderer: vi.fn(),
       platform: "win32",

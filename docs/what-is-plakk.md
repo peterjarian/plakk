@@ -21,7 +21,7 @@ that only work in one ecosystem.
 Plakk should remove that friction by giving each platform a low-effort way to
 add a snippet:
 
-- on desktop, through a toolbar drop target and a global hotkey;
+- on desktop, through a toolbar drop target;
 - on mobile, through a custom keyboard;
 - on the web, through a simple interface.
 

@@ -1,10 +1,13 @@
 import { contextBridge, webUtils } from "electron";
 import type {
+  AppearancePreference,
+  AppearanceState,
   AuthError,
   ClipboardContent,
   LocalState,
   SnippetIngestPayload,
   SnippetIngestResult,
+  StorageFreeUpResult,
   TrayDroppedItem,
   UserConfig,
   UserConfigPatch,
@@ -38,6 +41,11 @@ type RendererSnippetIngestPayload = Pick<
   );
 
 export type DesktopApi = {
+  readonly appearance: {
+    readonly get: () => Promise<AppearanceState>;
+    readonly onChanged: (callback: (state: AppearanceState) => void) => () => void;
+    readonly set: (preference: AppearancePreference) => Promise<AppearanceState>;
+  };
   readonly auth: {
     readonly onError: (callback: (error: AuthError) => void) => () => void;
     readonly signIn: () => Promise<void>;
@@ -64,7 +72,7 @@ export type DesktopApi = {
     readonly read: (id: string) => Promise<Uint8Array>;
   };
   readonly storage: {
-    readonly freeUp: () => Promise<void>;
+    readonly freeUp: () => Promise<StorageFreeUpResult>;
   };
   readonly tray: {
     readonly onDroppedItem: (callback: (item: TrayDroppedItem) => void) => () => void;
@@ -85,6 +93,12 @@ export type DesktopApi = {
 };
 
 export const desktopApi = {
+  appearance: {
+    get: () => invoke(ipcMethods.appearanceGet, undefined),
+    onChanged: (callback: (state: AppearanceState) => void) =>
+      on(ipcEvents.appearanceChanged, callback),
+    set: (preference: AppearancePreference) => invoke(ipcMethods.appearanceSet, preference),
+  },
   auth: {
     onError: (callback: (error: AuthError) => void) => on(ipcEvents.authError, callback),
     signIn: () => invoke(ipcMethods.authSignIn, undefined),

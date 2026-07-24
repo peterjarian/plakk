@@ -1,7 +1,26 @@
 import { describe, expect, it } from "vite-plus/test";
 import { Schema } from "effect";
 
-import { DesktopSnippetSchema, UserConfigPatchSchema, UserConfigSchema } from "./contracts.ts";
+import {
+  AppearancePreferenceSchema,
+  DesktopSnippetSchema,
+  StorageFreeUpResultSchema,
+  UserConfigPatchSchema,
+  UserConfigSchema,
+} from "./contracts.ts";
+
+describe("AppearancePreferenceSchema", () => {
+  it("accepts exactly Light, Dark, and System preferences", () => {
+    const decode = Schema.decodeUnknownSync(AppearancePreferenceSchema);
+
+    expect(["light", "dark", "system"].map((value) => decode(value))).toEqual([
+      "light",
+      "dark",
+      "system",
+    ]);
+    expect(() => decode("sepia")).toThrow();
+  });
+});
 
 describe("UserConfigSchema", () => {
   it("carries the persisted Toolbar widget preference across the desktop boundary", () => {
@@ -10,10 +29,12 @@ describe("UserConfigSchema", () => {
 
     expect(
       decodeConfig({
+        appearance: "system",
         showExternalLinkWarning: true,
         toolbarWidgetEnabled: false,
       }),
     ).toEqual({
+      appearance: "system",
       showExternalLinkWarning: true,
       toolbarWidgetEnabled: false,
     });
@@ -66,5 +87,17 @@ describe("DesktopSnippetSchema", () => {
     });
 
     expect(snippet).not.toHaveProperty("storageObjectId");
+  });
+});
+
+describe("StorageFreeUpResultSchema", () => {
+  it("accepts an authoritative storage reclamation measurement", () => {
+    const decode = Schema.decodeUnknownSync(StorageFreeUpResultSchema);
+
+    expect(decode({ reclaimedBytes: 2048, removedCopies: 1, storageUsageBytes: 4096 })).toEqual({
+      reclaimedBytes: 2048,
+      removedCopies: 1,
+      storageUsageBytes: 4096,
+    });
   });
 });

@@ -1,58 +1,61 @@
-import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { Effect } from "effect";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { UserConfigStore } from "./UserConfigStore.ts";
-
-const persisted = vi.hoisted(() => ({
-  value: {} as Record<string, unknown>,
-}));
+const stores = vi.hoisted(() => new Map<string, Record<string, unknown>>());
 
 vi.mock("electron-store", () => ({
-  default: class {
-    readonly defaults: Record<string, unknown>;
+  default: class ElectronStore {
+    readonly name: string;
 
-    constructor(options: { readonly defaults: Record<string, unknown> }) {
-      this.defaults = options.defaults;
+    constructor(options: { defaults: Record<string, unknown>; name: string }) {
+      this.name = options.name;
+      if (!stores.has(this.name)) stores.set(this.name, { ...options.defaults });
     }
 
     get store() {
-      return { ...this.defaults, ...persisted.value };
+      return stores.get(this.name) ?? {};
     }
 
     set store(value: Record<string, unknown>) {
-      persisted.value = value;
+      stores.set(this.name, { ...value });
     }
   },
 }));
 
-const { UserConfigStoreLive } = await import("./UserConfigStoreLive.ts");
+import { UserConfigStore } from "./UserConfigStore.ts";
+import { UserConfigStoreLive } from "./UserConfigStoreLive.ts";
 
-const readConfig = UserConfigStore.use((store) => store.get).pipe(
-  Effect.provide(UserConfigStoreLive),
-);
+const runWithStore = <A>(effect: Effect.Effect<A, unknown, UserConfigStore>) =>
+  Effect.runPromise(effect.pipe(Effect.provide(UserConfigStoreLive)));
 
-describe("UserConfigStoreLive", () => {
-  beforeEach(() => {
-    persisted.value = {};
-  });
+describe("desktop user config persistence", () => {
+  beforeEach(() => stores.clear());
 
-  it("keeps the current enabled Toolbar widget default for users without a saved preference", async () => {
-    persisted.value = { showExternalLinkWarning: false };
+  it("defaults missing appearance and Toolbar widget choices", async () => {
+    stores.set("user-config", { showExternalLinkWarning: false });
 
-    await expect(Effect.runPromise(readConfig)).resolves.toEqual({
+    await expect(runWithStore(UserConfigStore.use((store) => store.get))).resolves.toEqual({
+      appearance: "system",
       showExternalLinkWarning: false,
       toolbarWidgetEnabled: true,
     });
   });
 
-  it("restores a disabled Toolbar widget after a new store layer is constructed", async () => {
-    await Effect.runPromise(
-      UserConfigStore.use((store) => store.set({ toolbarWidgetEnabled: false })).pipe(
-        Effect.provide(UserConfigStoreLive),
-      ),
-    );
+  it("restores an explicit appearance after recreating the store", async () => {
+    await runWithStore(UserConfigStore.use((store) => store.set({ appearance: "dark" })));
 
-    await expect(Effect.runPromise(readConfig)).resolves.toEqual({
+    await expect(runWithStore(UserConfigStore.use((store) => store.get))).resolves.toEqual({
+      appearance: "dark",
+      showExternalLinkWarning: true,
+      toolbarWidgetEnabled: true,
+    });
+  });
+
+  it("restores a disabled Toolbar widget after recreating the store", async () => {
+    await runWithStore(UserConfigStore.use((store) => store.set({ toolbarWidgetEnabled: false })));
+
+    await expect(runWithStore(UserConfigStore.use((store) => store.get))).resolves.toEqual({
+      appearance: "system",
       showExternalLinkWarning: true,
       toolbarWidgetEnabled: false,
     });

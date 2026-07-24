@@ -8,6 +8,11 @@ export class ManagedSnippetContentError extends Schema.TaggedErrorClass<ManagedS
 
 export type ManagedTextValidation = "VALID" | "INVALID" | "NOT_FOUND";
 
+export type ManagedSnippetContentReclamation = {
+  readonly reclaimedBytes: number;
+  readonly removedCopies: number;
+};
+
 export class ManagedSnippetContent extends Context.Service<
   ManagedSnippetContent,
   {
@@ -54,7 +59,7 @@ export class ManagedSnippetContent extends Context.Service<
     removeExcept(
       accountId: string,
       retainedSnippetIds: ReadonlySet<string>,
-    ): Effect.Effect<void, ManagedSnippetContentError>;
+    ): Effect.Effect<ManagedSnippetContentReclamation, ManagedSnippetContentError>;
     purge(accountId: string): Effect.Effect<void, ManagedSnippetContentError>;
   }
 >()("plakk/main/snippets/content/ManagedSnippetContent") {}

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatFileSize } from "@plakk/shared";
 import {
   ArrowLeft,
@@ -7,9 +7,9 @@ import {
   CreditCard,
   FileText,
   HardDrive,
-  Keyboard,
   MessageCircle,
   RefreshCw,
+  SunMoon,
   SquareMenu,
 } from "lucide-react";
 import { Avatar, AvatarFallback } from "@plakk/ui/components/primitives/avatar";
@@ -17,7 +17,6 @@ import { Button } from "@plakk/ui/components/primitives/button";
 import { Switch } from "@plakk/ui/components/primitives/switch";
 import {
   SettingsRow,
-  SettingsRowAction,
   SettingsRowIcon,
   SettingsRowMain,
   SettingsRowText,
@@ -27,6 +26,7 @@ import {
 } from "@plakk/ui/components/settings";
 import { getInitials } from "@plakk/ui/lib/getInitials";
 import { useAuth } from "../hooks/useAuth.ts";
+import { setAppearancePreference, useAppearance } from "../hooks/useAppearance.ts";
 import { useLocalState } from "../hooks/useLocalState.tsx";
 import {
   StorageProviderIcon,
@@ -35,21 +35,44 @@ import {
   useLinkedStorageProvider,
   useStorageStatus,
 } from "../hooks/useStorageStatus.tsx";
+import { ipcActionErrorMessage } from "../lib/ipcActionErrorMessage.ts";
 import { navigate } from "../lib/navigate.ts";
+
+type StorageFeedback =
+  | {
+      readonly kind: "reclaimed";
+      readonly reclaimedBytes: number;
+      readonly removedCopies: number;
+    }
+  | { readonly kind: "no-op" }
+  | { readonly kind: "failed"; readonly message: string };
 
 export function Settings() {
   const auth = useAuth();
   const linkedProvider = useLinkedStorageProvider();
   const storageStatus = useStorageStatus();
-  const storageUsageBytes = useLocalState().localState.storageUsageBytes;
+  const { localState } = useLocalState();
+  const appearance = useAppearance();
   const [autoUpdate, setAutoUpdate] = useState(true);
-  const [globalHotkey, setGlobalHotkey] = useState(true);
   const [toolbarWidget, setToolbarWidget] = useState<boolean | null>(null);
   const [toolbarWidgetSaving, setToolbarWidgetSaving] = useState(false);
   const [toolbarWidgetError, setToolbarWidgetError] = useState<string | null>(null);
   const [updateStatus, setUpdateStatus] = useState("Up to date");
   const [freeingStorage, setFreeingStorage] = useState(false);
-  const [storageError, setStorageError] = useState<string | null>(null);
+  const [storageFeedback, setStorageFeedback] = useState<StorageFeedback | null>(null);
+  const [storageResult, setStorageResult] = useState<{
+    readonly localStateRevision: number;
+    readonly storageUsageBytes: number;
+  } | null>(null);
+  const freeingStorageRef = useRef(false);
+  const localStateRevisionRef = useRef(localState.revision);
+  localStateRevisionRef.current = localState.revision;
+  const storageUsageBytes =
+    storageResult !== null && localState.revision <= storageResult.localStateRevision
+      ? storageResult.storageUsageBytes
+      : localState.storageUsageBytes;
+  const [appearanceError, setAppearanceError] = useState<string | null>(null);
+  const [savingAppearance, setSavingAppearance] = useState(false);
   const user = auth.user;
 
   useEffect(() => {
@@ -247,12 +270,16 @@ export function Settings() {
           <SettingsSection>
             <SettingsSectionTitle>Device storage</SettingsSectionTitle>
             <SettingsSectionBody>
-              <SettingsRow>
-                <SettingsRowMain>
-                  <HardDrive className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+              <SettingsRow className="items-start">
+                <SettingsRowMain className="flex-1 items-start">
+                  <HardDrive
+                    className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+                    aria-hidden="true"
+                  />
                   <SettingsRowText
                     title={`${formatFileSize(storageUsageBytes)} used by Plakk`}
                     description="Freeing space keeps your newest 20 eligible snippets available and removes older device copies only."
+                    descriptionClassName="overflow-visible text-clip whitespace-normal"
                   />
                 </SettingsRowMain>
                 <Button
@@ -261,13 +288,38 @@ export function Settings() {
                   size="sm"
                   disabled={freeingStorage}
                   onClick={() => {
-                    setStorageError(null);
+                    if (freeingStorageRef.current) return;
+                    freeingStorageRef.current = true;
+                    setStorageFeedback(null);
                     setFreeingStorage(true);
                     void window.ipc.storage.freeUp().then(
-                      () => setFreeingStorage(false),
-                      () => {
+                      (result) => {
+                        freeingStorageRef.current = false;
                         setFreeingStorage(false);
-                        setStorageError("Could not free up Plakk storage.");
+                        setStorageResult({
+                          localStateRevision: localStateRevisionRef.current,
+                          storageUsageBytes: result.storageUsageBytes,
+                        });
+                        setStorageFeedback(
+                          result.removedCopies === 0
+                            ? { kind: "no-op" }
+                            : {
+                                kind: "reclaimed",
+                                reclaimedBytes: result.reclaimedBytes,
+                                removedCopies: result.removedCopies,
+                              },
+                        );
+                      },
+                      (cause: unknown) => {
+                        freeingStorageRef.current = false;
+                        setFreeingStorage(false);
+                        setStorageFeedback({
+                          kind: "failed",
+                          message: ipcActionErrorMessage(
+                            cause,
+                            "Plakk couldn’t free device space. Try again.",
+                          ),
+                        });
                       },
                     );
                   }}
@@ -275,9 +327,25 @@ export function Settings() {
                   {freeingStorage ? "Freeing…" : "Free up space"}
                 </Button>
               </SettingsRow>
-              {storageError !== null && (
-                <p className="px-4 py-2 text-xs text-destructive" role="alert">
-                  {storageError}
+              {storageFeedback !== null && (
+                <p
+                  className={
+                    storageFeedback.kind === "failed"
+                      ? "px-4 py-2 text-xs text-destructive"
+                      : "px-4 py-2 text-xs text-muted-foreground"
+                  }
+                  role={storageFeedback.kind === "failed" ? "alert" : "status"}
+                  aria-live={storageFeedback.kind === "failed" ? undefined : "polite"}
+                >
+                  {storageFeedback.kind === "reclaimed"
+                    ? storageFeedback.reclaimedBytes > 0
+                      ? `Reclaimed ${formatFileSize(storageFeedback.reclaimedBytes)} on this device.`
+                      : `Removed ${storageFeedback.removedCopies} older device ${
+                          storageFeedback.removedCopies === 1 ? "copy" : "copies"
+                        } from this device.`
+                    : storageFeedback.kind === "no-op"
+                      ? "No older device copies are available to remove."
+                      : storageFeedback.message}
                 </p>
               )}
             </SettingsSectionBody>
@@ -288,22 +356,41 @@ export function Settings() {
             <SettingsSectionBody>
               <SettingsRow>
                 <SettingsRowMain>
-                  <Keyboard className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                  <SettingsRowText title="Global hotkey" description="Open Plakk from anywhere." />
+                  <SunMoon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                  <SettingsRowText
+                    title="Appearance"
+                    description="Choose a theme or follow your system."
+                  />
                 </SettingsRowMain>
-                <SettingsRowAction>
-                  <select
-                    className="h-7 rounded-md border bg-background px-2 text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-                    disabled={!globalHotkey}
-                    defaultValue="CommandOrControl+Shift+V"
-                  >
-                    <option value="CommandOrControl+Shift+V">⌘⇧V</option>
-                    <option value="CommandOrControl+Shift+Space">⌘⇧Space</option>
-                    <option value="CommandOrControl+Option+V">⌘⌥V</option>
-                  </select>
-                  <Switch checked={globalHotkey} onCheckedChange={setGlobalHotkey} />
-                </SettingsRowAction>
+                <select
+                  aria-label="Appearance"
+                  className="h-8 rounded-md border bg-background px-2 text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+                  disabled={savingAppearance}
+                  value={appearance.preference}
+                  onChange={(event) => {
+                    setAppearanceError(null);
+                    setSavingAppearance(true);
+                    void setAppearancePreference(
+                      event.currentTarget.value as "light" | "dark" | "system",
+                    ).then(
+                      () => setSavingAppearance(false),
+                      () => {
+                        setSavingAppearance(false);
+                        setAppearanceError("Could not save the appearance setting.");
+                      },
+                    );
+                  }}
+                >
+                  <option value="light">Light</option>
+                  <option value="dark">Dark</option>
+                  <option value="system">System</option>
+                </select>
               </SettingsRow>
+              {appearanceError !== null && (
+                <p className="px-4 py-2 text-xs text-destructive" role="alert">
+                  {appearanceError}
+                </p>
+              )}
 
               <SettingsRow>
                 <SettingsRowMain>

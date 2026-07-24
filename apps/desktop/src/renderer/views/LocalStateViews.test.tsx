@@ -143,4 +143,13 @@ describe("local state views", () => {
     expect(settings).toContain("Free up space");
     state.setStorageUsageBytes(0);
   });
+
+  it("offers Light, Dark, and System appearance choices in Settings", () => {
+    const settings = renderToStaticMarkup(<Settings />);
+
+    expect(settings).toContain('aria-label="Appearance"');
+    expect(settings).toContain('<option value="light">Light</option>');
+    expect(settings).toContain('<option value="dark">Dark</option>');
+    expect(settings).toContain('<option value="system" selected="">System</option>');
+  });
 });
