@@ -96,6 +96,15 @@ afterEach(async () => {
   document.body.replaceChildren();
 });
 
+describe("Desktop settings", () => {
+  it("does not advertise the unavailable global hotkey feature", async () => {
+    const { container } = await renderSettings();
+
+    expect(container.textContent).not.toContain("Global hotkey");
+    expect(container.querySelector('select[aria-label="Appearance"]')).not.toBeNull();
+  });
+});
+
 describe("Device storage settings", () => {
   it("prevents concurrent actions and immediately shows reclaimed usage", async () => {
     const request = deferred<{
