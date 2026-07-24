@@ -10,6 +10,7 @@ import {
   Keyboard,
   MessageCircle,
   RefreshCw,
+  SunMoon,
   SquareMenu,
 } from "lucide-react";
 import { Avatar, AvatarFallback } from "@plakk/ui/components/primitives/avatar";
@@ -27,6 +28,7 @@ import {
 } from "@plakk/ui/components/settings";
 import { getInitials } from "@plakk/ui/lib/getInitials";
 import { useAuth } from "../hooks/useAuth.ts";
+import { setAppearancePreference, useAppearance } from "../hooks/useAppearance.ts";
 import { useLocalState } from "../hooks/useLocalState.tsx";
 import {
   StorageProviderIcon,
@@ -41,6 +43,7 @@ export function Settings() {
   const auth = useAuth();
   const linkedProvider = useLinkedStorageProvider();
   const storageStatus = useStorageStatus();
+  const appearance = useAppearance();
   const storageUsageBytes = useLocalState().localState.storageUsageBytes;
   const [autoUpdate, setAutoUpdate] = useState(true);
   const [globalHotkey, setGlobalHotkey] = useState(true);
@@ -48,6 +51,8 @@ export function Settings() {
   const [updateStatus, setUpdateStatus] = useState("Up to date");
   const [freeingStorage, setFreeingStorage] = useState(false);
   const [storageError, setStorageError] = useState<string | null>(null);
+  const [appearanceError, setAppearanceError] = useState<string | null>(null);
+  const [savingAppearance, setSavingAppearance] = useState(false);
   const user = auth.user;
 
   if (user === null) return null;
@@ -250,6 +255,44 @@ export function Settings() {
           <SettingsSection>
             <SettingsSectionTitle>Desktop</SettingsSectionTitle>
             <SettingsSectionBody>
+              <SettingsRow>
+                <SettingsRowMain>
+                  <SunMoon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                  <SettingsRowText
+                    title="Appearance"
+                    description="Choose a theme or follow your system."
+                  />
+                </SettingsRowMain>
+                <select
+                  aria-label="Appearance"
+                  className="h-8 rounded-md border bg-background px-2 text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+                  disabled={savingAppearance}
+                  value={appearance.preference}
+                  onChange={(event) => {
+                    setAppearanceError(null);
+                    setSavingAppearance(true);
+                    void setAppearancePreference(
+                      event.currentTarget.value as "light" | "dark" | "system",
+                    ).then(
+                      () => setSavingAppearance(false),
+                      () => {
+                        setSavingAppearance(false);
+                        setAppearanceError("Could not save the appearance setting.");
+                      },
+                    );
+                  }}
+                >
+                  <option value="light">Light</option>
+                  <option value="dark">Dark</option>
+                  <option value="system">System</option>
+                </select>
+              </SettingsRow>
+              {appearanceError !== null && (
+                <p className="px-4 py-2 text-xs text-destructive" role="alert">
+                  {appearanceError}
+                </p>
+              )}
+
               <SettingsRow>
                 <SettingsRowMain>
                   <Keyboard className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />

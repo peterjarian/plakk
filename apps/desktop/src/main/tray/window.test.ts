@@ -115,6 +115,7 @@ describe("tray window lifecycle", () => {
   it("preloads hidden and waits for renderer and account readiness before showing", () => {
     const loadTrayRenderer = vi.fn();
     const controller = createTrayWindowController({
+      getBackgroundColor: () => "#0a0a0a",
       guardExternalWindows: vi.fn(),
       loadTrayRenderer,
       preloadPath: "/preload.cjs",
@@ -125,6 +126,7 @@ describe("tray window lifecycle", () => {
     expect(electron.Tray.instances).toHaveLength(1);
     expect(electron.BrowserWindow.instances).toHaveLength(1);
     expect(window.options.show).toBe(false);
+    expect(window.options.backgroundColor).toBe("#0a0a0a");
     expect(loadTrayRenderer).toHaveBeenCalledOnce();
 
     controller.show();
@@ -138,6 +140,7 @@ describe("tray window lifecycle", () => {
   it("gates native drops and destroys all tray ownership on sign-out", () => {
     const onDropFiles = vi.fn();
     const controller = createTrayWindowController({
+      getBackgroundColor: () => "#ffffff",
       guardExternalWindows: vi.fn(),
       loadTrayRenderer: vi.fn(),
       onDropFiles,
@@ -168,6 +171,7 @@ describe("tray window lifecycle", () => {
     vi.setSystemTime(0);
     const onAccountRefreshRequested = vi.fn();
     const controller = createTrayWindowController({
+      getBackgroundColor: () => "#ffffff",
       guardExternalWindows: vi.fn(),
       loadTrayRenderer: vi.fn(),
       onAccountRefreshRequested,

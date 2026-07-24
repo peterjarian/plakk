@@ -63,6 +63,9 @@ describe("snippet ingestion preload boundary", () => {
       expect.objectContaining({ sourceId: "opaque-source" }),
     );
     expect(boundary.api?.tray.selectFiles).toBeTypeOf("function");
+    expect(boundary.api?.appearance.get).toBeTypeOf("function");
+    expect(boundary.api?.appearance.set).toBeTypeOf("function");
+    expect(boundary.api?.appearance.onChanged).toBeTypeOf("function");
     expect(boundary.api).not.toHaveProperty("runtimeConfig");
   });
 });

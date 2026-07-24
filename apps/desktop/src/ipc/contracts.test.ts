@@ -1,7 +1,20 @@
 import { describe, expect, it } from "vite-plus/test";
 import { Schema } from "effect";
 
-import { DesktopSnippetSchema } from "./contracts.ts";
+import { AppearancePreferenceSchema, DesktopSnippetSchema } from "./contracts.ts";
+
+describe("AppearancePreferenceSchema", () => {
+  it("accepts exactly Light, Dark, and System preferences", () => {
+    const decode = Schema.decodeUnknownSync(AppearancePreferenceSchema);
+
+    expect(["light", "dark", "system"].map((value) => decode(value))).toEqual([
+      "light",
+      "dark",
+      "system",
+    ]);
+    expect(() => decode("sepia")).toThrow();
+  });
+});
 
 describe("DesktopSnippetSchema", () => {
   it("encodes local state containing an active text upload synchronously", () => {

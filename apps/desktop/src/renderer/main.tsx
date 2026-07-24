@@ -10,6 +10,7 @@ import type { ComponentType } from "react";
 import type { ViewType } from "./lib/navigate.ts";
 import { AuthProvider, useAuth } from "./hooks/useAuth.ts";
 import { LocalStateProvider } from "./hooks/useLocalState.tsx";
+import { startAppearanceSync } from "./hooks/useAppearance.ts";
 import {
   getDesktopView,
   navigate,
@@ -18,6 +19,8 @@ import {
 } from "./lib/navigate.ts";
 
 import "@plakk/ui/globals.css";
+
+startAppearanceSync();
 
 const views: Record<ViewType, ComponentType> = {
   home: Home,
