@@ -1,0 +1,5 @@
+interface:
+  display_name: "Plakk E2E Testing"
+  short_description: "Exercise Plakk end to end on macOS or Linux"
+policy:
+  allow_implicit_invocation: true
