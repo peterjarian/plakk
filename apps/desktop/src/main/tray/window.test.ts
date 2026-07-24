@@ -102,6 +102,7 @@ vi.mock("electron", () => ({
   Tray: electron.Tray,
 }));
 
+import { createToolbarWidgetLifecycle } from "../lifecycle.ts";
 import { createTrayWindowController } from "./window.ts";
 
 describe("tray window lifecycle", () => {
@@ -137,6 +138,7 @@ describe("tray window lifecycle", () => {
 
   it("gates native drops and destroys all tray ownership on sign-out", () => {
     const onDropFiles = vi.fn();
+    const onDropText = vi.fn();
     const onDragEnter = vi.fn(() => {
       expect(electron.BrowserWindow.instances[0]!.visible).toBe(true);
     });
@@ -145,6 +147,7 @@ describe("tray window lifecycle", () => {
       loadTrayRenderer: vi.fn(),
       onDragEnter,
       onDropFiles,
+      onDropText,
       preloadPath: "/preload.cjs",
     });
 
@@ -159,8 +162,10 @@ describe("tray window lifecycle", () => {
     electron.BrowserWindow.instances[0]!.hide();
     tray.emit("drag-enter");
     tray.emit("drop-files", {}, ["ready.txt"]);
+    tray.emit("drop-text", {}, "ready text");
     expect(onDragEnter).toHaveBeenCalledOnce();
     expect(onDropFiles).toHaveBeenCalledWith(expect.objectContaining({ files: ["ready.txt"] }));
+    expect(onDropText).toHaveBeenCalledWith(expect.objectContaining({ text: "ready text" }));
     expect(electron.BrowserWindow.instances[0]!.visible).toBe(true);
 
     controller.disable();
@@ -220,5 +225,41 @@ describe("tray window lifecycle", () => {
     expect(electron.Tray.instances[0]!.destroyed).toBe(true);
     expect(electron.BrowserWindow.instances[0]!.destroyed).toBe(true);
     expect(loadTrayRenderer).toHaveBeenCalledTimes(2);
+  });
+
+  it("applies live preference and account transitions to native Tray ownership", () => {
+    const controller = createTrayWindowController({
+      guardExternalWindows: vi.fn(),
+      loadTrayRenderer: vi.fn(),
+      preloadPath: "/preload.cjs",
+    });
+    const lifecycle = createToolbarWidgetLifecycle(controller, false);
+    const user = {
+      id: "user_1",
+      email: "user@example.com",
+      firstName: "Test",
+      lastName: "User",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+
+    lifecycle.applyAccountState({ canIngest: true, user });
+    expect(electron.Tray.instances).toHaveLength(0);
+
+    lifecycle.applyToolbarWidgetPreference(true);
+    expect(electron.Tray.instances).toHaveLength(1);
+    expect(electron.BrowserWindow.instances).toHaveLength(1);
+
+    lifecycle.applyToolbarWidgetPreference(false);
+    expect(electron.Tray.instances[0]!.destroyed).toBe(true);
+    expect(electron.BrowserWindow.instances[0]!.destroyed).toBe(true);
+
+    lifecycle.applyToolbarWidgetPreference(true);
+    expect(electron.Tray.instances).toHaveLength(2);
+    expect(electron.BrowserWindow.instances).toHaveLength(2);
+
+    lifecycle.applyAccountState({ canIngest: false, user: null });
+    expect(electron.Tray.instances[1]!.destroyed).toBe(true);
+    expect(electron.BrowserWindow.instances[1]!.destroyed).toBe(true);
   });
 });

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import {
+  createToolbarWidgetLifecycle,
   isReloadShortcut,
-  reconcileTrayLifecycle,
   resolveDesktopUserDataPath,
   type DesktopTrayState,
 } from "./lifecycle.ts";
@@ -16,7 +16,6 @@ const signedIn = {
     updatedAt: "2026-01-01T00:00:00.000Z",
   },
   canIngest: true,
-  toolbarWidgetEnabled: true,
 } satisfies DesktopTrayState;
 
 describe("desktop lifecycle", () => {
@@ -49,31 +48,42 @@ describe("desktop lifecycle", () => {
     ).toBe(false);
   });
 
-  it("creates the enabled tray only for a signed-in account and applies readiness", () => {
+  it("restores the preference and applies live toggles to a signed-in account", () => {
     const controller = { setup: vi.fn(), disable: vi.fn(), setAccountState: vi.fn() };
+    const lifecycle = createToolbarWidgetLifecycle(controller, false);
 
-    reconcileTrayLifecycle({ ...signedIn, user: null }, controller);
+    lifecycle.applyAccountState(signedIn);
     expect(controller.disable).toHaveBeenCalledOnce();
     expect(controller.setup).not.toHaveBeenCalled();
     expect(controller.setAccountState).not.toHaveBeenCalled();
 
-    reconcileTrayLifecycle(signedIn, controller);
+    lifecycle.applyToolbarWidgetPreference(true);
     expect(controller.setup).toHaveBeenCalledOnce();
     expect(controller.setAccountState).toHaveBeenLastCalledWith(true, true);
 
-    reconcileTrayLifecycle({ ...signedIn, canIngest: false }, controller);
+    lifecycle.applyAccountState({ ...signedIn, canIngest: false });
     expect(controller.setup).toHaveBeenCalledTimes(2);
     expect(controller.setAccountState).toHaveBeenLastCalledWith(true, false);
+
+    lifecycle.applyToolbarWidgetPreference(false);
+    expect(controller.disable).toHaveBeenCalledTimes(2);
   });
 
-  it("removes the tray when signed out or disabled without applying stale readiness", () => {
+  it("removes the tray on sign-out and restores it after sign-in only while enabled", () => {
     const controller = { setup: vi.fn(), disable: vi.fn(), setAccountState: vi.fn() };
+    const lifecycle = createToolbarWidgetLifecycle(controller, true);
 
-    reconcileTrayLifecycle({ ...signedIn, toolbarWidgetEnabled: false }, controller);
-    reconcileTrayLifecycle({ ...signedIn, user: null }, controller);
+    lifecycle.applyAccountState(signedIn);
+    lifecycle.applyAccountState({ canIngest: false, user: null });
+    lifecycle.applyToolbarWidgetPreference(false);
+    lifecycle.applyAccountState(signedIn);
 
-    expect(controller.disable).toHaveBeenCalledTimes(2);
-    expect(controller.setup).not.toHaveBeenCalled();
-    expect(controller.setAccountState).not.toHaveBeenCalled();
+    expect(controller.disable).toHaveBeenCalledTimes(3);
+    expect(controller.setup).toHaveBeenCalledOnce();
+    expect(controller.setAccountState).toHaveBeenCalledOnce();
+
+    lifecycle.applyToolbarWidgetPreference(true);
+    expect(controller.setup).toHaveBeenCalledTimes(2);
+    expect(controller.setAccountState).toHaveBeenLastCalledWith(true, true);
   });
 });

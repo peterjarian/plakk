@@ -24,7 +24,7 @@ import {
   type NativeClipboardContent,
 } from "./clipboard.ts";
 import { UserConfigStore } from "./UserConfigStore.ts";
-import { isReloadShortcut, reconcileTrayLifecycle } from "./lifecycle.ts";
+import { createToolbarWidgetLifecycle, isReloadShortcut } from "./lifecycle.ts";
 import { LocalState } from "./local-state/LocalState.ts";
 import { runEffect, runtime } from "./runtime.ts";
 import { DesktopSession } from "./session/DesktopSession.ts";
@@ -73,6 +73,20 @@ handle(ipcMethods.openExternal, (url) =>
 );
 
 const getLocalState = LocalState.use((localState) => localState.current);
+
+const applyUserConfigToTray = Effect.fn("Desktop.applyUserConfigToTray")(function* (
+  config: UserConfig,
+) {
+  yield* Effect.sync(() => {
+    toolbarWidgetLifecycle?.applyToolbarWidgetPreference(config.toolbarWidgetEnabled);
+  }).pipe(
+    Effect.catchCause((cause) =>
+      Effect.logError("Desktop preference was saved but could not be applied to the Tray", {
+        cause,
+      }),
+    ),
+  );
+});
 
 handle(ipcMethods.localStateGet, () => getLocalState);
 
@@ -360,14 +374,14 @@ handle(ipcMethods.userConfigGet, () =>
 
 handle(ipcMethods.userConfigSet, (patch) =>
   UserConfigStore.use((store) => store.set(patch)).pipe(
-    Effect.tap(applyUserConfig),
+    Effect.tap(applyUserConfigToTray),
     asIpcFailure("Could not save desktop preferences."),
   ),
 );
 
 handle(ipcMethods.userConfigReset, () =>
   UserConfigStore.use((store) => store.reset).pipe(
-    Effect.tap(applyUserConfig),
+    Effect.tap(applyUserConfigToTray),
     asIpcFailure("Could not reset desktop preferences."),
   ),
 );
@@ -376,7 +390,7 @@ type RendererView = "home" | "settings" | "tray" | "welcome";
 
 let mainWindow: BrowserWindow | undefined;
 let trayWindowController: ReturnType<typeof createTrayWindowController> | undefined;
-let toolbarWidgetEnabled = false;
+let toolbarWidgetLifecycle: ReturnType<typeof createToolbarWidgetLifecycle> | undefined;
 let isQuitting = false;
 
 app.setName(app.isPackaged ? "Plakk" : "Plakk (Dev)");
@@ -534,32 +548,14 @@ function registerAuthCallbackProtocol(callbackUrl: string): void {
   }
 }
 
-function reconcileTray(localState: LocalStateValue): void {
+function broadcastLocalState(localState: LocalStateValue): void {
   const canSync =
     localState.capability.status === "ONLINE" &&
     accountCanSyncWithConnection(localState.capability.account, localState.capability.connection);
-  reconcileTrayLifecycle(
-    {
-      canIngest: canSync,
-      toolbarWidgetEnabled,
-      user: localState.account,
-    },
-    trayWindowController,
-  );
-}
-
-function applyUserConfig(config: UserConfig) {
-  return Effect.sync(() => {
-    toolbarWidgetEnabled = config.toolbarWidgetEnabled;
-  }).pipe(
-    Effect.andThen(getLocalState),
-    Effect.tap((localState) => Effect.sync(() => reconcileTray(localState))),
-    Effect.asVoid,
-  );
-}
-
-function broadcastLocalState(localState: LocalStateValue): void {
-  reconcileTray(localState);
+  toolbarWidgetLifecycle?.applyAccountState({
+    canIngest: canSync,
+    user: localState.account,
+  });
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed()) {
       send(window.webContents, ipcEvents.localStateChanged, localState);
@@ -683,8 +679,12 @@ if (!hasSingleInstanceLock) {
       runEffect(Effect.result(DesktopSession.use((session) => session.start))),
       runEffect(Effect.result(UserConfigStore.use((store) => store.get))),
     ]);
-    if (Result.isSuccess(initialUserConfig)) {
-      toolbarWidgetEnabled = initialUserConfig.success.toolbarWidgetEnabled;
+    if (Result.isFailure(initialUserConfig)) {
+      await runEffect(
+        Effect.logError("Could not load the Toolbar widget preference; leaving the Tray disabled", {
+          cause: initialUserConfig.failure,
+        }),
+      );
     }
 
     runtime.runFork(
@@ -749,6 +749,10 @@ if (!hasSingleInstanceLock) {
       },
       preloadPath: join(__dirname, "../preload/index.cjs"),
     });
+    toolbarWidgetLifecycle = createToolbarWidgetLifecycle(
+      trayWindowController,
+      Result.isSuccess(initialUserConfig) ? initialUserConfig.success.toolbarWidgetEnabled : false,
+    );
     createWindow();
     runtime.runFork(
       LocalState.use((localState) =>

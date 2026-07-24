@@ -3,11 +3,10 @@ import { resolve } from "node:path";
 
 export type DesktopTrayState = {
   readonly canIngest: boolean;
-  readonly toolbarWidgetEnabled: boolean;
   readonly user: User | null;
 };
 
-type TrayLifecycleController = {
+type TrayWindowController = {
   disable(): void;
   setAccountState(resolved: boolean, canIngest: boolean): void;
   setup(): void;
@@ -21,16 +20,32 @@ export function resolveDesktopUserDataPath(
   return value ? resolve(value) : defaultPath;
 }
 
-export function reconcileTrayLifecycle(
-  state: DesktopTrayState,
-  controller: TrayLifecycleController | undefined,
+export function createToolbarWidgetLifecycle(
+  controller: TrayWindowController,
+  initialToolbarWidgetEnabled: boolean,
 ) {
-  if (!state.toolbarWidgetEnabled || state.user === null) {
-    controller?.disable();
-    return;
+  let accountState: DesktopTrayState = { canIngest: false, user: null };
+  let toolbarWidgetEnabled = initialToolbarWidgetEnabled;
+
+  function reconcile() {
+    if (!toolbarWidgetEnabled || accountState.user === null) {
+      controller.disable();
+      return;
+    }
+    controller.setup();
+    controller.setAccountState(true, accountState.canIngest);
   }
-  controller?.setup();
-  controller?.setAccountState(true, state.canIngest);
+
+  return {
+    applyAccountState(state: DesktopTrayState) {
+      accountState = state;
+      reconcile();
+    },
+    applyToolbarWidgetPreference(enabled: boolean) {
+      toolbarWidgetEnabled = enabled;
+      reconcile();
+    },
+  };
 }
 
 export function isReloadShortcut(
