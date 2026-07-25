@@ -1,34 +1,34 @@
+import { STORAGE_PROVIDERS } from "@plakk/shared";
+import { WorkOS } from "@workos-inc/node";
 import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
-import { HttpClient } from "effect/unstable/http";
+import * as Schema from "effect/Schema";
+import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 
-import { makeWorkOSClient } from "../auth/makeWorkOSClient.ts";
-import { getProviderSlug } from "./getProviderSlug.ts";
 import { DropboxStorageProvider } from "./providers/DropboxStorageProvider.ts";
 import { GoogleDriveStorageProvider } from "./providers/GoogleDriveStorageProvider.ts";
 import { OneDriveStorageProvider } from "./providers/OneDriveStorageProvider.ts";
 import {
   type ConnectedStorageInput,
+  type DeleteStorageObjectInput,
+  type DownloadStorageObjectInput,
+  type GetStorageObjectUrlInput,
+  getProviderSlug,
+  type PreparedStorageUpload,
+  type PrepareStorageUploadInput,
   StorageCredentialsError,
   type StorageDeletionError,
+  type StorageDownloadTarget,
   type StorageDownloadError,
   StorageNeedsReauthorizationError,
   StorageNotConnectedError,
+  StorageProvider,
+  StorageProviderError,
   type StorageProviderAdapter,
-  StorageProviderService,
   type StorageUploadError,
 } from "./StorageProvider.ts";
-import { StorageProviderError } from "./types.ts";
-import type {
-  DeleteStorageObjectInput,
-  PreparedStorageUpload,
-  PrepareStorageUploadInput,
-  DownloadStorageObjectInput,
-  GetStorageObjectUrlInput,
-  StorageDownloadTarget,
-} from "./types.ts";
 
 type ConnectedStorageToken = {
   readonly accessToken: string;
@@ -40,17 +40,32 @@ const storageProviderAdapters = {
   [DropboxStorageProvider.storageProvider]: DropboxStorageProvider,
 } satisfies Record<PrepareStorageUploadInput["storageProvider"], StorageProviderAdapter>;
 
+const WorkosUserDataProvidersSchema = Schema.Struct({
+  data: Schema.Array(
+    Schema.Struct({
+      slug: Schema.String,
+      connected_account: Schema.optionalKey(
+        Schema.NullOr(
+          Schema.Struct({
+            state: Schema.Literals(["connected", "needs_reauthorization"] as const),
+          }),
+        ),
+      ),
+    }),
+  ),
+});
+
 export const StorageProviderLive = Layer.effect(
-  StorageProviderService,
+  StorageProvider,
   Effect.gen(function* () {
     const { apiKey, clientId } = yield* Effect.all({
       apiKey: Config.redacted("WORKOS_API_KEY"),
       clientId: Config.string("WORKOS_CLIENT_ID"),
     }).pipe(Effect.orDie);
-    const workos = yield* makeWorkOSClient(Redacted.value(apiKey), clientId);
+    const workos = new WorkOS({ apiKey: Redacted.value(apiKey), clientId });
     const httpClient = yield* HttpClient.HttpClient;
 
-    const getConnectedToken = Effect.fn("StorageProviderService.getConnectedToken")(function* (
+    const getConnectedToken = Effect.fn("StorageProvider.getConnectedToken")(function* (
       input: ConnectedStorageInput,
     ): Effect.fn.Return<
       ConnectedStorageToken,
@@ -84,13 +99,67 @@ export const StorageProviderLive = Layer.effect(
       return { accessToken: token.accessToken.accessToken };
     });
 
-    const ensureConnected = Effect.fn("StorageProviderService.ensureConnected")(function* (
+    const ensureConnected = Effect.fn("StorageProvider.ensureConnected")(function* (
       input: ConnectedStorageInput,
     ) {
       yield* getConnectedToken(input);
     });
 
-    const prepareUpload = Effect.fn("StorageProviderService.prepareUpload")(function* (
+    const getLinkedProvider = Effect.fn("StorageProvider.getLinkedProvider")(function* (
+      workosUserId: string,
+    ) {
+      const response = yield* httpClient
+        .get(
+          `https://api.workos.com/user_management/users/${encodeURIComponent(workosUserId)}/data_providers`,
+          {
+            headers: { Authorization: `Bearer ${Redacted.value(apiKey)}` },
+          },
+        )
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new StorageCredentialsError({
+                message: "Could not read linked storage.",
+                cause,
+              }),
+          ),
+        );
+      if (response.status < 200 || response.status >= 300) {
+        return yield* new StorageCredentialsError({
+          message: "Could not read linked storage.",
+          cause: new Error(`WorkOS Pipes returned ${response.status}.`),
+        });
+      }
+
+      const { data } = yield* HttpClientResponse.schemaBodyJson(WorkosUserDataProvidersSchema)(
+        response,
+      ).pipe(
+        Effect.mapError(
+          (cause) =>
+            new StorageCredentialsError({
+              message: "Could not read linked storage.",
+              cause,
+            }),
+        ),
+      );
+      const linkedProviders = new Set(
+        data.flatMap(({ connected_account: connectedAccount, slug }) => {
+          if (connectedAccount === null || connectedAccount === undefined) return [];
+          const provider = STORAGE_PROVIDERS.find(
+            (candidate) => getProviderSlug(candidate) === slug,
+          );
+          return provider === undefined ? [] : [provider];
+        }),
+      );
+      if (linkedProviders.size > 1) {
+        return yield* new StorageCredentialsError({
+          message: "More than one storage provider is linked.",
+        });
+      }
+      return linkedProviders.values().next().value ?? null;
+    });
+
+    const prepareUpload = Effect.fn("StorageProvider.prepareUpload")(function* (
       input: Omit<PrepareStorageUploadInput, "accessToken"> & { readonly workosUserId: string },
     ): Effect.fn.Return<PreparedStorageUpload, StorageUploadError> {
       const token = yield* getConnectedToken(input);
@@ -100,7 +169,7 @@ export const StorageProviderLive = Layer.effect(
         .pipe(Effect.provideService(HttpClient.HttpClient, httpClient));
     });
 
-    const getDestinationUrl = Effect.fn("StorageProviderService.getDestinationUrl")(function* (
+    const getDestinationUrl = Effect.fn("StorageProvider.getDestinationUrl")(function* (
       input: ConnectedStorageInput,
     ): Effect.fn.Return<string, StorageUploadError> {
       const token = yield* getConnectedToken(input);
@@ -110,7 +179,7 @@ export const StorageProviderLive = Layer.effect(
       return destination.url;
     });
 
-    const downloadObject = Effect.fn("StorageProviderService.downloadObject")(function* (
+    const downloadObject = Effect.fn("StorageProvider.downloadObject")(function* (
       input: Omit<DownloadStorageObjectInput, "accessToken"> & {
         readonly workosUserId: string;
       },
@@ -128,7 +197,7 @@ export const StorageProviderLive = Layer.effect(
       return bytes;
     });
 
-    const getDownloadUrl = Effect.fn("StorageProviderService.getDownloadUrl")(function* (
+    const getDownloadUrl = Effect.fn("StorageProvider.getDownloadUrl")(function* (
       input: Omit<GetStorageObjectUrlInput, "accessToken"> & { readonly workosUserId: string },
     ): Effect.fn.Return<string, StorageDownloadError> {
       const token = yield* getConnectedToken(input);
@@ -137,7 +206,7 @@ export const StorageProviderLive = Layer.effect(
         .pipe(Effect.provideService(HttpClient.HttpClient, httpClient));
     });
 
-    const getDownloadTarget = Effect.fn("StorageProviderService.getDownloadTarget")(function* (
+    const getDownloadTarget = Effect.fn("StorageProvider.getDownloadTarget")(function* (
       input: Omit<GetStorageObjectUrlInput, "accessToken"> & {
         readonly workosUserId: string;
       },
@@ -155,7 +224,7 @@ export const StorageProviderLive = Layer.effect(
       return { url, headers: [] };
     });
 
-    const deleteObject = Effect.fn("StorageProviderService.deleteObject")(function* (
+    const deleteObject = Effect.fn("StorageProvider.deleteObject")(function* (
       input: Omit<DeleteStorageObjectInput, "accessToken"> & { readonly workosUserId: string },
     ): Effect.fn.Return<void, StorageDeletionError> {
       const token = yield* getConnectedToken(input);
@@ -164,9 +233,10 @@ export const StorageProviderLive = Layer.effect(
         .pipe(Effect.provideService(HttpClient.HttpClient, httpClient));
     });
 
-    return StorageProviderService.of({
+    return StorageProvider.of({
       deleteObject,
       ensureConnected,
+      getLinkedProvider,
       prepareUpload,
       getDestinationUrl,
       downloadObject,

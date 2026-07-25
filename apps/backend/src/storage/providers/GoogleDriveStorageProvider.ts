@@ -5,16 +5,16 @@ import { Headers, HttpClient, HttpClientRequest, HttpClientResponse } from "effe
 
 import {
   type DeleteStorageObjectInput,
-  StorageProviderError,
-  StorageObjectNotFoundError,
   type DownloadStorageObjectInput,
   type GetStorageObjectUrlInput,
   type PreparedStorageUpload,
   type PrepareStorageUploadInput,
+  readStorageObjectBytes,
+  StorageObjectNotFoundError,
+  type StorageProviderAdapter,
   type StorageProviderDestination,
-} from "../types.ts";
-import type { StorageProviderAdapter } from "../StorageProvider.ts";
-import { readStorageObjectBytes } from "../readStorageObjectBytes.ts";
+  StorageProviderError,
+} from "../StorageProvider.ts";
 
 const GOOGLE_DRIVE_FILES_URL = "https://www.googleapis.com/drive/v3/files";
 const GOOGLE_DRIVE_RESUMABLE_UPLOAD_URL =

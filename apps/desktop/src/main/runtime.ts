@@ -15,7 +15,7 @@ import { makeManagedSnippetContentLive } from "./snippets/content/ManagedSnippet
 import { SnippetDeletionLive } from "./snippets/deletion/SnippetDeletion.ts";
 import { SnippetHydrationLive } from "./snippets/hydration/SnippetHydrationLive.ts";
 import { SnippetHydrationTransportLive } from "./snippets/hydration/SnippetHydrationTransportLive.ts";
-import { makeSnippetRemoteTransportLive } from "./snippets/replica/SnippetRemoteTransportLive.ts";
+import { SnippetRemoteTransportLive } from "./snippets/replica/SnippetRemoteTransportLive.ts";
 import { SnippetReplicaLive } from "./snippets/replica/SnippetReplicaLive.ts";
 import { NativeFileSourcesLive } from "./snippets/sources/NativeFileSourcesLive.ts";
 import { SnippetUploadEngineLive } from "./snippets/upload/SnippetUploadEngineLive.ts";
@@ -46,9 +46,9 @@ const storageUploadLayer = makeStorageUploadLive((input, init) => net.fetch(inpu
   Layer.provide(platformLayer),
 );
 const plakkRpcClientLayer = PlakkRpcClientLive.pipe(Layer.provide(plakkRpcProtocolLayer));
-const snippetRemoteTransportLayer = makeSnippetRemoteTransportLive((input, init) =>
-  net.fetch(input instanceof URL ? input.toString() : input, init),
-).pipe(Layer.provide(plakkRpcClientLayer));
+const snippetRemoteTransportLayer = SnippetRemoteTransportLive.pipe(
+  Layer.provide(plakkRpcClientLayer),
+);
 const snippetUploadRemoteLayer = SnippetUploadRemoteLive.pipe(Layer.provide(plakkRpcClientLayer));
 const snippetReplicaLayer = SnippetReplicaLive;
 const uploadEngineDependencies = Layer.mergeAll(

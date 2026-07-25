@@ -1,5 +1,9 @@
 import { StorageProviderLiteral, UserSchema } from "@plakk/shared";
-import { AccountStatusSchema, PipeConnectionSchema, SnippetIdSchema } from "@plakk/shared/PlakkApi";
+import {
+  AccountStatusSchema,
+  SnippetIdSchema,
+  StorageProviderStatusSchema,
+} from "@plakk/shared/PlakkApi";
 import { LocalContentAvailabilitySchema } from "@plakk/shared";
 import { Schema } from "effect";
 
@@ -169,7 +173,7 @@ export const LocalStateSchema = Schema.Struct({
     Schema.Struct({
       status: Schema.Literal("ONLINE"),
       account: AccountStatusSchema,
-      connection: Schema.NullOr(PipeConnectionSchema),
+      connection: Schema.NullOr(StorageProviderStatusSchema),
     }),
   ]),
   liveConnection: Schema.NullOr(

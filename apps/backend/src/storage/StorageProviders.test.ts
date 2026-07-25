@@ -1,11 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import { FetchHttpClient } from "effect/unstable/http";
 
-import { DropboxStorageProvider } from "./DropboxStorageProvider.ts";
-import { GoogleDriveStorageProvider } from "./GoogleDriveStorageProvider.ts";
-import { OneDriveStorageProvider } from "./OneDriveStorageProvider.ts";
-import type { PrepareStorageUploadInput } from "../types.ts";
+import { DropboxStorageProvider } from "./providers/DropboxStorageProvider.ts";
+import { GoogleDriveStorageProvider } from "./providers/GoogleDriveStorageProvider.ts";
+import { OneDriveStorageProvider } from "./providers/OneDriveStorageProvider.ts";
+import { type PrepareStorageUploadInput, StorageProvider } from "./StorageProvider.ts";
+import { StorageProviderLive } from "./StorageProviderLive.ts";
 
 const input = {
   accessToken: "token",
@@ -26,6 +29,85 @@ const fetchRequest = (index: number) => {
   const [request, init] = vi.mocked(fetch).mock.calls[index] ?? [];
   return new Request(request as RequestInfo, init);
 };
+
+const StorageProviderTestLive = StorageProviderLive.pipe(Layer.provide(FetchHttpClient.layer));
+
+const linkedProvider = (workosUserId: string) =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const storage = yield* StorageProvider;
+      return yield* storage.getLinkedProvider(workosUserId);
+    }).pipe(
+      Effect.provide(StorageProviderTestLive),
+      Effect.provideService(
+        ConfigProvider.ConfigProvider,
+        ConfigProvider.fromEnv({
+          env: {
+            WORKOS_API_KEY: "workos-api-key",
+            WORKOS_CLIENT_ID: "workos-client-id",
+          },
+        }),
+      ),
+    ),
+  );
+
+describe("linked storage provider", () => {
+  it("resolves the connected provider separately for each WorkOS user", async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        Response.json({
+          data: [
+            { slug: "google-drive", connected_account: { state: "connected" } },
+            { slug: "dropbox", connected_account: null },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          data: [
+            { slug: "google-drive", connected_account: null },
+            { slug: "dropbox", connected_account: { state: "needs_reauthorization" } },
+          ],
+        }),
+      );
+
+    await expect(linkedProvider("google-user")).resolves.toBe("GOOGLE_DRIVE");
+    await expect(linkedProvider("dropbox-user")).resolves.toBe("DROPBOX");
+
+    expect(fetchRequest(0).url).toBe(
+      "https://api.workos.com/user_management/users/google-user/data_providers",
+    );
+    expect(fetchRequest(1).url).toBe(
+      "https://api.workos.com/user_management/users/dropbox-user/data_providers",
+    );
+  });
+
+  it("returns no provider when the user has not linked storage", async () => {
+    fetchMock.mockResolvedValue(
+      Response.json({
+        data: [{ slug: "google-drive", connected_account: null }, { slug: "microsoft-onedrive" }],
+      }),
+    );
+
+    await expect(linkedProvider("unlinked-user")).resolves.toBeNull();
+  });
+
+  it("rejects ambiguous accounts instead of choosing a default provider", async () => {
+    fetchMock.mockResolvedValue(
+      Response.json({
+        data: [
+          { slug: "google-drive", connected_account: { state: "connected" } },
+          { slug: "dropbox", connected_account: { state: "connected" } },
+        ],
+      }),
+    );
+
+    await expect(linkedProvider("ambiguous-user")).rejects.toMatchObject({
+      _tag: "StorageCredentialsError",
+      message: "More than one storage provider is linked.",
+    });
+  });
+});
 
 describe("storage upload providers", () => {
   it("creates a Dropbox temporary upload link", async () => {

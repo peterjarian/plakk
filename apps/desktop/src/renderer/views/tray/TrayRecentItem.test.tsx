@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import type { SnippetReadModel } from "../../hooks/useSnippets.ts";
 import { TrayRecentItem } from "./TrayRecentItem.tsx";
@@ -29,6 +29,8 @@ const handlers = {
   onOpenLink: () => undefined,
   onReload: () => undefined,
 };
+
+afterEach(() => vi.useRealTimers());
 
 describe("TrayRecentItem", () => {
   it("shows a controlled retry instead of an empty state when snippet loading fails", () => {
@@ -110,6 +112,8 @@ describe("TrayRecentItem", () => {
   });
 
   it("shows download progress without replacing snippet metadata", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime("2026-07-18T00:00:00.000Z");
     const markup = renderToStaticMarkup(
       <TrayRecentItem
         snippet={{

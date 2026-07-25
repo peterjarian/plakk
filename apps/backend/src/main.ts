@@ -1,19 +1,42 @@
 import "dotenv/config";
 
 import { NodeHttpServer, NodeRuntime } from "@effect/platform-node";
-import { PostgresNotificationsLive } from "@plakk/db";
+import { DrizzleLive, PgClientLive, PostgresNotificationsLive } from "@plakk/db";
+import { PlakkApi } from "@plakk/shared/PlakkApi";
 import * as Config from "effect/Config";
 import * as Layer from "effect/Layer";
-import { HttpRouter } from "effect/unstable/http";
+import { FetchHttpClient, HttpRouter } from "effect/unstable/http";
+import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 import { createServer } from "node:http";
 
-import { RpcRoutes } from "./api/rpc.ts";
-import { ServerRuntimeLive } from "./api/ServerRuntime.ts";
-import { SnippetInvalidationsRoute } from "./api/snippets/snippetInvalidations.ts";
+import { AuthMiddlewareLive } from "./middleware/AuthMiddlewareLive.ts";
+import { InternalServerErrorMiddlewareLive } from "./middleware/InternalServerErrorMiddlewareLive.ts";
+import { PlakkApiLive } from "./rpcs/PlakkApiLive.ts";
+import { StorageProviderLive } from "./storage/StorageProviderLive.ts";
+
+const InfrastructureLive = Layer.mergeAll(
+  DrizzleLive,
+  PgClientLive,
+  PostgresNotificationsLive,
+  StorageProviderLive,
+).pipe(Layer.provideMerge(FetchHttpClient.layer));
+
+const RpcRoutes = RpcServer.layerHttp({
+  group: PlakkApi,
+  path: "/api/rpc",
+  protocol: "http",
+  disableFatalDefects: true,
+}).pipe(
+  Layer.provide(PlakkApiLive),
+  Layer.provide(AuthMiddlewareLive),
+  Layer.provide(InternalServerErrorMiddlewareLive),
+  Layer.provide(FetchHttpClient.layer),
+  Layer.provide(RpcSerialization.layerNdjson),
+  Layer.provide(InfrastructureLive),
+);
 
 const BackendRoutes = Layer.mergeAll(
-  RpcRoutes.pipe(Layer.provide(ServerRuntimeLive)),
-  SnippetInvalidationsRoute.pipe(Layer.provide(PostgresNotificationsLive)),
+  RpcRoutes,
   HttpRouter.cors({
     allowedOrigins: ["plakk-app://renderer"],
     allowedMethods: ["GET", "POST", "OPTIONS"],

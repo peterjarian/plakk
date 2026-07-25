@@ -1,16 +1,18 @@
+import { SNIPPET_INVALIDATION_KEEP_ALIVE, SNIPPETS_CHANGED } from "@plakk/shared/PlakkApi";
 import { describe, expect, it } from "vite-plus/test";
 import { Effect, Stream } from "effect";
 
-import { decodeSnippetInvalidations } from "./SnippetRemoteTransportLive.ts";
+import { selectSnippetInvalidations } from "./SnippetRemoteTransportLive.ts";
 
-describe("Snippet SSE transport", () => {
-  it("decodes fragmented payload-free invalidations and ignores keep-alive comments", async () => {
-    const encode = (value: string) => new TextEncoder().encode(value);
+describe("Snippet invalidation RPC transport", () => {
+  it("projects change events and ignores keep-alives", async () => {
     const events = await Effect.runPromise(
-      decodeSnippetInvalidations(
+      selectSnippetInvalidations(
         Stream.make(
-          encode(": keep-alive\n\ndata: SNIPP"),
-          encode("ETS_CHANGED\n\ndata: IGNORED\n\ndata: SNIPPETS_CHANGED\n\n"),
+          SNIPPET_INVALIDATION_KEEP_ALIVE,
+          SNIPPETS_CHANGED,
+          SNIPPET_INVALIDATION_KEEP_ALIVE,
+          SNIPPETS_CHANGED,
         ),
       ).pipe(Stream.runCollect),
     );
