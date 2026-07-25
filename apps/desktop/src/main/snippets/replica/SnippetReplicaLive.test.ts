@@ -2,6 +2,7 @@ import { NodeFileSystem } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
 import { join } from "node:path";
 import { Effect, FileSystem, Layer } from "effect";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { makeDesktopSqliteLayer } from "../../persistence/Sqlite.ts";
 import {
@@ -36,10 +37,13 @@ const local: LocalUploadRecord = {
   updatedAt: "2026-07-10T20:00:03.000Z",
 };
 
-const withReplica = <A, E>(databasePath: string, effect: Effect.Effect<A, E, SnippetReplica>) =>
-  effect.pipe(
-    Effect.provide(SnippetReplicaLive.pipe(Layer.provide(makeDesktopSqliteLayer(databasePath)))),
-  );
+const withReplica = <A, E>(
+  databasePath: string,
+  effect: Effect.Effect<A, E, SnippetReplica | SqlClient.SqlClient>,
+) => {
+  const sqliteLayer = makeDesktopSqliteLayer(databasePath);
+  return effect.pipe(Effect.provide(SnippetReplicaLive.pipe(Layer.provideMerge(sqliteLayer))));
+};
 
 it.layer(NodeFileSystem.layer)("SQLite snippet replica", (it) => {
   it.effect("persists ordered records and empty replicas across database restarts", () =>
@@ -90,6 +94,55 @@ it.layer(NodeFileSystem.layer)("SQLite snippet replica", (it) => {
         SnippetReplica.use((replica) => replica.get(accountId)),
       );
       expect(purged).toBeNull();
+    }),
+  );
+
+  it.effect("rejects the superseded authoritative upload-status shape", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const cwd = yield* fileSystem.makeTempDirectoryScoped({ prefix: "plakk-sqlite-replica-" });
+      const databasePath = join(cwd, "plakk.sqlite");
+
+      const error = yield* withReplica(
+        databasePath,
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          const replica = yield* SnippetReplica;
+          const legacyRecord = JSON.stringify({
+            id: "0d1e2f3a-4567-4890-8abc-def012345678",
+            fileName: "legacy.txt",
+            byteSize: 12,
+            storageProvider: "GOOGLE_DRIVE",
+            storageObjectId: "drive-id",
+            uploadStatus: "UPLOADED",
+            createdAt: "2026-07-10T20:00:00.000Z",
+            updatedAt: "2026-07-10T20:00:01.000Z",
+          });
+
+          yield* sql`
+            INSERT INTO snippet_replicas (account_id)
+            VALUES (${accountId})
+          `;
+          yield* sql`
+            INSERT INTO snippet_replica_items (
+              account_id,
+              snippet_id,
+              position,
+              record_json
+            )
+            VALUES (
+              ${accountId},
+              ${"0d1e2f3a-4567-4890-8abc-def012345678"},
+              ${0},
+              ${legacyRecord}
+            )
+          `;
+
+          return yield* Effect.flip(replica.get(accountId));
+        }),
+      );
+
+      expect(error.reason).toBe("Stored snippet replica is invalid.");
     }),
   );
 });

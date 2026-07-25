@@ -16,6 +16,18 @@ const ReplicaItemRowSchema = Schema.Struct({
   recordJson: Schema.String,
 });
 
+const invalidStoredReplica = (cause: unknown) =>
+  new SnippetReplicaError({
+    cause,
+    reason: "Stored snippet replica is invalid.",
+  });
+
+const invalidReplica = (cause: unknown) =>
+  new SnippetReplicaError({
+    cause,
+    reason: "Snippet replica is invalid.",
+  });
+
 export const SnippetReplicaLive = Layer.effect(
   SnippetReplica,
   Effect.gen(function* () {
@@ -46,9 +58,13 @@ export const SnippetReplicaLive = Layer.effect(
         WHERE account_id = ${accountId}
       `;
       if (replicas.length === 0) return null;
-      const rows = yield* readReplicaRows(accountId);
+      const rows = yield* readReplicaRows(accountId).pipe(
+        Effect.catchTag("SchemaError", invalidStoredReplica),
+      );
       const items = yield* Effect.forEach(rows, ({ recordJson }) =>
-        Schema.decodeEffect(StoredRecordCodec)(recordJson),
+        Schema.decodeEffect(StoredRecordCodec)(recordJson).pipe(
+          Effect.mapError(invalidStoredReplica),
+        ),
       );
       return { items } satisfies SnippetReplicaState;
     });
@@ -58,6 +74,7 @@ export const SnippetReplicaLive = Layer.effect(
     ) {
       return yield* Effect.forEach(state.items, (record, position) =>
         Schema.encodeEffect(StoredRecordCodec)(record).pipe(
+          Effect.mapError(invalidReplica),
           Effect.map((recordJson) => ({
             position,
             recordJson,
@@ -101,8 +118,9 @@ export const SnippetReplicaLive = Layer.effect(
     });
 
     const readReplica = Effect.fn("DesktopSnippetReplica.read")((accountId: string) =>
-      readReplicaSql(accountId).pipe(
-        Effect.mapError(
+      sql.withTransaction(readReplicaSql(accountId)).pipe(
+        Effect.catchTag(
+          "SqlError",
           (cause) =>
             new SnippetReplicaError({
               cause,
@@ -121,7 +139,8 @@ export const SnippetReplicaLive = Layer.effect(
           yield* sql.withTransaction(writeReplicaSql(accountId, encoded));
           yield* PubSub.publish(changes, { accountId, items: state.items });
         }).pipe(
-          Effect.mapError(
+          Effect.catchTag(
+            "SqlError",
             (cause) =>
               new SnippetReplicaError({
                 cause,
@@ -141,7 +160,8 @@ export const SnippetReplicaLive = Layer.effect(
             }),
           )
           .pipe(
-            Effect.mapError(
+            Effect.catchTag(
+              "SqlError",
               (cause) =>
                 new SnippetReplicaError({
                   cause,
@@ -177,7 +197,8 @@ export const SnippetReplicaLive = Layer.effect(
             }),
           )
           .pipe(
-            Effect.mapError(
+            Effect.catchTag(
+              "SqlError",
               (cause) =>
                 new SnippetReplicaError({
                   cause,

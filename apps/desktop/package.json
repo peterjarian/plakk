@@ -5,10 +5,9 @@
   "type": "module",
   "main": "./out/main/index.js",
   "scripts": {
-    "dev": "electron-rebuild -f -w better-sqlite3 && node scripts/dev-electron.mjs",
+    "dev": "node scripts/with-electron-native.mjs node scripts/dev-electron.mjs",
     "build": "tsc --noEmit && electron-vite build",
-    "preview": "electron-rebuild -f -w better-sqlite3 && electron-vite preview",
-    "rebuild:native": "electron-rebuild -f -w better-sqlite3"
+    "preview": "node scripts/with-electron-native.mjs electron-vite preview"
   },
   "dependencies": {
     "@effect/platform-node": "4.0.0-beta.92",
