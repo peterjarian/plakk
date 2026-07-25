@@ -54,6 +54,12 @@ type StorageFeedback =
   | { readonly kind: "no-op" }
   | { readonly kind: "failed"; readonly message: string };
 
+const appearanceLabels = {
+  light: "Light",
+  dark: "Dark",
+  system: "System",
+} as const;
+
 export function Settings() {
   const auth = useAuth();
   const linkedProvider = useLinkedStorageProvider();
@@ -386,12 +392,12 @@ export function Settings() {
                   }}
                 >
                   <SelectTrigger aria-label="Appearance">
-                    <SelectValue />
+                    <SelectValue>{appearanceLabels[appearance.preference]}</SelectValue>
                   </SelectTrigger>
                   <SelectContent align="end">
-                    <SelectItem value="light">Light</SelectItem>
-                    <SelectItem value="dark">Dark</SelectItem>
-                    <SelectItem value="system">System</SelectItem>
+                    <SelectItem value="light">{appearanceLabels.light}</SelectItem>
+                    <SelectItem value="dark">{appearanceLabels.dark}</SelectItem>
+                    <SelectItem value="system">{appearanceLabels.system}</SelectItem>
                   </SelectContent>
                 </Select>
               </SettingsRow>
