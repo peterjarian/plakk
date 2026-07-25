@@ -1,5 +1,6 @@
 packages:
   - apps/*
+  - infra
   - oxlint-plugin-plakk
   - packages/*
 
@@ -28,3 +29,5 @@ allowBuilds:
   electron: true
   esbuild: true
   msgpackr-extract: true
+  protobufjs: true
+  workerd: true
