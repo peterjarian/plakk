@@ -2,7 +2,6 @@ import { LoaderCircle } from "lucide-react";
 import { useEffect, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import { TooltipProvider } from "@plakk/ui/components/primitives/tooltip";
-import { PlakkAtomProvider } from "@plakk/ui/hooks/useUploadFlow";
 import { Home } from "./views/Home.tsx";
 import { Settings } from "./views/Settings.tsx";
 import { Tray } from "./views/Tray.tsx";
@@ -10,7 +9,8 @@ import { Welcome } from "./views/Welcome.tsx";
 import type { ComponentType } from "react";
 import type { ViewType } from "./lib/navigate.ts";
 import { AuthProvider, useAuth } from "./hooks/useAuth.ts";
-import { StorageStatusProvider } from "./hooks/useStorageStatus.tsx";
+import { LocalStateProvider } from "./hooks/useLocalState.tsx";
+import { startAppearanceSync } from "./hooks/useAppearance.ts";
 import {
   getDesktopView,
   navigate,
@@ -19,6 +19,8 @@ import {
 } from "./lib/navigate.ts";
 
 import "@plakk/ui/globals.css";
+
+startAppearanceSync();
 
 const views: Record<ViewType, ComponentType> = {
   home: Home,
@@ -68,14 +70,14 @@ function DesktopViews() {
   useEffect(() => window.ipc.navigation.onRequested(setDesktopView), []);
 
   return (
-    <StorageStatusProvider>
+    <>
       <div hidden={view !== "home"}>
         <Home active={view === "home"} />
       </div>
       <div hidden={view !== "settings"}>
         <Settings />
       </div>
-    </StorageStatusProvider>
+    </>
   );
 }
 
@@ -90,7 +92,7 @@ const isProtectedView = view !== null && view !== "welcome";
 
 createRoot(document.querySelector<HTMLDivElement>("#app")!).render(
   <TooltipProvider>
-    <PlakkAtomProvider>
+    <LocalStateProvider>
       <AuthProvider>
         {isProtectedView ? (
           <ProtectedView View={View} redirectOnSignOut={view !== "tray"} />
@@ -98,6 +100,6 @@ createRoot(document.querySelector<HTMLDivElement>("#app")!).render(
           <View />
         )}
       </AuthProvider>
-    </PlakkAtomProvider>
+    </LocalStateProvider>
   </TooltipProvider>,
 );

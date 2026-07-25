@@ -1,96 +1,79 @@
-import {
-  createContext,
-  createElement,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
-import type { AuthStatus } from "../../ipc/contracts.ts";
+import { createContext, createElement, useContext, useEffect, useMemo, useState } from "react";
+import type { AuthError } from "../../ipc/contracts.ts";
 import type { ReactNode } from "react";
+import { ipcActionErrorMessage } from "../lib/ipcActionErrorMessage.ts";
+import { useLocalState } from "./useLocalState.tsx";
 
 type AuthState = {
-  issue: { message: string } | null;
-  isLoading: boolean;
-  signIn: () => Promise<void>;
-  signOut: () => Promise<void>;
-  accessToken: string | null;
-  user: AuthStatus["user"];
+  readonly issue: AuthError | null;
+  readonly isLoading: boolean;
+  readonly user: ReturnType<typeof useLocalState>["localState"]["account"];
 };
 
 const AuthContext = createContext<AuthState | null>(null);
-const AUTH_REFRESH_INTERVAL_MS = 30 * 1000;
+
+type AuthCommands = {
+  readonly signIn: () => Promise<void>;
+  readonly signOut: () => Promise<void>;
+};
+
+export const makeAuthCommands = (
+  commands: AuthCommands,
+  publishIssue: (issue: AuthError | null) => void,
+) => {
+  const run = async (command: () => Promise<void>, fallback: string) => {
+    publishIssue(null);
+    try {
+      await command();
+      return true;
+    } catch (cause) {
+      publishIssue({ message: ipcActionErrorMessage(cause, fallback) });
+      return false;
+    }
+  };
+
+  return {
+    signIn: () => run(commands.signIn, "Couldn’t start sign-in."),
+    signOut: () => run(commands.signOut, "Couldn’t sign out of Plakk."),
+  };
+};
+
+const commandIssueSubscribers = new Set<(issue: AuthError | null) => void>();
+const publishCommandIssue = (issue: AuthError | null) => {
+  for (const subscriber of commandIssueSubscribers) subscriber(issue);
+};
+const commands = makeAuthCommands(
+  {
+    signIn: () => window.ipc.auth.signIn(),
+    signOut: () => window.ipc.auth.signOut(),
+  },
+  publishCommandIssue,
+);
+
+export const signIn = commands.signIn;
+export const signOut = commands.signOut;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [status, setStatus] = useState<AuthStatus | null>(null);
-  const [issue, setIssue] = useState<{ message: string } | null>(null);
+  const state = useLocalState();
+  const [issue, setIssue] = useState<AuthError | null>(null);
 
   useEffect(() => {
-    let isMounted = true;
-    const applyStatus = (nextStatus: AuthStatus) => {
-      if (!isMounted) return;
-      setIssue(null);
-      setStatus(nextStatus);
-    };
-    const reportError = (error: unknown) => {
-      if (!isMounted) return;
-      setIssue({ message: error instanceof Error ? error.message : "Could not check session." });
-    };
-    const refresh = () => void window.ipc.auth.getAuth().then(applyStatus, reportError);
-    const unsubscribeError = window.ipc.auth.onError((error) => {
-      if (!isMounted) return;
-      setIssue(error);
-    });
-    const unsubscribe = window.ipc.auth.onStatusChanged(applyStatus);
-
-    void window.ipc.auth.getAuth().then(applyStatus, (error) => {
-      if (!isMounted) return;
-      reportError(error);
-      setStatus({ accessToken: null, user: null });
-    });
-    const refreshInterval = window.setInterval(refresh, AUTH_REFRESH_INTERVAL_MS);
-    window.addEventListener("focus", refresh);
-
+    commandIssueSubscribers.add(setIssue);
+    const unsubscribe = window.ipc.auth.onError(setIssue);
     return () => {
-      isMounted = false;
-      window.clearInterval(refreshInterval);
-      window.removeEventListener("focus", refresh);
+      commandIssueSubscribers.delete(setIssue);
       unsubscribe();
-      unsubscribeError();
     };
   }, []);
 
-  const signIn = useCallback(async () => {
-    setIssue(null);
-    try {
-      await window.ipc.auth.signIn();
-    } catch (error) {
-      setIssue({ message: error instanceof Error ? error.message : "Could not start sign-in." });
-    }
-  }, []);
-
-  const signOut = useCallback(async () => {
-    setIssue(null);
-    try {
-      await window.ipc.auth.signOut();
-    } catch (error) {
-      setIssue({ message: error instanceof Error ? error.message : "Could not sign out." });
-    }
-  }, []);
-
-  const value = useMemo(() => {
-    const user = status?.user ?? null;
-
-    return {
-      accessToken: status?.accessToken ?? null,
+  const value = useMemo(
+    () => ({
       issue,
-      isLoading: status === null,
-      signIn,
-      signOut,
-      user,
-    };
-  }, [issue, signIn, signOut, status]);
+      isLoading: state.isLoading,
+      user: state.localState.account,
+    }),
+    [issue, state.isLoading, state.localState.account],
+  );
 
   return createElement(AuthContext.Provider, { value }, children);
 }

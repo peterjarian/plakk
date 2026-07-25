@@ -4,13 +4,7 @@ import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 import * as RpcMiddleware from "effect/unstable/rpc/RpcMiddleware";
 
-import {
-  SnippetKindLiteral,
-  SnippetUploadStatusLiteral,
-  StorageProviderLiteral,
-  MAX_TEXT_SNIPPET_BYTE_SIZE,
-  type User,
-} from "../index.ts";
+import { StorageProviderLiteral } from "../index.ts";
 import { RpcError } from "./RpcError.ts";
 
 export const AccountBlockedReasonSchema = Schema.Literals(["billing", "storage"] as const);
@@ -28,15 +22,15 @@ export type AccountStatus = typeof AccountStatusSchema.Type;
 export const accountCanSync = (account: AccountStatus): boolean =>
   account.canSync && account.blockedReasons.length === 0 && account.storageProvider !== null;
 
-export const PipeConnectionStatusSchema = Schema.Literals([
+export const StorageProviderConnectionStatusSchema = Schema.Literals([
   "CONNECTED",
   "NEEDS_REAUTHORIZATION",
   "NOT_CONNECTED",
 ] as const);
 
-export type PipeConnectionStatus = typeof PipeConnectionStatusSchema.Type;
+export type StorageProviderConnectionStatus = typeof StorageProviderConnectionStatusSchema.Type;
 
-export const PipeConnectionSchema = Schema.Union([
+export const StorageProviderStatusSchema = Schema.Union([
   Schema.Struct({
     storageProvider: StorageProviderLiteral,
     status: Schema.Literal("CONNECTED"),
@@ -49,7 +43,12 @@ export const PipeConnectionSchema = Schema.Union([
   }),
 ]);
 
-export type PipeConnection = typeof PipeConnectionSchema.Type;
+export type StorageProviderStatus = typeof StorageProviderStatusSchema.Type;
+
+export const accountCanSyncWithConnection = (
+  account: AccountStatus,
+  connection: StorageProviderStatus | null,
+): boolean => accountCanSync(account) && connection?.status === "CONNECTED";
 
 export const PreparedStorageUploadSchema = Schema.Struct({
   storageProvider: StorageProviderLiteral,
@@ -76,45 +75,47 @@ export const SnippetIdSchema = Schema.String.check(Schema.isUUID());
 
 export const ApiSnippetSchema = Schema.Struct({
   id: SnippetIdSchema,
-  kind: SnippetKindLiteral,
-  title: Schema.String,
   fileName: Schema.String,
   byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-  contentType: Schema.NullOr(Schema.String),
-  contentUrl: Schema.NullOr(Schema.String),
-  thumbnailUrl: Schema.NullOr(Schema.String),
-  textContent: Schema.NullOr(Schema.String),
-  storageProvider: Schema.NullOr(StorageProviderLiteral),
-  uploadStatus: SnippetUploadStatusLiteral,
+  storageProvider: StorageProviderLiteral,
+  storageObjectId: Schema.String,
   createdAt: Schema.String,
   updatedAt: Schema.String,
 });
 
 export type ApiSnippet = typeof ApiSnippetSchema.Type;
 
-export const CreateStoredSnippetPayloadSchema = Schema.Union([
-  Schema.Struct({
-    id: SnippetIdSchema,
-    kind: Schema.Literal("TEXT"),
-    byteSize: Schema.Int.check(
-      Schema.isBetween({ minimum: 1, maximum: MAX_TEXT_SNIPPET_BYTE_SIZE }),
-    ),
-    storageProvider: StorageProviderLiteral,
-    storageObjectId: Schema.NullOr(Schema.String),
-  }),
-  Schema.Struct({
-    id: SnippetIdSchema,
-    kind: Schema.Literals(["FILE", "IMAGE"] as const),
-    title: Schema.String,
-    fileName: Schema.String,
-    byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-    contentType: Schema.NullOr(Schema.String),
-    storageProvider: StorageProviderLiteral,
-    storageObjectId: Schema.NullOr(Schema.String),
-  }),
-]);
+export const SNIPPETS_CHANGED = "SNIPPETS_CHANGED" as const;
+export const SNIPPET_INVALIDATION_KEEP_ALIVE = "KEEP_ALIVE" as const;
 
-export class CurrentUser extends Context.Service<CurrentUser, User>()(
+export const SnippetInvalidationEventSchema = Schema.Literals([
+  SNIPPETS_CHANGED,
+  SNIPPET_INVALIDATION_KEEP_ALIVE,
+] as const);
+
+export type SnippetInvalidationEvent = typeof SnippetInvalidationEventSchema.Type;
+
+export const PrepareSnippetUploadPayloadSchema = Schema.Struct({
+  id: SnippetIdSchema,
+  fileName: Schema.String,
+  byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  storageProvider: StorageProviderLiteral,
+  mediaType: Schema.NullOr(Schema.String),
+});
+
+export type PrepareSnippetUploadPayload = typeof PrepareSnippetUploadPayloadSchema.Type;
+
+export const PublishSnippetPayloadSchema = Schema.Struct({
+  id: SnippetIdSchema,
+  fileName: Schema.String,
+  byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  storageProvider: StorageProviderLiteral,
+  storageObjectId: Schema.String,
+});
+
+export type PublishSnippetPayload = typeof PublishSnippetPayloadSchema.Type;
+
+export class CurrentUser extends Context.Service<CurrentUser, { readonly id: string }>()(
   "@plakk/shared/api/PlakkApi/CurrentUser",
 ) {}
 
@@ -143,70 +144,48 @@ export const AccountRpcs = RpcGroup.make(
 );
 
 export const StorageRpcs = RpcGroup.make(
-  Rpc.make("GetPipeConnectionUrl", {
+  Rpc.make("BeginStorageProviderLink", {
     payload: { storageProvider: StorageProviderLiteral },
     success: Schema.Struct({ url: Schema.String }),
     error: RpcError,
   }),
-  Rpc.make("GetPipeConnectionStatus", {
+  Rpc.make("GetStorageProviderStatus", {
     payload: { storageProvider: StorageProviderLiteral },
-    success: PipeConnectionSchema,
+    success: StorageProviderStatusSchema,
     error: RpcError,
   }),
-  Rpc.make("DisconnectPipe", {
+  Rpc.make("UnlinkStorageProvider", {
     payload: { storageProvider: StorageProviderLiteral },
     success: Schema.Void,
-    error: RpcError,
-  }),
-  Rpc.make("PrepareStoredSnippetUpload", {
-    payload: {
-      snippetId: SnippetIdSchema,
-      storageProvider: StorageProviderLiteral,
-    },
-    success: PreparedStorageUploadSchema,
     error: RpcError,
   }),
 );
 
 export const SnippetRpcs = RpcGroup.make(
-  Rpc.make("ListSnippets", {
-    payload: {
-      limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 })),
-    },
-    success: Schema.Struct({
-      items: Schema.Array(ApiSnippetSchema),
-    }),
+  Rpc.make("PrepareSnippetUpload", {
+    payload: PrepareSnippetUploadPayloadSchema,
+    success: PreparedStorageUploadSchema,
     error: RpcError,
   }),
-  Rpc.make("CreateStoredSnippet", {
-    payload: CreateStoredSnippetPayloadSchema,
+  Rpc.make("GetSnippetSnapshot", {
+    success: Schema.Array(ApiSnippetSchema),
+    error: RpcError,
+  }),
+  Rpc.make("WatchSnippetInvalidations", {
+    success: SnippetInvalidationEventSchema,
+    error: RpcError,
+    stream: true,
+  }),
+  Rpc.make("PublishSnippet", {
+    payload: PublishSnippetPayloadSchema,
     success: ApiSnippetSchema,
     error: RpcError,
   }),
-  Rpc.make("UpdateStoredSnippetUploadStatus", {
-    payload: Schema.Union([
-      Schema.Struct({
-        id: SnippetIdSchema,
-        uploadStatus: Schema.Literal("READY"),
-        storageObjectId: Schema.String,
-        storageProvider: Schema.optionalKey(StorageProviderLiteral),
-      }),
-      Schema.Struct({
-        id: SnippetIdSchema,
-        uploadStatus: Schema.Literal("FAILED"),
-        storageObjectId: Schema.optionalKey(Schema.NullOr(Schema.String)),
-      }),
-    ]),
-    success: ApiSnippetSchema,
-    error: RpcError,
-  }),
-  Rpc.make("GetSnippetCopyPayload", {
+  Rpc.make("PrepareSnippetDownload", {
     payload: { id: SnippetIdSchema },
     success: Schema.Struct({
-      kind: Schema.Literals(["FILE", "IMAGE"] as const),
       storageProvider: StorageProviderLiteral,
       fileName: Schema.String,
-      contentType: Schema.NullOr(Schema.String),
       byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
       download: Schema.Struct({
         url: Schema.String,

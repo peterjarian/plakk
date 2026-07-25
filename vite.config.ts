@@ -18,7 +18,6 @@ export default defineConfig({
   },
   lint: {
     ignorePatterns: [
-      ".repos",
       ".repos/**",
       "dist",
       "dist-electron",

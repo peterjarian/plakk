@@ -1,14 +1,13 @@
-import { statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, statSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { basename, extname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { app, clipboard, nativeImage, net } from "electron";
+import { app, clipboard, nativeImage } from "electron";
 import { Data, Effect } from "effect";
-import type { StorageProvider } from "@plakk/shared";
+import { deriveSnippetPresentation } from "@plakk/shared";
 
 type SnippetContent = {
   readonly bytes: Uint8Array;
-  readonly kind: "FILE" | "IMAGE";
   readonly fileName: string;
   readonly contentType: string | null;
 };
@@ -35,7 +34,7 @@ export type WritableClipboardContent =
       readonly dataUrl: string;
     };
 
-type ClipboardContent =
+export type NativeClipboardContent =
   | {
       readonly type: "text";
       readonly text: string;
@@ -76,11 +75,11 @@ function encodeXmlText(value: string): string {
     .replaceAll("'", "&apos;");
 }
 
-function fileContentFromPath(path: string): ClipboardContent | undefined {
+function fileContentFromPath(path: string): NativeClipboardContent | undefined {
   const stats = statSync(path, { throwIfNoEntry: false });
   if (stats === undefined) return undefined;
 
-  const content: ClipboardContent = {
+  const content: NativeClipboardContent = {
     type: "file",
     name: basename(path),
     path,
@@ -92,14 +91,14 @@ function fileContentFromPath(path: string): ClipboardContent | undefined {
   return content;
 }
 
-function textContent(text: string): ClipboardContent {
+function textContent(text: string): NativeClipboardContent {
   return {
     type: "text",
     text,
   };
 }
 
-function emptyContent(): ClipboardContent {
+function emptyContent(): NativeClipboardContent {
   return { type: "empty" };
 }
 
@@ -166,7 +165,7 @@ function firstLinuxClipboardFilePath(formats: ReadonlyArray<string>): string {
 
 export const readClipboard = Effect.fn("readClipboard")(function* () {
   const file = yield* Effect.try({
-    try: (): ClipboardContent | undefined => {
+    try: (): NativeClipboardContent | undefined => {
       const formats = clipboard.availableFormats();
       const rawPath =
         process.platform === "darwin"
@@ -191,7 +190,7 @@ export const readClipboard = Effect.fn("readClipboard")(function* () {
 
   if (!image.isEmpty()) {
     return yield* Effect.try({
-      try: (): ClipboardContent => {
+      try: (): NativeClipboardContent => {
         const { width, height } = image.getSize();
         const path = join(app.getPath("temp"), `plakk-clipboard-${crypto.randomUUID()}.png`);
         writeFileSync(path, image.toPNG());
@@ -248,7 +247,8 @@ const windowsFileDrop = (path: string) => {
 
 const writeSnippetFile = (content: SnippetContent) => {
   const fileName = basename(content.fileName);
-  const path = join(app.getPath("temp"), `plakk-snippet-${crypto.randomUUID()}-${fileName}`);
+  const directory = mkdtempSync(join(app.getPath("temp"), "plakk-snippet-"));
+  const path = join(directory, fileName);
   const url = pathToFileURL(path).toString();
 
   writeFileSync(path, content.bytes);
@@ -273,7 +273,11 @@ export const writeSnippetToClipboard = Effect.fn("writeSnippetToClipboard")(func
 ) {
   return yield* Effect.try({
     try: () => {
-      if (content.kind === "IMAGE") {
+      const presentation = deriveSnippetPresentation({
+        fileName: content.fileName,
+        content: content.bytes,
+      });
+      if (presentation.type === "image") {
         const image = nativeImage.createFromBuffer(Buffer.from(content.bytes));
         if (image.isEmpty()) writeSnippetBytes(content);
         else clipboard.writeImage(image);
@@ -285,78 +289,3 @@ export const writeSnippetToClipboard = Effect.fn("writeSnippetToClipboard")(func
     catch: (cause) => new WriteClipboardError({ cause }),
   });
 });
-
-export const downloadSnippetToClipboard = Effect.fn("downloadSnippetToClipboard")(function* (
-  snippet: Omit<SnippetContent, "bytes"> & {
-    readonly storageProvider: StorageProvider;
-    readonly byteSize: number;
-    readonly download: {
-      readonly url: string;
-      readonly headers: ReadonlyArray<{ readonly name: string; readonly value: string }>;
-    };
-  },
-) {
-  const bytes = yield* downloadSnippetBytes(snippet);
-  yield* Effect.logInfo("Downloaded stored snippet", { byteSize: bytes.byteLength });
-  yield* writeSnippetToClipboard({ ...snippet, bytes });
-  yield* Effect.logInfo("Wrote stored snippet to clipboard", {
-    formats: clipboard.availableFormats(),
-  });
-});
-
-export const downloadSnippetBytes = Effect.fn("downloadSnippetBytes")(function* (
-  snippet: Omit<SnippetContent, "bytes"> & {
-    readonly storageProvider: StorageProvider;
-    readonly byteSize: number;
-    readonly download: {
-      readonly url: string;
-      readonly headers: ReadonlyArray<{ readonly name: string; readonly value: string }>;
-    };
-  },
-) {
-  if (!isSignedStorageUrl(snippet.storageProvider, snippet.download.url)) {
-    return yield* new WriteClipboardError({ cause: new Error("Invalid storage download URL.") });
-  }
-  yield* Effect.logInfo("Copying stored snippet", {
-    kind: snippet.kind,
-    storageProvider: snippet.storageProvider,
-    downloadHost: new URL(snippet.download.url).hostname,
-  });
-  return yield* Effect.tryPromise({
-    try: async () => {
-      const response = await net.fetch(snippet.download.url, {
-        headers: Object.fromEntries(
-          snippet.download.headers.map(({ name, value }) => [name, value]),
-        ),
-      });
-      if (!response.ok) throw new Error(`Snippet download failed: ${response.status}`);
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      if (bytes.byteLength !== snippet.byteSize) {
-        throw new Error("Snippet size does not match metadata.");
-      }
-      return bytes;
-    },
-    catch: (cause) => new WriteClipboardError({ cause }),
-  });
-});
-
-const isSignedStorageUrl = (storageProvider: StorageProvider, value: string): boolean => {
-  try {
-    const url = new URL(value);
-    if (url.protocol !== "https:") return false;
-    if (storageProvider === "GOOGLE_DRIVE") {
-      return (
-        url.hostname === "www.googleapis.com" ||
-        url.hostname === "drive.google.com" ||
-        url.hostname === "drive.usercontent.google.com" ||
-        url.hostname.endsWith(".googleusercontent.com")
-      );
-    }
-    if (storageProvider === "ONE_DRIVE") {
-      return url.hostname.endsWith(".1drv.com") || url.hostname.endsWith(".sharepoint.com");
-    }
-    return url.hostname.endsWith(".dropboxusercontent.com");
-  } catch {
-    return false;
-  }
-};

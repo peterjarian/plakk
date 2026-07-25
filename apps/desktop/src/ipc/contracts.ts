@@ -1,11 +1,11 @@
-import { UserSchema } from "@plakk/shared";
+import { StorageProviderLiteral, UserSchema } from "@plakk/shared";
 import {
   AccountStatusSchema,
-  PreparedStorageUploadSchema,
   SnippetIdSchema,
+  StorageProviderStatusSchema,
 } from "@plakk/shared/PlakkApi";
+import { LocalContentAvailabilitySchema } from "@plakk/shared";
 import { Schema } from "effect";
-import type { PreparedFileUploadPayload, StorageUploadResult } from "../storageUpload.ts";
 
 export type IpcSchema = Schema.ConstraintCodec<unknown, unknown, never, never>;
 
@@ -30,13 +30,6 @@ export type IpcPayload<T extends IpcMethod<IpcSchema, IpcSchema>> = T["payload"]
 export type IpcResult<T extends IpcMethod<IpcSchema, IpcSchema>> = T["result"]["Type"];
 export type IpcEventPayload<T extends IpcEvent<IpcSchema>> = T["payload"]["Type"];
 
-export const AuthStatusSchema = Schema.Struct({
-  accessToken: Schema.NullOr(Schema.String),
-  user: Schema.NullOr(UserSchema),
-});
-
-export type AuthStatus = typeof AuthStatusSchema.Type;
-
 export const AuthErrorSchema = Schema.Struct({
   message: Schema.String,
 });
@@ -51,14 +44,14 @@ export const ClipboardContentSchema = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("image"),
     dataUrl: Schema.String,
-    path: Schema.String,
+    sourceId: Schema.String,
     width: Schema.Number,
     height: Schema.Number,
   }),
   Schema.Struct({
     type: Schema.Literal("file"),
     name: Schema.String,
-    path: Schema.String,
+    sourceId: Schema.String,
     extension: Schema.String,
     size: Schema.optionalKey(Schema.Number),
   }),
@@ -69,23 +62,37 @@ export const ClipboardContentSchema = Schema.Union([
 
 export type ClipboardContent = typeof ClipboardContentSchema.Type;
 
-const UserConfigSchema = Schema.Struct({
+export const AppearancePreferenceSchema = Schema.Literals(["light", "dark", "system"] as const);
+
+export type AppearancePreference = typeof AppearancePreferenceSchema.Type;
+
+export const AppearanceStateSchema = Schema.Struct({
+  preference: AppearancePreferenceSchema,
+  effective: Schema.Literals(["light", "dark"] as const),
+});
+
+export type AppearanceState = typeof AppearanceStateSchema.Type;
+
+export const UserConfigSchema = Schema.Struct({
+  appearance: AppearancePreferenceSchema,
   showExternalLinkWarning: Schema.Boolean,
+  toolbarWidgetEnabled: Schema.Boolean,
 });
 
 export type UserConfig = typeof UserConfigSchema.Type;
 
-export type UserConfigPatch = Partial<UserConfig>;
-
-const UserConfigPatchSchema = Schema.Struct({
+export const UserConfigPatchSchema = Schema.Struct({
   showExternalLinkWarning: Schema.optionalKey(Schema.Boolean),
+  toolbarWidgetEnabled: Schema.optionalKey(Schema.Boolean),
 });
+
+export type UserConfigPatch = typeof UserConfigPatchSchema.Type;
 
 export const TrayDroppedItemSchema = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("files"),
     files: Schema.Array(
-      Schema.Struct({ path: Schema.String, name: Schema.String, size: Schema.Number }),
+      Schema.Struct({ sourceId: Schema.String, name: Schema.String, size: Schema.Number }),
     ),
   }),
   Schema.Struct({
@@ -96,40 +103,97 @@ export const TrayDroppedItemSchema = Schema.Union([
 
 export type TrayDroppedItem = typeof TrayDroppedItemSchema.Type;
 
-export const TrayAccountStateSchema = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal("loading") }),
-  Schema.Struct({ kind: Schema.Literal("failed") }),
-  Schema.Struct({ kind: Schema.Literal("resolved"), account: AccountStatusSchema }),
-]);
-
-export type TrayAccountState = typeof TrayAccountStateSchema.Type;
-
-const PreparedUploadBaseSchema = {
+const SnippetIngestBaseSchema = {
   id: SnippetIdSchema,
-  prepared: PreparedStorageUploadSchema,
+  fileName: Schema.String,
   byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  mediaType: Schema.NullOr(Schema.String),
+  storageProvider: StorageProviderLiteral,
 };
 
-export const PreparedFileUploadPayloadSchema = Schema.Union([
-  Schema.Struct({ ...PreparedUploadBaseSchema, filePath: Schema.String }),
-  Schema.Struct({ ...PreparedUploadBaseSchema, bytes: Schema.Uint8Array }),
-]) satisfies Schema.Schema<PreparedFileUploadPayload>;
+export const SnippetIngestPayloadSchema = Schema.Union([
+  Schema.Struct({ ...SnippetIngestBaseSchema, filePath: Schema.String }),
+  Schema.Struct({ ...SnippetIngestBaseSchema, sourceId: Schema.String }),
+  Schema.Struct({ ...SnippetIngestBaseSchema, bytes: Schema.Uint8Array }),
+]);
 
-export const StorageUploadProgressSchema = Schema.Struct({
-  id: SnippetIdSchema,
-  progress: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 100 })),
+export type SnippetIngestPayload = typeof SnippetIngestPayloadSchema.Type;
+export type ResolvedSnippetIngestPayload = Exclude<
+  SnippetIngestPayload,
+  { readonly sourceId: string }
+>;
+
+const SnippetIngestResultSchema = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("ENQUEUED") }),
+  Schema.Struct({ status: Schema.Literal("FAILED"), message: Schema.String }),
+]);
+
+export type SnippetIngestResult = typeof SnippetIngestResultSchema.Type;
+
+export const DesktopSnippetLocalStateSchema = Schema.Struct({
+  status: Schema.Literals(["UPLOADING", "FAILED"] as const),
+  errorMessage: Schema.NullOr(Schema.String),
 });
 
-export const StorageUploadResultSchema = Schema.Struct({
-  storageObjectId: Schema.String,
-}) satisfies Schema.Schema<StorageUploadResult>;
+const DesktopSnippetBaseSchema = {
+  id: SnippetIdSchema,
+  fileName: Schema.String,
+  byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  storageProvider: StorageProviderLiteral,
+  createdAt: Schema.String,
+  updatedAt: Schema.String,
+  localTextPreview: Schema.NullOr(Schema.String),
+  localContentAvailability: LocalContentAvailabilitySchema,
+};
+
+export const DesktopSnippetSchema = Schema.Union([
+  Schema.Struct({
+    ...DesktopSnippetBaseSchema,
+    kind: Schema.Literal("LOCAL"),
+    localState: DesktopSnippetLocalStateSchema,
+  }),
+  Schema.Struct({
+    ...DesktopSnippetBaseSchema,
+    kind: Schema.Literal("PUBLISHED"),
+    localState: Schema.Null,
+  }),
+]);
+
+export type DesktopSnippet = typeof DesktopSnippetSchema.Type;
+
+export const LocalStateSchema = Schema.Struct({
+  revision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  account: Schema.NullOr(UserSchema),
+  provider: Schema.Struct({
+    known: Schema.Boolean,
+    value: Schema.NullOr(StorageProviderLiteral),
+  }),
+  capability: Schema.Union([
+    Schema.Struct({ status: Schema.Literal("OFFLINE") }),
+    Schema.Struct({
+      status: Schema.Literal("ONLINE"),
+      account: AccountStatusSchema,
+      connection: Schema.NullOr(StorageProviderStatusSchema),
+    }),
+  ]),
+  liveConnection: Schema.NullOr(
+    Schema.Struct({ status: Schema.Literals(["CONNECTED", "RECONNECTING"] as const) }),
+  ),
+  storageUsageBytes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  snippets: Schema.Array(DesktopSnippetSchema),
+});
+
+export type LocalState = typeof LocalStateSchema.Type;
+
+export const StorageFreeUpResultSchema = Schema.Struct({
+  reclaimedBytes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  removedCopies: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  storageUsageBytes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+});
+
+export type StorageFreeUpResult = typeof StorageFreeUpResultSchema.Type;
 
 export const ipcMethods = {
-  authGet: method({
-    channel: "auth:get",
-    payload: Schema.Void,
-    result: AuthStatusSchema,
-  }),
   authSignIn: method({
     channel: "auth:sign-in",
     payload: Schema.Void,
@@ -140,18 +204,38 @@ export const ipcMethods = {
     payload: Schema.Void,
     result: Schema.Void,
   }),
+  appearanceGet: method({
+    channel: "appearance:get",
+    payload: Schema.Void,
+    result: AppearanceStateSchema,
+  }),
+  appearanceSet: method({
+    channel: "appearance:set",
+    payload: AppearancePreferenceSchema,
+    result: AppearanceStateSchema,
+  }),
+  localStateGet: method({
+    channel: "local-state:get",
+    payload: Schema.Void,
+    result: LocalStateSchema,
+  }),
   openExternal: method({
     channel: "open-external",
     payload: Schema.String,
     result: Schema.Void,
   }),
-  storageUploadPreparedFile: method({
-    channel: "storage:upload-prepared-file",
-    payload: PreparedFileUploadPayloadSchema,
-    result: StorageUploadResultSchema,
+  snippetIngest: method({
+    channel: "snippet:ingest",
+    payload: SnippetIngestPayloadSchema,
+    result: SnippetIngestResultSchema,
   }),
-  storageCancelUpload: method({
-    channel: "storage:cancel-upload",
+  snippetDiscard: method({
+    channel: "snippet:discard",
+    payload: SnippetIdSchema,
+    result: Schema.Void,
+  }),
+  snippetDelete: method({
+    channel: "snippet:delete",
     payload: SnippetIdSchema,
     result: Schema.Void,
   }),
@@ -165,6 +249,16 @@ export const ipcMethods = {
     payload: SnippetIdSchema,
     result: Schema.Uint8Array,
   }),
+  snippetDownload: method({
+    channel: "snippet:download",
+    payload: SnippetIdSchema,
+    result: Schema.Void,
+  }),
+  storageFreeUp: method({
+    channel: "storage:free-up",
+    payload: Schema.Void,
+    result: StorageFreeUpResultSchema,
+  }),
   clipboardRead: method({
     channel: "clipboard:read",
     payload: Schema.Void,
@@ -174,13 +268,8 @@ export const ipcMethods = {
     channel: "tray:select-files",
     payload: Schema.Void,
     result: Schema.Array(
-      Schema.Struct({ path: Schema.String, name: Schema.String, size: Schema.Number }),
+      Schema.Struct({ sourceId: Schema.String, name: Schema.String, size: Schema.Number }),
     ),
-  }),
-  trayGetAccountState: method({
-    channel: "tray:get-account-state",
-    payload: Schema.Void,
-    result: TrayAccountStateSchema,
   }),
   userConfigGet: method({
     channel: "user-config:get",
@@ -200,13 +289,17 @@ export const ipcMethods = {
 } as const;
 
 export const ipcEvents = {
-  authStatusChanged: event({
-    channel: "auth:status-changed",
-    payload: AuthStatusSchema,
+  appearanceChanged: event({
+    channel: "appearance:changed",
+    payload: AppearanceStateSchema,
   }),
   authError: event({
     channel: "auth:error",
     payload: AuthErrorSchema,
+  }),
+  localStateChanged: event({
+    channel: "local-state:changed",
+    payload: LocalStateSchema,
   }),
   clipboardPaste: event({
     channel: "clipboard:paste",
@@ -216,16 +309,8 @@ export const ipcEvents = {
     channel: "tray:dropped-item",
     payload: TrayDroppedItemSchema,
   }),
-  trayAccountStateChanged: event({
-    channel: "tray:account-state-changed",
-    payload: TrayAccountStateSchema,
-  }),
   navigate: event({
     channel: "navigation:requested",
     payload: Schema.Literals(["home", "settings"] as const),
-  }),
-  storageUploadProgress: event({
-    channel: "storage:upload-progress",
-    payload: StorageUploadProgressSchema,
   }),
 } as const;

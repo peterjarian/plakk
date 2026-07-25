@@ -11,8 +11,16 @@ cd "$CODEX_WORKTREE_PATH"
 
 if command -v mise >/dev/null 2>&1; then
   mise trust "$CODEX_WORKTREE_PATH/.mise.toml"
+  mise install
   eval "$(mise activate bash)"
 fi
+
+export PATH="/home/apollo/.vite-plus/bin:$PATH"
+
+command -v vp >/dev/null 2>&1 || {
+  echo "Vite+ CLI not found at /home/apollo/.vite-plus/bin/vp" >&2
+  exit 127
+}
 
 vp install
 '''

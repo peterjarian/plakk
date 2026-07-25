@@ -1,4 +1,4 @@
-import { SNIPPET_KINDS, SNIPPET_UPLOAD_STATUSES, STORAGE_PROVIDERS } from "@plakk/shared";
+import { STORAGE_PROVIDERS } from "@plakk/shared";
 import {
   bigint,
   index,
@@ -10,8 +10,6 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 
-export const snippetKind = pgEnum("snippet_kind", SNIPPET_KINDS);
-export const snippetUploadStatus = pgEnum("snippet_upload_status", SNIPPET_UPLOAD_STATUSES);
 export const storageProvider = pgEnum("storage_provider", STORAGE_PROVIDERS);
 
 const timestamps = {
@@ -24,20 +22,14 @@ export const snippets = pgTable(
   {
     id: uuid("id").primaryKey(),
     ownerWorkosUserId: text("owner_workos_user_id").notNull(),
-    kind: snippetKind("kind").notNull(),
-    title: text("title").notNull(),
-    storageProvider: storageProvider("storage_provider"),
-    storageObjectId: text("storage_object_id"),
-    uploadStatus: snippetUploadStatus("upload_status").default("READY").notNull(),
+    storageProvider: storageProvider("storage_provider").notNull(),
+    storageObjectId: text("storage_object_id").notNull(),
     fileName: text("file_name").notNull(),
     byteSize: bigint("byte_size", { mode: "number" }).notNull(),
-    contentType: text("content_type"),
-    deletedAt: timestamp("deleted_at", { withTimezone: true }),
     ...timestamps,
   },
   (table) => [
     index("snippets_owner_created_at_idx").on(table.ownerWorkosUserId, table.createdAt),
-    index("snippets_owner_kind_idx").on(table.ownerWorkosUserId, table.kind),
     uniqueIndex("snippets_owner_storage_object_unique").on(
       table.ownerWorkosUserId,
       table.storageProvider,

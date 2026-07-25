@@ -1,10 +1,12 @@
-import { formatFileSize, type SnippetKind } from "@plakk/shared";
+import { formatFileSize, type SnippetPresentation } from "@plakk/shared";
 import type { ApiSnippet } from "@plakk/shared/PlakkApi";
+import type { LocalContentAvailability } from "@plakk/shared";
 import * as DateTime from "effect/DateTime";
 import {
   ArrowUpRight,
   Check,
   Copy,
+  Download,
   FileText,
   ImageIcon,
   LoaderCircle,
@@ -14,27 +16,26 @@ import {
   Type,
   X,
 } from "lucide-react";
-import type { UploadTask } from "../atoms/upload.ts";
 import { Button } from "./primitives/button.tsx";
 
-export type SnippetRowItem = ApiSnippet | UploadTask;
-
-export type TextSnippetContent =
-  | { readonly state: "loading" }
-  | { readonly state: "ready"; readonly text: string; readonly migrationError?: string }
-  | { readonly state: "failed"; readonly message: string };
-
-const kindMeta: Record<SnippetKind, { Icon: typeof Type }> = {
-  TEXT: { Icon: Type },
-  LINK: { Icon: LinkIcon },
-  FILE: { Icon: FileText },
-  IMAGE: { Icon: ImageIcon },
+export type SnippetRowItem = Omit<ApiSnippet, "storageObjectId"> & {
+  readonly kind: "LOCAL" | "PUBLISHED";
+  readonly localState: null | {
+    readonly status: "UPLOADING" | "FAILED";
+    readonly errorMessage: string | null;
+  };
+  readonly localContentAvailability: LocalContentAvailability;
 };
 
-const isUploadTask = (snippet: SnippetRowItem): snippet is UploadTask => "phase" in snippet;
+const presentationMeta: Record<SnippetPresentation["type"], { Icon: typeof Type }> = {
+  text: { Icon: Type },
+  hyperlink: { Icon: LinkIcon },
+  file: { Icon: FileText },
+  image: { Icon: ImageIcon },
+};
 
-const fileSubtitle = (snippet: Pick<ApiSnippet, "byteSize" | "fileName" | "kind">) =>
-  `${snippet.fileName.split(".").pop()?.toUpperCase() ?? snippet.kind} · ${formatFileSize(snippet.byteSize)}`;
+const fileSubtitle = (snippet: Pick<ApiSnippet, "byteSize" | "fileName">) =>
+  `${snippet.fileName.split(".").pop()?.toUpperCase() ?? "FILE"} · ${formatFileSize(snippet.byteSize)}`;
 
 const relativeDateUnits = [
   [30 * 24 * 60 * 60 * 1000, "month"],
@@ -77,14 +78,13 @@ export function formatSnippetDate(
 
 export function SnippetRow(props: {
   snippet: SnippetRowItem;
+  presentation: SnippetPresentation;
   now: number;
   copied: boolean;
   onCopy: () => void;
   onDelete: () => void;
+  onDownload?: () => void;
   onOpenLink?: (url: string) => void;
-  onRetryContent?: () => void;
-  onStopUpload: () => void;
-  textContent?: TextSnippetContent;
   thumbnailUrl?: string | null;
   copyDisabled?: boolean;
   copying?: boolean;
@@ -93,51 +93,42 @@ export function SnippetRow(props: {
 }) {
   const {
     snippet,
+    presentation,
     now,
     copied,
     onCopy,
     onDelete,
+    onDownload,
     onOpenLink,
-    onRetryContent,
-    onStopUpload,
-    textContent,
     thumbnailUrl,
     copyDisabled = false,
     copying = false,
     copyError,
     showActions = true,
   } = props;
-  const { Icon } = kindMeta[snippet.kind];
-  const isUploading = isUploadTask(snippet) && snippet.phase !== "FAILED";
-  const title =
-    snippet.kind === "TEXT"
-      ? textContent?.state === "ready"
-        ? textContent.text
-        : isUploadTask(snippet)
-          ? "Text snippet"
-          : snippet.title
-      : isUploadTask(snippet)
-        ? snippet.fileName
-        : snippet.title;
+  const { Icon } = presentationMeta[presentation.type];
+  const localState = snippet.localState;
+  const isUploading = localState?.status === "UPLOADING";
+  const isFailed = localState?.status === "FAILED";
+  const isDownloading = snippet.localContentAvailability.status === "DOWNLOADING";
+  const needsDownload =
+    snippet.kind === "PUBLISHED" &&
+    (snippet.localContentAvailability.status === "NOT_AVAILABLE" ||
+      snippet.localContentAvailability.status === "FAILED");
+  const title = presentation.title;
+  const time = formatSnippetDate(snippet.createdAt, now);
+  const metadata =
+    presentation.type === "file" || presentation.type === "image"
+      ? `${fileSubtitle(snippet)} · ${time}`
+      : `${formatFileSize(snippet.byteSize)} · ${time}`;
   const subtitle =
-    isUploadTask(snippet) && snippet.phase === "FAILED"
-      ? (snippet.errorMessage ?? "Upload failed. Choose the file again to retry.")
-      : snippet.kind === "TEXT" && textContent?.state === "loading"
-        ? "Loading text…"
-        : snippet.kind === "TEXT" && textContent?.state === "ready" && textContent.migrationError
-          ? textContent.migrationError
-          : snippet.kind === "TEXT" && textContent?.state === "failed"
-            ? textContent.message
-            : snippet.kind === "FILE" || snippet.kind === "IMAGE"
-              ? fileSubtitle(snippet)
-              : isUploadTask(snippet)
-                ? ""
-                : formatFileSize(snippet.byteSize);
-  const time = isUploadTask(snippet)
-    ? snippet.phase === "FAILED"
-      ? "Failed"
-      : ""
-    : formatSnippetDate(snippet.createdAt, now);
+    copyError !== undefined
+      ? copyError
+      : isFailed
+        ? (localState?.errorMessage ?? "Upload failed. Dismiss it and add the content again.")
+        : snippet.localContentAvailability.status === "FAILED"
+          ? snippet.localContentAvailability.message
+          : metadata;
 
   return (
     <li>
@@ -147,7 +138,7 @@ export function SnippetRow(props: {
         className="group relative flex items-center gap-2.5 rounded-lg px-2 py-2 transition-colors outline-none select-none hover:bg-muted/60 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-offset-1 focus-visible:ring-offset-background focus-visible:outline-none focus-within:bg-muted/60"
       >
         <span className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted text-muted-foreground">
-          {snippet.kind === "IMAGE" && thumbnailUrl !== null && thumbnailUrl !== undefined ? (
+          {presentation.type === "image" && thumbnailUrl !== null && thumbnailUrl !== undefined ? (
             <img src={thumbnailUrl} alt="" className="size-full object-cover" />
           ) : (
             <Icon className="size-4" />
@@ -160,64 +151,58 @@ export function SnippetRow(props: {
         </div>
 
         <div className="flex shrink-0 items-center justify-end">
-          {isUploading ? (
-            <div className="flex items-center gap-1">
+          {(isUploading || isDownloading) && (
+            <span
+              className="flex size-7 items-center justify-center"
+              role="status"
+              aria-label={isDownloading ? "Downloading for offline access" : "Syncing"}
+            >
               <LoaderCircle
                 className="size-4 animate-spin text-muted-foreground"
                 aria-hidden="true"
               />
-              {showActions && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label="Stop uploading"
-                  className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                  onClick={onStopUpload}
-                >
-                  <X />
-                </Button>
-              )}
-            </div>
-          ) : (
-            <>
-              <span
-                className={`text-[11px] tabular-nums text-muted-foreground ${showActions ? "group-hover:hidden group-focus-within:hidden" : ""}`}
-              >
-                {time}
-              </span>
+            </span>
+          )}
 
-              <div
-                className={
-                  showActions
-                    ? "hidden items-center gap-0.5 group-hover:flex group-focus-within:flex"
-                    : "hidden"
-                }
-              >
-                {snippet.kind === "TEXT" &&
-                  (textContent?.state === "failed" ||
-                    (textContent?.state === "ready" && textContent.migrationError)) &&
-                  onRetryContent && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      aria-label="Retry loading text"
-                      onClick={onRetryContent}
-                    >
-                      <RotateCw />
-                    </Button>
-                  )}
+          {needsDownload && onDownload && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              data-persistent-action="download"
+              aria-label={
+                snippet.localContentAvailability.status === "FAILED"
+                  ? "Retry download"
+                  : "Download to this device"
+              }
+              onClick={onDownload}
+            >
+              {snippet.localContentAvailability.status === "FAILED" ? <RotateCw /> : <Download />}
+            </Button>
+          )}
+
+          {isFailed && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              data-persistent-action="dismiss"
+              aria-label="Dismiss failed upload"
+              onClick={onDelete}
+            >
+              <X />
+            </Button>
+          )}
+
+          {showActions && snippet.kind === "PUBLISHED" && (
+            <div className="invisible flex items-center gap-0.5 group-hover:visible group-focus-within:visible">
+              {!needsDownload && !isDownloading && (
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon-sm"
                   aria-label={copying ? "Copying" : copied ? "Copied" : "Copy"}
-                  disabled={
-                    copying ||
-                    copyDisabled ||
-                    (snippet.kind === "TEXT" && textContent?.state !== "ready")
-                  }
+                  disabled={copying || copyDisabled}
                   onClick={onCopy}
                 >
                   {copying ? (
@@ -228,42 +213,29 @@ export function SnippetRow(props: {
                     <Copy />
                   )}
                 </Button>
-                {snippet.kind === "LINK" && (
-                  <>
-                    {onOpenLink ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label="Open link"
-                        onClick={() => onOpenLink(title)}
-                      >
-                        <ArrowUpRight />
-                      </Button>
-                    ) : (
-                      <Button
-                        render={<a href={title} target="_blank" rel="noreferrer" />}
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label="Open link"
-                      >
-                        <ArrowUpRight />
-                      </Button>
-                    )}
-                  </>
-                )}
+              )}
+              {presentation.type === "hyperlink" && onOpenLink && (
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon-sm"
-                  aria-label="Delete"
-                  className="hover:bg-destructive/10 hover:text-destructive"
-                  onClick={onDelete}
+                  aria-label="Open link"
+                  onClick={() => onOpenLink(presentation.url)}
                 >
-                  <Trash2 />
+                  <ArrowUpRight />
                 </Button>
-              </div>
-            </>
+              )}
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Delete"
+                className="hover:bg-destructive/10 hover:text-destructive"
+                onClick={onDelete}
+              >
+                <Trash2 />
+              </Button>
+            </div>
           )}
         </div>
         {copyError && (

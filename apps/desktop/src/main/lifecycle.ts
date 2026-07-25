@@ -1,16 +1,51 @@
-import type { AuthStatus } from "../ipc/contracts.ts";
+import type { User } from "@plakk/shared";
+import { resolve } from "node:path";
 
-type TrayAuthController = {
+export type DesktopTrayState = {
+  readonly canIngest: boolean;
+  readonly user: User | null;
+};
+
+type TrayWindowController = {
   disable(): void;
+  setAccountState(resolved: boolean, canIngest: boolean): void;
   setup(): void;
 };
 
-export function reconcileTrayAuth(status: AuthStatus, controller: TrayAuthController | undefined) {
-  if (status.user === null || status.accessToken === null) {
-    controller?.disable();
-    return;
+export function resolveDesktopUserDataPath(
+  defaultPath: string,
+  configuredPath: string | undefined,
+) {
+  const value = configuredPath?.trim();
+  return value ? resolve(value) : defaultPath;
+}
+
+export function createToolbarWidgetLifecycle(
+  controller: TrayWindowController,
+  initialToolbarWidgetEnabled: boolean,
+) {
+  let accountState: DesktopTrayState = { canIngest: false, user: null };
+  let toolbarWidgetEnabled = initialToolbarWidgetEnabled;
+
+  function reconcile() {
+    if (!toolbarWidgetEnabled || accountState.user === null) {
+      controller.disable();
+      return;
+    }
+    controller.setup();
+    controller.setAccountState(true, accountState.canIngest);
   }
-  controller?.setup();
+
+  return {
+    applyAccountState(state: DesktopTrayState) {
+      accountState = state;
+      reconcile();
+    },
+    applyToolbarWidgetPreference(enabled: boolean) {
+      toolbarWidgetEnabled = enabled;
+      reconcile();
+    },
+  };
 }
 
 export function isReloadShortcut(

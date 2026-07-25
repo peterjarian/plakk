@@ -6,18 +6,14 @@ import { formatSnippetDate, SnippetRow } from "./SnippetRow.tsx";
 
 const snippet = {
   id: "8c72d6f6-9a25-4633-b72f-d8f83cf1c8e0",
-  kind: "TEXT",
-  title: "A text snippet",
   fileName: "snippet.txt",
   byteSize: 14,
-  contentType: "text/plain",
-  contentUrl: null,
-  thumbnailUrl: null,
-  textContent: null,
-  storageProvider: null,
-  uploadStatus: "READY",
+  storageProvider: "GOOGLE_DRIVE",
+  kind: "PUBLISHED",
   createdAt: "2026-07-11T00:00:00.000Z",
   updatedAt: "2026-07-11T00:00:00.000Z",
+  localState: null,
+  localContentAvailability: { status: "AVAILABLE" } as const,
 } as const;
 
 const now = DateTime.toEpochMillis(DateTime.makeUnsafe("2026-07-11T12:00:00.000Z"));
@@ -29,12 +25,11 @@ describe("SnippetRow", () => {
     const markup = renderToStaticMarkup(
       <SnippetRow
         snippet={snippet}
+        presentation={{ type: "text", title: "A text snippet" }}
         now={now}
         copied={false}
         onCopy={() => undefined}
         onDelete={() => undefined}
-        onStopUpload={() => undefined}
-        textContent={{ state: "ready", text: "A text snippet" }}
       />,
     );
 
@@ -47,18 +42,188 @@ describe("SnippetRow", () => {
     const markup = renderToStaticMarkup(
       <SnippetRow
         snippet={snippet}
+        presentation={{ type: "text", title: "A text snippet" }}
         now={now}
         copied={false}
         copying
         onCopy={() => undefined}
         onDelete={() => undefined}
-        onStopUpload={() => undefined}
-        textContent={{ state: "ready", text: "A text snippet" }}
       />,
     );
 
     expect(markup).toContain('aria-label="Copying"');
     expect(markup).toContain("animate-spin");
+  });
+
+  it("shows local uploads as syncing without stop or retry actions", () => {
+    const markup = renderToStaticMarkup(
+      <SnippetRow
+        snippet={{
+          ...snippet,
+          kind: "LOCAL",
+          localState: { status: "UPLOADING", errorMessage: null },
+          localContentAvailability: { status: "NOT_AVAILABLE" },
+        }}
+        presentation={{ type: "text", title: "Text snippet" }}
+        now={now}
+        copied={false}
+        onCopy={() => undefined}
+        onDelete={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain('aria-label="Syncing"');
+    expect(markup).not.toContain('aria-label="Stop uploading"');
+    expect(markup).not.toContain('aria-label="Retry upload"');
+  });
+
+  it("shows failed local uploads with Dismiss and no Retry", () => {
+    const markup = renderToStaticMarkup(
+      <SnippetRow
+        snippet={{
+          ...snippet,
+          kind: "LOCAL",
+          localState: { status: "FAILED", errorMessage: "Upload failed." },
+          localContentAvailability: { status: "AVAILABLE" },
+        }}
+        presentation={{ type: "text", title: "Text snippet" }}
+        now={now}
+        copied={false}
+        onCopy={() => undefined}
+        onDelete={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain("Upload failed.");
+    expect(markup).toContain('aria-label="Dismiss failed upload"');
+    expect(markup).toContain('data-persistent-action="dismiss"');
+    expect(markup).not.toContain('aria-label="Retry upload"');
+    expect(markup).not.toContain('aria-label="Copy"');
+  });
+
+  it("only exposes hyperlink navigation through an explicit surface owner", () => {
+    const withoutOwner = renderToStaticMarkup(
+      <SnippetRow
+        snippet={snippet}
+        presentation={{
+          type: "hyperlink",
+          title: "https://example.com",
+          url: "https://example.com",
+        }}
+        now={now}
+        copied={false}
+        onCopy={() => undefined}
+        onDelete={() => undefined}
+      />,
+    );
+    const withOwner = renderToStaticMarkup(
+      <SnippetRow
+        snippet={snippet}
+        presentation={{
+          type: "hyperlink",
+          title: "https://example.com",
+          url: "https://example.com",
+        }}
+        now={now}
+        copied={false}
+        onCopy={() => undefined}
+        onDelete={() => undefined}
+        onOpenLink={() => undefined}
+      />,
+    );
+
+    expect(withoutOwner).not.toContain('aria-label="Open link"');
+    expect(withOwner).toContain('aria-label="Open link"');
+  });
+
+  it("keeps local download failure actionable without deriving a loading title", () => {
+    const markup = renderToStaticMarkup(
+      <SnippetRow
+        snippet={{
+          ...snippet,
+          localContentAvailability: {
+            status: "FAILED",
+            message: "Couldn’t download this text. Try again.",
+          },
+        }}
+        presentation={{ type: "text", title: "Text snippet" }}
+        now={now}
+        copied={false}
+        onCopy={() => undefined}
+        onDelete={() => undefined}
+        onDownload={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain("Text snippet");
+    expect(markup).toContain("Couldn’t download this text. Try again.");
+    expect(markup).not.toContain("Loading text");
+    expect(markup).toContain('aria-label="Retry download"');
+    expect(markup).toContain('data-persistent-action="download"');
+  });
+
+  it("keeps hydration progress visible without replacing content metadata", () => {
+    const markup = renderToStaticMarkup(
+      <SnippetRow
+        snippet={{
+          ...snippet,
+          localContentAvailability: { status: "DOWNLOADING" },
+        }}
+        presentation={{ type: "text", title: "Text snippet" }}
+        now={now}
+        copied={false}
+        onCopy={() => undefined}
+        onDelete={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain('role="status"');
+    expect(markup).toContain('aria-label="Downloading for offline access"');
+    expect(markup).toContain("14 B · 12 hours ago");
+    expect(markup).toContain("animate-spin");
+    expect(markup).not.toContain("Downloading for offline access…");
+    expect(markup).not.toContain("Saving on this device");
+  });
+
+  it("shows size and date without describing local availability", () => {
+    const markup = renderToStaticMarkup(
+      <SnippetRow
+        snippet={snippet}
+        presentation={{ type: "text", title: "A text snippet" }}
+        now={now}
+        copied={false}
+        onCopy={() => undefined}
+        onDelete={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain("14 B · 12 hours ago");
+    expect(markup).not.toContain("Available offline");
+    expect(markup).not.toContain("Not on this device");
+  });
+
+  it("keeps download available while ordinary actions wait for row interaction", () => {
+    const markup = renderToStaticMarkup(
+      <SnippetRow
+        snippet={{
+          ...snippet,
+          localContentAvailability: { status: "NOT_AVAILABLE" },
+        }}
+        presentation={{ type: "text", title: "A text snippet" }}
+        now={now}
+        copied={false}
+        copyDisabled
+        onCopy={() => undefined}
+        onDelete={() => undefined}
+        onDownload={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain('data-persistent-action="download"');
+    expect(markup).toContain('aria-label="Download to this device"');
+    expect(markup).toContain('aria-label="Delete"');
+    expect(markup).toContain("group-hover:visible");
+    expect(markup).not.toContain('aria-label="Copy"');
   });
 });
 

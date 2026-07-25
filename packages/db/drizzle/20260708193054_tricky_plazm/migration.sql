@@ -1,2 +1,0 @@
-CREATE TYPE "snippet_upload_status" AS ENUM('UPLOADING', 'READY', 'FAILED');--> statement-breakpoint
-ALTER TABLE "snippets" ADD COLUMN "upload_status" "snippet_upload_status" DEFAULT 'READY'::"snippet_upload_status" NOT NULL;

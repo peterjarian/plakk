@@ -4,6 +4,22 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Plakk Desktop</title>
+    <script>
+      const appearanceParams = new URLSearchParams(window.location.search);
+      const appearancePreference = appearanceParams.get("appearance");
+      const effectiveAppearance = appearanceParams.get("effectiveAppearance");
+      document.documentElement.dataset.appearance =
+        appearancePreference === "light" ||
+        appearancePreference === "dark" ||
+        appearancePreference === "system"
+          ? appearancePreference
+          : "system";
+      document.documentElement.dataset.effectiveAppearance =
+        effectiveAppearance === "dark" ? "dark" : "light";
+      document.documentElement.classList.toggle("dark", effectiveAppearance === "dark");
+      document.documentElement.style.colorScheme =
+        effectiveAppearance === "dark" ? "dark" : "light";
+    </script>
     <style>
       html,
       body,
@@ -15,6 +31,11 @@
       body {
         background: #ffffff;
         color: #171717;
+      }
+
+      html.dark body {
+        background: #0a0a0a;
+        color: #fafafa;
       }
     </style>
   </head>

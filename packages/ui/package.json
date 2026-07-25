@@ -4,7 +4,6 @@
   "type": "module",
   "exports": {
     "./globals.css": "./src/styles/globals.css",
-    "./atoms/*": "./src/atoms/*.ts",
     "./components/*": "./src/components/*.tsx",
     "./icons/*": "./src/icons/*.tsx",
     "./hooks/*": "./src/hooks/*.ts",
@@ -16,7 +15,6 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
-    "@effect/atom-react": "4.0.0-beta.92",
     "@plakk/shared": "workspace:*",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -24,7 +22,6 @@
     "lucide-react": "^1.23.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "scheduler": "^0.27.0",
     "shadcn": "^4.12.0",
     "tailwind-merge": "^3.6.0",
     "tailwindcss": "^4.3.2",

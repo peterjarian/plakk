@@ -5,6 +5,7 @@ export function TrayActions({
   copyDisabled,
   copied,
   copying,
+  ingestionDisabled,
   onCopy,
   onPaste,
   onSelect,
@@ -12,6 +13,7 @@ export function TrayActions({
   copyDisabled: boolean;
   copied: boolean;
   copying: boolean;
+  ingestionDisabled: boolean;
   onCopy: () => void;
   onPaste: () => void;
   onSelect: () => void;
@@ -28,11 +30,23 @@ export function TrayActions({
         {copying ? <LoaderCircle className="animate-spin" /> : copied ? <Check /> : <Copy />}
         Copy
       </Button>
-      <Button type="button" variant="outline" size="sm" onClick={onPaste}>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={ingestionDisabled}
+        onClick={onPaste}
+      >
         <ClipboardPaste />
         Paste
       </Button>
-      <Button type="button" variant="outline" size="sm" onClick={onSelect}>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={ingestionDisabled}
+        onClick={onSelect}
+      >
         <FileUp />
         Select
       </Button>

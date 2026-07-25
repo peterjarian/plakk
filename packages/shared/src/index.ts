@@ -1,5 +1,7 @@
 import * as Schema from "effect/Schema";
 
+export * from "./SnippetPresentation.ts";
+
 export const STORAGE_PROVIDERS = ["GOOGLE_DRIVE", "ONE_DRIVE", "DROPBOX"] as const;
 
 export const StorageProviderLiteral = Schema.Literals(STORAGE_PROVIDERS);
@@ -17,27 +19,14 @@ export const UserSchema = Schema.Struct({
 
 export type User = typeof UserSchema.Type;
 
-export const SNIPPET_KINDS = ["TEXT", "LINK", "FILE", "IMAGE"] as const;
+export const LocalContentAvailabilitySchema = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("AVAILABLE") }),
+  Schema.Struct({ status: Schema.Literal("NOT_AVAILABLE") }),
+  Schema.Struct({ status: Schema.Literal("DOWNLOADING") }),
+  Schema.Struct({ status: Schema.Literal("FAILED"), message: Schema.String }),
+]);
 
-export const SnippetKindLiteral = Schema.Literals(SNIPPET_KINDS);
-
-export type SnippetKind = typeof SnippetKindLiteral.Type;
-
-export const SNIPPET_UPLOAD_STATUSES = ["UPLOADING", "READY", "FAILED"] as const;
-export const MAX_TEXT_SNIPPET_BYTE_SIZE = 1024 * 1024;
-
-export const SnippetUploadStatusLiteral = Schema.Literals(SNIPPET_UPLOAD_STATUSES);
-
-export type SnippetUploadStatus = typeof SnippetUploadStatusLiteral.Type;
-
-export const isHttpUrl = (value: string): boolean => {
-  try {
-    const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:";
-  } catch {
-    return false;
-  }
-};
+export type LocalContentAvailability = typeof LocalContentAvailabilitySchema.Type;
 
 const formatFileSizeNumber = (value: number) =>
   value >= 100 ? value.toFixed(0) : value.toFixed(1);
@@ -53,6 +42,3 @@ export function formatFileSize(bytes: number): string {
 
   return `${formatFileSizeNumber(mb / 1024)} GB`;
 }
-
-export const snippetKindForFileName = (name: string): SnippetKind =>
-  /\.(avif|bmp|gif|heic|jpe?g|png|svg|tiff?|webp)$/i.test(name) ? "IMAGE" : "FILE";
