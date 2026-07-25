@@ -17,6 +17,7 @@ import { Button } from "@plakk/ui/components/primitives/button";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -395,9 +396,11 @@ export function Settings() {
                     <SelectValue>{appearanceLabels[appearance.preference]}</SelectValue>
                   </SelectTrigger>
                   <SelectContent align="end">
-                    <SelectItem value="light">{appearanceLabels.light}</SelectItem>
-                    <SelectItem value="dark">{appearanceLabels.dark}</SelectItem>
-                    <SelectItem value="system">{appearanceLabels.system}</SelectItem>
+                    <SelectGroup>
+                      <SelectItem value="light">{appearanceLabels.light}</SelectItem>
+                      <SelectItem value="dark">{appearanceLabels.dark}</SelectItem>
+                      <SelectItem value="system">{appearanceLabels.system}</SelectItem>
+                    </SelectGroup>
                   </SelectContent>
                 </Select>
               </SettingsRow>

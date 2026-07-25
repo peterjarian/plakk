@@ -119,8 +119,14 @@ describe("Desktop settings", () => {
 
     expect(container.textContent).not.toContain("Global hotkey");
     const appearance = container.querySelector('[role="combobox"][aria-label="Appearance"]');
-    expect(appearance).not.toBeNull();
-    expect(appearance?.querySelector('[data-slot="select-value"]')?.textContent).toBe("System");
+    if (!(appearance instanceof HTMLElement)) {
+      throw new Error("Appearance select was not rendered.");
+    }
+    expect(appearance.querySelector('[data-slot="select-value"]')?.textContent).toBe("System");
+
+    await act(async () => appearance.click());
+
+    expect(document.querySelector('[data-slot="select-group"]')).not.toBeNull();
   });
 
   it("restores and updates the Toolbar widget preference", async () => {
