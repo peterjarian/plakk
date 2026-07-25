@@ -26,6 +26,7 @@ peerDependencyRules:
     vitest: "*"
 minimumReleaseAge: 0
 allowBuilds:
+  better-sqlite3: true
   electron: true
   esbuild: true
   msgpackr-extract: true

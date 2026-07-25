@@ -22,13 +22,17 @@ export const PublishedSnippetRecordSchema = Schema.Struct({
 });
 
 export type PublishedSnippetRecord = typeof PublishedSnippetRecordSchema.Type;
+export const DeviceSnippetRecordSchema = Schema.Union([
+  LocalUploadRecordSchema,
+  PublishedSnippetRecordSchema,
+]);
 export type DeviceSnippetRecord = LocalUploadRecord | PublishedSnippetRecord;
 
 export const deviceSnippetRecordId = (record: DeviceSnippetRecord) =>
   record.kind === "LOCAL" ? record.id : record.snippet.id;
 
 export const SnippetReplicaStateSchema = Schema.Struct({
-  items: Schema.Array(Schema.Union([LocalUploadRecordSchema, PublishedSnippetRecordSchema])),
+  items: Schema.Array(DeviceSnippetRecordSchema),
 });
 
 export type SnippetReplicaState = typeof SnippetReplicaStateSchema.Type;

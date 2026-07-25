@@ -9,6 +9,7 @@ import { LocalStateLive } from "./local-state/LocalStateLive.ts";
 import { LocalStateSnippetsLive } from "./local-state/LocalStateSnippetsLive.ts";
 import { LocalStateStoreLive } from "./local-state/LocalStateStoreLive.ts";
 import { PlakkRpcClientLive, plakkRpcProtocolLayer } from "./PlakkRpcClientLive.ts";
+import { makeDesktopSqliteLayer } from "./persistence/Sqlite.ts";
 import { DesktopAccountDataLive } from "./session/DesktopAccountDataLive.ts";
 import { DesktopSessionLive } from "./session/DesktopSessionLive.ts";
 import { makeManagedSnippetContentLive } from "./snippets/content/ManagedSnippetContentLive.ts";
@@ -36,6 +37,7 @@ if (Option.isSome(configuredUserDataPath)) {
   app.setPath("userData", userDataPath);
 }
 export const managedSnippetContentRoot = join(app.getPath("userData"), "snippet-content");
+export const desktopDatabasePath = join(app.getPath("userData"), "plakk.sqlite");
 const platformLayer = NodeFileSystem.layer;
 const authServiceLayer = AuthServiceLive.pipe(Layer.provideMerge(AuthStoreLive));
 const nativeFileSourcesLayer = NativeFileSourcesLive.pipe(Layer.provide(NodeCrypto.layer));
@@ -50,7 +52,8 @@ const snippetRemoteTransportLayer = SnippetRemoteTransportLive.pipe(
   Layer.provide(plakkRpcClientLayer),
 );
 const snippetUploadRemoteLayer = SnippetUploadRemoteLive.pipe(Layer.provide(plakkRpcClientLayer));
-const snippetReplicaLayer = SnippetReplicaLive;
+const desktopSqliteLayer = makeDesktopSqliteLayer(desktopDatabasePath);
+const snippetReplicaLayer = SnippetReplicaLive.pipe(Layer.provide(desktopSqliteLayer));
 const uploadEngineDependencies = Layer.mergeAll(
   managedSnippetContentLayer,
   snippetReplicaLayer,
