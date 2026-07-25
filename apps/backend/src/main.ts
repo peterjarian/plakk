@@ -1,7 +1,7 @@
 import "dotenv/config";
 
 import { NodeHttpServer, NodeRuntime } from "@effect/platform-node";
-import { PgClientLive } from "@plakk/db";
+import { PostgresNotificationsLive } from "@plakk/db";
 import * as Config from "effect/Config";
 import * as Layer from "effect/Layer";
 import { HttpRouter } from "effect/unstable/http";
@@ -13,7 +13,7 @@ import { SnippetInvalidationsRoute } from "./api/snippets/snippetInvalidations.t
 
 const BackendRoutes = Layer.mergeAll(
   RpcRoutes.pipe(Layer.provide(ServerRuntimeLive)),
-  SnippetInvalidationsRoute.pipe(Layer.provide(PgClientLive)),
+  SnippetInvalidationsRoute.pipe(Layer.provide(PostgresNotificationsLive)),
   HttpRouter.cors({
     allowedOrigins: ["plakk-app://renderer"],
     allowedMethods: ["GET", "POST", "OPTIONS"],

@@ -7,6 +7,7 @@ import { TestClock } from "effect/testing";
 import {
   makeSnippetInvalidationsResponse,
   notifySnippetChanges,
+  reconnectSnippetNotifications,
   snippetInvalidationBytes,
   snippetInvalidationStream,
 } from "./snippetInvalidations.ts";
@@ -14,12 +15,39 @@ import {
 describe("snippet invalidations", () => {
   it("emits one payload-free refresh signal on connect and only for the authenticated account", async () => {
     const events = await Effect.runPromise(
-      snippetInvalidationStream(Stream.make("account-2", "account-1"), "account-1").pipe(
-        Stream.runCollect,
-      ),
+      snippetInvalidationStream(
+        Stream.make(
+          { _tag: "Connected" },
+          { _tag: "Notification", payload: "account-2" },
+          { _tag: "Notification", payload: "account-1" },
+        ),
+        "account-1",
+      ).pipe(Stream.runCollect),
     );
 
-    expect(Array.from(events)).toEqual([SNIPPETS_CHANGED, SNIPPETS_CHANGED]);
+    expect(Array.from(events)).toEqual([SNIPPETS_CHANGED, SNIPPETS_CHANGED, SNIPPETS_CHANGED]);
+  });
+
+  it("reconnects the PostgreSQL listener without ending the device-facing stream", async () => {
+    let attempts = 0;
+    const events = await Effect.runPromise(
+      Effect.gen(function* () {
+        const fiber = yield* reconnectSnippetNotifications(() => {
+          attempts += 1;
+          return attempts === 1
+            ? Stream.concat(
+                Stream.succeed({ _tag: "Connected" as const }),
+                Stream.fail("connection dropped"),
+              )
+            : Stream.succeed({ _tag: "Connected" as const });
+        }).pipe(Stream.take(1), Stream.runCollect, Effect.forkChild);
+        yield* TestClock.adjust("1 second");
+        return yield* Fiber.join(fiber);
+      }).pipe(Effect.provide(TestClock.layer())),
+    );
+
+    expect(Array.from(events)).toEqual([{ _tag: "Connected" }]);
+    expect(attempts).toBe(2);
   });
 
   it("renders a long-lived SSE response with lightweight transport keep-alive", async () => {

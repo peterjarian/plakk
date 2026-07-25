@@ -1,5 +1,5 @@
 import type { DrizzleService } from "@plakk/db";
-import { PgClient, sql } from "@plakk/db";
+import { PostgresNotifications, type PostgresNotificationEvent, sql } from "@plakk/db";
 import { SNIPPETS_CHANGED } from "@plakk/shared/PlakkApi";
 import { RpcError } from "@plakk/shared/RpcError";
 import * as Effect from "effect/Effect";
@@ -21,22 +21,38 @@ export const notifySnippetChanges = Effect.fn("notifySnippetChanges")(function* 
 });
 
 export const snippetInvalidationStream = <E>(
-  notifications: Stream.Stream<string, E>,
+  notifications: Stream.Stream<PostgresNotificationEvent, E>,
   ownerWorkosUserId: string,
 ): Stream.Stream<typeof SNIPPETS_CHANGED, E> =>
   Stream.merge(
     Stream.succeed(SNIPPETS_CHANGED),
     notifications.pipe(
-      Stream.filter((notifiedOwner) => notifiedOwner === ownerWorkosUserId),
+      Stream.filter((event) => event._tag === "Connected" || event.payload === ownerWorkosUserId),
       Stream.map(() => SNIPPETS_CHANGED),
     ),
     { haltStrategy: "both" },
   );
 
+export const reconnectSnippetNotifications = <E>(
+  listen: () => Stream.Stream<PostgresNotificationEvent, E>,
+) =>
+  Stream.suspend(() => {
+    let attempts = 0;
+    return Stream.suspend(() => {
+      attempts += 1;
+      return listen().pipe(Stream.filter((event) => event._tag !== "Connected" || attempts > 1));
+    }).pipe(
+      Stream.tapError((error) =>
+        Effect.logWarning("PostgreSQL notification listener disconnected", { error }),
+      ),
+      Stream.retry(Schedule.spaced("1 second")),
+    );
+  });
+
 const eventChunk = (value: string) => new TextEncoder().encode(value);
 
 export const snippetInvalidationBytes = <E>(
-  notifications: Stream.Stream<string, E>,
+  notifications: Stream.Stream<PostgresNotificationEvent, E>,
   ownerWorkosUserId: string,
 ) => {
   const invalidations = snippetInvalidationStream(notifications, ownerWorkosUserId).pipe(
@@ -49,7 +65,7 @@ export const snippetInvalidationBytes = <E>(
 };
 
 export const makeSnippetInvalidationsResponse = <E>(
-  notifications: Stream.Stream<string, E>,
+  notifications: Stream.Stream<PostgresNotificationEvent, E>,
   ownerWorkosUserId: string,
 ) =>
   HttpServerResponse.stream(snippetInvalidationBytes(notifications, ownerWorkosUserId), {
@@ -63,17 +79,13 @@ export const makeSnippetInvalidationsResponse = <E>(
 
 export const SnippetInvalidationsRoute = HttpRouter.use((router) =>
   Effect.gen(function* () {
-    const pg = yield* PgClient.PgClient;
+    const postgresNotifications = yield* PostgresNotifications;
+    const notifications = yield* reconnectSnippetNotifications(() =>
+      postgresNotifications.listen(SNIPPET_INVALIDATION_CHANNEL),
+    ).pipe(Stream.share({ capacity: "unbounded" }));
     yield* router.add("GET", "/api/snippets/invalidations", (request) =>
       Effect.gen(function* () {
         const currentUser = yield* authenticateRequest(request.headers);
-        const notifications = pg
-          .listen(SNIPPET_INVALIDATION_CHANNEL)
-          .pipe(
-            Stream.tapError((error) =>
-              Effect.logError("Snippet invalidation listener failed", { error }),
-            ),
-          );
         yield* Effect.logInfo("Snippet SSE stream connected", {
           ownerWorkosUserId: currentUser.id,
         });

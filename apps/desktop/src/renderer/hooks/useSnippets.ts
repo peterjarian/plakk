@@ -1,4 +1,8 @@
-import { deriveSnippetPresentation, type SnippetPresentation } from "@plakk/shared";
+import {
+  deriveSnippetPresentation,
+  isTextSnippetFileName,
+  type SnippetPresentation,
+} from "@plakk/shared";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { DesktopSnippet } from "../../ipc/contracts.ts";
@@ -13,16 +17,26 @@ export const projectSnippetReadModels = (
   replicaItems: ReadonlyArray<DesktopSnippet>,
   thumbnailUrls: Readonly<Record<string, string>>,
 ): ReadonlyArray<SnippetReadModel> =>
-  replicaItems.map((snippet) => {
+  replicaItems.flatMap((snippet) => {
+    if (
+      snippet.kind === "PUBLISHED" &&
+      isTextSnippetFileName(snippet.fileName) &&
+      snippet.localTextPreview === null &&
+      snippet.localContentAvailability.status === "DOWNLOADING"
+    ) {
+      return [];
+    }
     const presentation = deriveSnippetPresentation({
       fileName: snippet.fileName,
       ...(snippet.localTextPreview === null ? {} : { content: snippet.localTextPreview }),
     });
-    return {
-      ...snippet,
-      presentation,
-      thumbnailUrl: thumbnailUrls[snippet.id] ?? null,
-    };
+    return [
+      {
+        ...snippet,
+        presentation,
+        thumbnailUrl: thumbnailUrls[snippet.id] ?? null,
+      },
+    ];
   });
 
 export const createImageUrlRegistry = () => {

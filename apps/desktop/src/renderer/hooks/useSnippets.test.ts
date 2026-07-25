@@ -25,7 +25,7 @@ describe("snippet read-model projection", () => {
     expect(item?.presentation).toEqual({ type: "text", title: "A stable local snippet" });
   });
 
-  it("projects a neutral file row before local text content is available", () => {
+  it("withholds pulled text until its local presentation is available", () => {
     const remoteText = snippet({
       localState: null,
       localTextPreview: null,
@@ -33,11 +33,9 @@ describe("snippet read-model projection", () => {
       localContentAvailability: { status: "DOWNLOADING" },
     });
 
-    const [item] = projectSnippetReadModels([remoteText], {});
+    const items = projectSnippetReadModels([remoteText], {});
 
-    expect(item?.presentation).toEqual({ type: "file", title: "Text snippet" });
-    expect(item?.presentation.title).not.toContain(remoteText.id);
-    expect(JSON.stringify(item)).not.toContain("Loading text");
+    expect(items).toEqual([]);
   });
 
   it("does not expose a user-named text file before its content is decoded", () => {
