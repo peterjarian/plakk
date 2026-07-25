@@ -1,5 +1,5 @@
 import { StorageProviderLiteral, UserSchema, type User } from "@plakk/shared";
-import type { AccountStatus, PipeConnection } from "@plakk/shared/PlakkApi";
+import type { AccountStatus, StorageProviderStatus } from "@plakk/shared/PlakkApi";
 import { Context, Effect, Schema, type Stream } from "effect";
 
 import type { LocalState as LocalStateValue } from "../../ipc/contracts.ts";
@@ -26,7 +26,7 @@ export type LocalStateUpdate =
       readonly kind: "online";
       readonly account: User;
       readonly accountStatus: AccountStatus;
-      readonly connection: PipeConnection | null;
+      readonly connection: StorageProviderStatus | null;
     }
   | {
       readonly kind: "live-connection";

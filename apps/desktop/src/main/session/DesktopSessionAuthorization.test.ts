@@ -205,7 +205,7 @@ describe("DesktopSession command authority", () => {
                 storageProvider: "GOOGLE_DRIVE",
                 blockedReasons: [],
               }),
-            GetPipeConnectionStatus: () =>
+            GetStorageProviderStatus: () =>
               Effect.succeed({
                 storageProvider: "GOOGLE_DRIVE",
                 status: "CONNECTED",
@@ -261,7 +261,7 @@ describe("DesktopSession command authority", () => {
               storageProvider: "GOOGLE_DRIVE",
               blockedReasons: [],
             }),
-          GetPipeConnectionStatus: () =>
+          GetStorageProviderStatus: () =>
             Deferred.succeed(capabilityChecked, undefined).pipe(
               Effect.as({
                 storageProvider: "GOOGLE_DRIVE",
@@ -351,7 +351,7 @@ describe("DesktopSession command authority", () => {
                 blockedReasons: [],
               } as const;
             }),
-          GetPipeConnectionStatus: () =>
+          GetStorageProviderStatus: () =>
             Effect.succeed({
               storageProvider: "GOOGLE_DRIVE",
               status: "CONNECTED",
@@ -671,7 +671,7 @@ describe("DesktopSession command authority", () => {
               storageProvider: "GOOGLE_DRIVE",
               blockedReasons: [],
             }),
-          GetPipeConnectionStatus: () =>
+          GetStorageProviderStatus: () =>
             Deferred.succeed(detailAttempted, undefined).pipe(
               Effect.andThen(
                 Effect.fail(

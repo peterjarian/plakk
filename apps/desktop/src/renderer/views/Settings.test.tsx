@@ -126,7 +126,10 @@ describe("Desktop settings", () => {
 
     await act(async () => appearance.click());
 
-    expect(document.querySelector('[data-slot="select-group"]')).not.toBeNull();
+    const appearanceOptions = document.querySelector('[data-slot="select-group"]');
+    expect(appearanceOptions?.textContent).toContain("Light");
+    expect(appearanceOptions?.textContent).toContain("Dark");
+    expect(appearanceOptions?.textContent).toContain("System");
   });
 
   it("restores and updates the Toolbar widget preference", async () => {

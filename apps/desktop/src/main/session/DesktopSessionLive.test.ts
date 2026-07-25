@@ -181,7 +181,7 @@ describe("DesktopSession", () => {
                 storageProvider: "GOOGLE_DRIVE",
                 blockedReasons: [],
               }),
-            GetPipeConnectionStatus: () =>
+            GetStorageProviderStatus: () =>
               Effect.succeed({
                 storageProvider: "GOOGLE_DRIVE",
                 status: "CONNECTED",

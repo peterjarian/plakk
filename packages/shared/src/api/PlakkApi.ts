@@ -4,7 +4,7 @@ import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 import * as RpcMiddleware from "effect/unstable/rpc/RpcMiddleware";
 
-import { StorageProviderLiteral, type User } from "../index.ts";
+import { StorageProviderLiteral } from "../index.ts";
 import { RpcError } from "./RpcError.ts";
 
 export const AccountBlockedReasonSchema = Schema.Literals(["billing", "storage"] as const);
@@ -22,15 +22,15 @@ export type AccountStatus = typeof AccountStatusSchema.Type;
 export const accountCanSync = (account: AccountStatus): boolean =>
   account.canSync && account.blockedReasons.length === 0 && account.storageProvider !== null;
 
-export const PipeConnectionStatusSchema = Schema.Literals([
+export const StorageProviderConnectionStatusSchema = Schema.Literals([
   "CONNECTED",
   "NEEDS_REAUTHORIZATION",
   "NOT_CONNECTED",
 ] as const);
 
-export type PipeConnectionStatus = typeof PipeConnectionStatusSchema.Type;
+export type StorageProviderConnectionStatus = typeof StorageProviderConnectionStatusSchema.Type;
 
-export const PipeConnectionSchema = Schema.Union([
+export const StorageProviderStatusSchema = Schema.Union([
   Schema.Struct({
     storageProvider: StorageProviderLiteral,
     status: Schema.Literal("CONNECTED"),
@@ -43,11 +43,11 @@ export const PipeConnectionSchema = Schema.Union([
   }),
 ]);
 
-export type PipeConnection = typeof PipeConnectionSchema.Type;
+export type StorageProviderStatus = typeof StorageProviderStatusSchema.Type;
 
 export const accountCanSyncWithConnection = (
   account: AccountStatus,
-  connection: PipeConnection | null,
+  connection: StorageProviderStatus | null,
 ): boolean => accountCanSync(account) && connection?.status === "CONNECTED";
 
 export const PreparedStorageUploadSchema = Schema.Struct({
@@ -86,6 +86,14 @@ export const ApiSnippetSchema = Schema.Struct({
 export type ApiSnippet = typeof ApiSnippetSchema.Type;
 
 export const SNIPPETS_CHANGED = "SNIPPETS_CHANGED" as const;
+export const SNIPPET_INVALIDATION_KEEP_ALIVE = "KEEP_ALIVE" as const;
+
+export const SnippetInvalidationEventSchema = Schema.Literals([
+  SNIPPETS_CHANGED,
+  SNIPPET_INVALIDATION_KEEP_ALIVE,
+] as const);
+
+export type SnippetInvalidationEvent = typeof SnippetInvalidationEventSchema.Type;
 
 export const PrepareSnippetUploadPayloadSchema = Schema.Struct({
   id: SnippetIdSchema,
@@ -107,7 +115,7 @@ export const PublishSnippetPayloadSchema = Schema.Struct({
 
 export type PublishSnippetPayload = typeof PublishSnippetPayloadSchema.Type;
 
-export class CurrentUser extends Context.Service<CurrentUser, User>()(
+export class CurrentUser extends Context.Service<CurrentUser, { readonly id: string }>()(
   "@plakk/shared/api/PlakkApi/CurrentUser",
 ) {}
 
@@ -136,17 +144,17 @@ export const AccountRpcs = RpcGroup.make(
 );
 
 export const StorageRpcs = RpcGroup.make(
-  Rpc.make("GetPipeConnectionUrl", {
+  Rpc.make("BeginStorageProviderLink", {
     payload: { storageProvider: StorageProviderLiteral },
     success: Schema.Struct({ url: Schema.String }),
     error: RpcError,
   }),
-  Rpc.make("GetPipeConnectionStatus", {
+  Rpc.make("GetStorageProviderStatus", {
     payload: { storageProvider: StorageProviderLiteral },
-    success: PipeConnectionSchema,
+    success: StorageProviderStatusSchema,
     error: RpcError,
   }),
-  Rpc.make("DisconnectPipe", {
+  Rpc.make("UnlinkStorageProvider", {
     payload: { storageProvider: StorageProviderLiteral },
     success: Schema.Void,
     error: RpcError,
@@ -162,6 +170,11 @@ export const SnippetRpcs = RpcGroup.make(
   Rpc.make("GetSnippetSnapshot", {
     success: Schema.Array(ApiSnippetSchema),
     error: RpcError,
+  }),
+  Rpc.make("WatchSnippetInvalidations", {
+    success: SnippetInvalidationEventSchema,
+    error: RpcError,
+    stream: true,
   }),
   Rpc.make("PublishSnippet", {
     payload: PublishSnippetPayloadSchema,

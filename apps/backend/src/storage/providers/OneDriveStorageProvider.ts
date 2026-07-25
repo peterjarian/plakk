@@ -4,16 +4,16 @@ import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstab
 
 import {
   type DeleteStorageObjectInput,
-  StorageProviderError,
-  StorageObjectNotFoundError,
   type DownloadStorageObjectInput,
   type GetStorageObjectUrlInput,
   type PreparedStorageUpload,
   type PrepareStorageUploadInput,
+  readStorageObjectBytes,
+  StorageObjectNotFoundError,
+  type StorageProviderAdapter,
   type StorageProviderDestination,
-} from "../types.ts";
-import type { StorageProviderAdapter } from "../StorageProvider.ts";
-import { readStorageObjectBytes } from "../readStorageObjectBytes.ts";
+  StorageProviderError,
+} from "../StorageProvider.ts";
 
 const ONE_DRIVE_ROOT_URL = "https://graph.microsoft.com/v1.0/me/drive/root:";
 const ONE_DRIVE_ITEMS_URL = "https://graph.microsoft.com/v1.0/me/drive/items";

@@ -56,6 +56,10 @@ _Avoid_: Active token, online session
 The storage provider most recently confirmed as linked to the current account. The cached provider remains displayable offline but does not imply that the provider is currently reachable.
 _Avoid_: Available provider, live connection
 
+**Storage provider status**:
+The current online assessment that a storage provider is connected for the current account, needs reauthorization, or is not connected. It is distinct from both the cached linked storage provider and the device's live invalidation connection.
+_Avoid_: Pipe connection, live connection
+
 **Snippet snapshot**:
 The complete authoritative set of Snippet records for an account at refresh time. Applying it atomically replaces published device records, preserves local upload records, promotes a matching local identity to published, and treats absence of a previously published identity as deletion.
 _Avoid_: Change page, partial snapshot, event batch

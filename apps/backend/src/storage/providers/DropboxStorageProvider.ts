@@ -4,16 +4,16 @@ import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstab
 
 import {
   type DeleteStorageObjectInput,
-  StorageProviderError,
-  StorageObjectNotFoundError,
   type DownloadStorageObjectInput,
   type GetStorageObjectUrlInput,
   type PreparedStorageUpload,
   type PrepareStorageUploadInput,
+  readStorageObjectBytes,
+  StorageObjectNotFoundError,
+  type StorageProviderAdapter,
   type StorageProviderDestination,
-} from "../types.ts";
-import type { StorageProviderAdapter } from "../StorageProvider.ts";
-import { readStorageObjectBytes } from "../readStorageObjectBytes.ts";
+  StorageProviderError,
+} from "../StorageProvider.ts";
 
 const DROPBOX_TEMPORARY_UPLOAD_LINK_URL =
   "https://api.dropboxapi.com/2/files/get_temporary_upload_link";

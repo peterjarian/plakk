@@ -1,6 +1,6 @@
 import { NodeFileSystem } from "@effect/platform-node";
 import { UserSchema, type User } from "@plakk/shared";
-import type { AccountStatus, PipeConnection } from "@plakk/shared/PlakkApi";
+import type { AccountStatus, StorageProviderStatus } from "@plakk/shared/PlakkApi";
 import { expect, it } from "@effect/vitest";
 import { Effect, FileSystem, Layer, ManagedRuntime, Schema, Stream } from "effect";
 import ElectronStore from "electron-store";
@@ -39,13 +39,13 @@ const onlineAccount: AccountStatus = {
   blockedReasons: [],
 };
 
-const connected: PipeConnection = {
+const connected: StorageProviderStatus = {
   storageProvider: "GOOGLE_DRIVE",
   status: "CONNECTED",
   externalDestinationUrl: "https://drive.example.com/folder",
 };
 
-const notConnected: PipeConnection = {
+const notConnected: StorageProviderStatus = {
   storageProvider: "GOOGLE_DRIVE",
   status: "NOT_CONNECTED",
   externalDestinationUrl: null,

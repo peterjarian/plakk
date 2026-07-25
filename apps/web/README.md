@@ -39,4 +39,4 @@ The web app owns the WorkOS browser authentication routes under `/api/auth/*`. I
 product RPC commands or live updates.
 
 Desktop connects directly to the independently deployed backend using `PLAKK_RPC_URL` for commands
-and `PLAKK_SNIPPET_INVALIDATIONS_URL` for live Snippet invalidations.
+and live Snippet invalidations.

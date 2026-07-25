@@ -76,10 +76,9 @@ deterministic Electron-main seams rather than by introducing a permanent network
 
 The focused suite maps to the contracted owners:
 
-- Backend publication, idempotency/conflict, snapshots, transaction notification ordering, SSE
-  filtering, deletion, and one-shot provider cleanup:
-  `SnippetUploadsLive.test.ts`, `snippetSnapshots.test.ts`, `snippetInvalidations.test.ts`, and
-  `SnippetDeletionLive.test.ts`.
+- Backend publication, idempotency/conflict, snapshots, transaction notification ordering,
+  streaming RPC filtering, deletion, and one-shot provider cleanup:
+  `SnippetRpcsLive.test.ts` and `SnippetInvalidations.test.ts`.
 - Electron-main Device Snippet records, lost-response promotion, upload lifecycle, reconnect,
   hydration, integrity, deletion, storage management, and account isolation:
   `SnippetUploadEngineLive.test.ts`, `device-records.test.ts`, `sync.test.ts`,
