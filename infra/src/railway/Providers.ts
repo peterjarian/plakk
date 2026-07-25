@@ -6,8 +6,7 @@ import { RailwayApiLive } from "./RailwayApi.ts";
 
 export class Providers extends Provider.ProviderCollection<Providers>()("Railway") {}
 
-export const providers = () =>
-  Layer.effect(Providers, Provider.collection([Backend])).pipe(
-    Layer.provide(BackendProvider()),
-    Layer.provideMerge(RailwayApiLive),
-  );
+export const providers = Layer.effect(Providers, Provider.collection([Backend])).pipe(
+  Layer.provide(BackendProvider),
+  Layer.provideMerge(RailwayApiLive),
+);

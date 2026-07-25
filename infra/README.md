@@ -3,8 +3,8 @@
 This package deploys the production backend as one Alchemy stack:
 
 - a Neon project with the SQL migrations from `packages/db/drizzle`;
-- three Axiom datasets for OTEL traces, logs, and metrics, plus one
-  ingest-only API token;
+- one Axiom dataset for the complete OTEL stream, plus one ingest-only API
+  token;
 - a Railway project containing the GitHub-backed `backend` service and a
   generated public domain.
 
@@ -66,5 +66,6 @@ shared database/domain dependencies. Database migrations run through the Neon
 resource before Railway receives `DATABASE_URL`.
 
 The backend binds to `0.0.0.0:$PORT`, exposes `/health`, and exports Effect
-traces, logs, and metrics over OTLP/HTTP. Each signal uses its own Axiom
-dataset; metrics use Axiom's required `X-Axiom-Metrics-Dataset` header.
+traces, logs, and metrics over OTLP/HTTP into one Axiom dataset. Metrics use
+Axiom's required `X-Axiom-Metrics-Dataset` header while naming that same
+dataset.

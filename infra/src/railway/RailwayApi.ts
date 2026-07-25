@@ -80,8 +80,7 @@ const configurationOf = (desired: DesiredBackend): string =>
   });
 
 export interface RailwayApiService {
-  readonly none: Effect.Effect<undefined>;
-  readonly listManagedBackends: () => Effect.Effect<Array<BackendAttributes>, RailwayApiError>;
+  readonly listManagedBackends: Effect.Effect<Array<BackendAttributes>, RailwayApiError>;
   readonly readBackend: (
     attributes: BackendAttributes,
   ) => Effect.Effect<BackendAttributes, RailwayApiError>;
@@ -527,7 +526,7 @@ export const makeRailwayApi = (
         previous === undefined
           ? undefined
           : yield* getProject(previous.projectId).pipe(
-              Effect.catchIf(isNotFound, () => Effect.succeed(undefined)),
+              Effect.catchIf(isNotFound, () => Effect.void),
             );
 
       if (project === undefined) {
@@ -581,7 +580,7 @@ export const makeRailwayApi = (
         yield* connectService(serviceId, desired.repository, desired.branch);
       }
       yield* getServiceInstance(serviceId, environment.id).pipe(
-        Effect.catchIf(isNotFound, () => Effect.succeed(undefined)),
+        Effect.catchIf(isNotFound, () => Effect.void),
       );
       if (previous?.configuration !== configuration) {
         yield* updateServiceInstance(serviceId, environment.id, desired);
@@ -621,30 +620,29 @@ export const makeRailwayApi = (
       };
     });
 
-  const listManagedBackends = () =>
-    Effect.gen(function* () {
-      const projects = yield* listProjects();
-      const managed = projects.filter((project) =>
-        project.description?.startsWith("Managed by Alchemy ("),
-      );
-      const backends = yield* Effect.forEach(managed, (summary) =>
-        Effect.gen(function* () {
-          const project = yield* getProject(summary.id);
-          const environment = project.environments.edges[0]?.node;
-          const service = project.services.edges[0]?.node;
-          if (environment === undefined || service === undefined) {
-            return undefined;
-          }
-          return yield* attributesFor(project.id, environment.id, service.id, "").pipe(
-            Effect.catch(() => Effect.succeed(undefined)),
-          );
-        }),
-      );
-      return backends.filter((backend): backend is BackendAttributes => backend !== undefined);
-    });
+  const listManagedBackends = Effect.gen(function* () {
+    const projects = yield* listProjects();
+    const managed = projects.filter((project) =>
+      project.description?.startsWith("Managed by Alchemy ("),
+    );
+    const backends = yield* Effect.forEach(managed, (summary) =>
+      Effect.gen(function* () {
+        const project = yield* getProject(summary.id);
+        const environment = project.environments.edges[0]?.node;
+        const service = project.services.edges[0]?.node;
+        if (environment === undefined || service === undefined) {
+          return undefined;
+        }
+        return yield* attributesFor(project.id, environment.id, service.id, "").pipe(
+          Effect.orElseSucceed(() => undefined),
+        );
+      }),
+    );
+    return backends.filter((backend): backend is BackendAttributes => backend !== undefined);
+  });
 
   const orNotFound = <A>(effect: Effect.Effect<A, RailwayApiError>) =>
-    effect.pipe(Effect.catchIf(isNotFound, () => Effect.succeed(undefined)));
+    effect.pipe(Effect.catchIf(isNotFound, () => Effect.void.pipe(Effect.as(undefined))));
 
   const ignoreNotFound = (
     effect: Effect.Effect<void, RailwayApiError>,
@@ -652,7 +650,6 @@ export const makeRailwayApi = (
     effect.pipe(Effect.catchIf(isNotFound, () => Effect.void));
 
   return {
-    none: Effect.succeed(undefined),
     listManagedBackends,
     readBackend,
     reconcileBackend,

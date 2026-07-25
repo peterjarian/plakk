@@ -2,7 +2,6 @@ import { Resource } from "alchemy";
 import * as Provider from "alchemy/Provider";
 import * as Effect from "effect/Effect";
 import * as Redacted from "effect/Redacted";
-
 import { RailwayApi } from "./RailwayApi.ts";
 import type { Providers } from "./Providers.ts";
 
@@ -57,27 +56,28 @@ const revealVariables = (
     ]),
   );
 
-export const BackendProvider = () =>
-  Provider.effect(
-    Backend,
-    RailwayApi.pipe(
-      Effect.map((api) =>
-        Backend.Provider.of({
-          stables: ["projectId", "environmentId", "serviceId"],
-          list: () => api.listManagedBackends(),
-          read: ({ output }) =>
-            output === undefined ? api.none : api.readBackend(output).pipe(api.orNotFound),
-          reconcile: ({ id, news, output }) =>
-            api.reconcileBackend({
-              desired: {
-                ...news,
-                variables: revealVariables(news.variables),
-              },
-              marker: ownershipMarker(id),
-              previous: output,
-            }),
-          delete: ({ output }) => api.deleteProject(output.projectId).pipe(api.ignoreNotFound),
-        }),
-      ),
+export const BackendProvider = Provider.effect(
+  Backend,
+  RailwayApi.pipe(
+    Effect.map((api) =>
+      Backend.Provider.of({
+        stables: ["projectId", "environmentId", "serviceId"],
+        list: () => api.listManagedBackends,
+        read: ({ output }) =>
+          output === undefined
+            ? Effect.void.pipe(Effect.as(undefined))
+            : api.readBackend(output).pipe(api.orNotFound),
+        reconcile: ({ id, news, output }) =>
+          api.reconcileBackend({
+            desired: {
+              ...news,
+              variables: revealVariables(news.variables),
+            },
+            marker: ownershipMarker(id),
+            previous: output,
+          }),
+        delete: ({ output }) => api.deleteProject(output.projectId).pipe(api.ignoreNotFound),
+      }),
     ),
-  );
+  ),
+);

@@ -23,7 +23,7 @@ const otelHeaders = (
 export default Alchemy.Stack(
   "Plakk",
   {
-    providers: Layer.mergeAll(Axiom.providers(), Neon.providers(), Railway.providers()),
+    providers: Layer.mergeAll(Axiom.providers(), Neon.providers(), Railway.providers),
     state: Alchemy.localState(),
   },
   Effect.gen(function* () {
@@ -46,37 +46,21 @@ export default Alchemy.Stack(
       migrationsDir: "../packages/db/drizzle",
     });
 
-    const traces = yield* Axiom.Dataset("Traces", {
-      name: `plakk-${stack.stage}-traces`,
-      kind: "otel:traces:v1",
-      description: `Plakk ${stack.stage} traces`,
-      retentionDays: 30,
-      useRetentionPeriod: true,
-    });
-    const logs = yield* Axiom.Dataset("Logs", {
-      name: `plakk-${stack.stage}-logs`,
-      kind: "otel:logs:v1",
-      description: `Plakk ${stack.stage} logs`,
-      retentionDays: 30,
-      useRetentionPeriod: true,
-    });
-    const metrics = yield* Axiom.Dataset("Metrics", {
-      name: `plakk-${stack.stage}-metrics`,
-      kind: "otel:metrics:v1",
-      description: `Plakk ${stack.stage} metrics`,
+    const telemetry = yield* Axiom.Dataset("Telemetry", {
+      name: `plakk-${stack.stage}-otel`,
+      kind: "axiom:events:v1",
+      description: `Plakk ${stack.stage} OpenTelemetry`,
       retentionDays: 30,
       useRetentionPeriod: true,
     });
     const ingestToken = yield* Axiom.ApiToken(
       "OtelIngestToken",
-      Output.all(traces.name, logs.name, metrics.name).pipe(
-        Output.map(([tracesName, logsName, metricsName]) => ({
+      telemetry.name.pipe(
+        Output.map((datasetName) => ({
           name: `plakk-${stack.stage}-otel-ingest`,
           description: `Ingest-only OTEL token for Plakk ${stack.stage}`,
           datasetCapabilities: {
-            [tracesName]: { ingest: ["create"] as const },
-            [logsName]: { ingest: ["create"] as const },
-            [metricsName]: { ingest: ["create"] as const },
+            [datasetName]: { ingest: ["create"] as const },
           },
         })),
       ),
@@ -108,16 +92,16 @@ export default Alchemy.Stack(
         WORKOS_CLIENT_ID: workosClientId,
         OTEL_SERVICE_NAME: "plakk-backend",
         OTEL_RESOURCE_ATTRIBUTES: `deployment.environment.name=${stack.stage}`,
-        OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: traces.otelTracesEndpoint,
-        OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: logs.otelLogsEndpoint,
-        OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: metrics.otelMetricsEndpoint,
-        OTEL_EXPORTER_OTLP_TRACES_HEADERS: Output.all(ingestToken.token, traces.name).pipe(
+        OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: telemetry.otelTracesEndpoint,
+        OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: telemetry.otelLogsEndpoint,
+        OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: telemetry.otelMetricsEndpoint,
+        OTEL_EXPORTER_OTLP_TRACES_HEADERS: Output.all(ingestToken.token, telemetry.name).pipe(
           Output.map(([token, dataset]) => otelHeaders(token, dataset, "X-Axiom-Dataset")),
         ),
-        OTEL_EXPORTER_OTLP_LOGS_HEADERS: Output.all(ingestToken.token, logs.name).pipe(
+        OTEL_EXPORTER_OTLP_LOGS_HEADERS: Output.all(ingestToken.token, telemetry.name).pipe(
           Output.map(([token, dataset]) => otelHeaders(token, dataset, "X-Axiom-Dataset")),
         ),
-        OTEL_EXPORTER_OTLP_METRICS_HEADERS: Output.all(ingestToken.token, metrics.name).pipe(
+        OTEL_EXPORTER_OTLP_METRICS_HEADERS: Output.all(ingestToken.token, telemetry.name).pipe(
           Output.map(([token, dataset]) => otelHeaders(token, dataset, "X-Axiom-Metrics-Dataset")),
         ),
       },
@@ -127,11 +111,7 @@ export default Alchemy.Stack(
       backendUrl: backend.url,
       railwayProjectId: backend.projectId,
       neonProjectId: database.projectId,
-      axiomDatasets: {
-        traces: traces.name,
-        logs: logs.name,
-        metrics: metrics.name,
-      },
+      axiomDataset: telemetry.name,
     };
   }),
 );
