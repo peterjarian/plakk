@@ -4,8 +4,9 @@ import { NodeHttpServer, NodeRuntime } from "@effect/platform-node";
 import { DrizzleLive, PgClientLive, PostgresNotificationsLive } from "@plakk/db";
 import { PlakkApi } from "@plakk/shared/PlakkApi";
 import * as Config from "effect/Config";
+import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { FetchHttpClient, HttpRouter } from "effect/unstable/http";
+import { FetchHttpClient, HttpRouter, HttpServerResponse } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 import { createServer } from "node:http";
 
@@ -13,6 +14,7 @@ import { AuthMiddlewareLive } from "./middleware/AuthMiddlewareLive.ts";
 import { InternalServerErrorMiddlewareLive } from "./middleware/InternalServerErrorMiddlewareLive.ts";
 import { PlakkApiLive } from "./rpcs/PlakkApiLive.ts";
 import { StorageProviderLive } from "./storage/StorageProviderLive.ts";
+import { TelemetryLive } from "./TelemetryLive.ts";
 
 const InfrastructureLive = Layer.mergeAll(
   DrizzleLive,
@@ -35,7 +37,14 @@ const RpcRoutes = RpcServer.layerHttp({
   Layer.provide(InfrastructureLive),
 );
 
+const HealthRoute = HttpRouter.add(
+  "GET",
+  "/health",
+  Effect.succeed(HttpServerResponse.text("ok")),
+).pipe(HttpRouter.serve);
+
 const BackendRoutes = Layer.mergeAll(
+  HealthRoute,
   RpcRoutes,
   HttpRouter.cors({
     allowedOrigins: ["plakk-app://renderer"],
@@ -52,4 +61,4 @@ const NodeServerLive = NodeHttpServer.layerConfig(createServer, {
 
 export const BackendLive = HttpRouter.serve(BackendRoutes).pipe(Layer.provide(NodeServerLive));
 
-NodeRuntime.runMain(Layer.launch(BackendLive));
+NodeRuntime.runMain(Layer.launch(BackendLive.pipe(Layer.provideMerge(TelemetryLive))));

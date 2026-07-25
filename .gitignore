@@ -16,6 +16,7 @@ out
 .tanstack
 .wrangler
 .output
+.alchemy/
 .vinxi
 __unconfig*
 todos.json
