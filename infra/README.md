@@ -30,6 +30,13 @@ Copy `.env.example` to `.env` and fill in:
 the token owner's personal workspace. `RAILWAY_REPOSITORY` and
 `RAILWAY_BRANCH` default to `peterjarian/plakk` and `main`.
 
+Before the first deployment, link the Railway account to GitHub and grant the
+Railway GitHub App access to the configured repository. For a private
+repository, open Railway's account settings, find the GitHub integration, and
+use **Edit Scope** to include that repository. The API token can configure a
+service source, but it cannot grant the GitHub App access to private source
+code.
+
 Alchemy can also store Neon and Axiom credentials in a local profile via
 `alchemy login`; environment variables are the non-interactive CI path.
 
@@ -65,7 +72,12 @@ Railway builds only the backend workspace and watches the backend plus its
 shared database/domain dependencies. Database migrations run through the Neon
 resource before Railway receives `DATABASE_URL`.
 
+`Railway.Backend` owns the complete service-level variable collection supplied
+in the stack. Removing a variable from `alchemy.run.ts` removes it from Railway
+on the next deployment.
+
 The backend binds to `0.0.0.0:$PORT`, exposes `/health`, and exports Effect
 traces, logs, and metrics over OTLP/HTTP into one Axiom dataset. Metrics use
 Axiom's required `X-Axiom-Metrics-Dataset` header while naming that same
-dataset.
+dataset. Reconciliation waits for Railway to finish the triggered deployment
+and fails when its build or health-checked rollout does not reach `SUCCESS`.

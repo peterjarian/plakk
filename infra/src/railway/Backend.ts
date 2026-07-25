@@ -28,6 +28,8 @@ export interface BackendAttributes {
   readonly domain: string;
   readonly url: string;
   readonly configuration: string;
+  readonly managesRegion: boolean;
+  readonly variablesFingerprint: string;
 }
 
 export type Backend = Resource<

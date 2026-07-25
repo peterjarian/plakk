@@ -18,7 +18,8 @@ const otelHeaders = (
   token: Axiom.ApiToken["Attributes"]["token"],
   dataset: string,
   datasetHeader: "X-Axiom-Dataset" | "X-Axiom-Metrics-Dataset",
-) => `Authorization=Bearer ${Redacted.value(token)},${datasetHeader}=${dataset}`;
+): Redacted.Redacted<string> =>
+  Redacted.make(`Authorization=Bearer ${Redacted.value(token)},${datasetHeader}=${dataset}`);
 
 export default Alchemy.Stack(
   "Plakk",
