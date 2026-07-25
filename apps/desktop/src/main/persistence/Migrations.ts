@@ -22,13 +22,6 @@ const createSnippetReplicaTables = Effect.gen(function* () {
       FOREIGN KEY (account_id) REFERENCES snippet_replicas(account_id) ON DELETE CASCADE
     )
   `;
-
-  yield* sql`
-    CREATE TABLE desktop_data_migrations (
-      key TEXT PRIMARY KEY NOT NULL,
-      completed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )
-  `;
 });
 
 const migrationLoader = Migrator.fromRecord({

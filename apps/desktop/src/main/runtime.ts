@@ -17,7 +17,7 @@ import { SnippetDeletionLive } from "./snippets/deletion/SnippetDeletion.ts";
 import { SnippetHydrationLive } from "./snippets/hydration/SnippetHydrationLive.ts";
 import { SnippetHydrationTransportLive } from "./snippets/hydration/SnippetHydrationTransportLive.ts";
 import { SnippetRemoteTransportLive } from "./snippets/replica/SnippetRemoteTransportLive.ts";
-import { makeSnippetReplicaLive } from "./snippets/replica/SnippetReplicaLive.ts";
+import { SnippetReplicaLive } from "./snippets/replica/SnippetReplicaLive.ts";
 import { NativeFileSourcesLive } from "./snippets/sources/NativeFileSourcesLive.ts";
 import { SnippetUploadEngineLive } from "./snippets/upload/SnippetUploadEngineLive.ts";
 import { SnippetUploadRemoteLive } from "./snippets/upload/SnippetUploadRemoteLive.ts";
@@ -53,9 +53,7 @@ const snippetRemoteTransportLayer = SnippetRemoteTransportLive.pipe(
 );
 const snippetUploadRemoteLayer = SnippetUploadRemoteLive.pipe(Layer.provide(plakkRpcClientLayer));
 const desktopSqliteLayer = makeDesktopSqliteLayer(desktopDatabasePath);
-const snippetReplicaLayer = makeSnippetReplicaLive({
-  legacyStoreCwd: app.getPath("userData"),
-}).pipe(Layer.provide(desktopSqliteLayer));
+const snippetReplicaLayer = SnippetReplicaLive.pipe(Layer.provide(desktopSqliteLayer));
 const uploadEngineDependencies = Layer.mergeAll(
   managedSnippetContentLayer,
   snippetReplicaLayer,
