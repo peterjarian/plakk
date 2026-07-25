@@ -118,7 +118,7 @@ describe("Desktop settings", () => {
     const { container } = await renderSettings();
 
     expect(container.textContent).not.toContain("Global hotkey");
-    expect(container.querySelector('select[aria-label="Appearance"]')).not.toBeNull();
+    expect(container.querySelector('[role="combobox"][aria-label="Appearance"]')).not.toBeNull();
   });
 
   it("restores and updates the Toolbar widget preference", async () => {

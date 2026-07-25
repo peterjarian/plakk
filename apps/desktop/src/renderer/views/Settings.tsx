@@ -14,6 +14,13 @@ import {
 } from "lucide-react";
 import { Avatar, AvatarFallback } from "@plakk/ui/components/primitives/avatar";
 import { Button } from "@plakk/ui/components/primitives/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@plakk/ui/components/primitives/select";
 import { Switch } from "@plakk/ui/components/primitives/switch";
 import {
   SettingsRow,
@@ -362,17 +369,14 @@ export function Settings() {
                     description="Choose a theme or follow your system."
                   />
                 </SettingsRowMain>
-                <select
-                  aria-label="Appearance"
-                  className="h-8 rounded-md border bg-background px-2 text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+                <Select
                   disabled={savingAppearance}
                   value={appearance.preference}
-                  onChange={(event) => {
+                  onValueChange={(value) => {
+                    if (value === null) return;
                     setAppearanceError(null);
                     setSavingAppearance(true);
-                    void setAppearancePreference(
-                      event.currentTarget.value as "light" | "dark" | "system",
-                    ).then(
+                    void setAppearancePreference(value as "light" | "dark" | "system").then(
                       () => setSavingAppearance(false),
                       () => {
                         setSavingAppearance(false);
@@ -381,10 +385,15 @@ export function Settings() {
                     );
                   }}
                 >
-                  <option value="light">Light</option>
-                  <option value="dark">Dark</option>
-                  <option value="system">System</option>
-                </select>
+                  <SelectTrigger aria-label="Appearance">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent align="end">
+                    <SelectItem value="light">Light</SelectItem>
+                    <SelectItem value="dark">Dark</SelectItem>
+                    <SelectItem value="system">System</SelectItem>
+                  </SelectContent>
+                </Select>
               </SettingsRow>
               {appearanceError !== null && (
                 <p className="px-4 py-2 text-xs text-destructive" role="alert">
