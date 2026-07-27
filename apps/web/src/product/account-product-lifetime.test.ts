@@ -185,6 +185,51 @@ describe("account product lifetime", () => {
     ),
   );
 
+  it.effect(
+    "refreshes renewable paid authority at paid-through instead of inferring restriction",
+    () =>
+      Effect.gen(function* () {
+        let reads = 0;
+        const read = Effect.sync(() => {
+          reads += 1;
+          return {
+            account: {
+              ...account,
+              accessEntitlement: {
+                status: "PAID_ACTIVE" as const,
+                paidThrough: DateTime.makeUnsafe(
+                  reads <= INITIAL_AND_CONNECTED_REFRESH_COUNT ? 1_000 : 2_000,
+                ),
+                cancelAtPeriodEnd: false,
+              },
+            },
+            snippets: [],
+          };
+        });
+        yield* Effect.gen(function* () {
+          const lifetime = yield* AccountProductLifetime;
+          yield* lifetime.enter("user_1");
+          yield* Effect.yieldNow;
+          expect(reads).toBe(INITIAL_AND_CONNECTED_REFRESH_COUNT);
+
+          yield* TestClock.adjust("1 second");
+          yield* Effect.yieldNow;
+
+          expect(reads).toBe(INITIAL_AND_CONNECTED_REFRESH_COUNT + 1);
+          expect(lifetime.getSnapshot()).toMatchObject({
+            account: {
+              accessEntitlement: {
+                status: "PAID_ACTIVE",
+                cancelAtPeriodEnd: false,
+              },
+              blockedReasons: [],
+            },
+            kind: "ready",
+          });
+        }).pipe(Effect.provide(Layer.merge(provideLifetime(read), TestClock.layer())));
+      }),
+  );
+
   it.effect("removes purged facts and accepts a later peer replacement", () =>
     Effect.gen(function* () {
       const mirrorChanges = yield* Queue.unbounded<"purge" | "replace">();

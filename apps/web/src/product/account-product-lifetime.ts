@@ -105,6 +105,10 @@ export class AccountProductLifetime extends Context.Service<
 
       const isCurrent = (accountId: string, expectedGeneration: number) =>
         generation === expectedGeneration && activeAccountId === accountId;
+      let refreshAuthorityAtBoundary: (
+        accountId: string,
+        expectedGeneration: number,
+      ) => Effect.Effect<void> = () => Effect.void;
 
       const scheduleEntitlementExpiry = Effect.fn(
         "AccountProductLifetime.scheduleEntitlementExpiry",
@@ -124,7 +128,7 @@ export class AccountProductLifetime extends Context.Service<
           entitlementExpiryFiber,
           Effect.sleep(delayMillis).pipe(
             Effect.andThen(
-              Effect.sync(() => {
+              Effect.suspend(() => {
                 if (
                   !isCurrent(accountId, expectedGeneration) ||
                   state.kind !== "ready" ||
@@ -132,12 +136,21 @@ export class AccountProductLifetime extends Context.Service<
                   state.account.accessEntitlement.status !== expectedStatus ||
                   accountEntitlementEndsAtMillis(state.account.accessEntitlement) !== expectedEndsAt
                 ) {
-                  return;
+                  return Effect.void;
+                }
+                if (
+                  state.account.accessEntitlement.status === "PAID_ACTIVE" &&
+                  !state.account.accessEntitlement.cancelAtPeriodEnd
+                ) {
+                  // A renewable paid-through boundary is owned by Polar. Re-read backend
+                  // authority instead of inferring either renewal or restriction in the browser.
+                  return refreshAuthorityAtBoundary(accountId, expectedGeneration);
                 }
                 publish({
                   ...state,
                   account: accountWithBillingRestriction(state.account),
                 });
+                return Effect.void;
               }),
             ),
           ),
@@ -241,6 +254,7 @@ export class AccountProductLifetime extends Context.Service<
             ),
           );
       });
+      refreshAuthorityAtBoundary = refresh;
 
       const startRefresh = (accountId: string, expectedGeneration: number) =>
         FiberHandle.run(refreshFiber, refresh(accountId, expectedGeneration), {
