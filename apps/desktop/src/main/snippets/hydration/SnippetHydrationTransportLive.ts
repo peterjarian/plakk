@@ -75,6 +75,9 @@ export const makeSnippetHydrationTransportLive = (fetch: SnippetFetch) =>
                   return Effect.tryPromise({
                     try: (signal) =>
                       fetch(prepared.download.url, {
+                        headers: Object.fromEntries(
+                          prepared.download.headers.map(({ name, value }) => [name, value]),
+                        ),
                         signal,
                       }),
                     catch: (cause) =>

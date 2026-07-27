@@ -4,12 +4,12 @@ import {
   isHttpUrl,
   isTextSnippetFileName,
   isTrustedStorageDownloadUrl,
-  type StorageProvider,
 } from "@plakk/shared";
 import {
   WEB_SNIPPET_CONTENT_MAX_BYTES,
   type ApiSnippet,
   type PreparedSnippetDownload,
+  type SnippetContent,
 } from "@plakk/shared/PlakkApi";
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
@@ -18,13 +18,6 @@ import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
 
 import type { AccountProductReadError } from "./product-reader.ts";
-
-export type WebSnippetContent = {
-  readonly storageProvider: StorageProvider;
-  readonly fileName: string;
-  readonly byteSize: number;
-  readonly content: Uint8Array;
-};
 
 export class WebSnippetActionError extends Data.TaggedError("WebSnippetActionError")<{
   readonly cause: unknown;
@@ -43,7 +36,7 @@ export class WebSnippetActionRemote extends Context.Service<
     readonly prepareDownload: (
       id: string,
     ) => Effect.Effect<PreparedSnippetDownload, AccountProductReadError>;
-    readonly read: (id: string) => Effect.Effect<WebSnippetContent, AccountProductReadError>;
+    readonly read: (id: string) => Effect.Effect<SnippetContent, AccountProductReadError>;
   }
 >()("@plakk/web/product/snippet-actions/WebSnippetActionRemote") {}
 
@@ -243,13 +236,9 @@ export class WebSnippetActions extends Context.Service<
         yield* browser.open(confirmedUrl).pipe(Effect.mapError(browserActionError));
       });
 
-      const deleteSnippet = Effect.fn("WebSnippetActions.delete")(function* (snippetId: string) {
-        yield* remote.delete(snippetId);
-      });
-
       return WebSnippetActions.of({
         copy,
-        delete: deleteSnippet,
+        delete: remote.delete,
         download,
         open,
         prepareOpen,

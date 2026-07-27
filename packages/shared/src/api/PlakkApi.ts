@@ -137,6 +137,15 @@ export const PreparedSnippetDownloadSchema = Schema.Struct({
 
 export type PreparedSnippetDownload = typeof PreparedSnippetDownloadSchema.Type;
 
+export const SnippetContentSchema = Schema.Struct({
+  storageProvider: StorageProviderLiteral,
+  fileName: Schema.String,
+  byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  content: Schema.Uint8Array,
+});
+
+export type SnippetContent = typeof SnippetContentSchema.Type;
+
 export const SNIPPETS_CHANGED = "SNIPPETS_CHANGED" as const;
 export const SNIPPET_INVALIDATION_KEEP_ALIVE = "KEEP_ALIVE" as const;
 
@@ -245,12 +254,7 @@ export const SnippetRpcs = RpcGroup.make(
   }),
   Rpc.make("GetSnippetContent", {
     payload: { id: SnippetIdSchema },
-    success: Schema.Struct({
-      storageProvider: StorageProviderLiteral,
-      fileName: Schema.String,
-      byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-      content: Schema.Uint8Array,
-    }),
+    success: SnippetContentSchema,
     error: RpcError,
   }),
   Rpc.make("DeleteSnippet", {

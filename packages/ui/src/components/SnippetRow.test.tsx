@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 import * as DateTime from "effect/DateTime";
+import { WEB_SNIPPET_CONTENT_MAX_BYTES } from "@plakk/shared/PlakkApi";
 
 import { formatSnippetDate, PublishedSnippetRow, SnippetRow } from "./SnippetRow.tsx";
 
@@ -265,10 +266,11 @@ describe("PublishedSnippetRow browser actions", () => {
     fileName: string,
     presentation: Parameters<typeof PublishedSnippetRow>[0]["presentation"],
     productActionsDisabled = false,
+    byteSize: number = snippet.byteSize,
   ) =>
     renderToStaticMarkup(
       <PublishedSnippetRow
-        snippet={{ ...snippet, fileName, storageObjectId: "drive-object" }}
+        snippet={{ ...snippet, byteSize, fileName, storageObjectId: "drive-object" }}
         presentation={presentation}
         now={now}
         onCopy={() => undefined}
@@ -296,6 +298,27 @@ describe("PublishedSnippetRow browser actions", () => {
     expect(image).not.toContain('aria-label="Download"');
     expect(file).toContain('aria-label="Download"');
     expect(file).not.toContain('aria-label="Copy"');
+  });
+
+  it("offers Download when an image or text candidate is too large to Copy", () => {
+    const byteSize = WEB_SNIPPET_CONTENT_MAX_BYTES + 1;
+    const text = renderPublished(
+      "note.txt",
+      { type: "file", title: "Text snippet" },
+      false,
+      byteSize,
+    );
+    const image = renderPublished(
+      "photo.png",
+      { type: "image", title: "photo.png" },
+      false,
+      byteSize,
+    );
+
+    expect(text).toContain('aria-label="Download"');
+    expect(text).not.toContain('aria-label="Copy"');
+    expect(image).toContain('aria-label="Download"');
+    expect(image).not.toContain('aria-label="Copy"');
   });
 
   it("disables content actions while preserving authoritative Delete", () => {

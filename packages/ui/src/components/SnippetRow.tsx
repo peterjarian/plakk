@@ -4,7 +4,7 @@ import {
   type LocalUploadRecord,
   type SnippetPresentation,
 } from "@plakk/shared";
-import type { ApiSnippet } from "@plakk/shared/PlakkApi";
+import { WEB_SNIPPET_CONTENT_MAX_BYTES, type ApiSnippet } from "@plakk/shared/PlakkApi";
 import type { LocalContentAvailability } from "@plakk/shared";
 import * as DateTime from "effect/DateTime";
 import {
@@ -168,8 +168,11 @@ export function PublishedSnippetRow(props: {
     snippet,
   } = props;
   const isTextCandidate = isTextSnippetFileName(snippet.fileName);
-  const copyAvailable = isTextCandidate || presentation.type === "image";
-  const downloadAvailable = !isTextCandidate && presentation.type === "file";
+  const isCopyCandidate = isTextCandidate || presentation.type === "image";
+  const copyAvailable = isCopyCandidate && snippet.byteSize <= WEB_SNIPPET_CONTENT_MAX_BYTES;
+  const downloadAvailable =
+    (!isTextCandidate && presentation.type === "file") ||
+    (isCopyCandidate && snippet.byteSize > WEB_SNIPPET_CONTENT_MAX_BYTES);
   const busy = actionStatus === "busy";
   const primaryAction =
     copyAvailable && onCopy !== undefined ? (
