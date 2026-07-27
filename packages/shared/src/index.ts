@@ -1,12 +1,9 @@
 import * as Schema from "effect/Schema";
 
 export * from "./SnippetPresentation.ts";
-
-export const STORAGE_PROVIDERS = ["GOOGLE_DRIVE", "ONE_DRIVE", "DROPBOX"] as const;
-
-export const StorageProviderLiteral = Schema.Literals(STORAGE_PROVIDERS);
-
-export type StorageProvider = typeof StorageProviderLiteral.Type;
+export * from "./DeviceSnippet.ts";
+export * from "./ProviderUploadTarget.ts";
+export * from "./StorageProvider.ts";
 
 export const UserSchema = Schema.Struct({
   id: Schema.String,

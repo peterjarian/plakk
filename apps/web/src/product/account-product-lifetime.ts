@@ -6,6 +6,7 @@ import * as FiberHandle from "effect/FiberHandle";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 
+import type { DeviceSnippetRecord } from "@plakk/shared";
 import {
   accountTrialExpiryDelayMillis,
   accountWithBillingRestriction,
@@ -22,6 +23,7 @@ import {
   type AccountProductMirrorError,
   type LocalReadPerformance,
 } from "./readable-mirror.ts";
+import { WebSnippetUploads } from "./snippet-upload.ts";
 
 const INITIAL_RECONNECT_DELAY_MILLIS = 1_000;
 const MAX_RECONNECT_DELAY_MILLIS = 30_000;
@@ -40,20 +42,22 @@ export type AccountProductState =
       readonly accountId: string;
       readonly cause: AccountProductReadError | AccountProductLifetimeInitializationFailure;
     }
-  | (AccountProductSnapshot & {
+  | (Omit<AccountProductSnapshot, "snippets"> & {
       readonly kind: "ready";
       readonly accountId: string;
       readonly apiAvailability: "available" | "checking";
       readonly liveConnection: "connected" | "reconnecting";
       readonly localReadPerformance: LocalReadPerformance;
+      readonly snippets: ReadonlyArray<DeviceSnippetRecord>;
     })
-  | (AccountProductSnapshot & {
+  | (Omit<AccountProductSnapshot, "snippets"> & {
       readonly kind: "ready";
       readonly accountId: string;
       readonly apiAvailability: "unavailable";
       readonly cause: AccountProductReadError;
       readonly liveConnection: "connected" | "reconnecting";
       readonly localReadPerformance: LocalReadPerformance;
+      readonly snippets: ReadonlyArray<DeviceSnippetRecord>;
     });
 
 export interface AccountProductLifetimeShape {
@@ -74,6 +78,7 @@ export class AccountProductLifetime extends Context.Service<
     Effect.gen(function* () {
       const reader = yield* AccountProductReader;
       const mirror = yield* AccountProductMirror;
+      const snippetUploads = yield* WebSnippetUploads;
       const mirrorFiber = yield* FiberHandle.make<void, never>();
       const trialExpiryFiber = yield* FiberHandle.make<void, never>();
       const refreshFiber = yield* FiberHandle.make<void, never>();
@@ -91,6 +96,11 @@ export class AccountProductLifetime extends Context.Service<
         state = next;
         for (const listener of listeners) listener();
       };
+      snippetUploads.subscribe(() => {
+        if (state.kind === "ready") {
+          publish({ ...state, snippets: snippetUploads.getSnapshot() });
+        }
+      });
 
       const isCurrent = (accountId: string, expectedGeneration: number) =>
         generation === expectedGeneration && activeAccountId === accountId;
@@ -186,6 +196,7 @@ export class AccountProductLifetime extends Context.Service<
                       return;
                     }
                     yield* mirror.replace(snapshot).pipe(Effect.result);
+                    yield* snippetUploads.replacePublished(snapshot.snippets);
                     localReadPerformance = mirror.readPerformance();
                     if (
                       !isCurrent(accountId, expectedGeneration) ||
@@ -194,12 +205,13 @@ export class AccountProductLifetime extends Context.Service<
                       return;
                     }
                     publish({
-                      ...snapshot,
+                      account: snapshot.account,
                       accountId,
                       apiAvailability: "available",
                       kind: "ready",
                       liveConnection,
                       localReadPerformance,
+                      snippets: snippetUploads.getSnapshot(),
                     });
                     yield* scheduleTrialExpiry(accountId, expectedGeneration, snapshot.account);
                   }),
@@ -261,13 +273,15 @@ export class AccountProductLifetime extends Context.Service<
           return;
         }
 
+        yield* snippetUploads.replacePublished(mirrored.success.snippets);
         const current = state;
         const common = {
-          ...mirrored.success,
+          account: mirrored.success.account,
           accountId,
           kind: "ready" as const,
           liveConnection,
           localReadPerformance,
+          snippets: snippetUploads.getSnapshot(),
         };
         if (current.kind === "ready" && current.apiAvailability === "unavailable") {
           publish({
@@ -348,6 +362,7 @@ export class AccountProductLifetime extends Context.Service<
         yield* FiberHandle.clear(mirrorFiber);
         yield* FiberHandle.clear(trialExpiryFiber);
         yield* FiberHandle.clear(refreshFiber);
+        yield* snippetUploads.clear;
         const purgeResult = yield* mirror.purge.pipe(Effect.result);
         if (purgeResult._tag === "Failure") {
           if (previousAccountId !== null) {

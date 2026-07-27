@@ -77,6 +77,7 @@ export const SnippetUploadEngineLive = Layer.effect(
     ) {
       const filePath = yield* content.path(account.id, input.id, input.byteSize);
       const prepared = yield* remote.prepare(account.accessToken, {
+        client: "DESKTOP",
         id: input.id,
         fileName: input.fileName,
         byteSize: input.byteSize,

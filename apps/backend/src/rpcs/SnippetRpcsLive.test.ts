@@ -12,7 +12,7 @@ import {
 } from "@plakk/shared/PlakkApi";
 import { RpcError } from "@plakk/shared/RpcError";
 import { describe, expect, it, vi } from "vite-plus/test";
-import { DateTime, Effect, Fiber, Stream } from "effect";
+import { ConfigProvider, DateTime, Effect, Fiber, Stream } from "effect";
 import { TestClock } from "effect/testing";
 
 import { AccountCapability } from "../account/AccountCapability.ts";
@@ -32,6 +32,7 @@ type SnippetRpcsHandlers = Effect.Success<typeof SnippetRpcsLive>;
 const timestamp = DateTime.toDateUtc(DateTime.makeUnsafe("2026-07-20T20:00:00.000Z"));
 const currentUser = {
   id: "user-1",
+  requestOrigin: "https://app.plakk.io",
   firstName: null,
   lastName: null,
   email: null,
@@ -70,7 +71,7 @@ const storageService = (
         storageObjectId: null,
         upload: {
           method: "PUT",
-          url: "https://upload.example",
+          url: "https://www.googleapis.com/upload/drive/v3/files?upload_id=test",
           headers: [],
           strategy: { type: "single_request" },
         },
@@ -129,6 +130,15 @@ const runSnippetEffect = <A, E>(
       Effect.provideService(CurrentUser, user),
       Effect.provideService(Drizzle, { db }),
       Effect.provideService(StorageProvider, storage),
+      Effect.provideService(
+        ConfigProvider.ConfigProvider,
+        ConfigProvider.fromEnv({
+          env: {
+            NODE_ENV: "production",
+            PLAKK_WEB_ORIGIN: "https://app.plakk.io",
+          },
+        }),
+      ),
     ),
   );
 
@@ -309,7 +319,7 @@ describe("completed Snippet publication", () => {
     const { storageObjectId: _storageObjectId, ...prepareInput } = input;
 
     await runSnippetEffect(
-      (rpcs) => rpcs.PrepareSnippetUpload(prepareInput),
+      (rpcs) => rpcs.PrepareSnippetUpload({ ...prepareInput, client: "WEB" } as never),
       store.db,
       storageService({ prepareUpload }),
     );
@@ -323,6 +333,55 @@ describe("completed Snippet publication", () => {
       workosUserId: currentUser.id,
     });
     expect(store.insertedValues).toEqual([]);
+  });
+
+  it("rejects Web preparation from an origin other than the configured production Web origin", async () => {
+    const store = publicationDatabase();
+    const prepareUpload = vi.fn(storageService().prepareUpload);
+    const { storageObjectId: _storageObjectId, ...prepareInput } = {
+      ...publication,
+      mediaType: "text/plain",
+    };
+
+    await expect(
+      runSnippetEffect(
+        (rpcs) => rpcs.PrepareSnippetUpload({ ...prepareInput, client: "WEB" } as never),
+        store.db,
+        storageService({ prepareUpload }),
+        { ...currentUser, requestOrigin: "https://evil.example" },
+      ),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+    expect(prepareUpload).not.toHaveBeenCalled();
+  });
+
+  it("rejects a prepared upload outside the provider's documented HTTPS target", async () => {
+    const store = publicationDatabase();
+    const prepareUpload = vi.fn(() =>
+      Effect.succeed({
+        storageProvider: "GOOGLE_DRIVE" as const,
+        storageObjectId: null,
+        upload: {
+          method: "PUT" as const,
+          url: "https://www.googleapis.com.evil.example/upload",
+          headers: [],
+          strategy: { type: "single_request" as const },
+        },
+        expiresAt: null,
+      }),
+    );
+    const { storageObjectId: _storageObjectId, ...prepareInput } = {
+      ...publication,
+      mediaType: "text/plain",
+    };
+
+    await expect(
+      runSnippetEffect(
+        (rpcs) => rpcs.PrepareSnippetUpload({ ...prepareInput, client: "WEB" } as never),
+        store.db,
+        storageService({ prepareUpload }),
+      ),
+    ).rejects.toMatchObject({ code: "INTERNAL_SERVER_ERROR" });
   });
 
   it("inserts only the completed Snippet and notifies before commit", async () => {
@@ -477,58 +536,62 @@ describe("stored snippet download preparation", () => {
 });
 
 describe("account capability enforcement", () => {
-  it("rejects upload preparation, publication, and download preparation before side effects", async () => {
-    const denied = new RpcError({
-      code: "FORBIDDEN",
-      message: "Restore billing access to use this action.",
-    });
-    const authorizeProductCommand = vi.fn(() => Effect.fail(denied));
-    const capability = accountCapabilityService({ authorizeProductCommand });
-    const store = publicationDatabase({ inserted: [snippet()] });
-    const prepareUpload = vi.fn(storageService().prepareUpload);
-    const getDownloadTarget = vi.fn(storageService().getDownloadTarget);
-    const storage = storageService({ getDownloadTarget, prepareUpload });
+  it.each(["Restore billing access to use this action.", "Reconnect storage to use this action."])(
+    "rejects upload preparation, publication, and download preparation before side effects: %s",
+    async (message) => {
+      const denied = new RpcError({
+        code: "FORBIDDEN",
+        message,
+      });
+      const authorizeProductCommand = vi.fn(() => Effect.fail(denied));
+      const capability = accountCapabilityService({ authorizeProductCommand });
+      const store = publicationDatabase({ inserted: [snippet()] });
+      const prepareUpload = vi.fn(storageService().prepareUpload);
+      const getDownloadTarget = vi.fn(storageService().getDownloadTarget);
+      const storage = storageService({ getDownloadTarget, prepareUpload });
 
-    await expect(
-      runSnippetEffect(
-        (rpcs) =>
-          rpcs.PrepareSnippetUpload({
-            id: publication.id,
-            fileName: publication.fileName,
-            byteSize: publication.byteSize,
-            storageProvider: publication.storageProvider,
-            mediaType: "text/plain",
-          }),
-        store.db,
-        storage,
-        currentUser,
-        capability,
-      ),
-    ).rejects.toMatchObject({ code: "FORBIDDEN" });
-    await expect(
-      runSnippetEffect(
-        (rpcs) => rpcs.PublishSnippet(publication),
-        store.db,
-        storage,
-        currentUser,
-        capability,
-      ),
-    ).rejects.toMatchObject({ code: "FORBIDDEN" });
-    await expect(
-      runSnippetEffect(
-        (rpcs) => rpcs.PrepareSnippetDownload({ id: publication.id }),
-        downloadDatabase([snippet()]),
-        storage,
-        currentUser,
-        capability,
-      ),
-    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+      await expect(
+        runSnippetEffect(
+          (rpcs) =>
+            rpcs.PrepareSnippetUpload({
+              client: "WEB",
+              id: publication.id,
+              fileName: publication.fileName,
+              byteSize: publication.byteSize,
+              storageProvider: publication.storageProvider,
+              mediaType: "text/plain",
+            }),
+          store.db,
+          storage,
+          currentUser,
+          capability,
+        ),
+      ).rejects.toMatchObject({ code: "FORBIDDEN" });
+      await expect(
+        runSnippetEffect(
+          (rpcs) => rpcs.PublishSnippet(publication),
+          store.db,
+          storage,
+          currentUser,
+          capability,
+        ),
+      ).rejects.toMatchObject({ code: "FORBIDDEN" });
+      await expect(
+        runSnippetEffect(
+          (rpcs) => rpcs.PrepareSnippetDownload({ id: publication.id }),
+          downloadDatabase([snippet()]),
+          storage,
+          currentUser,
+          capability,
+        ),
+      ).rejects.toMatchObject({ code: "FORBIDDEN" });
 
-    expect(authorizeProductCommand).toHaveBeenCalledTimes(3);
-    expect(prepareUpload).not.toHaveBeenCalled();
-    expect(store.insertedValues).toEqual([]);
-    expect(getDownloadTarget).not.toHaveBeenCalled();
-  });
+      expect(authorizeProductCommand).toHaveBeenCalledTimes(3);
+      expect(prepareUpload).not.toHaveBeenCalled();
+      expect(store.insertedValues).toEqual([]);
+      expect(getDownloadTarget).not.toHaveBeenCalled();
+    },
+  );
 
   it("keeps authoritative deletion available while billing is restricted", async () => {
     const stored = snippet();

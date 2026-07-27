@@ -1,3 +1,4 @@
+import { reconcileDeviceSnippetRecords } from "@plakk/shared";
 import type { ApiSnippet } from "@plakk/shared/PlakkApi";
 import { Cause, Effect, Stream } from "effect";
 
@@ -6,40 +7,22 @@ import { SnippetRemoteTransport, type SnippetSyncAccount } from "./SnippetRemote
 import {
   SnippetReplica,
   deviceSnippetRecordId,
-  type DeviceSnippetRecord,
   type SnippetReplicaState,
 } from "./SnippetReplica.ts";
 
 export type LiveConnectionStatus = "CONNECTED" | "RECONNECTING";
 
-const recordCreatedAt = (record: DeviceSnippetRecord) =>
-  record.kind === "LOCAL" ? record.createdAt : record.snippet.createdAt;
-
-const ordered = (items: Iterable<DeviceSnippetRecord>): ReadonlyArray<DeviceSnippetRecord> =>
-  Array.from(items).sort((left, right) =>
-    recordCreatedAt(right).localeCompare(recordCreatedAt(left)),
-  );
-
 export const reconcileSnippetSnapshot = (
   current: SnippetReplicaState | null,
   snapshot: ReadonlyArray<ApiSnippet>,
 ): { readonly state: SnippetReplicaState; readonly stalePublishedIds: ReadonlyArray<string> } => {
-  const published = new Map(snapshot.map((snippet) => [snippet.id, snippet]));
-  const local = (current?.items ?? []).filter(
-    (record) => record.kind === "LOCAL" && !published.has(record.id),
-  );
+  const published = new Set(snapshot.map((snippet) => snippet.id));
   const stalePublishedIds = (current?.items ?? [])
     .filter((record) => record.kind === "PUBLISHED" && !published.has(record.snippet.id))
     .map((record) => deviceSnippetRecordId(record));
   return {
     state: {
-      items: ordered([
-        ...Array.from(published.values(), (snippet) => ({
-          kind: "PUBLISHED" as const,
-          snippet,
-        })),
-        ...local,
-      ]),
+      items: reconcileDeviceSnippetRecords(current?.items ?? [], snapshot),
     },
     stalePublishedIds,
   };

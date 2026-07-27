@@ -45,7 +45,10 @@ const run = <A, E>(
 ) =>
   Effect.runPromise(
     effect.pipe(
-      Effect.provideService(CurrentUser, { id: "user-account-bound" }),
+      Effect.provideService(CurrentUser, {
+        id: "user-account-bound",
+        requestOrigin: "https://app.plakk.io",
+      }),
       Effect.provideService(StorageProvider, storage),
       Effect.provide(FetchHttpClient.layer),
       Effect.provideService(

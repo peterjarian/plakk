@@ -81,6 +81,7 @@ function FirstRunRouteProof() {
           snippets: [],
         },
         storageOnboarding: null,
+        snippetUploads: null,
       }}
     >
       <AuthenticatedHome onStorageOnboardingRequired={openStorage} user={user} />
@@ -153,6 +154,10 @@ function StorageOnboardingScenario({ mode }: { readonly mode: StorageProofMode }
         onRetry={null}
         onSignOut={() => undefined}
         signOutError={null}
+        onAddFiles={() => undefined}
+        onAddText={() => undefined}
+        onDismissUpload={() => undefined}
+        uploadsDisabled
       />
     );
   }

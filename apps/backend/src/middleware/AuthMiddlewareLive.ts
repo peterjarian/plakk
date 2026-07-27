@@ -8,11 +8,14 @@ import { jwtVerify } from "jose";
 
 import { AccountCapability } from "../account/AccountCapability.ts";
 
-type AccessTokenVerifier = (accessToken: string) => Effect.Effect<CurrentUser["Service"], RpcError>;
+type AccessTokenVerifier = (
+  accessToken: string,
+) => Effect.Effect<{ readonly id: string }, RpcError>;
 
 export const runAuthenticatedRpc = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
   authorization: string | undefined,
+  requestOrigin: string | undefined,
   verifyAccessToken: AccessTokenVerifier,
   accountCapability: AccountCapability["Service"],
 ): Effect.Effect<A, E | RpcError, Exclude<R, CurrentUser>> =>
@@ -27,7 +30,10 @@ export const runAuthenticatedRpc = <A, E, R>(
 
     const currentUser = yield* verifyAccessToken(accessToken);
     yield* accountCapability.startTrial(currentUser.id);
-    return yield* Effect.provideService(effect, CurrentUser, currentUser);
+    return yield* Effect.provideService(effect, CurrentUser, {
+      ...currentUser,
+      requestOrigin: requestOrigin ?? null,
+    });
   });
 
 const makeAuthMiddleware = (
@@ -35,7 +41,13 @@ const makeAuthMiddleware = (
   accountCapability: AccountCapability["Service"],
 ): AuthMiddleware["Service"] =>
   AuthMiddleware.of((effect, { headers }) =>
-    runAuthenticatedRpc(effect, headers.authorization, verifyAccessToken, accountCapability),
+    runAuthenticatedRpc(
+      effect,
+      headers.authorization,
+      headers.origin,
+      verifyAccessToken,
+      accountCapability,
+    ),
   );
 
 export const AuthMiddlewareLive = Layer.effect(

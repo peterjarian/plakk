@@ -35,6 +35,7 @@ const photo: ApiSnippet = {
   createdAt: "2026-07-27T00:00:00.000Z",
   updatedAt: "2026-07-27T00:00:00.000Z",
 };
+const photoRecord = { kind: "PUBLISHED" as const, snippet: photo };
 
 const render = (state: Parameters<typeof HomeView>[0]["state"]) =>
   renderToStaticMarkup(
@@ -44,6 +45,10 @@ const render = (state: Parameters<typeof HomeView>[0]["state"]) =>
       onRetry={vi.fn()}
       onSignOut={vi.fn()}
       signOutError={null}
+      onAddFiles={vi.fn()}
+      onAddText={vi.fn()}
+      onDismissUpload={vi.fn()}
+      uploadsDisabled={false}
     />,
   );
 
@@ -96,7 +101,7 @@ describe("Web Home", () => {
       kind: "ready",
       liveConnection: "connected",
       localReadPerformance: "degraded",
-      snippets: [photo],
+      snippets: [photoRecord],
     });
     expect(html).toContain("Fast local reads are unavailable");
     expect(html).toContain("Summer photo.png");
@@ -110,7 +115,7 @@ describe("Web Home", () => {
       kind: "ready",
       liveConnection: "connected",
       localReadPerformance: "accelerated",
-      snippets: [photo],
+      snippets: [photoRecord],
     });
     expect(html).toContain("Summer photo.png");
     expect(html).toContain("Google Drive");
@@ -126,7 +131,7 @@ describe("Web Home", () => {
       kind: "ready",
       liveConnection: "connected",
       localReadPerformance: "accelerated",
-      snippets: [photo],
+      snippets: [photoRecord],
     });
 
     expect(html).toContain("Trial active");
@@ -150,7 +155,7 @@ describe("Web Home", () => {
       kind: "ready",
       liveConnection: "connected",
       localReadPerformance: "accelerated",
-      snippets: [photo],
+      snippets: [photoRecord],
     });
 
     expect(html).toContain("Billing access required");
@@ -168,7 +173,7 @@ describe("Web Home", () => {
       kind: "ready",
       liveConnection: "reconnecting",
       localReadPerformance: "accelerated",
-      snippets: [photo],
+      snippets: [photoRecord],
     });
     expect(html).toContain("Summer photo.png");
     expect(html).toContain("Live updates reconnecting");
@@ -188,7 +193,7 @@ describe("Web Home", () => {
       kind: "ready",
       liveConnection: "connected",
       localReadPerformance: "accelerated",
-      snippets: [photo],
+      snippets: [photoRecord],
     });
     expect(html).toContain("Summer photo.png");
     expect(html).toContain("API unavailable");
@@ -206,6 +211,10 @@ describe("Web Home", () => {
         onRetry={null}
         onSignOut={vi.fn()}
         signOutError="workos"
+        onAddFiles={vi.fn()}
+        onAddText={vi.fn()}
+        onDismissUpload={vi.fn()}
+        uploadsDisabled
       />,
     );
     expect(html).toContain("WorkOS could not sign you out");
@@ -220,6 +229,10 @@ describe("Web Home", () => {
         onRetry={null}
         onSignOut={vi.fn()}
         signOutError="product-purge"
+        onAddFiles={vi.fn()}
+        onAddText={vi.fn()}
+        onDismissUpload={vi.fn()}
+        uploadsDisabled
       />,
     );
     expect(html).toContain("could not confirm");

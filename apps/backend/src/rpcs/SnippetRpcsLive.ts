@@ -1,3 +1,5 @@
+import { isSupportedProviderUploadTarget } from "@plakk/shared";
+import { parseExactHttpOrigin } from "@plakk/shared/ExactHttpOrigin";
 import {
   and,
   desc,
@@ -21,6 +23,7 @@ import {
 } from "@plakk/shared/PlakkApi";
 import { RpcError } from "@plakk/shared/RpcError";
 import * as DateTime from "effect/DateTime";
+import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
 import * as Schedule from "effect/Schedule";
 import * as Stream from "effect/Stream";
@@ -121,6 +124,31 @@ const prepareSnippetUpload = Effect.fn("SnippetRpcs.prepareUpload")(function* (
       workosUserId: ownerWorkosUserId,
     })
     .pipe(mapStorageErrorsToRpc);
+});
+
+const authorizeWebUploadOrigin = Effect.fn("SnippetRpcs.authorizeWebUploadOrigin")(function* (
+  requestOrigin: string | null,
+) {
+  const { configuredWebOrigin, nodeEnv } = yield* Effect.all({
+    configuredWebOrigin: Config.string("PLAKK_WEB_ORIGIN"),
+    nodeEnv: Config.string("NODE_ENV").pipe(Config.withDefault("development")),
+  }).pipe(Effect.orDie);
+  const webOrigin = parseExactHttpOrigin(configuredWebOrigin);
+  if (webOrigin === null || (nodeEnv === "production" && !webOrigin.startsWith("https://"))) {
+    return yield* Effect.die(
+      new Error(
+        nodeEnv === "production"
+          ? "PLAKK_WEB_ORIGIN must be an exact HTTPS origin in production."
+          : "PLAKK_WEB_ORIGIN must be an exact HTTP(S) origin.",
+      ),
+    );
+  }
+  if (requestOrigin !== webOrigin) {
+    return yield* new RpcError({
+      code: "FORBIDDEN",
+      message: "Web upload preparation is unavailable from this origin.",
+    });
+  }
 });
 
 const publishSnippet = Effect.fn("SnippetRpcs.publish")(function* (
@@ -279,10 +307,27 @@ export const SnippetRpcsLive = Effect.gen(function* () {
       const capability = yield* AccountCapability;
       const storage = yield* StorageProvider;
       const currentUser = yield* CurrentUser;
+      if (input.client === "WEB") {
+        yield* authorizeWebUploadOrigin(currentUser.requestOrigin);
+      }
       yield* capability.authorizeProductCommand(currentUser.id, input.storageProvider);
-      return yield* prepareSnippetUpload(storage, currentUser.id, input).pipe(
+      const prepared = yield* prepareSnippetUpload(storage, currentUser.id, input).pipe(
         Effect.annotateSpans({ id: input.id }),
       );
+      if (
+        input.client === "WEB" &&
+        (prepared.storageProvider !== input.storageProvider ||
+          !isSupportedProviderUploadTarget(input.storageProvider, prepared.upload.url))
+      ) {
+        yield* Effect.logError("Provider returned an unsupported Web upload target", {
+          storageProvider: input.storageProvider,
+        });
+        return yield* new RpcError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "The storage provider did not return a supported Web upload target.",
+        });
+      }
+      return prepared;
     }),
     PublishSnippet: Effect.fn("rpc.PublishSnippet")(function* (input) {
       const capability = yield* AccountCapability;

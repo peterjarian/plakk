@@ -40,7 +40,7 @@ describe("backend authentication", () => {
         return { id: "user-1" };
       });
 
-    const userId = await Effect.runPromise(
+    const user = await Effect.runPromise(
       runAuthenticatedRpc(
         CurrentUser.pipe(
           Effect.tap(() =>
@@ -48,15 +48,18 @@ describe("backend authentication", () => {
               events.push("rpc");
             }),
           ),
-          Effect.map(({ id }) => id),
         ),
         "Bearer workos-token",
+        "https://app.plakk.io",
         verify,
         capabilityService(startTrial),
       ),
     );
 
-    expect(userId).toBe("user-1");
+    expect(user).toEqual({
+      id: "user-1",
+      requestOrigin: "https://app.plakk.io",
+    });
     expect(events).toEqual(["verified:workos-token", "trial:user-1", "rpc"]);
   });
 
@@ -65,9 +68,13 @@ describe("backend authentication", () => {
     const startTrial = vi.fn(() => Effect.succeed(activeTrial));
 
     const result = await Effect.runPromise(
-      runAuthenticatedRpc(Effect.void, undefined, verify, capabilityService(startTrial)).pipe(
-        Effect.result,
-      ),
+      runAuthenticatedRpc(
+        Effect.void,
+        undefined,
+        undefined,
+        verify,
+        capabilityService(startTrial),
+      ).pipe(Effect.result),
     );
 
     expect(result).toMatchObject({

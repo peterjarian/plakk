@@ -11,6 +11,11 @@ import {
   AccountProductMirrorError,
   makeSessionMemoryAccountProductMirrorLayer,
 } from "./readable-mirror.ts";
+import {
+  WebProviderTransfer,
+  WebSnippetUploadRemote,
+  WebSnippetUploads,
+} from "./snippet-upload.ts";
 
 const account: AccountStatus = {
   accessEntitlement: {
@@ -42,6 +47,28 @@ const snippet = (id: string): ApiSnippet => ({
 
 const INITIAL_AND_CONNECTED_REFRESH_COUNT = 2;
 
+const snippetUploadsLayer = WebSnippetUploads.layer.pipe(
+  Layer.provide(
+    Layer.merge(
+      Layer.succeed(
+        WebSnippetUploadRemote,
+        WebSnippetUploadRemote.of({
+          prepare: () => Effect.die("Uploads are not used in account lifetime tests."),
+          publish: () => Effect.die("Uploads are not used in account lifetime tests."),
+        }),
+      ),
+      Layer.succeed(
+        WebProviderTransfer,
+        WebProviderTransfer.of({
+          upload: () => Effect.die("Uploads are not used in account lifetime tests."),
+        }),
+      ),
+    ),
+  ),
+);
+
+const publishedRecord = (value: ApiSnippet) => ({ kind: "PUBLISHED" as const, snippet: value });
+
 const provideLifetime = (
   read: AccountProductReader["Service"]["read"],
   invalidations: AccountProductReader["Service"]["invalidations"] = Stream.make(undefined).pipe(
@@ -51,9 +78,10 @@ const provideLifetime = (
 ) =>
   AccountProductLifetime.layer.pipe(
     Layer.provideMerge(
-      Layer.merge(
+      Layer.mergeAll(
         Layer.succeed(AccountProductReader, AccountProductReader.of({ invalidations, read })),
         mirrorLayer,
+        snippetUploadsLayer,
       ),
     ),
   );
@@ -96,7 +124,7 @@ describe("account product lifetime", () => {
         });
       }).pipe(
         Effect.provide(
-          Layer.merge(
+          Layer.mergeAll(
             provideLifetime(Effect.succeed({ account: expiringAccount, snippets: [] })),
             TestClock.layer(),
           ),
@@ -109,7 +137,7 @@ describe("account product lifetime", () => {
       const pending = yield* Deferred.make<AccountProductSnapshot>();
       const lifetimeLayer = AccountProductLifetime.layer.pipe(
         Layer.provideMerge(
-          Layer.merge(
+          Layer.mergeAll(
             Layer.succeed(
               AccountProductReader,
               AccountProductReader.of({
@@ -121,6 +149,7 @@ describe("account product lifetime", () => {
               initial: { account, snippets: [snippet("mirrored")] },
               readPerformance: "accelerated",
             }),
+            snippetUploadsLayer,
           ),
         ),
       );
@@ -135,7 +164,7 @@ describe("account product lifetime", () => {
           kind: "ready",
           liveConnection: "reconnecting",
           localReadPerformance: "accelerated",
-          snippets: [snippet("mirrored")],
+          snippets: [publishedRecord(snippet("mirrored"))],
         });
       }).pipe(Effect.provide(lifetimeLayer));
     }),
@@ -185,7 +214,7 @@ describe("account product lifetime", () => {
         yield* lifetime.enter("user_1");
         expect(lifetime.getSnapshot()).toMatchObject({
           kind: "ready",
-          snippets: [snippet("mirrored")],
+          snippets: [publishedRecord(snippet("mirrored"))],
         });
 
         mirrored = null;
@@ -200,7 +229,7 @@ describe("account product lifetime", () => {
 
         expect(lifetime.getSnapshot()).toMatchObject({
           kind: "ready",
-          snippets: [snippet("restored")],
+          snippets: [publishedRecord(snippet("restored"))],
         });
       }).pipe(Effect.provide(provideLifetime(Effect.never, Stream.never, mirrorLayer)));
     }),
@@ -234,7 +263,9 @@ describe("account product lifetime", () => {
       yield* Effect.gen(function* () {
         const lifetime = yield* AccountProductLifetime;
         yield* lifetime.enter("user_1");
-        expect(lifetime.getSnapshot()).toMatchObject({ snippets: [snippet("mirrored")] });
+        expect(lifetime.getSnapshot()).toMatchObject({
+          snippets: [publishedRecord(snippet("mirrored"))],
+        });
 
         mirrored = null;
         yield* Deferred.succeed(mirrorChanged, undefined);
@@ -245,7 +276,7 @@ describe("account product lifetime", () => {
         yield* Effect.yieldNow;
         expect(lifetime.getSnapshot()).toMatchObject({
           apiAvailability: "available",
-          snippets: [snippet("rebuilt")],
+          snippets: [publishedRecord(snippet("rebuilt"))],
         });
       }).pipe(Effect.provide(provideLifetime(Deferred.await(rebuilt), Stream.never, mirrorLayer)));
     }),
@@ -287,7 +318,7 @@ describe("account product lifetime", () => {
         yield* Effect.yieldNow;
 
         expect(lifetime.getSnapshot()).toMatchObject({
-          snippets: [snippet("replacement")],
+          snippets: [publishedRecord(snippet("replacement"))],
         });
       }).pipe(Effect.provide(provideLifetime(Effect.never, Stream.never, mirrorLayer)));
     }),
@@ -354,7 +385,7 @@ describe("account product lifetime", () => {
         kind: "ready",
         liveConnection: "connected",
         localReadPerformance: "degraded",
-        snippets: [expectedSnippet],
+        snippets: [publishedRecord(expectedSnippet)],
       });
     }).pipe(
       Effect.provide(provideLifetime(Effect.succeed({ account, snippets: [expectedSnippet] }))),
@@ -391,7 +422,7 @@ describe("account product lifetime", () => {
           kind: "ready",
           liveConnection: "connected",
           localReadPerformance: "degraded",
-          snippets: [secondSnippet],
+          snippets: [publishedRecord(secondSnippet)],
         });
       }).pipe(Effect.provide(lifetimeLayer));
     }),
@@ -589,7 +620,7 @@ it.effect("replaces the complete collection atomically on an invalidation", () =
       expect(lifetime.getSnapshot()).toMatchObject({
         apiAvailability: "available",
         liveConnection: "connected",
-        snippets: [firstSnippet],
+        snippets: [publishedRecord(firstSnippet)],
       });
 
       yield* Deferred.succeed(nextInvalidation, undefined);
@@ -601,7 +632,7 @@ it.effect("replaces the complete collection atomically on an invalidation", () =
         kind: "ready",
         liveConnection: "connected",
         localReadPerformance: "degraded",
-        snippets: [secondSnippet],
+        snippets: [publishedRecord(secondSnippet)],
       });
     }).pipe(Effect.provide(provideLifetime(read, invalidations)));
   }),
@@ -645,7 +676,7 @@ it.effect("refreshes the complete snapshot after stream reconnection", () =>
       expect(lifetime.getSnapshot()).toMatchObject({
         apiAvailability: "available",
         liveConnection: "reconnecting",
-        snippets: [firstSnippet],
+        snippets: [publishedRecord(firstSnippet)],
       });
 
       yield* TestClock.adjust("1 second");
@@ -659,7 +690,7 @@ it.effect("refreshes the complete snapshot after stream reconnection", () =>
         kind: "ready",
         liveConnection: "connected",
         localReadPerformance: "degraded",
-        snippets: [secondSnippet],
+        snippets: [publishedRecord(secondSnippet)],
       });
     }).pipe(Effect.provide(Layer.merge(provideLifetime(read, invalidations), TestClock.layer())));
   }),
@@ -746,14 +777,14 @@ it.effect("observes a stream disconnect while a snapshot refresh is hung", () =>
       yield* Effect.yieldNow;
       expect(lifetime.getSnapshot()).toMatchObject({
         apiAvailability: "available",
-        snippets: [firstSnippet],
+        snippets: [publishedRecord(firstSnippet)],
       });
 
       yield* Deferred.succeed(allowInvalidation, undefined);
       yield* Effect.yieldNow;
       expect(lifetime.getSnapshot()).toMatchObject({
         liveConnection: "reconnecting",
-        snippets: [firstSnippet],
+        snippets: [publishedRecord(firstSnippet)],
       });
 
       yield* TestClock.adjust("1 second");
@@ -766,7 +797,7 @@ it.effect("observes a stream disconnect while a snapshot refresh is hung", () =>
         kind: "ready",
         liveConnection: "connected",
         localReadPerformance: "degraded",
-        snippets: [secondSnippet],
+        snippets: [publishedRecord(secondSnippet)],
       });
     }).pipe(Effect.provide(Layer.merge(provideLifetime(read, invalidations), TestClock.layer())));
   }),
@@ -808,7 +839,7 @@ it.effect("preserves the last-confirmed collection when the API becomes unavaila
         kind: "ready",
         liveConnection: "connected",
         localReadPerformance: "degraded",
-        snippets: [expectedSnippet],
+        snippets: [publishedRecord(expectedSnippet)],
       });
       yield* TestClock.adjust("5 seconds");
       yield* Effect.yieldNow;

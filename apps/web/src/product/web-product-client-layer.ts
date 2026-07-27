@@ -7,6 +7,7 @@ import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 
 import {
   AccountProductReader,
+  authenticatedRpcOptions,
   readAuthenticatedProduct,
   watchAuthenticatedInvalidations,
 } from "./product-reader.ts";
@@ -15,11 +16,12 @@ import {
   readStorageOnboarding,
   StorageOnboardingClient,
 } from "./storage-onboarding-client.ts";
+import { WebSnippetUploadRemote } from "./snippet-upload.ts";
 
 export const makeWebProductClientLayer = (options: {
   readonly getAccessToken: () => Promise<string | undefined>;
   readonly rpcUrl: string;
-}): Layer.Layer<AccountProductReader | StorageOnboardingClient> => {
+}): Layer.Layer<AccountProductReader | StorageOnboardingClient | WebSnippetUploadRemote> => {
   const protocolLayer = RpcClient.layerProtocolHttp({ url: options.rpcUrl }).pipe(
     Layer.provideMerge(FetchHttpClient.layer),
     Layer.provideMerge(RpcSerialization.layerNdjson),
@@ -42,6 +44,21 @@ export const makeWebProductClientLayer = (options: {
                 beginStorageProviderLink(rpc, options.getAccessToken, storageProvider, origin),
               read: (providerHint) =>
                 readStorageOnboarding(rpc, options.getAccessToken, providerHint),
+            }),
+          ),
+          Context.add(
+            WebSnippetUploadRemote,
+            WebSnippetUploadRemote.of({
+              prepare: (input) =>
+                authenticatedRpcOptions(options.getAccessToken).pipe(
+                  Effect.flatMap((requestOptions) =>
+                    rpc.PrepareSnippetUpload(input, requestOptions),
+                  ),
+                ),
+              publish: (input) =>
+                authenticatedRpcOptions(options.getAccessToken).pipe(
+                  Effect.flatMap((requestOptions) => rpc.PublishSnippet(input, requestOptions)),
+                ),
             }),
           ),
         ),
