@@ -2,7 +2,10 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { parseStorageOnboardingRouteSearch } from "@plakk/shared/StorageOnboardingReturn";
 import { useCallback } from "react";
 
-import { StorageOnboardingView } from "../../product/StorageOnboardingView.tsx";
+import {
+  StorageOnboardingInitialization,
+  StorageOnboardingView,
+} from "../../product/StorageOnboardingView.tsx";
 import { storageOnboardingOrigin } from "../../product/storage-onboarding.ts";
 import { useWebProduct } from "../../product/WebProductProvider.tsx";
 
@@ -25,9 +28,10 @@ function Storage() {
   }, [navigate, product.refresh]);
   if (product.storageOnboarding === null) {
     return (
-      <main className="grid min-h-screen place-items-center text-sm text-muted-foreground">
-        Preparing storage setup
-      </main>
+      <StorageOnboardingInitialization
+        failed={product.state.kind === "failed"}
+        onRetry={product.retry}
+      />
     );
   }
 

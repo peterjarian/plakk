@@ -6,7 +6,10 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { StorageOnboardingView } from "./StorageOnboardingView.tsx";
+import {
+  StorageOnboardingInitialization,
+  StorageOnboardingView,
+} from "./StorageOnboardingView.tsx";
 import type { StorageOnboardingRead } from "./storage-onboarding-client.ts";
 
 type StorageOnboardingViewProps = Parameters<typeof StorageOnboardingView>[0];
@@ -82,6 +85,23 @@ const render = async (options: {
 };
 
 describe("storage onboarding view", () => {
+  it("offers retry when account-product initialization fails", async () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    const retry = vi.fn();
+    mountedRoots.push(root);
+
+    await act(async () => {
+      root.render(<StorageOnboardingInitialization failed onRetry={retry} />);
+    });
+    expect(container.textContent).toContain("Storage setup could not start");
+
+    await act(async () => {
+      (container.querySelector("button") as HTMLButtonElement).click();
+    });
+    expect(retry).toHaveBeenCalledOnce();
+  });
+
   it("presents Google Drive, OneDrive, and Dropbox as equal choices", async () => {
     const { container } = await render({
       read: () => Promise.resolve({ account: account(), providerStatus: null }),

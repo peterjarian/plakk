@@ -48,6 +48,42 @@ const stateFromDestination = (destination: StorageOnboardingDestination): ViewSt
   }
 };
 
+export function StorageOnboardingInitialization(props: {
+  readonly failed: boolean;
+  readonly onRetry: (() => void) | null;
+}) {
+  return (
+    <main className="grid min-h-screen place-items-center bg-background px-6 py-10 text-foreground">
+      {props.failed ? (
+        <section
+          className="grid w-full max-w-xl gap-5 rounded-xl border border-destructive/20 bg-destructive/10 p-6"
+          role="alert"
+        >
+          <div className="grid gap-1">
+            <h1 className="font-semibold">Storage setup could not start</h1>
+            <p className="text-sm text-muted-foreground">
+              Plakk could not prepare your account for storage setup. Try again.
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={props.onRetry === null}
+            onClick={props.onRetry ?? undefined}
+          >
+            <RotateCcw aria-hidden="true" />
+            Try again
+          </Button>
+        </section>
+      ) : (
+        <p className="text-sm text-muted-foreground" role="status">
+          Preparing storage setup
+        </p>
+      )}
+    </main>
+  );
+}
+
 export function StorageOnboardingView(props: {
   readonly begin: (
     provider: StorageProvider,
