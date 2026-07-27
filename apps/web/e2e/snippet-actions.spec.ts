@@ -186,7 +186,7 @@ test("gates content actions while Delete converges despite provider cleanup fail
   await page.getByRole("button", { name: "Restrict storage" }).click();
   const storageRestrictedRow = await revealRow(page, 0);
   await expect(storageRestrictedRow.getByRole("button", { name: "Copy" })).toBeDisabled();
-  await expect(storageRestrictedRow.getByRole("button", { name: "Delete" })).toBeDisabled();
+  await expect(storageRestrictedRow.getByRole("button", { name: "Delete" })).toBeEnabled();
   await page.getByRole("button", { name: "Reconnect storage" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-storage-reconnect-requested", "true");
 });

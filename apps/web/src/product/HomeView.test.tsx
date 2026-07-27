@@ -235,11 +235,12 @@ describe("Web Home", () => {
     expect(html).toContain("Your snippets are preserved");
     expect(html).toContain("Restore billing access");
     expect(html).toContain("Add, Copy, Download, and Open remain unavailable");
+    expect(html).toContain('href="mailto:help@plakk.io"');
     expect(actionTag(html, "Copy")).toContain('disabled=""');
     expect(actionTag(html, "Delete")).not.toContain('disabled=""');
   });
 
-  it("gates every provider-dependent action during storage restriction", () => {
+  it("gates provider-dependent actions but keeps authoritative Delete during storage restriction", () => {
     const html = render(
       {
         account: {
@@ -259,10 +260,46 @@ describe("Web Home", () => {
     );
 
     expect(html).toContain("Storage access required");
-    expect(html).toContain("Copy, Download, Open, and Delete");
+    expect(html).toContain("Add, Copy, Download, and Open");
     expect(html).toContain(">Reconnect storage</button>");
     expect(actionTag(html, "Copy")).toContain('disabled=""');
-    expect(actionTag(html, "Delete")).toContain('disabled=""');
+    expect(actionTag(html, "Delete")).not.toContain('disabled=""');
+  });
+
+  it("presents billing and storage as independent simultaneous blockers", () => {
+    const html = render(
+      {
+        account: {
+          ...account,
+          accessEntitlement: { status: "BILLING_RESTRICTED" },
+          blockedReasons: ["billing", "storage"],
+          canSync: false,
+        },
+        accountId: user.id,
+        apiAvailability: "available",
+        kind: "ready",
+        liveConnection: "connected",
+        localReadPerformance: "accelerated",
+        snippets: [photoRecord],
+      },
+      snippetActions,
+      {
+        onBilling: vi.fn(),
+        onStorageReconnect: vi.fn(),
+      },
+    );
+
+    expect(html).toContain("Billing access required");
+    expect(html).toContain("Storage access required");
+    expect(html).toContain(
+      "Restore billing and reconnect storage before Add, Copy, Download, and Open can resume",
+    );
+    expect(html).toContain("Resolving billing will not clear this storage restriction");
+    expect(html).toContain(">Restore billing</button>");
+    expect(html).toContain(">Reconnect storage</button>");
+    expect(html).toContain("Summer photo.png");
+    expect(actionTag(html, "Copy")).toContain('disabled=""');
+    expect(actionTag(html, "Delete")).not.toContain('disabled=""');
   });
 
   it("keeps last-confirmed snippets visible while live updates reconnect", () => {
@@ -301,6 +338,34 @@ describe("Web Home", () => {
     expect(html).toContain("Remote actions are paused");
     expect(html).toContain("Try again");
     expect(html).not.toContain("Nothing added yet");
+  });
+
+  it("does not promise Delete while remote actions are paused during a storage restriction", () => {
+    const html = render(
+      {
+        account: {
+          ...account,
+          blockedReasons: ["storage"],
+          canSync: false,
+        },
+        accountId: user.id,
+        apiAvailability: "unavailable",
+        cause: new RpcError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "backend unavailable",
+        }),
+        kind: "ready",
+        liveConnection: "connected",
+        localReadPerformance: "accelerated",
+        snippets: [photoRecord],
+      },
+      snippetActions,
+      { onStorageReconnect: vi.fn() },
+    );
+
+    expect(html).toContain("Delete is paused until the API is reachable");
+    expect(html).not.toContain("Delete stays available");
+    expect(actionTag(html, "Delete")).toContain('disabled=""');
   });
 
   it("keeps a delegated sign-out failure visible and retryable", () => {

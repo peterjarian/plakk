@@ -2,7 +2,11 @@ import type { AccountStatus, StorageProviderStatus } from "@plakk/shared/PlakkAp
 import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
-import { storageOnboardingDestination, storageOnboardingOrigin } from "./storage-onboarding.ts";
+import {
+  accountNeedsFirstRunStorageOnboarding,
+  storageOnboardingDestination,
+  storageOnboardingOrigin,
+} from "./storage-onboarding.ts";
 
 const account = (input: Partial<AccountStatus> = {}): AccountStatus => ({
   accessEntitlement: {
@@ -29,6 +33,23 @@ const providerStatus = (status: StorageProviderStatus["status"]): StorageProvide
       };
 
 describe("storage onboarding reconstruction", () => {
+  it("auto-opens only for eligible first-run accounts that have never linked storage", () => {
+    expect(accountNeedsFirstRunStorageOnboarding(account(), false)).toBe(true);
+    expect(
+      accountNeedsFirstRunStorageOnboarding(account({ storageProvider: "GOOGLE_DRIVE" }), false),
+    ).toBe(false);
+    expect(
+      accountNeedsFirstRunStorageOnboarding(
+        account({
+          accessEntitlement: { status: "BILLING_RESTRICTED" },
+          blockedReasons: ["billing", "storage"],
+        }),
+        false,
+      ),
+    ).toBe(false);
+    expect(accountNeedsFirstRunStorageOnboarding(account(), true)).toBe(false);
+  });
+
   it("returns retry when authoritative provider state is not connected", () => {
     expect(storageOnboardingDestination(account(), providerStatus("NOT_CONNECTED"), "WEB")).toEqual(
       {

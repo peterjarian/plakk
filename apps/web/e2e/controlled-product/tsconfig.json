@@ -2,6 +2,7 @@
   "extends": "../../tsconfig.json",
   "include": [
     "config.ts",
+    "Issue130Proof.tsx",
     "main.tsx",
     "StorageManagementProof.tsx",
     "StorageOnboardingProof.tsx",
