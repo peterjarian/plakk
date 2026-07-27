@@ -65,9 +65,10 @@ describe("Web Home", () => {
   });
 
   it("renders the established empty state for a confirmed empty snapshot", () => {
-    expect(render({ account, accountId: user.id, kind: "ready", snippets: [] })).toContain(
-      "Nothing added yet",
-    );
+    const html = render({ account, accountId: user.id, kind: "ready", snippets: [] });
+    expect(html).toContain("Nothing added yet");
+    expect(html).toContain("Published snippets from your Plakk account will appear here.");
+    expect(html).not.toContain("Add something above");
   });
 
   it("renders account-owned published Snippets without mutation actions", () => {

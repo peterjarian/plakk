@@ -77,7 +77,10 @@ export function HomeView(props: {
             )}
           </div>
         ) : (
-          <SnippetList empty={state.snippets.length === 0}>
+          <SnippetList
+            empty={state.snippets.length === 0}
+            emptyDescription="Published snippets from your Plakk account will appear here."
+          >
             {state.snippets.map((snippet) => (
               <PublishedSnippetRow
                 key={snippet.id}
