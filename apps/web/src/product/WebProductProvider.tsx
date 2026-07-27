@@ -95,9 +95,11 @@ function ActiveIdentityProduct(props: {
     [runtime],
   );
   const read = useCallback(
-    (providerHint: StorageProvider | null) =>
+    (providerHint: StorageProvider | null, consumeAuthorization: boolean) =>
       runtime.runPromise(
-        Effect.flatMap(StorageOnboardingClient, (client) => client.read(providerHint)),
+        Effect.flatMap(StorageOnboardingClient, (client) =>
+          client.read(providerHint, consumeAuthorization),
+        ),
       ),
     [runtime],
   );

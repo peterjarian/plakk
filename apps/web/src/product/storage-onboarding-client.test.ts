@@ -83,6 +83,7 @@ describe("storage onboarding client", () => {
           }),
           () => Promise.resolve("fresh-workos-token"),
           "GOOGLE_DRIVE",
+          true,
         ),
       ),
     ).resolves.toEqual({
@@ -94,17 +95,29 @@ describe("storage onboarding client", () => {
 
   it("does not reread or claim success when provider status is not connected", async () => {
     const getAccount = vi.fn(() => Effect.succeed(unlinkedAccount));
+    const getProviderStatus = vi.fn<StorageOnboardingRpcClient["GetStorageProviderStatus"]>(() =>
+      Effect.succeed({
+        externalDestinationUrl: null,
+        status: "NOT_CONNECTED",
+        storageProvider: "GOOGLE_DRIVE",
+      }),
+    );
 
     const result = await Effect.runPromise(
       readStorageOnboarding(
-        rpc({ GetAccountStatus: getAccount }),
+        rpc({ GetAccountStatus: getAccount, GetStorageProviderStatus: getProviderStatus }),
         () => Promise.resolve("fresh-workos-token"),
         "GOOGLE_DRIVE",
+        true,
       ),
     );
 
     expect(result.account).toEqual(unlinkedAccount);
     expect(result.providerStatus?.status).toBe("NOT_CONNECTED");
     expect(getAccount).toHaveBeenCalledOnce();
+    expect(getProviderStatus).toHaveBeenCalledWith(
+      { consumeAuthorization: true, storageProvider: "GOOGLE_DRIVE" },
+      { headers: { authorization: "Bearer fresh-workos-token" } },
+    );
   });
 });

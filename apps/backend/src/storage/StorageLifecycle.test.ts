@@ -399,7 +399,9 @@ describe("storage destructive lifecycle", () => {
     );
     expect(begin).toHaveBeenCalled();
     await run(
-      Effect.flatMap(StorageLifecycle, (lifecycle) => lifecycle.getProviderStatus(owner, provider)),
+      Effect.flatMap(StorageLifecycle, (lifecycle) =>
+        lifecycle.getProviderStatus(owner, provider, true),
+      ),
       store,
       storageWithBegin,
     );
@@ -541,7 +543,9 @@ describe("storage destructive lifecycle", () => {
       storage,
     );
     await run(
-      Effect.flatMap(StorageLifecycle, (lifecycle) => lifecycle.getProviderStatus(owner, provider)),
+      Effect.flatMap(StorageLifecycle, (lifecycle) =>
+        lifecycle.getProviderStatus(owner, provider, true),
+      ),
       store,
       storage,
     );
@@ -569,7 +573,29 @@ describe("storage destructive lifecycle", () => {
     );
     await run(
       Effect.flatMap(StorageLifecycle, (lifecycle) =>
-        lifecycle.getProviderStatus(owner, "DROPBOX"),
+        lifecycle.getProviderStatus(owner, "DROPBOX", false),
+      ),
+      store,
+      storage,
+    );
+
+    expect(store.authorization()).toBe(provider);
+  });
+
+  it("keeps a first-link reservation during unrelated same-provider status reads", async () => {
+    const store = makeStore([]);
+    const storage = makeStorage({ linkedProvider: null, status: "NOT_CONNECTED" });
+
+    await run(
+      Effect.flatMap(StorageLifecycle, (lifecycle) =>
+        lifecycle.beginAuthorization(owner, provider, "https://app.plakk.io/storage"),
+      ),
+      store,
+      storage,
+    );
+    await run(
+      Effect.flatMap(StorageLifecycle, (lifecycle) =>
+        lifecycle.getProviderStatus(owner, provider, false),
       ),
       store,
       storage,

@@ -303,7 +303,10 @@ export const StorageRpcs = RpcGroup.make(
     error: RpcError,
   }),
   Rpc.make("GetStorageProviderStatus", {
-    payload: { storageProvider: StorageProviderLiteral },
+    payload: {
+      consumeAuthorization: Schema.Boolean,
+      storageProvider: StorageProviderLiteral,
+    },
     success: StorageProviderStatusSchema,
     error: RpcError,
   }),

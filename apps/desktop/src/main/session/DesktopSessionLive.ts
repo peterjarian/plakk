@@ -345,7 +345,7 @@ const makeDesktopSession = Effect.gen(function* () {
         account.storageProvider === null
           ? null
           : yield* rpc.GetStorageProviderStatus(
-              { storageProvider: account.storageProvider },
+              { consumeAuthorization: false, storageProvider: account.storageProvider },
               { headers },
             );
       return { account, connection };

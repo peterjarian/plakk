@@ -19,7 +19,10 @@ export type StorageOnboardingActions = {
     provider: StorageProvider,
     origin: StorageOnboardingOrigin,
   ) => Promise<{ readonly url: string }>;
-  readonly read: (providerHint: StorageProvider | null) => Promise<StorageOnboardingRead>;
+  readonly read: (
+    providerHint: StorageProvider | null,
+    consumeAuthorization: boolean,
+  ) => Promise<StorageOnboardingRead>;
 };
 
 export type StorageManagementActions = {

@@ -83,7 +83,10 @@ export function StorageOnboardingView(props: {
   readonly onRedirect?: (url: string) => void;
   readonly origin: StorageOnboardingOrigin;
   readonly providerHint: StorageProvider | null;
-  readonly read: (providerHint: StorageProvider | null) => Promise<StorageOnboardingRead>;
+  readonly read: (
+    providerHint: StorageProvider | null,
+    consumeAuthorization: boolean,
+  ) => Promise<StorageOnboardingRead>;
 }) {
   const { begin, confirmationRequested, onContinueWeb, origin, providerHint, read } = props;
   const onRedirect =
@@ -96,7 +99,7 @@ export function StorageOnboardingView(props: {
   const reconstruct = useCallback(async () => {
     setState({ kind: "checking" });
     try {
-      const snapshot = await read(providerHint);
+      const snapshot = await read(providerHint, confirmationRequested);
       const destination = storageOnboardingDestination(
         snapshot.account,
         snapshot.providerStatus,

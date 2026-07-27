@@ -554,6 +554,7 @@ export class StorageLifecycle extends Context.Service<
     readonly getProviderStatus: (
       workosUserId: string,
       storageProvider: StorageProviderName,
+      consumeAuthorization: boolean,
     ) => Effect.Effect<import("@plakk/shared/PlakkApi").StorageProviderStatus, RpcError>;
     readonly retryCleanup: (
       workosUserId: string,
@@ -754,7 +755,7 @@ export class StorageLifecycle extends Context.Service<
             : yield* storage
                 .getStatus({ storageProvider: effectiveProvider, workosUserId })
                 .pipe(Effect.mapError((error) => internal(error.message)));
-        if (effectiveProvider !== null && providerStatus.status !== "NEEDS_REAUTHORIZATION") {
+        if (effectiveProvider !== null && providerStatus.status === "CONNECTED") {
           yield* store.clearAuthorization(workosUserId, effectiveProvider);
         }
         return {
@@ -777,11 +778,12 @@ export class StorageLifecycle extends Context.Service<
       const getProviderStatus = Effect.fn("StorageLifecycle.getProviderStatus")(function* (
         workosUserId: string,
         storageProvider: StorageProviderName,
+        consumeAuthorization: boolean,
       ) {
         const status = yield* storage
           .getStatus({ storageProvider, workosUserId })
           .pipe(Effect.mapError((error) => internal(error.message)));
-        if (status.status !== "NEEDS_REAUTHORIZATION") {
+        if (consumeAuthorization || status.status === "CONNECTED") {
           yield* store.clearAuthorization(workosUserId, storageProvider);
         }
         return status;

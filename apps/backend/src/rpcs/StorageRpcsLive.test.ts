@@ -148,6 +148,7 @@ describe("authoritative storage management", () => {
     await expect(
       run(
         StorageRpcsLive.GetStorageProviderStatus({
+          consumeAuthorization: true,
           storageProvider: "ONE_DRIVE",
         }),
         lifecycle({ getProviderStatus }),
@@ -157,7 +158,7 @@ describe("authoritative storage management", () => {
       status: "CONNECTED",
       storageProvider: "ONE_DRIVE",
     });
-    expect(getProviderStatus).toHaveBeenCalledWith("user-account-bound", "ONE_DRIVE");
+    expect(getProviderStatus).toHaveBeenCalledWith("user-account-bound", "ONE_DRIVE", true);
   });
 
   it("delegates exact-count cleanup and retry to the lifecycle owner", async () => {

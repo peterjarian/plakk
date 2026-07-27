@@ -83,8 +83,13 @@ export const makeWebProductClientLayer = (options: {
             StorageOnboardingClient.of({
               begin: (storageProvider, origin) =>
                 beginStorageProviderLink(rpc, options.getAccessToken, storageProvider, origin),
-              read: (providerHint) =>
-                readStorageOnboarding(rpc, options.getAccessToken, providerHint),
+              read: (providerHint, consumeAuthorization) =>
+                readStorageOnboarding(
+                  rpc,
+                  options.getAccessToken,
+                  providerHint,
+                  consumeAuthorization,
+                ),
             }),
           ),
           Context.add(

@@ -48,7 +48,7 @@ export const StorageRpcsLive = StorageRpcs.of({
     const currentUser = yield* CurrentUser;
     const lifecycle = yield* StorageLifecycle;
     return yield* lifecycle
-      .getProviderStatus(currentUser.id, input.storageProvider)
+      .getProviderStatus(currentUser.id, input.storageProvider, input.consumeAuthorization)
       .pipe(Effect.annotateSpans({ storageProvider: input.storageProvider }));
   }),
   GetStorageManagementState: Effect.fn("rpc.GetStorageManagementState")(function* () {
