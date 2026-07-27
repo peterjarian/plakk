@@ -18,6 +18,10 @@
     "./RpcError": {
       "import": "./src/api/RpcError.ts",
       "types": "./src/api/RpcError.ts"
+    },
+    "./StorageOnboardingReturn": {
+      "import": "./src/api/StorageOnboardingReturn.ts",
+      "types": "./src/api/StorageOnboardingReturn.ts"
     }
   },
   "scripts": {

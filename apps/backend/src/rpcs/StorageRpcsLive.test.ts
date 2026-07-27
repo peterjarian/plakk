@@ -109,6 +109,15 @@ describe("storage authorization", () => {
       expect(() => storageProviderReturnUrl(origin, "DROPBOX", "WEB")).toThrow("PLAKK_WEB_ORIGIN");
     }
   });
+
+  it("requires HTTPS for a production return", () => {
+    expect(() =>
+      storageProviderReturnUrl("http://app.plakk.io", "GOOGLE_DRIVE", "WEB", true),
+    ).toThrow("exact HTTPS origin in production");
+    expect(storageProviderReturnUrl("https://app.plakk.io", "GOOGLE_DRIVE", "WEB", true)).toBe(
+      "https://app.plakk.io/storage?provider=GOOGLE_DRIVE&origin=web&confirmation=provider",
+    );
+  });
 });
 
 describe("authoritative storage status", () => {

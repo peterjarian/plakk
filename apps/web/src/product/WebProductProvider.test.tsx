@@ -11,6 +11,7 @@ import { flushSync } from "react-dom";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { AccountProductReader } from "./product-reader.ts";
+import { StorageOnboardingClient } from "./storage-onboarding-client.ts";
 import { ProductIdentityBoundary, useWebProduct } from "./WebProductProvider.tsx";
 
 const account: AccountStatus = {
@@ -41,6 +42,13 @@ const readerLayer = (id: string) =>
       read: Effect.succeed({ account, snippets: [snippet(id)] }),
     }),
   );
+const storageOnboardingLayer = Layer.succeed(
+  StorageOnboardingClient,
+  StorageOnboardingClient.of({
+    begin: () => Effect.succeed({ url: "https://api.workos.com/provider-redirect" }),
+    read: () => Effect.succeed({ account, providerStatus: null }),
+  }),
+);
 
 function ProductProbe() {
   const { signOut, state } = useWebProduct();
@@ -81,6 +89,7 @@ describe("Web product identity boundary", () => {
           accountId={accountId}
           delegateSignOut={delegateSignOut}
           readerLayer={readerLayer(accountId)}
+          storageOnboardingLayer={storageOnboardingLayer}
         >
           <ProductProbe />
         </ProductIdentityBoundary>
@@ -120,6 +129,7 @@ describe("Web product identity boundary", () => {
           accountId="user_a"
           delegateSignOut={delegateSignOut}
           readerLayer={readerLayer("user_a")}
+          storageOnboardingLayer={storageOnboardingLayer}
         >
           <ProductProbe />
         </ProductIdentityBoundary>,

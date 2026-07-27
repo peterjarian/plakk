@@ -15,6 +15,7 @@ test("first-run routing presents equal provider choices", async ({ page }) => {
   await expect(providerButtons.nth(0)).toHaveText("Google Drive");
   await expect(providerButtons.nth(1)).toHaveText("OneDrive");
   await expect(providerButtons.nth(2)).toHaveText("Dropbox");
+  expect(new URL(page.url()).pathname).toBe("/storage");
 });
 
 test("provider choice starts WorkOS redirect without browser credentials", async ({ page }) => {

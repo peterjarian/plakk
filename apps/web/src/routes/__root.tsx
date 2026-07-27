@@ -5,7 +5,6 @@ import { getAuth } from "@workos/authkit-tanstack-react-start";
 import { TooltipProvider } from "@plakk/ui/components/primitives/tooltip";
 
 import { WebProductProvider } from "../product/WebProductProvider.tsx";
-import { WebStorageOnboardingProvider } from "../product/WebStorageOnboardingProvider.tsx";
 import appCss from "../styles.css?url";
 
 export const Route = createRootRoute({
@@ -39,11 +38,9 @@ function RootComponent() {
     <RootDocument>
       <AuthKitProvider initialAuth={initialAuth}>
         <TooltipProvider>
-          <WebStorageOnboardingProvider>
-            <WebProductProvider>
-              <Outlet />
-            </WebProductProvider>
-          </WebStorageOnboardingProvider>
+          <WebProductProvider>
+            <Outlet />
+          </WebProductProvider>
         </TooltipProvider>
       </AuthKitProvider>
     </RootDocument>

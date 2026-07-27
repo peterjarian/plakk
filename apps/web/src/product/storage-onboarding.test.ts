@@ -2,11 +2,7 @@ import type { AccountStatus, StorageProviderStatus } from "@plakk/shared/PlakkAp
 import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
-import {
-  storageOnboardingDestination,
-  storageOnboardingOrigin,
-  storageOnboardingProvider,
-} from "./storage-onboarding.ts";
+import { storageOnboardingDestination, storageOnboardingOrigin } from "./storage-onboarding.ts";
 
 const account = (input: Partial<AccountStatus> = {}): AccountStatus => ({
   accessEntitlement: {
@@ -71,9 +67,7 @@ describe("storage onboarding reconstruction", () => {
     ).toEqual({ kind: "return-desktop" });
   });
 
-  it("accepts only the supported provider and Desktop origin query vocabulary", () => {
-    expect(storageOnboardingProvider("ONE_DRIVE")).toBe("ONE_DRIVE");
-    expect(storageOnboardingProvider("google-drive")).toBeNull();
+  it("recognizes only the Desktop origin query vocabulary", () => {
     expect(storageOnboardingOrigin("desktop")).toBe("DESKTOP");
     expect(storageOnboardingOrigin("DESKTOP")).toBe("WEB");
   });

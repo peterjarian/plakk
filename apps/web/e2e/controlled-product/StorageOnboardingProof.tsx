@@ -3,9 +3,11 @@ import type { AccountStatus, StorageProviderStatus } from "@plakk/shared/PlakkAp
 import * as DateTime from "effect/DateTime";
 import { useCallback, useRef, useState } from "react";
 
+import { AuthenticatedHome } from "../../src/product/AuthenticatedHome.tsx";
 import { HomeView } from "../../src/product/HomeView.tsx";
 import { StorageOnboardingView } from "../../src/product/StorageOnboardingView.tsx";
 import { accountNeedsStorageOnboarding } from "../../src/product/storage-onboarding.ts";
+import { WebProductContext } from "../../src/product/web-product-context.tsx";
 
 const unlinkedAccount: AccountStatus = {
   accessEntitlement: {
@@ -54,7 +56,39 @@ type StorageProofMode =
   | "temporary-failure"
   | "authorization-failure";
 
-export function StorageOnboardingProof({ mode }: { readonly mode: StorageProofMode }) {
+function FirstRunRouteProof() {
+  const [openedStorage, setOpenedStorage] = useState(false);
+  const openStorage = useCallback(() => {
+    history.replaceState(null, "", "/storage");
+    setOpenedStorage(true);
+  }, []);
+
+  if (openedStorage) return <StorageOnboardingScenario mode="first-run" />;
+
+  return (
+    <WebProductContext.Provider
+      value={{
+        refresh: null,
+        retry: null,
+        signOut: null,
+        state: {
+          account: unlinkedAccount,
+          accountId: user.id,
+          apiAvailability: "available",
+          kind: "ready",
+          liveConnection: "connected",
+          localReadPerformance: "accelerated",
+          snippets: [],
+        },
+        storageOnboarding: null,
+      }}
+    >
+      <AuthenticatedHome onStorageOnboardingRequired={openStorage} user={user} />
+    </WebProductContext.Provider>
+  );
+}
+
+function StorageOnboardingScenario({ mode }: { readonly mode: StorageProofMode }) {
   const [continued, setContinued] = useState(false);
   const temporaryFailures = useRef(mode === "temporary-failure" ? 1 : 0);
   const authorizationFailures = useRef(mode === "authorization-failure" ? 1 : 0);
@@ -137,4 +171,8 @@ export function StorageOnboardingProof({ mode }: { readonly mode: StorageProofMo
       read={read}
     />
   );
+}
+
+export function StorageOnboardingProof({ mode }: { readonly mode: StorageProofMode }) {
+  return mode === "first-run" ? <FirstRunRouteProof /> : <StorageOnboardingScenario mode={mode} />;
 }
