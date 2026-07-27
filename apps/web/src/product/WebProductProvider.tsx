@@ -16,6 +16,7 @@ import {
 
 import {
   AccountProductLifetime,
+  AccountProductLifetimeInitializationFailure,
   clearProductThenSignOut,
   type AccountProductLifetimeShape,
   type AccountProductState,
@@ -75,27 +76,61 @@ function IdentityProductResource(props: {
   readonly readerLayer: Layer.Layer<AccountProductReader>;
 }) {
   const { accountId, children, delegateSignOut, readerLayer } = props;
-  const [runtime] = useState(() =>
-    ManagedRuntime.make(AccountProductLifetime.layer.pipe(Layer.provide(readerLayer))),
-  );
-  const [lifetime, setLifetime] = useState<AccountProductLifetimeShape | null>(null);
+  type IdentityRuntime = {
+    readonly lifetimePromise: Promise<AccountProductLifetimeShape>;
+    readonly runtime: ManagedRuntime.ManagedRuntime<AccountProductLifetime, never>;
+  };
+  type ActiveIdentityRuntime = IdentityRuntime & {
+    readonly lifetime: AccountProductLifetimeShape;
+  };
+  const resourceRef = useRef<IdentityRuntime | null>(null);
+  const [activeResource, setActiveResource] = useState<ActiveIdentityRuntime | null>(null);
+  const [initializationFailure, setInitializationFailure] =
+    useState<AccountProductLifetimeInitializationFailure | null>(null);
+  const [initializationAttempt, setInitializationAttempt] = useState(0);
 
   useEffect(() => {
     let mounted = true;
-    void runtime.runPromise(AccountProductLifetime).then((productLifetime) => {
-      if (!mounted) return;
-      runtime.runFork(productLifetime.enter(accountId));
-      setLifetime(productLifetime);
-    });
+    setActiveResource(null);
+    setInitializationFailure(null);
+    const runtime = ManagedRuntime.make(
+      AccountProductLifetime.layer.pipe(Layer.provide(readerLayer)),
+    );
+    const lifetimePromise = runtime.runPromise(AccountProductLifetime);
+    const resource = { lifetimePromise, runtime };
+    resourceRef.current = resource;
+    void lifetimePromise.then(
+      (lifetime) => {
+        if (!mounted) return;
+        runtime.runFork(lifetime.enter(accountId));
+        setActiveResource({ ...resource, lifetime });
+      },
+      (cause) => {
+        if (!mounted) return;
+        setInitializationFailure(new AccountProductLifetimeInitializationFailure({ cause }));
+      },
+    );
     return () => {
       mounted = false;
+      if (resourceRef.current === resource) resourceRef.current = null;
       void runtime.dispose();
     };
-  }, [accountId, runtime]);
+  }, [accountId, initializationAttempt, readerLayer]);
 
   const signOut = useCallback(async () => {
-    const productLifetime = lifetime ?? (await runtime.runPromise(AccountProductLifetime));
-    await runtime.runPromise(
+    const resource = resourceRef.current;
+    if (resource === null) {
+      await delegateSignOut();
+      return;
+    }
+    let productLifetime: AccountProductLifetimeShape;
+    try {
+      productLifetime = await resource.lifetimePromise;
+    } catch {
+      await delegateSignOut();
+      return;
+    }
+    await resource.runtime.runPromise(
       clearProductThenSignOut(
         productLifetime.clear,
         Effect.tryPromise({
@@ -104,15 +139,21 @@ function IdentityProductResource(props: {
         }),
       ),
     );
-  }, [delegateSignOut, lifetime, runtime]);
+  }, [delegateSignOut]);
 
-  if (lifetime === null) {
+  if (activeResource === null) {
     return (
       <WebProductContext.Provider
         value={{
-          retry: null,
+          retry:
+            initializationFailure === null
+              ? null
+              : () => setInitializationAttempt((attempt) => attempt + 1),
           signOut,
-          state: { accountId, kind: "loading" },
+          state:
+            initializationFailure === null
+              ? { accountId, kind: "loading" }
+              : { accountId, cause: initializationFailure, kind: "failed" },
         }}
       >
         {children}
@@ -121,7 +162,11 @@ function IdentityProductResource(props: {
   }
 
   return (
-    <ActiveIdentityProduct lifetime={lifetime} runtime={runtime} signOut={signOut}>
+    <ActiveIdentityProduct
+      lifetime={activeResource.lifetime}
+      runtime={activeResource.runtime}
+      signOut={signOut}
+    >
       {children}
     </ActiveIdentityProduct>
   );

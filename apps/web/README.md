@@ -32,6 +32,7 @@ WORKOS_CLIENT_ID=client_...
 WORKOS_REDIRECT_URI=http://localhost:3000/api/auth/callback
 WORKOS_COOKIE_PASSWORD=32+ chars
 VITE_PLAKK_API_ORIGIN=http://localhost:3100
+PLAKK_WEB_ORIGIN=http://localhost:3000
 ```
 
 ## Backend ownership

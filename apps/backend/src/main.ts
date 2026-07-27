@@ -46,7 +46,6 @@ const HealthRoute = HttpRouter.add(
 
 const CorsLive = Layer.unwrap(
   Config.string("PLAKK_WEB_ORIGIN").pipe(
-    Config.withDefault("http://localhost:3000"),
     Effect.flatMap((configuredWebOrigin) =>
       Effect.try({
         try: () => allowedBackendOrigins(configuredWebOrigin),

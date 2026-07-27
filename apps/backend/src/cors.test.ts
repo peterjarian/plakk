@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { allowedBackendOrigins } from "./cors.ts";
+import { allowedBackendOrigins, InvalidCorsConfiguration } from "./cors.ts";
 
 describe("backend CORS origins", () => {
   it("retains Desktop and adds one exact configured Web origin", () => {
@@ -23,6 +23,19 @@ describe("backend CORS origins", () => {
       expect(() => allowedBackendOrigins(value)).toThrow(
         "PLAKK_WEB_ORIGIN must be an exact HTTP(S) origin.",
       );
+    }
+  });
+
+  it("does not retain malformed configuration values in its error cause", () => {
+    const configuredOrigin = "https://user:password@example.com";
+    try {
+      allowedBackendOrigins(configuredOrigin);
+      expect.unreachable("invalid origins must fail");
+    } catch (cause) {
+      expect(cause).toBeInstanceOf(InvalidCorsConfiguration);
+      expect((cause as InvalidCorsConfiguration).cause).toBe("redacted-invalid-web-origin");
+      expect(JSON.stringify(cause)).not.toContain(configuredOrigin);
+      expect(JSON.stringify(cause)).not.toContain("password");
     }
   });
 });

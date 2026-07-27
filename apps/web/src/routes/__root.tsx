@@ -8,7 +8,7 @@ import { WebProductProvider } from "../product/WebProductProvider.tsx";
 import appCss from "../styles.css?url";
 
 export const Route = createRootRoute({
-  loader: () => getAuth(),
+  beforeLoad: async () => ({ auth: await getAuth() }),
   head: () => ({
     meta: [
       {
@@ -33,7 +33,7 @@ export const Route = createRootRoute({
 });
 
 function RootComponent() {
-  const initialAuth = Route.useLoaderData();
+  const { auth: initialAuth } = Route.useRouteContext();
   return (
     <RootDocument>
       <AuthKitProvider initialAuth={initialAuth}>

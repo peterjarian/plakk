@@ -1,4 +1,5 @@
 import * as Context from "effect/Context";
+import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as FiberHandle from "effect/FiberHandle";
 import * as Layer from "effect/Layer";
@@ -9,13 +10,19 @@ import {
   type AccountProductSnapshot,
 } from "./product-reader.ts";
 
+export class AccountProductLifetimeInitializationFailure extends Data.TaggedError(
+  "AccountProductLifetimeInitializationFailure",
+)<{
+  readonly cause: unknown;
+}> {}
+
 export type AccountProductState =
   | { readonly kind: "idle" }
   | { readonly kind: "loading"; readonly accountId: string }
   | {
       readonly kind: "failed";
       readonly accountId: string;
-      readonly cause: AccountProductReadError;
+      readonly cause: AccountProductReadError | AccountProductLifetimeInitializationFailure;
     }
   | ({
       readonly kind: "ready";

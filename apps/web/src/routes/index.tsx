@@ -1,10 +1,9 @@
 import { buttonVariants } from "@plakk/ui/components/primitives/button";
 import { createFileRoute, redirect } from "@tanstack/react-router";
-import { getAuth } from "@workos/authkit-tanstack-react-start";
 
 export const Route = createFileRoute("/")({
-  loader: async () => {
-    const { user } = await getAuth();
+  loader: ({ context }) => {
+    const { user } = context.auth;
     if (user !== null) throw redirect({ to: "/snippets" });
   },
   component: Welcome,

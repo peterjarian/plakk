@@ -3,7 +3,7 @@
 import type { AccountStatus, ApiSnippet } from "@plakk/shared/PlakkApi";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { act } from "react";
+import { act, StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
@@ -67,13 +67,15 @@ describe("Web product identity boundary", () => {
     mountedRoots.push(root);
 
     const renderIdentity = (accountId: string) => (
-      <ProductIdentityBoundary
-        accountId={accountId}
-        delegateSignOut={delegateSignOut}
-        readerLayer={readerLayer(accountId)}
-      >
-        <ProductProbe />
-      </ProductIdentityBoundary>
+      <StrictMode>
+        <ProductIdentityBoundary
+          accountId={accountId}
+          delegateSignOut={delegateSignOut}
+          readerLayer={readerLayer(accountId)}
+        >
+          <ProductProbe />
+        </ProductIdentityBoundary>
+      </StrictMode>
     );
 
     await act(async () => {

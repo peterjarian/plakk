@@ -12,7 +12,7 @@ export const allowedBackendOrigins = (configuredWebOrigin: string): ReadonlyArra
   const webOrigin = parseExactHttpOrigin(configuredWebOrigin);
   if (webOrigin === null) {
     throw new InvalidCorsConfiguration({
-      cause: configuredWebOrigin,
+      cause: "redacted-invalid-web-origin",
       message: invalidOriginMessage,
     });
   }
