@@ -3,12 +3,20 @@ import { defineConfig, devices } from "@playwright/test";
 import { CONTROLLED_PRODUCT_PORT } from "./e2e/controlled-product/config.ts";
 
 export default defineConfig({
-  globalSetup: "./e2e/global-setup.ts",
   testDir: "./e2e",
   timeout: 30_000,
   projects: [
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },
-    { name: "firefox", use: { ...devices["Desktop Firefox"] } },
+    {
+      name: "firefox-setup",
+      testMatch: /firefox\.setup\.ts/,
+      use: { ...devices["Desktop Firefox"] },
+    },
+    {
+      dependencies: ["firefox-setup"],
+      name: "firefox",
+      use: { ...devices["Desktop Firefox"] },
+    },
   ],
   use: {
     baseURL: "http://127.0.0.1:3000",
