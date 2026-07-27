@@ -154,7 +154,7 @@ export function SettingsView(props: {
         <SettingsSection>
           <SettingsSectionTitle>Billing</SettingsSectionTitle>
           <SettingsSectionBody>
-            <SettingsRow className="items-start">
+            <SettingsRow className="items-start sm:items-start">
               <SettingsRowMain className="items-start">
                 <CreditCard
                   className="mt-0.5 size-4 shrink-0 text-muted-foreground"
@@ -180,7 +180,7 @@ export function SettingsView(props: {
         <SettingsSection>
           <SettingsSectionTitle>Connected storage</SettingsSectionTitle>
           <SettingsSectionBody>
-            <SettingsRow className="items-start">
+            <SettingsRow className="items-start sm:items-start">
               <SettingsRowMain className="items-start">
                 <HardDrive
                   className="mt-0.5 size-4 shrink-0 text-muted-foreground"
