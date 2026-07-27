@@ -88,7 +88,8 @@ export class AccountProductLifetime extends Context.Service<
 
       return AccountProductLifetime.of({
         clear,
-        enter: (accountId) => (activeAccountId === accountId ? Effect.void : load(accountId)),
+        enter: (accountId) =>
+          Effect.suspend(() => (activeAccountId === accountId ? Effect.void : load(accountId))),
         getSnapshot: () => state,
         retry: Effect.suspend(() =>
           activeAccountId === null ? Effect.void : load(activeAccountId),
@@ -107,7 +108,12 @@ export const clearProductThenSignOut = Effect.fn("AccountProductLifetime.signOut
   ClearR,
   SignOutE,
   SignOutR,
->(clear: Effect.Effect<void, ClearE, ClearR>, signOut: Effect.Effect<void, SignOutE, SignOutR>) {
+  RestoreR,
+>(
+  clear: Effect.Effect<void, ClearE, ClearR>,
+  signOut: Effect.Effect<void, SignOutE, SignOutR>,
+  restore: Effect.Effect<void, never, RestoreR>,
+) {
   yield* clear;
-  yield* signOut;
+  yield* signOut.pipe(Effect.catch((cause) => restore.pipe(Effect.andThen(Effect.fail(cause)))));
 });

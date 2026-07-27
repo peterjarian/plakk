@@ -136,16 +136,39 @@ describe("account product lifetime", () => {
       yield* clearProductThenSignOut(
         Effect.sync(() => void order.push("clear")),
         Effect.sync(() => void order.push("sign-out")),
+        Effect.sync(() => void order.push("restore")),
       );
       expect(order).toEqual(["clear", "sign-out"]);
 
       const signOutCalled = yield* Ref.make(false);
+      const restoreCalled = yield* Ref.make(false);
       const failure = yield* clearProductThenSignOut(
         Effect.fail(new PurgeFailure()),
         Ref.set(signOutCalled, true),
+        Ref.set(restoreCalled, true),
       ).pipe(Effect.flip);
       expect(failure).toBeInstanceOf(PurgeFailure);
       expect(yield* Ref.get(signOutCalled)).toBe(false);
+      expect(yield* Ref.get(restoreCalled)).toBe(false);
+    }),
+  );
+
+  it.effect("restores the current account after delegated sign-out fails", () =>
+    Effect.gen(function* () {
+      const order: Array<string> = [];
+      const failure = new PurgeFailure();
+
+      const actualFailure = yield* clearProductThenSignOut(
+        Effect.sync(() => void order.push("clear")),
+        Effect.gen(function* () {
+          order.push("sign-out");
+          return yield* failure;
+        }),
+        Effect.sync(() => void order.push("restore")),
+      ).pipe(Effect.flip);
+
+      expect(actualFailure).toBe(failure);
+      expect(order).toEqual(["clear", "sign-out", "restore"]);
     }),
   );
 });

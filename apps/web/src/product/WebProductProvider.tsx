@@ -137,9 +137,10 @@ function IdentityProductResource(props: {
           try: delegateSignOut,
           catch: (cause) => new WorkOsSignOutFailure({ cause }),
         }),
+        productLifetime.enter(accountId),
       ),
     );
-  }, [delegateSignOut]);
+  }, [accountId, delegateSignOut]);
 
   if (activeResource === null) {
     return (
