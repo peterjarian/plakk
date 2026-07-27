@@ -94,6 +94,30 @@ const runCapability = <A, E>(
 };
 
 describe("account trial capability", () => {
+  it("consults billing authority on the first status read after creating the trial", async () => {
+    const getEntitlement = vi.fn(() =>
+      Effect.succeed({
+        status: "BILLING_RESTRICTED" as const,
+      }),
+    );
+
+    const status = await runCapability(
+      (capability) =>
+        Effect.gen(function* () {
+          yield* TestClock.setTime(trialStartMillis);
+          return yield* capability.getStatus("user-1");
+        }),
+      { billing: billingService({ getEntitlement }) },
+    );
+
+    expect(getEntitlement).toHaveBeenCalledTimes(1);
+    expect(getEntitlement).toHaveBeenCalledWith(
+      "user-1",
+      expect.objectContaining({ workosUserId: "user-1" }),
+    );
+    expect(status.accessEntitlement).toEqual({ status: "BILLING_RESTRICTED" });
+  });
+
   it("creates one immutable 14-day trial under concurrent first sign-ins", async () => {
     const repository = makeTrialRepository();
 

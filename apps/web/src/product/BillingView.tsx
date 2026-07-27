@@ -1,20 +1,14 @@
 import type { User } from "@plakk/shared";
-import type { BillingPlan } from "@plakk/shared/PlakkApi";
+import { formatAccountBillingInstant, type BillingPlan } from "@plakk/shared/PlakkApi";
 import { AppHeader } from "@plakk/ui/components/AppHeader";
 import { Button } from "@plakk/ui/components/primitives/button";
-import * as DateTime from "effect/DateTime";
 import { ArrowLeft, CircleHelp } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import type { AccountProductState } from "./account-product-lifetime.ts";
 import type { WebProductContextValue } from "./web-product-context.tsx";
 
-const billingInstant = (instant: DateTime.Utc) =>
-  DateTime.formatUtc(instant, {
-    dateStyle: "long",
-    locale: "en",
-    timeStyle: "short",
-  });
+const CONFIRMATION_DELAYS_MILLIS = [0, 1_500, 3_000, 6_000, 12_000, 15_000, 15_000] as const;
 
 export function BillingView(props: {
   readonly billing: WebProductContextValue["billing"];
@@ -40,6 +34,8 @@ export function BillingView(props: {
   } = props;
   const [pendingAction, setPendingAction] = useState<BillingPlan | "PORTAL" | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [confirmationRun, setConfirmationRun] = useState(0);
+  const [confirmationTimedOut, setConfirmationTimedOut] = useState(false);
   const account = state.kind === "ready" ? state.account : null;
   const entitlement = account?.accessEntitlement ?? null;
   const paidConfirmed = entitlement?.status === "PAID_ACTIVE";
@@ -47,18 +43,33 @@ export function BillingView(props: {
   useEffect(() => {
     if (!checkoutReturned || paidConfirmed || refresh === null) return;
     let active = true;
-    const check = () => {
-      void refresh().catch(() => {
-        if (active) setActionError("Plakk could not confirm billing yet. It will keep trying.");
-      });
+    let timer: number | null = null;
+    setConfirmationTimedOut(false);
+
+    const check = async (attempt: number) => {
+      if (!active) return;
+      try {
+        await refresh();
+        if (active) setActionError(null);
+      } catch {
+        if (active) setActionError("Plakk could not confirm billing yet.");
+      }
+      if (!active) return;
+      const nextAttempt = attempt + 1;
+      const delay = CONFIRMATION_DELAYS_MILLIS[nextAttempt];
+      if (delay === undefined) {
+        setConfirmationTimedOut(true);
+        return;
+      }
+      timer = window.setTimeout(() => void check(nextAttempt), delay);
     };
-    check();
-    const timer = window.setInterval(check, 1_500);
+
+    timer = window.setTimeout(() => void check(0), CONFIRMATION_DELAYS_MILLIS[0]);
     return () => {
       active = false;
-      window.clearInterval(timer);
+      if (timer !== null) window.clearTimeout(timer);
     };
-  }, [checkoutReturned, paidConfirmed, refresh]);
+  }, [checkoutReturned, confirmationRun, paidConfirmed, refresh]);
 
   const beginCheckout = (plan: BillingPlan) => {
     if (billing === null || pendingAction !== null) return;
@@ -152,6 +163,18 @@ export function BillingView(props: {
             >
               <strong>Waiting for Polar confirmation.</strong> Returning from checkout does not
               unlock Plakk. Normal access changes only after the backend confirms the paid benefit.
+              {confirmationTimedOut && (
+                <div className="mt-3">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setConfirmationRun((run) => run + 1)}
+                  >
+                    Check again
+                  </Button>
+                </div>
+              )}
             </div>
           ))}
 
@@ -164,7 +187,7 @@ export function BillingView(props: {
             <div>
               <h2 className="font-medium">Trial active</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                Your trial ends exactly {billingInstant(entitlement.trialEndsAt)}.
+                Your trial ends exactly {formatAccountBillingInstant(entitlement.trialEndsAt)}.
               </p>
             </div>
             <div
@@ -183,7 +206,8 @@ export function BillingView(props: {
                 {entitlement.cancelAtPeriodEnd ? "Subscription canceled" : "Paid access active"}
               </h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                Access remains active through {billingInstant(entitlement.paidThrough)}.
+                Access remains active through {formatAccountBillingInstant(entitlement.paidThrough)}
+                .
                 {entitlement.cancelAtPeriodEnd
                   ? " Your trial will not resume after that instant."
                   : " Polar will manage the next renewal."}
@@ -204,8 +228,8 @@ export function BillingView(props: {
             <div role="alert">
               <h2 className="font-medium text-destructive">Payment needs attention</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                Normal use continues through {billingInstant(entitlement.graceEndsAt)}. Update your
-                payment method before then to avoid restriction.
+                Normal use continues through {formatAccountBillingInstant(entitlement.graceEndsAt)}.
+                Update your payment method before then to avoid restriction.
               </p>
             </div>
             <Button

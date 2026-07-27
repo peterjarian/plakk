@@ -47,13 +47,15 @@ const startBackendUnavailable = query.get("backend-unavailable") === "true";
 const trialAtExactExpiry = query.get("trial-at-exact-expiry") === "true";
 const storageOnboardingMode = query.get("storage-onboarding");
 const snippetActionsProof = query.get("snippet-actions") === "true";
-const billingMode = query.get("billing") as
-  | "grace"
-  | "recovered"
-  | "restricted"
-  | "returned"
-  | "trial"
-  | null;
+const billingModeValue = query.get("billing");
+const billingMode =
+  billingModeValue === "grace" ||
+  billingModeValue === "recovered" ||
+  billingModeValue === "restricted" ||
+  billingModeValue === "returned" ||
+  billingModeValue === "trial"
+    ? billingModeValue
+    : null;
 
 const account: AccountStatus = {
   accessEntitlement: trialAtExactExpiry

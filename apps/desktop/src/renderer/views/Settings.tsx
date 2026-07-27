@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { formatFileSize } from "@plakk/shared";
-import type { AccountAccessEntitlement } from "@plakk/shared/PlakkApi";
-import * as DateTime from "effect/DateTime";
+import { formatAccountBillingInstant, type AccountAccessEntitlement } from "@plakk/shared/PlakkApi";
 import {
   ArrowLeft,
   ArrowUpRight,
@@ -63,18 +62,11 @@ const appearanceLabels = {
   system: "System",
 } as const;
 
-const billingInstant = (instant: DateTime.Utc) =>
-  DateTime.formatUtc(instant, {
-    dateStyle: "long",
-    locale: "en",
-    timeStyle: "short",
-  });
-
 export const desktopBillingPresentation = (
   entitlement: AccountAccessEntitlement | null,
 ): {
-  readonly action: "Manage" | "Recover" | "Upgrade";
-  readonly badge: "Grace" | "Pro" | "Restricted" | "Trial";
+  readonly action: "Manage" | "Open" | "Recover" | "Upgrade";
+  readonly badge: "Grace" | "Pro" | "Restricted" | "Trial" | "Unknown";
   readonly description: string;
   readonly title: string;
 } => {
@@ -83,21 +75,21 @@ export const desktopBillingPresentation = (
       return {
         action: "Upgrade",
         badge: "Trial",
-        description: `Billing starts immediately. Upgrading permanently ends unused trial time. Trial ends exactly ${billingInstant(entitlement.trialEndsAt)}.`,
+        description: `Billing starts immediately. Upgrading permanently ends unused trial time. Trial ends exactly ${formatAccountBillingInstant(entitlement.trialEndsAt)}.`,
         title: "Plakk trial",
       };
     case "PAID_ACTIVE":
       return {
         action: "Manage",
         badge: "Pro",
-        description: `${entitlement.cancelAtPeriodEnd ? "Canceled; access remains active" : "Paid access active"} through ${billingInstant(entitlement.paidThrough)}.`,
+        description: `${entitlement.cancelAtPeriodEnd ? "Canceled; access remains active" : "Paid access active"} through ${formatAccountBillingInstant(entitlement.paidThrough)}.`,
         title: "Plakk Pro",
       };
     case "GRACE_ACTIVE":
       return {
         action: "Recover",
         badge: "Grace",
-        description: `Normal use continues through ${billingInstant(entitlement.graceEndsAt)}. Update payment before then.`,
+        description: `Normal use continues through ${formatAccountBillingInstant(entitlement.graceEndsAt)}. Update payment before then.`,
         title: "Payment needs attention",
       };
     case "BILLING_RESTRICTED":
@@ -109,10 +101,11 @@ export const desktopBillingPresentation = (
       };
     default:
       return {
-        action: "Manage",
-        badge: "Pro",
-        description: "Manage billing securely on the Plakk web app.",
-        title: "Plakk subscription",
+        action: "Open",
+        badge: "Unknown",
+        description:
+          "Billing status is unavailable. Reconnect or open the Plakk web app to manage billing.",
+        title: "Billing status unavailable",
       };
   }
 };

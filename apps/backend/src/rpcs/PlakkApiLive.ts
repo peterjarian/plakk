@@ -38,11 +38,12 @@ const BillingRpcsLive = BillingRpcs.of({
     const currentUser = yield* CurrentUser;
     const billing = yield* AccountBilling;
     return yield* billing.beginCheckout(currentUser.id, plan).pipe(
+      Effect.tapError((error) => Effect.logError("Could not begin Polar checkout", { error })),
       Effect.mapError(
-        (error) =>
+        () =>
           new RpcError({
             code: "INTERNAL_SERVER_ERROR",
-            message: error.message,
+            message: "Billing checkout is temporarily unavailable.",
           }),
       ),
     );
@@ -51,11 +52,12 @@ const BillingRpcsLive = BillingRpcs.of({
     const currentUser = yield* CurrentUser;
     const billing = yield* AccountBilling;
     return yield* billing.openPortal(currentUser.id).pipe(
+      Effect.tapError((error) => Effect.logError("Could not open Polar billing portal", { error })),
       Effect.mapError(
-        (error) =>
+        () =>
           new RpcError({
             code: "INTERNAL_SERVER_ERROR",
-            message: error.message,
+            message: "Billing recovery is temporarily unavailable.",
           }),
       ),
     );

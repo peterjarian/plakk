@@ -199,6 +199,7 @@ describe("Polar-backed account billing", () => {
             paidThrough: date("2026-09-27T10:15:30.000Z"),
             updatedAt: date("2026-08-28T10:15:30.000Z"),
           });
+          yield* TestClock.adjust("5 seconds");
           return yield* billing.getEntitlement("user-1", trial);
         }),
       { authority },
@@ -223,6 +224,7 @@ describe("Polar-backed account billing", () => {
           authority.read.mockImplementationOnce(() =>
             Effect.fail(new BillingProviderError({ cause: null, message: "Polar unavailable" })),
           );
+          yield* TestClock.adjust("5 seconds");
           return yield* billing.getEntitlement("user-1", trial);
         }),
       { authority },
@@ -279,10 +281,13 @@ describe("Polar-backed account billing", () => {
           yield* TestClock.setTime(Date.parse("2026-08-28T10:15:30.000Z"));
           const staleFiber = yield* Effect.forkChild(billing.getEntitlement("user-1", trial));
           yield* Deferred.await(staleStarted);
-          const recoveredFiber = yield* Effect.forkChild(billing.getEntitlement("user-1", trial));
+          const recoveredFiber = yield* Effect.forkChild(
+            billing.handleWebhook("signed-recovery", {}),
+          );
           yield* Deferred.succeed(releaseStale, undefined);
           const staleResult = yield* Fiber.join(staleFiber);
-          const recovered = yield* Fiber.join(recoveredFiber);
+          yield* Fiber.join(recoveredFiber);
+          const recovered = yield* billing.getEntitlement("user-1", trial);
           return [recovered, staleResult] as const;
         }),
       { authority, repository },

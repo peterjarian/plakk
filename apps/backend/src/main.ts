@@ -21,6 +21,8 @@ import {
   AccountBilling,
   AccountBillingStateRepository,
   BillingAuthority,
+  type BillingWebhookPayloadError,
+  type BillingWebhookVerificationError,
 } from "./billing/AccountBilling.ts";
 import { allowedBackendOrigins, InvalidCorsConfiguration } from "./cors.ts";
 import { AuthMiddlewareLive } from "./middleware/AuthMiddlewareLive.ts";
@@ -78,13 +80,29 @@ const PolarWebhookRoute = HttpRouter.add(
       Effect.match({
         onFailure: (error) =>
           HttpServerResponse.empty({
-            status: error._tag === "BillingWebhookVerificationError" ? 403 : 503,
+            status: webhookFailureStatus(error),
           }),
         onSuccess: () => HttpServerResponse.empty({ status: 202 }),
       }),
     );
   }),
 ).pipe(HttpRouter.serve, Layer.provide(BillingDomainLive), Layer.provide(InfrastructureLive));
+
+export const webhookFailureStatus = (
+  error:
+    | { readonly _tag: "BillingProviderError" }
+    | BillingWebhookPayloadError
+    | BillingWebhookVerificationError,
+): 400 | 403 | 503 => {
+  switch (error._tag) {
+    case "BillingWebhookPayloadError":
+      return 400;
+    case "BillingWebhookVerificationError":
+      return 403;
+    case "BillingProviderError":
+      return 503;
+  }
+};
 
 const CorsLive = Layer.unwrap(
   Effect.all({

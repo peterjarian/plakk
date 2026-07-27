@@ -306,6 +306,15 @@ const makeDesktopSession = Effect.gen(function* () {
         ) {
           return;
         }
+        if (
+          currentLocalState.capability.account.accessEntitlement.status === "PAID_ACTIVE" &&
+          !currentLocalState.capability.account.accessEntitlement.cancelAtPeriodEnd
+        ) {
+          // A renewable subscription boundary is owned by Polar. Refresh authority instead of
+          // inferring either a successful renewal or a restriction from the previous paid-through.
+          yield* Ref.get(connectionRefresh).pipe(Effect.flatten);
+          return;
+        }
         yield* stopSync;
         yield* hydration.pause;
         yield* localState.update({

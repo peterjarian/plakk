@@ -118,24 +118,29 @@ export class AccountCapability extends Context.Service<
       const billing = yield* AccountBilling;
       const storage = yield* StorageProvider;
 
-      const startTrial = Effect.fn("AccountCapability.startTrial")(function* (
+      const ensureTrial = Effect.fn("AccountCapability.ensureTrial")(function* (
         workosUserId: string,
       ) {
         const now = yield* DateTime.now;
-        const trial = yield* trials.getOrCreate({
+        return yield* trials.getOrCreate({
           workosUserId,
           startedAt: DateTime.toDateUtc(now),
           endsAt: DateTime.toDateUtc(DateTime.addDuration(now, TRIAL_DURATION_MILLIS)),
         });
+      });
+
+      const startTrial = Effect.fn("AccountCapability.startTrial")(function* (
+        workosUserId: string,
+      ) {
+        const trial = yield* ensureTrial(workosUserId);
         return entitlementFromTrial(trial, DateTime.toEpochMillis(yield* DateTime.now));
       });
 
       const getEntitlement = Effect.fn("AccountCapability.getEntitlement")(function* (
         workosUserId: string,
       ) {
-        const existing = yield* trials.find(workosUserId);
-        if (existing === null) return yield* startTrial(workosUserId);
-        return yield* billing.getEntitlement(workosUserId, existing);
+        const trial = (yield* trials.find(workosUserId)) ?? (yield* ensureTrial(workosUserId));
+        return yield* billing.getEntitlement(workosUserId, trial);
       });
 
       const assessStorage = Effect.fn("AccountCapability.assessStorage")(function* (

@@ -94,6 +94,18 @@ describe("Polar webhook boundary", () => {
       failure: { _tag: "BillingWebhookVerificationError" },
     });
   });
+
+  it("accepts a valid non-state-change event without scheduling reconciliation", async () => {
+    const otherBody = body.replace('"customer.state_changed"', '"customer.updated"');
+    const result = await runAuthority((authority) =>
+      authority.verifyWebhook(otherBody, signedHeaders(otherBody)),
+    );
+
+    expect(result).toMatchObject({
+      _tag: "Success",
+      success: null,
+    });
+  });
 });
 
 const subscription = (
@@ -158,6 +170,25 @@ describe("Polar customer-state normalization", () => {
     expect(snapshot).toMatchObject({
       kind: "NONE",
       everPaid: true,
+    });
+  });
+
+  it("uses the latest past-due instant across configured recurring products", () => {
+    const older = subscription("past_due");
+    const latest = {
+      ...subscription("past_due", { productId: "annual-product-id" }),
+      currentPeriodEnd: date("2026-09-01T10:15:30.000Z"),
+      pastDueAt: null,
+    } as Subscription;
+
+    const snapshot = billingAuthoritySnapshotFromPolar(customerState([]), [older, latest], {
+      paidBenefitId: "paid-benefit-id",
+      productIds: ["monthly-product-id", "annual-product-id"],
+    });
+
+    expect(snapshot).toMatchObject({
+      kind: "PAST_DUE",
+      pastDueAt: date("2026-09-01T10:15:30.000Z"),
     });
   });
 });

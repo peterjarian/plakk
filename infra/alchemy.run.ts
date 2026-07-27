@@ -33,9 +33,9 @@ export default Alchemy.Stack(
     const workosClientId = yield* Config.string("WORKOS_CLIENT_ID");
     const polarAccessToken = yield* Config.redacted("POLAR_ACCESS_TOKEN");
     const polarWebhookSecret = yield* Config.redacted("POLAR_WEBHOOK_SECRET");
-    const polarMonthlyProductId = yield* Config.string("POLAR_MONTHLY_PRODUCT_ID");
-    const polarAnnualProductId = yield* Config.string("POLAR_ANNUAL_PRODUCT_ID");
-    const polarPaidBenefitId = yield* Config.string("POLAR_PAID_BENEFIT_ID");
+    const polarMonthlyProductId = yield* Config.nonEmptyString("POLAR_MONTHLY_PRODUCT_ID");
+    const polarAnnualProductId = yield* Config.nonEmptyString("POLAR_ANNUAL_PRODUCT_ID");
+    const polarPaidBenefitId = yield* Config.nonEmptyString("POLAR_PAID_BENEFIT_ID");
     const webOrigin = yield* Config.string("PLAKK_WEB_ORIGIN").pipe(
       Config.withDefault("https://app.plakk.io"),
     );

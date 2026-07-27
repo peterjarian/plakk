@@ -67,6 +67,7 @@ const render = (
 const mountedRoots: Array<ReturnType<typeof createRoot>> = [];
 
 afterEach(async () => {
+  vi.useRealTimers();
   billing.beginCheckout.mockClear();
   billing.openPortal.mockClear();
   await act(async () => {
@@ -157,5 +158,49 @@ describe("billing presentation", () => {
     expect(container.textContent).toContain("Waiting for Polar confirmation");
     expect(container.textContent).not.toContain("Subscription confirmed by Polar");
     expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("serializes confirmation checks, stops at its deadline, and offers manual retry", async () => {
+    vi.useFakeTimers();
+    const refresh = vi.fn().mockResolvedValue(undefined);
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    mountedRoots.push(root);
+
+    await act(async () => {
+      root.render(
+        <BillingView
+          billing={billing}
+          checkoutReturned
+          onBack={() => undefined}
+          onNavigate={() => undefined}
+          onSettings={() => undefined}
+          onSignOut={() => undefined}
+          refresh={refresh}
+          state={readyState(
+            account({
+              status: "TRIAL_ACTIVE",
+              trialEndsAt: DateTime.makeUnsafe("2026-08-10T10:15:30.000Z"),
+            }),
+          )}
+          user={user}
+        />,
+      );
+    });
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    expect(refresh).toHaveBeenCalledTimes(7);
+    const retry = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent === "Check again",
+    );
+    expect(retry).toBeDefined();
+
+    await act(async () => {
+      retry?.click();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(refresh).toHaveBeenCalledTimes(8);
   });
 });

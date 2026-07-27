@@ -20,6 +20,8 @@ import * as Redacted from "effect/Redacted";
 import * as Semaphore from "effect/Semaphore";
 
 export const GRACE_DURATION_MILLIS = 7 * 24 * 60 * 60 * 1_000;
+export const BILLING_RECONCILIATION_FRESH_MILLIS = 5_000;
+const BILLING_PROVIDER_TIMEOUT = "8 seconds";
 
 export type BillingAuthoritySnapshot =
   | {
@@ -140,6 +142,11 @@ export class BillingWebhookVerificationError extends Data.TaggedError(
   readonly message: string;
 }> {}
 
+export class BillingWebhookPayloadError extends Data.TaggedError("BillingWebhookPayloadError")<{
+  readonly cause: unknown;
+  readonly message: string;
+}> {}
+
 export class AccountBillingStateRepository extends Context.Service<
   AccountBillingStateRepository,
   {
@@ -237,7 +244,7 @@ export class BillingAuthority extends Context.Service<
     readonly verifyWebhook: (
       body: string,
       headers: Readonly<Record<string, string>>,
-    ) => Effect.Effect<string | null, BillingWebhookVerificationError | BillingProviderError>;
+    ) => Effect.Effect<string | null, BillingWebhookPayloadError | BillingWebhookVerificationError>;
   }
 >()("@plakk/backend/billing/AccountBilling/BillingAuthority") {
   static readonly layer = Layer.effect(
@@ -319,7 +326,16 @@ export class BillingAuthority extends Context.Service<
               cause,
               message: "Polar account state is temporarily unavailable.",
             }),
-        });
+        }).pipe(
+          Effect.timeout(BILLING_PROVIDER_TIMEOUT),
+          Effect.mapError(
+            (cause) =>
+              new BillingProviderError({
+                cause,
+                message: "Polar account state is temporarily unavailable.",
+              }),
+          ),
+        );
       });
 
       const beginCheckout = Effect.fn("BillingAuthority.beginCheckout")(function* (
@@ -342,7 +358,16 @@ export class BillingAuthority extends Context.Service<
               cause,
               message: "Polar checkout is temporarily unavailable.",
             }),
-        });
+        }).pipe(
+          Effect.timeout(BILLING_PROVIDER_TIMEOUT),
+          Effect.mapError(
+            (cause) =>
+              new BillingProviderError({
+                cause,
+                message: "Polar checkout is temporarily unavailable.",
+              }),
+          ),
+        );
       });
 
       const openPortal = Effect.fn("BillingAuthority.openPortal")(function* (workosUserId: string) {
@@ -359,7 +384,16 @@ export class BillingAuthority extends Context.Service<
               cause,
               message: "Polar billing recovery is temporarily unavailable.",
             }),
-        });
+        }).pipe(
+          Effect.timeout(BILLING_PROVIDER_TIMEOUT),
+          Effect.mapError(
+            (cause) =>
+              new BillingProviderError({
+                cause,
+                message: "Polar billing recovery is temporarily unavailable.",
+              }),
+          ),
+        );
       });
 
       const verifyWebhook = Effect.fn("BillingAuthority.verifyWebhook")(function* (
@@ -378,7 +412,7 @@ export class BillingAuthority extends Context.Service<
                   cause,
                   message: "Polar webhook signature verification failed.",
                 })
-              : new BillingProviderError({
+              : new BillingWebhookPayloadError({
                   cause,
                   message: "Polar webhook payload validation failed.",
                 }),
@@ -493,7 +527,10 @@ export class AccountBilling extends Context.Service<
     readonly handleWebhook: (
       body: string,
       headers: Readonly<Record<string, string>>,
-    ) => Effect.Effect<void, BillingWebhookVerificationError | BillingProviderError>;
+    ) => Effect.Effect<
+      void,
+      BillingProviderError | BillingWebhookPayloadError | BillingWebhookVerificationError
+    >;
     readonly openPortal: (
       workosUserId: string,
     ) => Effect.Effect<{ readonly url: string }, BillingProviderError>;
@@ -504,41 +541,62 @@ export class AccountBilling extends Context.Service<
     Effect.gen(function* () {
       const authority = yield* BillingAuthority;
       const repository = yield* AccountBillingStateRepository;
-      const reconciliationLocks = new Map<string, Semaphore.Semaphore>();
+      type ReconciliationLockEntry = {
+        readonly lock: Semaphore.Semaphore;
+        users: number;
+      };
+      // This map serializes reconciliation within one backend process. The repository's
+      // authorityUpdatedAt guard remains the cross-instance stale-write protection.
+      const reconciliationLocks = new Map<string, ReconciliationLockEntry>();
 
       const reconciliationLock = (workosUserId: string) =>
         Effect.sync(() => {
           const existing = reconciliationLocks.get(workosUserId);
-          if (existing !== undefined) return existing;
-          const created = Semaphore.makeUnsafe(1);
+          if (existing !== undefined) {
+            existing.users += 1;
+            return existing;
+          }
+          const created = { lock: Semaphore.makeUnsafe(1), users: 1 };
           reconciliationLocks.set(workosUserId, created);
           return created;
         });
 
+      const releaseReconciliationLock = (workosUserId: string, entry: ReconciliationLockEntry) =>
+        Effect.sync(() => {
+          entry.users -= 1;
+          if (entry.users === 0 && reconciliationLocks.get(workosUserId) === entry) {
+            reconciliationLocks.delete(workosUserId);
+          }
+        });
+
       const reconcile = Effect.fn("AccountBilling.reconcile")(function* (workosUserId: string) {
-        const lock = yield* reconciliationLock(workosUserId);
-        return yield* lock.withPermit(
-          Effect.gen(function* () {
-            const existing = yield* repository.find(workosUserId);
-            const snapshot = yield* authority.read(workosUserId);
-            const now = DateTime.toDateUtc(yield* DateTime.now);
-            return yield* repository.save(applyAuthority(workosUserId, existing, snapshot, now));
-          }),
-        );
+        const entry = yield* reconciliationLock(workosUserId);
+        return yield* entry.lock
+          .withPermit(
+            Effect.gen(function* () {
+              const existing = yield* repository.find(workosUserId);
+              const snapshot = yield* authority.read(workosUserId);
+              const now = DateTime.toDateUtc(yield* DateTime.now);
+              return yield* repository.save(applyAuthority(workosUserId, existing, snapshot, now));
+            }),
+          )
+          .pipe(Effect.ensuring(releaseReconciliationLock(workosUserId, entry)));
       });
 
       const getEntitlement = Effect.fn("AccountBilling.getEntitlement")(function* (
         workosUserId: string,
         trial: AccountTrialPeriod,
       ) {
-        const billing = yield* reconcile(workosUserId).pipe(
-          Effect.catchTag("BillingProviderError", () => repository.find(workosUserId)),
-        );
-        return entitlementFromBillingState(
-          trial,
-          billing,
-          DateTime.toEpochMillis(yield* DateTime.now),
-        );
+        const now = DateTime.toDateUtc(yield* DateTime.now);
+        const stored = yield* repository.find(workosUserId);
+        const billing =
+          stored !== null &&
+          now.getTime() - stored.reconciledAt.getTime() < BILLING_RECONCILIATION_FRESH_MILLIS
+            ? stored
+            : yield* reconcile(workosUserId).pipe(
+                Effect.catchTag("BillingProviderError", () => repository.find(workosUserId)),
+              );
+        return entitlementFromBillingState(trial, billing, now.getTime());
       });
 
       const handleWebhook = Effect.fn("AccountBilling.handleWebhook")(function* (

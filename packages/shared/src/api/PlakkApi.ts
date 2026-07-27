@@ -36,6 +36,13 @@ export const AccountAccessEntitlementSchema = Schema.Union([
 
 export type AccountAccessEntitlement = typeof AccountAccessEntitlementSchema.Type;
 
+export const formatAccountBillingInstant = (instant: DateTime.Utc): string =>
+  DateTime.formatUtc(instant, {
+    dateStyle: "long",
+    locale: "en",
+    timeStyle: "short",
+  });
+
 export const AccountStatusSchema = Schema.Struct({
   accessEntitlement: AccountAccessEntitlementSchema,
   canSync: Schema.Boolean,
