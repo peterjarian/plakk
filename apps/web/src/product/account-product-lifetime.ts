@@ -10,6 +10,11 @@ import {
   type AccountProductReadError,
   type AccountProductSnapshot,
 } from "./product-reader.ts";
+import {
+  AccountProductMirror,
+  type AccountProductMirrorError,
+  type LocalReadPerformance,
+} from "./readable-mirror.ts";
 
 const INITIAL_RECONNECT_DELAY_MILLIS = 1_000;
 const MAX_RECONNECT_DELAY_MILLIS = 30_000;
@@ -31,8 +36,9 @@ export type AccountProductState =
   | (AccountProductSnapshot & {
       readonly kind: "ready";
       readonly accountId: string;
-      readonly apiAvailability: "available";
+      readonly apiAvailability: "available" | "checking";
       readonly liveConnection: "connected" | "reconnecting";
+      readonly localReadPerformance: LocalReadPerformance;
     })
   | (AccountProductSnapshot & {
       readonly kind: "ready";
@@ -40,10 +46,11 @@ export type AccountProductState =
       readonly apiAvailability: "unavailable";
       readonly cause: AccountProductReadError;
       readonly liveConnection: "connected" | "reconnecting";
+      readonly localReadPerformance: LocalReadPerformance;
     });
 
 export interface AccountProductLifetimeShape {
-  readonly clear: Effect.Effect<void>;
+  readonly clear: Effect.Effect<void, AccountProductMirrorError>;
   readonly enter: (accountId: string) => Effect.Effect<void>;
   readonly getSnapshot: () => AccountProductState;
   readonly retry: Effect.Effect<void>;
@@ -58,6 +65,8 @@ export class AccountProductLifetime extends Context.Service<
     AccountProductLifetime,
     Effect.gen(function* () {
       const reader = yield* AccountProductReader;
+      const mirror = yield* AccountProductMirror;
+      const mirrorFiber = yield* FiberHandle.make<void, never>();
       const refreshFiber = yield* FiberHandle.make<void, never>();
       const synchronizationFiber = yield* FiberHandle.make<void, never>();
       let state: AccountProductState = { kind: "idle" };
@@ -65,6 +74,7 @@ export class AccountProductLifetime extends Context.Service<
       let generation = 0;
       let refreshSequence = 0;
       let liveConnection: "connected" | "reconnecting" = "reconnecting";
+      let localReadPerformance = mirror.readPerformance;
       const listeners = new Set<() => void>();
 
       const publish = (next: AccountProductState) => {
@@ -95,43 +105,57 @@ export class AccountProductLifetime extends Context.Service<
         refreshSequence += 1;
         const expectedRefreshSequence = refreshSequence;
         yield* reader.read.pipe(
-          Effect.match({
-            onFailure: (cause) => {
-              if (
-                !isCurrent(accountId, expectedGeneration) ||
-                refreshSequence !== expectedRefreshSequence
-              ) {
-                return;
-              }
-              if (state.kind === "ready" && state.accountId === accountId) {
+          Effect.matchEffect({
+            onFailure: (cause) =>
+              Effect.sync(() => {
+                if (
+                  !isCurrent(accountId, expectedGeneration) ||
+                  refreshSequence !== expectedRefreshSequence
+                ) {
+                  return;
+                }
+                if (state.kind === "ready" && state.accountId === accountId) {
+                  publish({
+                    account: state.account,
+                    accountId,
+                    apiAvailability: "unavailable",
+                    cause,
+                    kind: "ready",
+                    liveConnection,
+                    localReadPerformance,
+                    snippets: state.snippets,
+                  });
+                  return;
+                }
+                publish({ accountId, cause, kind: "failed" });
+              }),
+            onSuccess: (snapshot) =>
+              Effect.gen(function* () {
+                if (
+                  !isCurrent(accountId, expectedGeneration) ||
+                  refreshSequence !== expectedRefreshSequence
+                ) {
+                  return;
+                }
+                const mirrorResult = yield* mirror.replace(snapshot).pipe(Effect.result);
+                if (mirrorResult._tag === "Failure") {
+                  localReadPerformance = "degraded";
+                }
+                if (
+                  !isCurrent(accountId, expectedGeneration) ||
+                  refreshSequence !== expectedRefreshSequence
+                ) {
+                  return;
+                }
                 publish({
-                  account: state.account,
+                  ...snapshot,
                   accountId,
-                  apiAvailability: "unavailable",
-                  cause,
+                  apiAvailability: "available",
                   kind: "ready",
                   liveConnection,
-                  snippets: state.snippets,
+                  localReadPerformance,
                 });
-                return;
-              }
-              publish({ accountId, cause, kind: "failed" });
-            },
-            onSuccess: (snapshot) => {
-              if (
-                !isCurrent(accountId, expectedGeneration) ||
-                refreshSequence !== expectedRefreshSequence
-              ) {
-                return;
-              }
-              publish({
-                ...snapshot,
-                accountId,
-                apiAvailability: "available",
-                kind: "ready",
-                liveConnection,
-              });
-            },
+              }),
           }),
         );
       });
@@ -174,7 +198,55 @@ export class AccountProductLifetime extends Context.Service<
         refreshSequence += 1;
         activeAccountId = accountId;
         liveConnection = "reconnecting";
+        localReadPerformance = mirror.readPerformance;
         publish({ accountId, kind: "loading" });
+        const mirrored = yield* mirror.read.pipe(Effect.result);
+        if (mirrored._tag === "Failure") {
+          localReadPerformance = "degraded";
+        } else if (mirrored.success !== null && isCurrent(accountId, synchronizationGeneration)) {
+          publish({
+            ...mirrored.success,
+            accountId,
+            apiAvailability: "checking",
+            kind: "ready",
+            liveConnection,
+            localReadPerformance,
+          });
+        }
+        yield* FiberHandle.run(
+          mirrorFiber,
+          mirror.changes.pipe(
+            Stream.runForEach(() =>
+              mirror.read.pipe(
+                Effect.match({
+                  onFailure: () => {
+                    localReadPerformance = "degraded";
+                  },
+                  onSuccess: (snapshot) => {
+                    if (snapshot === null || !isCurrent(accountId, synchronizationGeneration)) {
+                      return;
+                    }
+                    const current = state;
+                    publish({
+                      ...snapshot,
+                      accountId,
+                      apiAvailability:
+                        current.kind === "ready" ? current.apiAvailability : "checking",
+                      ...(current.kind === "ready" && current.apiAvailability === "unavailable"
+                        ? { cause: current.cause }
+                        : {}),
+                      kind: "ready",
+                      liveConnection,
+                      localReadPerformance,
+                    } as AccountProductState);
+                  },
+                }),
+              ),
+            ),
+            Effect.ignore,
+          ),
+          { startImmediately: true },
+        );
         yield* FiberHandle.run(
           synchronizationFiber,
           synchronize(accountId, synchronizationGeneration),
@@ -189,7 +261,9 @@ export class AccountProductLifetime extends Context.Service<
         liveConnection = "reconnecting";
         publish({ kind: "idle" });
         yield* FiberHandle.clear(synchronizationFiber);
+        yield* FiberHandle.clear(mirrorFiber);
         yield* FiberHandle.clear(refreshFiber);
+        yield* mirror.purge;
       });
 
       return AccountProductLifetime.of({

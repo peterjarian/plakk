@@ -6,6 +6,10 @@ import { TestClock } from "effect/testing";
 
 import { AccountProductLifetime, clearProductThenSignOut } from "./account-product-lifetime.ts";
 import { AccountProductReader, type AccountProductSnapshot } from "./product-reader.ts";
+import {
+  AccountProductMirror,
+  makeSessionMemoryAccountProductMirrorLayer,
+} from "./readable-mirror.ts";
 
 const account: AccountStatus = {
   canSync: true,
@@ -30,16 +34,72 @@ const provideLifetime = (
   invalidations: AccountProductReader["Service"]["invalidations"] = Stream.make(undefined).pipe(
     Stream.concat(Stream.never),
   ),
+  mirrorLayer = makeSessionMemoryAccountProductMirrorLayer(),
 ) =>
   AccountProductLifetime.layer.pipe(
-    Layer.provide(
-      Layer.succeed(AccountProductReader, AccountProductReader.of({ invalidations, read })),
+    Layer.provideMerge(
+      Layer.merge(
+        Layer.succeed(AccountProductReader, AccountProductReader.of({ invalidations, read })),
+        mirrorLayer,
+      ),
     ),
   );
 
 class PurgeFailure extends Data.TaggedError("PurgeFailure") {}
 
 describe("account product lifetime", () => {
+  it.effect("presents the last-confirmed mirror while the backend refresh remains pending", () =>
+    Effect.gen(function* () {
+      const pending = yield* Deferred.make<AccountProductSnapshot>();
+      const lifetimeLayer = AccountProductLifetime.layer.pipe(
+        Layer.provideMerge(
+          Layer.merge(
+            Layer.succeed(
+              AccountProductReader,
+              AccountProductReader.of({
+                invalidations: Stream.never,
+                read: Deferred.await(pending),
+              }),
+            ),
+            makeSessionMemoryAccountProductMirrorLayer({
+              initial: { account, snippets: [snippet("mirrored")] },
+              readPerformance: "accelerated",
+            }),
+          ),
+        ),
+      );
+
+      yield* Effect.gen(function* () {
+        const lifetime = yield* AccountProductLifetime;
+        yield* lifetime.enter("user_1");
+        expect(lifetime.getSnapshot()).toEqual({
+          account,
+          accountId: "user_1",
+          apiAvailability: "checking",
+          kind: "ready",
+          liveConnection: "reconnecting",
+          localReadPerformance: "accelerated",
+          snippets: [snippet("mirrored")],
+        });
+      }).pipe(Effect.provide(lifetimeLayer));
+    }),
+  );
+
+  it.effect("stores a successful authoritative refresh in the readable mirror", () =>
+    Effect.gen(function* () {
+      const lifetime = yield* AccountProductLifetime;
+      const mirror = yield* AccountProductMirror;
+      yield* lifetime.enter("user_1");
+
+      expect(yield* mirror.read).toEqual({
+        account,
+        snippets: [snippet("remote")],
+      });
+    }).pipe(
+      Effect.provide(provideLifetime(Effect.succeed({ account, snippets: [snippet("remote")] }))),
+    ),
+  );
+
   it.effect("loads one authoritative account snapshot for the active identity", () => {
     const expectedSnippet = snippet(crypto.randomUUID());
     return Effect.gen(function* () {
@@ -51,6 +111,7 @@ describe("account product lifetime", () => {
         apiAvailability: "available",
         kind: "ready",
         liveConnection: "connected",
+        localReadPerformance: "degraded",
         snippets: [expectedSnippet],
       });
     }).pipe(
@@ -87,6 +148,7 @@ describe("account product lifetime", () => {
           apiAvailability: "available",
           kind: "ready",
           liveConnection: "connected",
+          localReadPerformance: "degraded",
           snippets: [secondSnippet],
         });
       }).pipe(Effect.provide(lifetimeLayer));
@@ -140,6 +202,7 @@ describe("account product lifetime", () => {
           apiAvailability: "available",
           kind: "ready",
           liveConnection: "reconnecting",
+          localReadPerformance: "degraded",
           snippets: [],
         });
       }).pipe(Effect.provide(provideLifetime(read, Stream.never)));
@@ -165,6 +228,7 @@ describe("account product lifetime", () => {
             apiAvailability: "available",
             kind: "ready",
             liveConnection: "reconnecting",
+            localReadPerformance: "degraded",
             snippets: [],
           });
         }).pipe(
@@ -253,6 +317,7 @@ it.effect("replaces the complete collection atomically on an invalidation", () =
         apiAvailability: "available",
         kind: "ready",
         liveConnection: "connected",
+        localReadPerformance: "degraded",
         snippets: [secondSnippet],
       });
     }).pipe(Effect.provide(provideLifetime(read, invalidations)));
@@ -310,6 +375,7 @@ it.effect("refreshes the complete snapshot after stream reconnection", () =>
         apiAvailability: "available",
         kind: "ready",
         liveConnection: "connected",
+        localReadPerformance: "degraded",
         snippets: [secondSnippet],
       });
     }).pipe(Effect.provide(Layer.merge(provideLifetime(read, invalidations), TestClock.layer())));
@@ -416,6 +482,7 @@ it.effect("observes a stream disconnect while a snapshot refresh is hung", () =>
         apiAvailability: "available",
         kind: "ready",
         liveConnection: "connected",
+        localReadPerformance: "degraded",
         snippets: [secondSnippet],
       });
     }).pipe(Effect.provide(Layer.merge(provideLifetime(read, invalidations), TestClock.layer())));
@@ -457,6 +524,7 @@ it.effect("preserves the last-confirmed collection when the API becomes unavaila
         cause: failure,
         kind: "ready",
         liveConnection: "connected",
+        localReadPerformance: "degraded",
         snippets: [expectedSnippet],
       });
       yield* TestClock.adjust("5 seconds");

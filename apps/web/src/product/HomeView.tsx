@@ -54,6 +54,16 @@ export function HomeView(props: {
             )}
         </div>
 
+        {state.kind === "ready" && state.localReadPerformance === "degraded" && (
+          <p
+            className="mb-4 rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground"
+            role="status"
+          >
+            Fast local reads are unavailable in this browser session. Plakk will keep using the
+            online service normally.
+          </p>
+        )}
+
         {signOutError !== null && (
           <div
             className="mb-4 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive"

@@ -73,6 +73,7 @@ describe("Web Home", () => {
       apiAvailability: "available",
       kind: "ready",
       liveConnection: "connected",
+      localReadPerformance: "accelerated",
       snippets: [],
     });
     expect(html).toContain("Nothing added yet");
@@ -88,6 +89,7 @@ describe("Web Home", () => {
       apiAvailability: "available",
       kind: "ready",
       liveConnection: "connected",
+      localReadPerformance: "accelerated",
       snippets: [photo],
     });
     expect(html).toContain("Summer photo.png");
@@ -103,6 +105,7 @@ describe("Web Home", () => {
       apiAvailability: "available",
       kind: "ready",
       liveConnection: "reconnecting",
+      localReadPerformance: "accelerated",
       snippets: [photo],
     });
     expect(html).toContain("Summer photo.png");
@@ -122,6 +125,7 @@ describe("Web Home", () => {
       }),
       kind: "ready",
       liveConnection: "connected",
+      localReadPerformance: "accelerated",
       snippets: [photo],
     });
     expect(html).toContain("Summer photo.png");
