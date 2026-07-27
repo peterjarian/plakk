@@ -134,6 +134,30 @@ describe("storage onboarding view", () => {
     expect(onContinueWeb).not.toHaveBeenCalled();
   });
 
+  it("rechecks authority instead of restarting OAuth while account capability catches up", async () => {
+    const begin = vi.fn<StorageOnboardingViewProps["begin"]>();
+    const read = vi.fn(() =>
+      Promise.resolve({
+        account: account({ storageProvider: "GOOGLE_DRIVE" }),
+        providerStatus: providerStatus("CONNECTED"),
+      }),
+    );
+    const { container } = await render({
+      begin,
+      confirmationRequested: true,
+      providerHint: "GOOGLE_DRIVE",
+      read,
+    });
+
+    expect(container.textContent).toContain("still being confirmed");
+    await act(async () => {
+      (container.querySelector("button") as HTMLButtonElement).click();
+    });
+
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(begin).not.toHaveBeenCalled();
+  });
+
   it("offers retry after authorization cancellation or failure", async () => {
     const begin = vi.fn().mockRejectedValue(new Error("provider cancelled"));
     const { container } = await render({

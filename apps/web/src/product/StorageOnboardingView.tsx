@@ -30,7 +30,11 @@ type ViewState =
   | { readonly kind: "checking" }
   | { readonly kind: "choose" }
   | { readonly kind: "redirecting"; readonly provider: StorageProvider }
-  | { readonly kind: "retry"; readonly provider: StorageProvider }
+  | {
+      readonly action: "reauthorize" | "recheck";
+      readonly kind: "retry";
+      readonly provider: StorageProvider;
+    }
   | { readonly kind: "failed" }
   | { readonly kind: "continuing" }
   | { readonly kind: "return-desktop" };
@@ -214,12 +218,16 @@ export function StorageOnboardingView(props: {
             <div className="grid gap-1">
               <h2 className="font-semibold">
                 {state.kind === "retry"
-                  ? "Storage connection not confirmed"
+                  ? state.action === "recheck"
+                    ? "Storage connection is still being confirmed"
+                    : "Storage connection not confirmed"
                   : "Storage setup is temporarily unavailable"}
               </h2>
               <p className="text-sm text-muted-foreground">
                 {state.kind === "retry"
-                  ? `Plakk did not find an active ${providerLabel(state.provider)} connection for this account. Nothing was changed.`
+                  ? state.action === "recheck"
+                    ? `${providerLabel(state.provider)} is connected, but the account has not finished updating yet. Try again to recheck it.`
+                    : `Plakk did not find an active ${providerLabel(state.provider)} connection for this account. Nothing was changed.`
                   : "Plakk could not confirm your account or contact the storage service. Try again."}
               </p>
             </div>
@@ -227,7 +235,9 @@ export function StorageOnboardingView(props: {
               type="button"
               variant="outline"
               onClick={() =>
-                state.kind === "retry" ? void connect(state.provider) : void reconstruct()
+                state.kind === "retry" && state.action === "reauthorize"
+                  ? void connect(state.provider)
+                  : void reconstruct()
               }
             >
               <RotateCcw aria-hidden="true" />

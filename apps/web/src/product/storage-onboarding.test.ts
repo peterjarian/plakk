@@ -31,8 +31,26 @@ const providerStatus = (status: StorageProviderStatus["status"]): StorageProvide
 describe("storage onboarding reconstruction", () => {
   it("treats query values as hints rather than confirmed state", () => {
     expect(storageOnboardingDestination(account(), providerStatus("NOT_CONNECTED"), "WEB")).toEqual(
-      { kind: "retry", provider: "GOOGLE_DRIVE" },
+      {
+        action: "reauthorize",
+        kind: "retry",
+        provider: "GOOGLE_DRIVE",
+      },
     );
+  });
+
+  it("rechecks instead of restarting OAuth while account capability catches up", () => {
+    expect(
+      storageOnboardingDestination(
+        account({ storageProvider: "GOOGLE_DRIVE" }),
+        providerStatus("CONNECTED"),
+        "WEB",
+      ),
+    ).toEqual({
+      action: "recheck",
+      kind: "retry",
+      provider: "GOOGLE_DRIVE",
+    });
   });
 
   it("continues Web only after the authoritative account and provider agree", () => {

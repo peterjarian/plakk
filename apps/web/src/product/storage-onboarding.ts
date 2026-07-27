@@ -7,7 +7,11 @@ import type {
 
 export type StorageOnboardingDestination =
   | { readonly kind: "choose" }
-  | { readonly kind: "retry"; readonly provider: StorageProvider }
+  | {
+      readonly action: "reauthorize" | "recheck";
+      readonly kind: "retry";
+      readonly provider: StorageProvider;
+    }
   | { readonly kind: "continue-web" }
   | { readonly kind: "return-desktop" };
 
@@ -31,5 +35,11 @@ export const storageOnboardingDestination = (
   }
 
   const provider = providerStatus?.storageProvider ?? account.storageProvider;
-  return provider === null ? { kind: "choose" } : { kind: "retry", provider };
+  return provider === null
+    ? { kind: "choose" }
+    : {
+        action: providerStatus?.status === "CONNECTED" ? "recheck" : "reauthorize",
+        kind: "retry",
+        provider,
+      };
 };
