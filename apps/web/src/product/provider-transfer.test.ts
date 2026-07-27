@@ -37,6 +37,27 @@ describe("browser provider transfer", () => {
     );
   });
 
+  it("keeps the default browser fetch bound to the global receiver", async () => {
+    const globalFetch = vi.fn(function (this: typeof globalThis) {
+      expect(this).toBe(globalThis);
+      return Promise.resolve(new Response(null, { status: 200 }));
+    });
+    vi.stubGlobal("fetch", globalFetch);
+
+    try {
+      await expect(
+        Effect.runPromise(
+          uploadPreparedBrowserContent({
+            content: new Blob(["hello"]),
+            prepared: prepared(),
+          }),
+        ),
+      ).resolves.toEqual({ storageObjectId: "/snippet/note.txt" });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("rejects provider mismatch and unsupported origins before fetch", async () => {
     const uploadFetch = vi.fn<typeof fetch>();
 
@@ -124,6 +145,52 @@ describe("browser provider transfer", () => {
       oneDrive.upload.url,
       expect.objectContaining({
         headers: { "Content-Range": "bytes 4-7/8" },
+      }),
+    );
+    expect(uploadFetch).toHaveBeenCalledTimes(2);
+    const firstBody = uploadFetch.mock.calls[0]?.[1]?.body;
+    const secondBody = uploadFetch.mock.calls[1]?.[1]?.body;
+    expect(firstBody).toBeInstanceOf(Blob);
+    expect(secondBody).toBeInstanceOf(Blob);
+    expect(await (firstBody as Blob).text()).toBe("abcd");
+    expect(await (secondBody as Blob).text()).toBe("efgh");
+  });
+
+  it("completes an empty resumable upload with an explicit zero-byte range", async () => {
+    const uploadFetch = vi.fn(() =>
+      Promise.resolve(Response.json({ id: "empty-drive-object" }, { status: 200 })),
+    );
+    const emptyGoogle: PreparedStorageUpload = {
+      storageProvider: "GOOGLE_DRIVE",
+      storageObjectId: null,
+      upload: {
+        method: "PUT",
+        url: "https://www.googleapis.com/upload/drive/v3/files?upload_id=empty",
+        headers: [{ name: "Content-Type", value: "application/octet-stream" }],
+        strategy: {
+          type: "byte_range",
+          maxPartByteSize: 262_144,
+          partByteMultiple: 262_144,
+        },
+      },
+      expiresAt: null,
+    };
+
+    await expect(
+      Effect.runPromise(
+        uploadPreparedBrowserContent({ content: new Blob([]), prepared: emptyGoogle }, uploadFetch),
+      ),
+    ).resolves.toEqual({ storageObjectId: "empty-drive-object" });
+
+    expect(uploadFetch).toHaveBeenCalledOnce();
+    expect(uploadFetch).toHaveBeenCalledWith(
+      emptyGoogle.upload.url,
+      expect.objectContaining({
+        body: expect.objectContaining({ size: 0 }),
+        headers: {
+          "Content-Range": "bytes */0",
+          "Content-Type": "application/octet-stream",
+        },
       }),
     );
   });

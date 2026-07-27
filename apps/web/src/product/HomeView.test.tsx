@@ -1,4 +1,4 @@
-import type { User } from "@plakk/shared";
+import type { LocalUploadRecord, User } from "@plakk/shared";
 import type { AccountStatus, ApiSnippet } from "@plakk/shared/PlakkApi";
 import { RpcError } from "@plakk/shared/RpcError";
 import * as DateTime from "effect/DateTime";
@@ -36,6 +36,18 @@ const photo: ApiSnippet = {
   updatedAt: "2026-07-27T00:00:00.000Z",
 };
 const photoRecord = { kind: "PUBLISHED" as const, snippet: photo };
+const localUpload = (id: string, status: LocalUploadRecord["status"]): LocalUploadRecord => ({
+  kind: "LOCAL",
+  id,
+  fileName: `${status.toLowerCase()}.txt`,
+  byteSize: 4,
+  storageProvider: "GOOGLE_DRIVE",
+  status,
+  errorMessage: status === "FAILED" ? "Provider transfer failed." : null,
+  publicationCandidate: null,
+  createdAt: "2026-07-27T01:00:00.000Z",
+  updatedAt: "2026-07-27T01:00:00.000Z",
+});
 
 const render = (state: Parameters<typeof HomeView>[0]["state"]) =>
   renderToStaticMarkup(
@@ -121,6 +133,26 @@ describe("Web Home", () => {
     expect(html).toContain("Google Drive");
     expect(html).not.toContain('aria-label="Copy"');
     expect(html).not.toContain('aria-label="Delete"');
+  });
+
+  it("renders uploading and dismissible failed page-lifetime records honestly", () => {
+    const html = render({
+      account,
+      accountId: user.id,
+      apiAvailability: "available",
+      kind: "ready",
+      liveConnection: "connected",
+      localReadPerformance: "accelerated",
+      snippets: [
+        localUpload("1d1e2f3a-4567-4890-8abc-def012345679", "UPLOADING"),
+        localUpload("2d1e2f3a-4567-4890-8abc-def012345670", "FAILED"),
+      ],
+    });
+
+    expect(html).toContain("Text snippet");
+    expect(html).toContain('aria-label="Syncing"');
+    expect(html).toContain("Provider transfer failed.");
+    expect(html).toContain('aria-label="Dismiss failed upload"');
   });
 
   it("presents the active account trial and its backend-provided end instant", () => {

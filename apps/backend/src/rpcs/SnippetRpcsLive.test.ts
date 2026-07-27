@@ -127,7 +127,7 @@ const runSnippetEffect = <A, E>(
   storage: StorageProvider["Service"] = storageService(),
   user: CurrentUser["Service"] = currentUser,
   capability: AccountCapability["Service"] = accountCapabilityService(),
-  requestOrigin = "https://app.plakk.io",
+  requestOrigin: string | null = "https://app.plakk.io",
 ) =>
   Effect.runPromise(
     withSnippetRpcs(use).pipe(
@@ -392,7 +392,7 @@ describe("completed Snippet publication", () => {
     ).rejects.toMatchObject({ code: "INTERNAL_SERVER_ERROR" });
   });
 
-  it("keeps Desktop preparation on the native request origin", async () => {
+  it("keeps Desktop preparation on the originless main-process request", async () => {
     const store = publicationDatabase();
     const prepareUpload = vi.fn(() =>
       Effect.succeed({
@@ -419,7 +419,7 @@ describe("completed Snippet publication", () => {
         storageService({ prepareUpload }),
         currentUser,
         accountCapabilityService(),
-        "plakk-app://renderer",
+        null,
       ),
     ).resolves.toMatchObject({
       upload: { url: "https://desktop-provider-upload.example/upload" },

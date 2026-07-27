@@ -9,10 +9,11 @@ export class InvalidCorsConfiguration extends Data.TaggedError("InvalidCorsConfi
 
 export const allowedBackendOrigins = (
   configuredWebOrigin: string | undefined,
+  requireHttps = false,
 ): ReadonlyArray<string> => {
   if (configuredWebOrigin === undefined) return ["plakk-app://renderer"];
   try {
-    return ["plakk-app://renderer", validateConfiguredWebOrigin(configuredWebOrigin)];
+    return ["plakk-app://renderer", validateConfiguredWebOrigin(configuredWebOrigin, requireHttps)];
   } catch {
     throw new InvalidCorsConfiguration({
       cause: "redacted-invalid-web-origin",

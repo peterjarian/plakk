@@ -5,6 +5,9 @@ import * as Schema from "effect/Schema";
 
 export type BrowserUploadFetch = (input: string, init?: RequestInit) => Promise<Response>;
 
+export const browserUploadFetch: BrowserUploadFetch = (input, init) =>
+  globalThis.fetch(input, init);
+
 export class WebProviderTransferError extends Schema.TaggedErrorClass<WebProviderTransferError>()(
   "WebProviderTransferError",
   {
@@ -20,10 +23,9 @@ const transferError = (message: string, cause?: unknown) =>
   });
 
 const responseJson = (response: Response) =>
-  Effect.tryPromise({
-    try: () => response.json() as Promise<unknown>,
-    catch: () => null,
-  }).pipe(Effect.orElseSucceed(() => null));
+  Effect.tryPromise(() => response.json() as Promise<unknown>).pipe(
+    Effect.orElseSucceed(() => null),
+  );
 
 const responseObjectId = Effect.fn("WebProviderTransfer.responseObjectId")(function* (
   response: Response,
@@ -66,7 +68,7 @@ const uploadPart = Effect.fn("WebProviderTransfer.uploadPart")(function* (input:
   readonly body: Blob;
   readonly byteSize: number;
   readonly prepared: PreparedStorageUpload;
-  readonly range: { readonly end: number; readonly start: number } | null;
+  readonly range: "EMPTY" | { readonly end: number; readonly start: number } | null;
   readonly uploadFetch: BrowserUploadFetch;
 }) {
   const headers = Object.fromEntries(
@@ -79,10 +81,12 @@ const uploadPart = Effect.fn("WebProviderTransfer.uploadPart")(function* (input:
         headers:
           input.range === null
             ? headers
-            : {
-                ...headers,
-                "Content-Range": `bytes ${input.range.start}-${input.range.end}/${input.byteSize}`,
-              },
+            : input.range === "EMPTY"
+              ? { ...headers, "Content-Range": "bytes */0" }
+              : {
+                  ...headers,
+                  "Content-Range": `bytes ${input.range.start}-${input.range.end}/${input.byteSize}`,
+                },
         body: input.body,
         signal,
       }),
@@ -100,7 +104,7 @@ export const uploadPreparedBrowserContent = Effect.fn("WebProviderTransfer.uploa
       readonly content: Blob;
       readonly prepared: PreparedStorageUpload;
     },
-    uploadFetch: BrowserUploadFetch = fetch,
+    uploadFetch: BrowserUploadFetch = browserUploadFetch,
   ) {
     const { content, prepared } = input;
     if (!isSupportedProviderUploadTarget(prepared.storageProvider, prepared.upload.url)) {
@@ -125,6 +129,20 @@ export const uploadPreparedBrowserContent = Effect.fn("WebProviderTransfer.uploa
     const partByteSize = Math.floor(maxPartByteSize / partByteMultiple) * partByteMultiple;
     if (partByteSize < 1) {
       return yield* transferError("The upload provider returned an invalid part size.");
+    }
+
+    if (content.size === 0) {
+      const response = yield* uploadPart({
+        body: content,
+        byteSize: 0,
+        prepared,
+        range: "EMPTY",
+        uploadFetch,
+      });
+      if (response.status === 202 || response.status === 308) {
+        return yield* transferError("The upload provider did not confirm completion.");
+      }
+      return { storageObjectId: yield* responseObjectId(response, prepared) };
     }
 
     let start = 0;

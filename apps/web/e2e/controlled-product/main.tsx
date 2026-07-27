@@ -147,7 +147,14 @@ const snippetUploadsLayer = WebSnippetUploads.layer.pipe(
                   headers: [
                     { name: "Content-Type", value: input.mediaType ?? "application/octet-stream" },
                   ],
-                  strategy: { type: "single_request" as const },
+                  strategy:
+                    input.byteSize === 0
+                      ? {
+                          type: "byte_range" as const,
+                          maxPartByteSize: 262_144,
+                          partByteMultiple: 262_144,
+                        }
+                      : { type: "single_request" as const },
                 },
                 expiresAt: null,
               });
@@ -377,16 +384,23 @@ function ActiveProduct(props: {
     state.kind === "ready" && state.apiAvailability === "available" && accountCanSync(state.account)
       ? state.account.storageProvider
       : null;
-  const uploadFile = (storageProvider: StorageProvider, file: File) =>
-    runtime.runPromise(
+  const uploadFile = (
+    storageProvider: StorageProvider,
+    content: Blob,
+    fileName: string | null,
+    mediaType: string | null,
+  ) => {
+    const id = crypto.randomUUID();
+    return runtime.runPromise(
       uploads.upload({
-        id: crypto.randomUUID(),
-        content: file,
-        fileName: file.name,
-        mediaType: file.type || null,
+        id,
+        content,
+        fileName: fileName ?? `${id}.txt`,
+        mediaType,
         storageProvider,
       }),
     );
+  };
   return (
     <>
       <HomeView
@@ -397,19 +411,17 @@ function ActiveProduct(props: {
         signOutError={null}
         onAddFiles={(files) => {
           if (uploadProvider === null) return;
-          for (const file of files) void uploadFile(uploadProvider, file);
+          for (const file of files) {
+            void uploadFile(uploadProvider, file, file.name, file.type || null);
+          }
         }}
         onAddText={(text) => {
           if (uploadProvider === null) return;
-          const id = crypto.randomUUID();
-          void runtime.runPromise(
-            uploads.upload({
-              id,
-              content: new Blob([text], { type: "text/plain; charset=utf-8" }),
-              fileName: `${id}.txt`,
-              mediaType: "text/plain; charset=utf-8",
-              storageProvider: uploadProvider,
-            }),
+          void uploadFile(
+            uploadProvider,
+            new Blob([text], { type: "text/plain; charset=utf-8" }),
+            null,
+            "text/plain; charset=utf-8",
           );
         }}
         onDismissUpload={(id) => void runtime.runPromise(uploads.dismiss(id))}

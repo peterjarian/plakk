@@ -57,6 +57,14 @@ export function HomeView(props: {
   };
   const addPastedContent = (event: ClipboardEvent<HTMLElement>) => {
     if (uploadsDisabled) return;
+    if (
+      event.target instanceof Element &&
+      event.target.closest(
+        "input, textarea, select, [contenteditable]:not([contenteditable='false'])",
+      ) !== null
+    ) {
+      return;
+    }
     const files = Array.from(event.clipboardData.files);
     if (files.length > 0) {
       event.preventDefault();

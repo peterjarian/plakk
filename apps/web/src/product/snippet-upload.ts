@@ -19,8 +19,8 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 
 import type { AccountProductReadError } from "./product-reader.ts";
-import type { WebProviderTransferError } from "./provider-transfer.ts";
-import { uploadPreparedBrowserContent } from "./provider-transfer.ts";
+import type { BrowserUploadFetch, WebProviderTransferError } from "./provider-transfer.ts";
+import { browserUploadFetch, uploadPreparedBrowserContent } from "./provider-transfer.ts";
 
 export type WebSnippetUploadInput = {
   readonly id: string;
@@ -58,7 +58,7 @@ export class WebProviderTransfer extends Context.Service<
 >()("@plakk/web/product/snippet-upload/WebProviderTransfer") {}
 
 export const makeWebProviderTransferLayer = (
-  uploadFetch: typeof fetch = fetch,
+  uploadFetch: BrowserUploadFetch = browserUploadFetch,
 ): Layer.Layer<WebProviderTransfer> =>
   Layer.succeed(
     WebProviderTransfer,

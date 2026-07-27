@@ -5,7 +5,10 @@ import { CONTROLLED_PRODUCT_ORIGIN } from "./controlled-product/config.ts";
 test("publishes page-scoped text and file work through the direct provider boundary", async ({
   page,
 }) => {
-  const providerRequests: Array<string> = [];
+  const providerRequests: Array<{
+    readonly contentRange: string | undefined;
+    readonly url: string;
+  }> = [];
   await page.route("https://www.googleapis.com/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -13,14 +16,17 @@ test("publishes page-scoped text and file work through the direct provider bound
       await route.fulfill({
         status: 204,
         headers: {
-          "access-control-allow-headers": "content-type",
+          "access-control-allow-headers": "content-type, content-range",
           "access-control-allow-methods": "PUT",
           "access-control-allow-origin": CONTROLLED_PRODUCT_ORIGIN,
         },
       });
       return;
     }
-    providerRequests.push(request.url());
+    providerRequests.push({
+      contentRange: request.headers()["content-range"],
+      url: request.url(),
+    });
     if (url.searchParams.get("mode") === "pending") {
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
@@ -81,9 +87,18 @@ test("publishes page-scoped text and file work through the direct provider bound
   await expect(page.getByLabel("Syncing")).toBeVisible();
   await expect(page.getByLabel("Syncing")).toHaveCount(0);
 
-  expect(providerRequests.length).toBeGreaterThanOrEqual(5);
-  expect(providerRequests.every((url) => url.startsWith("https://www.googleapis.com/"))).toBe(true);
-  await expect.poll(() => page.locator("html").getAttribute("data-publish-count")).toBe("5");
+  await fileInput.setInputFiles({
+    name: "empty.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.alloc(0),
+  });
+  await expect.poll(() => page.locator("html").getAttribute("data-publish-count")).toBe("6");
+
+  expect(providerRequests.length).toBeGreaterThanOrEqual(6);
+  expect(providerRequests.every(({ url }) => url.startsWith("https://www.googleapis.com/"))).toBe(
+    true,
+  );
+  expect(providerRequests.some(({ contentRange }) => contentRange === "bytes */0")).toBe(true);
 });
 
 test("converges lost responses, exposes conflicts and failures, and enforces restrictions", async ({
@@ -96,7 +111,7 @@ test("converges lost responses, exposes conflicts and failures, and enforces res
       await route.fulfill({
         status: 204,
         headers: {
-          "access-control-allow-headers": "content-type",
+          "access-control-allow-headers": "content-type, content-range",
           "access-control-allow-methods": "PUT",
           "access-control-allow-origin": CONTROLLED_PRODUCT_ORIGIN,
         },
@@ -199,7 +214,7 @@ test("reload interrupts page-lifetime work without resuming or publishing it", a
       await route.fulfill({
         status: 204,
         headers: {
-          "access-control-allow-headers": "content-type",
+          "access-control-allow-headers": "content-type, content-range",
           "access-control-allow-methods": "PUT",
           "access-control-allow-origin": CONTROLLED_PRODUCT_ORIGIN,
         },

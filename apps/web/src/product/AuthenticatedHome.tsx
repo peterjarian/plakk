@@ -18,14 +18,15 @@ export function AuthenticatedHome(props: {
     (
       storageProvider: StorageProvider,
       content: Blob,
-      fileName: string,
+      fileName: string | null,
       mediaType: string | null,
     ) => {
       if (product.snippetUploads === null) return;
+      const id = crypto.randomUUID();
       void product.snippetUploads.upload({
-        id: crypto.randomUUID(),
+        id,
         content,
-        fileName,
+        fileName: fileName ?? `${id}.txt`,
         mediaType,
         storageProvider,
       });
@@ -80,14 +81,12 @@ export function AuthenticatedHome(props: {
       }}
       onAddText={(text) => {
         if (uploadProvider === null) return;
-        const id = crypto.randomUUID();
-        void product.snippetUploads?.upload({
-          id,
-          content: new Blob([text], { type: "text/plain; charset=utf-8" }),
-          fileName: `${id}.txt`,
-          mediaType: "text/plain; charset=utf-8",
-          storageProvider: uploadProvider,
-        });
+        upload(
+          uploadProvider,
+          new Blob([text], { type: "text/plain; charset=utf-8" }),
+          null,
+          "text/plain; charset=utf-8",
+        );
       }}
       onDismissUpload={(id) => void product.snippetUploads?.dismiss(id)}
       uploadsDisabled={uploadProvider === null || product.snippetUploads === null}

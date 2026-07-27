@@ -130,7 +130,9 @@ const prepareSnippetUpload = Effect.fn("SnippetRpcs.prepareUpload")(function* (
 const snippetUploadRequestKind = Effect.fn("SnippetRpcs.snippetUploadRequestKind")(function* (
   requestOrigin: string | null,
 ) {
-  if (requestOrigin === "plakk-app://renderer") return "DESKTOP" as const;
+  if (requestOrigin === null || requestOrigin === "plakk-app://renderer") {
+    return "DESKTOP" as const;
+  }
   const { configuredWebOrigin, nodeEnv } = yield* Effect.all({
     configuredWebOrigin: Config.string("PLAKK_WEB_ORIGIN"),
     nodeEnv: Config.string("NODE_ENV").pipe(Config.withDefault("development")),
