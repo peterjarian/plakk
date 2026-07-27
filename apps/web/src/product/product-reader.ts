@@ -82,11 +82,21 @@ export const readAuthenticatedProduct = Effect.fn("WebProductReader.read")(funct
   return { account, snippets };
 });
 
-export const resolveProductRpcUrl = (configuredOrigin: string | undefined): string => {
-  const rawOrigin = configuredOrigin ?? "http://localhost:3100";
+export const resolveProductRpcUrl = (
+  configuredOrigin: string | undefined,
+  allowDevelopmentFallback = false,
+): string => {
+  const rawOrigin =
+    configuredOrigin ?? (allowDevelopmentFallback ? "http://localhost:3100" : undefined);
+  if (rawOrigin === undefined) {
+    throw new Error("VITE_PLAKK_API_ORIGIN is required outside local development.");
+  }
   const origin = parseExactHttpOrigin(rawOrigin);
   if (origin === null) {
     throw new Error("VITE_PLAKK_API_ORIGIN must be an exact HTTP(S) origin.");
+  }
+  if (!allowDevelopmentFallback && !origin.startsWith("https://")) {
+    throw new Error("VITE_PLAKK_API_ORIGIN must use HTTPS outside local development.");
   }
   return `${origin}/api/rpc`;
 };

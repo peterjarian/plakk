@@ -6,7 +6,7 @@ import * as Layer from "effect/Layer";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { AccountProductReader } from "./product-reader.ts";
 import { ProductIdentityBoundary, useWebProduct } from "./WebProductProvider.tsx";
@@ -36,13 +36,18 @@ const readerLayer = (id: string) =>
   );
 
 function ProductProbe() {
-  const { state } = useWebProduct();
+  const { signOut, state } = useWebProduct();
   return (
-    <output>
-      {state.kind === "ready"
-        ? `${state.accountId}:${state.snippets[0]?.fileName}`
-        : `${state.kind}:${state.kind === "loading" ? state.accountId : "none"}`}
-    </output>
+    <>
+      <output>
+        {state.kind === "ready"
+          ? `${state.accountId}:${state.snippets[0]?.fileName}`
+          : `${state.kind}:${state.kind === "loading" ? state.accountId : "none"}`}
+      </output>
+      <button type="button" onClick={() => void signOut?.()}>
+        Sign out
+      </button>
+    </>
   );
 }
 
@@ -58,13 +63,13 @@ describe("Web product identity boundary", () => {
   it("replaces the account resource before the next identity can render", async () => {
     const container = document.createElement("div");
     const root = createRoot(container);
+    const delegateSignOut = vi.fn().mockResolvedValue(undefined);
     mountedRoots.push(root);
 
     const renderIdentity = (accountId: string) => (
       <ProductIdentityBoundary
-        key={accountId}
         accountId={accountId}
-        delegateSignOut={() => Promise.resolve()}
+        delegateSignOut={delegateSignOut}
         readerLayer={readerLayer(accountId)}
       >
         <ProductProbe />
@@ -74,15 +79,21 @@ describe("Web product identity boundary", () => {
     await act(async () => {
       root.render(renderIdentity("user_a"));
     });
-    expect(container.textContent).toBe("user_a:user_a.png");
+    expect(container.querySelector("output")?.textContent).toBe("user_a:user_a.png");
 
     flushSync(() => {
       root.render(renderIdentity("user_b"));
     });
-    expect(container.textContent).not.toContain("user_a");
-    expect(container.textContent).toBe("loading:user_b");
+    expect(container.querySelector("output")?.textContent).not.toContain("user_a");
+    expect(container.querySelector("output")?.textContent).toBe("loading:user_b");
 
     await act(async () => undefined);
-    expect(container.textContent).toBe("user_b:user_b.png");
+    expect(container.querySelector("output")?.textContent).toBe("user_b:user_b.png");
+
+    await act(async () => {
+      container.querySelector("button")?.click();
+    });
+    expect(delegateSignOut).toHaveBeenCalledOnce();
+    expect(container.querySelector("output")?.textContent).toBe("idle:none");
   });
 });

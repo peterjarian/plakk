@@ -54,9 +54,21 @@ describe("authenticated product reader", () => {
 
   it("resolves the independent product API from an exact configured origin", () => {
     expect(resolveProductRpcUrl("https://api.plakk.io")).toBe("https://api.plakk.io/api/rpc");
-    expect(resolveProductRpcUrl(undefined)).toBe("http://localhost:3100/api/rpc");
+    expect(resolveProductRpcUrl(undefined, true)).toBe("http://localhost:3100/api/rpc");
+    expect(resolveProductRpcUrl("http://localhost:3100", true)).toBe(
+      "http://localhost:3100/api/rpc",
+    );
     expect(() => resolveProductRpcUrl("https://api.plakk.io/path")).toThrow(
       "VITE_PLAKK_API_ORIGIN must be an exact HTTP(S) origin.",
+    );
+  });
+
+  it("fails closed when production API configuration is missing or insecure", () => {
+    expect(() => resolveProductRpcUrl(undefined)).toThrow(
+      "VITE_PLAKK_API_ORIGIN is required outside local development.",
+    );
+    expect(() => resolveProductRpcUrl("http://api.plakk.io")).toThrow(
+      "VITE_PLAKK_API_ORIGIN must use HTTPS outside local development.",
     );
   });
 });

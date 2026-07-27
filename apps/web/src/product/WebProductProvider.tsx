@@ -27,8 +27,8 @@ import {
 } from "./product-reader.ts";
 
 type WebProductContextValue = {
-  readonly retry: () => void;
-  readonly signOut: () => Promise<void>;
+  readonly retry: (() => void) | null;
+  readonly signOut: (() => Promise<void>) | null;
   readonly state: AccountProductState;
 };
 
@@ -38,19 +38,19 @@ class WorkOsSignOutFailure extends Data.TaggedError("WorkOsSignOutFailure")<{
   readonly cause: unknown;
 }> {}
 
-const idleContext: WebProductContextValue = {
-  retry: () => undefined,
-  signOut: () => Promise.resolve(),
+const signedOutContext: WebProductContextValue = {
+  retry: null,
+  signOut: null,
   state: { kind: "idle" },
 };
 
 function ActiveIdentityProduct(props: {
   readonly children: ReactNode;
-  readonly delegateSignOut: () => Promise<void>;
   readonly lifetime: AccountProductLifetimeShape;
   readonly runtime: ManagedRuntime.ManagedRuntime<AccountProductLifetime, never>;
+  readonly signOut: () => Promise<void>;
 }) {
-  const { children, delegateSignOut, lifetime, runtime } = props;
+  const { children, lifetime, runtime, signOut } = props;
   const state = useSyncExternalStore(
     lifetime.subscribe,
     lifetime.getSnapshot,
@@ -61,20 +61,6 @@ function ActiveIdentityProduct(props: {
     runtime.runFork(lifetime.retry);
   }, [lifetime, runtime]);
 
-  const signOut = useCallback(
-    () =>
-      runtime.runPromise(
-        clearProductThenSignOut(
-          lifetime.clear,
-          Effect.tryPromise({
-            try: delegateSignOut,
-            catch: (cause) => new WorkOsSignOutFailure({ cause }),
-          }),
-        ),
-      ),
-    [delegateSignOut, lifetime, runtime],
-  );
-
   return (
     <WebProductContext.Provider value={{ retry, signOut, state }}>
       {children}
@@ -82,7 +68,7 @@ function ActiveIdentityProduct(props: {
   );
 }
 
-export function ProductIdentityBoundary(props: {
+function IdentityProductResource(props: {
   readonly accountId: string;
   readonly children: ReactNode;
   readonly delegateSignOut: () => Promise<void>;
@@ -107,19 +93,47 @@ export function ProductIdentityBoundary(props: {
     };
   }, [accountId, runtime]);
 
+  const signOut = useCallback(async () => {
+    const productLifetime = lifetime ?? (await runtime.runPromise(AccountProductLifetime));
+    await runtime.runPromise(
+      clearProductThenSignOut(
+        productLifetime.clear,
+        Effect.tryPromise({
+          try: delegateSignOut,
+          catch: (cause) => new WorkOsSignOutFailure({ cause }),
+        }),
+      ),
+    );
+  }, [delegateSignOut, lifetime, runtime]);
+
   if (lifetime === null) {
     return (
-      <WebProductContext.Provider value={{ ...idleContext, state: { accountId, kind: "loading" } }}>
+      <WebProductContext.Provider
+        value={{
+          retry: null,
+          signOut,
+          state: { accountId, kind: "loading" },
+        }}
+      >
         {children}
       </WebProductContext.Provider>
     );
   }
 
   return (
-    <ActiveIdentityProduct delegateSignOut={delegateSignOut} lifetime={lifetime} runtime={runtime}>
+    <ActiveIdentityProduct lifetime={lifetime} runtime={runtime} signOut={signOut}>
       {children}
     </ActiveIdentityProduct>
   );
+}
+
+export function ProductIdentityBoundary(props: {
+  readonly accountId: string;
+  readonly children: ReactNode;
+  readonly delegateSignOut: () => Promise<void>;
+  readonly readerLayer: Layer.Layer<AccountProductReader>;
+}) {
+  return <IdentityProductResource key={props.accountId} {...props} />;
 }
 
 export function WebProductProvider({ children }: Readonly<{ children: ReactNode }>) {
@@ -130,17 +144,18 @@ export function WebProductProvider({ children }: Readonly<{ children: ReactNode 
   const readerLayer = useState(() =>
     makeAccountProductReaderLayer({
       getAccessToken: () => getAccessTokenRef.current(),
-      rpcUrl: resolveProductRpcUrl(import.meta.env.VITE_PLAKK_API_ORIGIN),
+      rpcUrl: resolveProductRpcUrl(import.meta.env.VITE_PLAKK_API_ORIGIN, import.meta.env.DEV),
     }),
   )[0];
 
   if (auth.loading || auth.user === null) {
-    return <WebProductContext.Provider value={idleContext}>{children}</WebProductContext.Provider>;
+    return (
+      <WebProductContext.Provider value={signedOutContext}>{children}</WebProductContext.Provider>
+    );
   }
 
   return (
     <ProductIdentityBoundary
-      key={auth.user.id}
       accountId={auth.user.id}
       delegateSignOut={() => auth.signOut({ returnTo: "/" })}
       readerLayer={readerLayer}

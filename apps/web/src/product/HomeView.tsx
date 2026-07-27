@@ -17,10 +17,11 @@ const storageProviderLabel = {
 export function HomeView(props: {
   readonly user: User;
   readonly state: AccountProductState;
-  readonly onRetry: () => void;
+  readonly onRetry: (() => void) | null;
   readonly onSignOut: () => void;
+  readonly signOutError: { readonly cause: unknown } | null;
 }) {
-  const { onRetry, onSignOut, state, user } = props;
+  const { onRetry, onSignOut, signOutError, state, user } = props;
   const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
   const storageProvider = state.kind === "ready" ? state.account.storageProvider : null;
 
@@ -46,6 +47,16 @@ export function HomeView(props: {
           </p>
         </div>
 
+        {signOutError !== null && (
+          <div
+            className="mb-4 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+            role="alert"
+          >
+            Plakk cleared this account’s product data, but WorkOS could not sign you out. Try
+            signing out again.
+          </div>
+        )}
+
         {state.kind === "idle" || state.kind === "loading" ? (
           <div
             className="grid min-h-48 flex-1 place-items-center text-sm text-muted-foreground"
@@ -59,9 +70,11 @@ export function HomeView(props: {
             role="alert"
           >
             <span>Plakk couldn’t load your snippets.</span>
-            <Button type="button" variant="ghost" size="sm" onClick={onRetry}>
-              Try again
-            </Button>
+            {onRetry !== null && (
+              <Button type="button" variant="ghost" size="sm" onClick={onRetry}>
+                Try again
+              </Button>
+            )}
           </div>
         ) : (
           <SnippetList empty={state.snippets.length === 0}>

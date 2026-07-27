@@ -33,7 +33,13 @@ const photo: ApiSnippet = {
 
 const render = (state: Parameters<typeof HomeView>[0]["state"]) =>
   renderToStaticMarkup(
-    <HomeView user={user} state={state} onRetry={vi.fn()} onSignOut={vi.fn()} />,
+    <HomeView
+      user={user}
+      state={state}
+      onRetry={vi.fn()}
+      onSignOut={vi.fn()}
+      signOutError={null}
+    />,
   );
 
 describe("Web Home", () => {
@@ -75,5 +81,19 @@ describe("Web Home", () => {
     expect(html).toContain("Google Drive");
     expect(html).not.toContain('aria-label="Copy"');
     expect(html).not.toContain('aria-label="Delete"');
+  });
+
+  it("keeps a delegated sign-out failure visible and retryable", () => {
+    const html = renderToStaticMarkup(
+      <HomeView
+        user={user}
+        state={{ kind: "idle" }}
+        onRetry={null}
+        onSignOut={vi.fn()}
+        signOutError={{ cause: new Error("WorkOS unavailable") }}
+      />,
+    );
+    expect(html).toContain("WorkOS could not sign you out");
+    expect(html).toContain("Try signing out again");
   });
 });
