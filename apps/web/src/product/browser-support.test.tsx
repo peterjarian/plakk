@@ -1,15 +1,14 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { missingRequiredBrowserCapabilities, UnsupportedBrowserView } from "./browser-support.tsx";
+import {
+  BrowserSupportBoundary,
+  missingRequiredBrowserCapabilities,
+  UnsupportedBrowserView,
+} from "./browser-support.tsx";
 
 const supportedBrowser = {
-  AbortController: class {},
-  Blob: class {},
-  File: class {},
   ReadableStream: class {},
-  URL: class {},
-  crypto: { randomUUID: () => "controlled-id" },
   fetch: () => Promise.resolve(),
 };
 
@@ -37,5 +36,16 @@ describe("Web browser support", () => {
     expect(markup).toContain('href="mailto:help@plakk.io"');
     expect(markup).not.toContain("install");
     expect(markup).not.toContain("Desktop substitute");
+  });
+
+  it("blocks product children before they render when a required capability is missing", () => {
+    const markup = renderToStaticMarkup(
+      <BrowserSupportBoundary capabilities={{ ...supportedBrowser, fetch: undefined }}>
+        <p>Protected product child</p>
+      </BrowserSupportBoundary>,
+    );
+
+    expect(markup).toContain("This browser can’t run Plakk");
+    expect(markup).not.toContain("Protected product child");
   });
 });

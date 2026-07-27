@@ -130,7 +130,7 @@ test.describe("mobile browser presentation and touch interaction", () => {
     await expectNoHorizontalOverflow(page);
   });
 
-  test("keeps forced local-storage fallback supported and honest", async ({ page }, testInfo) => {
+  test("keeps forced session-memory fallback supported and honest", async ({ page }, testInfo) => {
     await page.goto(
       `${CONTROLLED_PRODUCT_ORIGIN}/?account=mobile-memory-${testInfo.project.name}&force-session-memory=true`,
     );

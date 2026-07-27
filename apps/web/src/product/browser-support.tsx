@@ -1,36 +1,19 @@
 import { Button, buttonVariants } from "@plakk/ui/components/primitives/button";
 import { RotateCcw } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 
 type BrowserCapabilities = {
-  readonly AbortController?: unknown;
-  readonly Blob?: unknown;
-  readonly File?: unknown;
   readonly ReadableStream?: unknown;
-  readonly URL?: unknown;
-  readonly crypto?: { readonly randomUUID?: unknown };
   readonly fetch?: unknown;
 };
 
-export type RequiredBrowserCapability =
-  | "abort-controller"
-  | "blob"
-  | "fetch"
-  | "file"
-  | "readable-stream"
-  | "secure-random-id"
-  | "url";
+export type RequiredBrowserCapability = "fetch" | "readable-stream";
 
 const requiredCapabilities: ReadonlyArray<
   readonly [RequiredBrowserCapability, (browser: BrowserCapabilities) => boolean]
 > = [
-  ["abort-controller", (browser) => typeof browser.AbortController === "function"],
-  ["blob", (browser) => typeof browser.Blob === "function"],
   ["fetch", (browser) => typeof browser.fetch === "function"],
-  ["file", (browser) => typeof browser.File === "function"],
   ["readable-stream", (browser) => typeof browser.ReadableStream === "function"],
-  ["secure-random-id", (browser) => typeof browser.crypto?.randomUUID === "function"],
-  ["url", (browser) => typeof browser.URL === "function"],
 ];
 
 export const missingRequiredBrowserCapabilities = (
@@ -57,8 +40,8 @@ export function UnsupportedBrowserView(props: { readonly onRetry?: () => void })
           <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Plakk</p>
           <h1 className="text-2xl font-semibold tracking-tight">This browser can’t run Plakk</h1>
           <p className="text-sm text-muted-foreground">
-            Required Web capabilities for secure account requests and page-scoped Snippet work are
-            unavailable. Update this browser or try another current browser.
+            Required Web capabilities for streaming secure account requests are unavailable. Update
+            this browser or try another current browser.
           </p>
         </div>
         <div className="grid gap-2 sm:grid-cols-2">
@@ -75,12 +58,19 @@ export function UnsupportedBrowserView(props: { readonly onRetry?: () => void })
   );
 }
 
-export function BrowserSupportBoundary(props: { readonly children: ReactNode }) {
-  const [supported, setSupported] = useState(true);
-
-  useEffect(() => {
-    setSupported(missingRequiredBrowserCapabilities(window).length === 0);
-  }, []);
-
-  return supported ? props.children : <UnsupportedBrowserView />;
+export function BrowserSupportBoundary(props: {
+  readonly capabilities?: BrowserCapabilities | null;
+  readonly children: ReactNode;
+}) {
+  const capabilities =
+    props.capabilities === undefined
+      ? typeof window === "undefined"
+        ? null
+        : window
+      : props.capabilities;
+  return capabilities === null || missingRequiredBrowserCapabilities(capabilities).length === 0 ? (
+    props.children
+  ) : (
+    <UnsupportedBrowserView />
+  );
 }
