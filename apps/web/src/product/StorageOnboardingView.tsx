@@ -111,7 +111,7 @@ export function StorageOnboardingView(props: {
     } catch {
       setState({ kind: "failed" });
     }
-  }, [onContinueWeb, origin, providerHint, read]);
+  }, [confirmationRequested, onContinueWeb, origin, providerHint, read]);
 
   useEffect(() => {
     void reconstruct();
