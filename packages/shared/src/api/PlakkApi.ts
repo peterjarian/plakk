@@ -13,8 +13,7 @@ export type AccountBlockedReason = typeof AccountBlockedReasonSchema.Type;
 
 export const AccountAccessEntitlementSchema = Schema.Struct({
   status: Schema.Literals(["TRIAL_ACTIVE", "BILLING_RESTRICTED"] as const),
-  trialStartedAt: Schema.String,
-  trialEndsAt: Schema.String,
+  trialEndsAt: Schema.DateTimeUtcFromString,
 });
 
 export type AccountAccessEntitlement = typeof AccountAccessEntitlementSchema.Type;

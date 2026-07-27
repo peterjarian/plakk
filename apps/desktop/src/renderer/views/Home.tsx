@@ -39,9 +39,13 @@ export function Home({ active = true }: { active?: boolean }) {
   const storageStatus = useStorageStatus();
   const localState = useLocalState().localState;
   const liveConnection = localState.liveConnection;
+  const billingRestricted =
+    localState.capability.status === "ONLINE" &&
+    localState.capability.account.blockedReasons.includes("billing");
   const [isDragging, setIsDragging] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copyingId, setCopyingId] = useState<string | null>(null);
+  const [pendingExternalSnippetId, setPendingExternalSnippetId] = useState<string | null>(null);
   const [pendingExternalUrl, setPendingExternalUrl] = useState<string | null>(null);
   const [skipExternalLinkWarning, setSkipExternalLinkWarning] = useState(false);
   const [showExternalLinkWarning, setShowExternalLinkWarning] = useState(true);
@@ -205,20 +209,28 @@ export function Home({ active = true }: { active?: boolean }) {
     return window.ipc.clipboard.onPaste((content) => handleClipboardPaste(content));
   }, [accountBlocked, active, storageStatus]);
 
-  function openLink(url: string) {
+  function openLink(snippetId: string, url: string) {
     setExternalActionError(null);
     if (!showExternalLinkWarning) {
-      void openExternal(url);
+      void openSnippet(snippetId);
       return;
     }
 
     setSkipExternalLinkWarning(false);
+    setPendingExternalSnippetId(snippetId);
     setPendingExternalUrl(url);
   }
 
   function closeExternalLinkDialog() {
+    setPendingExternalSnippetId(null);
     setPendingExternalUrl(null);
     setSkipExternalLinkWarning(false);
+  }
+
+  function openSnippet(snippetId: string) {
+    return window.ipc.snippets
+      .open(snippetId)
+      .catch(() => setExternalActionError("Plakk couldn’t open this link."));
   }
 
   function openExternal(url: string) {
@@ -228,9 +240,9 @@ export function Home({ active = true }: { active?: boolean }) {
   }
 
   async function confirmExternalLink() {
-    if (!pendingExternalUrl) return;
+    if (pendingExternalSnippetId === null || pendingExternalUrl === null) return;
 
-    const url = pendingExternalUrl;
+    const snippetId = pendingExternalSnippetId;
     const shouldSkipWarning = skipExternalLinkWarning;
     closeExternalLinkDialog();
     setExternalActionError(null);
@@ -242,7 +254,7 @@ export function Home({ active = true }: { active?: boolean }) {
       );
     }
 
-    await openExternal(url);
+    await openSnippet(snippetId);
   }
 
   const pendingExternalHost = pendingExternalUrl ? new URL(pendingExternalUrl).host : "";
@@ -434,9 +446,11 @@ export function Home({ active = true }: { active?: boolean }) {
                 copying={copyingId === snippet.id}
                 onCopy={() => void copySnippet(snippet)}
                 copyDisabled={
+                  billingRestricted ||
                   snippet.kind !== "PUBLISHED" ||
                   snippet.localContentAvailability.status !== "AVAILABLE"
                 }
+                productActionsDisabled={billingRestricted}
                 copyError={copyErrors[snippet.id]}
                 onDelete={() => {
                   void runSnippetAction(snippet.id, () =>
@@ -448,7 +462,7 @@ export function Home({ active = true }: { active?: boolean }) {
                 onDownload={() =>
                   void runSnippetAction(snippet.id, () => window.ipc.snippets.download(snippet.id))
                 }
-                onOpenLink={openLink}
+                onOpenLink={(url) => openLink(snippet.id, url)}
                 {...(snippet.presentation.type === "image"
                   ? {
                       thumbnailUrl: snippet.thumbnailUrl,

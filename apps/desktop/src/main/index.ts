@@ -193,7 +193,7 @@ handle(ipcMethods.snippetDownload, (id) =>
     const engine = yield* SnippetHydrationEngine;
     const session = yield* DesktopSession;
     yield* session
-      .withCurrentAccount((account) => {
+      .withCurrentProductAccess((account) => {
         if (account.accessToken === null) {
           return Effect.fail(
             new IpcHandlerError({
@@ -229,20 +229,27 @@ handle(ipcMethods.storageFreeUp, () =>
   }),
 );
 
-const findSnippet = Effect.fn("LocalState.findSnippet")(function* (id: string) {
+const findSnippetForAccount = Effect.fn("LocalState.findSnippetForAccount")(function* (
+  account: { readonly id: string; readonly accessToken: string | null },
+  id: string,
+) {
   const localState = yield* LocalState;
+  const current = yield* localState.current;
+  const snippets = current.account?.id === account.id ? current.snippets : [];
+  const snippet = snippets.find((item) => item.id === id);
+  if (snippet === undefined) {
+    return yield* new IpcHandlerError({ cause: null, message: "Snippet was not found." });
+  }
+  return { account, snippet };
+});
+
+const findSnippet = Effect.fn("LocalState.findSnippet")(function* (id: string) {
   const session = yield* DesktopSession;
   return yield* session
     .withCurrentAccount(
-      Effect.fn("LocalState.findAuthorizedSnippet")(function* (account) {
-        const current = yield* localState.current;
-        const snippets = current.account?.id === account.id ? current.snippets : [];
-        const snippet = snippets.find((item) => item.id === id);
-        if (snippet === undefined) {
-          return yield* new IpcHandlerError({ cause: null, message: "Snippet was not found." });
-        }
-        return { account, snippet };
-      }),
+      Effect.fn("LocalState.findAuthorizedSnippet")((account) =>
+        findSnippetForAccount(account, id),
+      ),
     )
     .pipe(
       Effect.mapError((cause) =>
@@ -255,25 +262,62 @@ const findSnippet = Effect.fn("LocalState.findSnippet")(function* (id: string) {
 
 handle(ipcMethods.snippetCopy, (id) =>
   Effect.gen(function* () {
-    const { account, snippet } = yield* findSnippet(id);
-    const { bytes } = yield* Effect.scoped(getManagedSnippetBytes(account, id, snippet)).pipe(
-      asIpcFailure("Could not load this snippet."),
-    );
-    const presentation = deriveSnippetPresentation({ fileName: snippet.fileName, content: bytes });
-    if (presentation.type === "text" || presentation.type === "hyperlink") {
-      const text = decodeSnippetText(bytes);
-      if (text !== null) {
-        return yield* writeClipboard({ type: "text", text }).pipe(
-          asIpcFailure("Could not copy this snippet."),
+    const session = yield* DesktopSession;
+    yield* session.withCurrentProductAccess((account) =>
+      Effect.gen(function* () {
+        const { snippet } = yield* findSnippetForAccount(account, id);
+        const { bytes } = yield* Effect.scoped(getManagedSnippetBytes(account, id, snippet)).pipe(
+          asIpcFailure("Could not load this snippet."),
         );
-      }
-    }
-    return yield* writeSnippetToClipboard({
-      bytes,
-      fileName: snippet.fileName,
-      contentType: null,
-    }).pipe(asIpcFailure("Could not copy this snippet."));
-  }),
+        const presentation = deriveSnippetPresentation({
+          fileName: snippet.fileName,
+          content: bytes,
+        });
+        if (presentation.type === "text" || presentation.type === "hyperlink") {
+          const text = decodeSnippetText(bytes);
+          if (text !== null) {
+            return yield* writeClipboard({ type: "text", text }).pipe(
+              asIpcFailure("Could not copy this snippet."),
+            );
+          }
+        }
+        return yield* writeSnippetToClipboard({
+          bytes,
+          fileName: snippet.fileName,
+          contentType: null,
+        }).pipe(asIpcFailure("Could not copy this snippet."));
+      }),
+    );
+  }).pipe(asIpcFailure("Could not copy this snippet.")),
+);
+
+handle(ipcMethods.snippetOpen, (id) =>
+  Effect.gen(function* () {
+    const session = yield* DesktopSession;
+    yield* session.withCurrentProductAccess((account) =>
+      Effect.gen(function* () {
+        const { snippet } = yield* findSnippetForAccount(account, id);
+        const { bytes } = yield* Effect.scoped(getManagedSnippetBytes(account, id, snippet)).pipe(
+          asIpcFailure("Could not load this snippet."),
+        );
+        const presentation = deriveSnippetPresentation({
+          fileName: snippet.fileName,
+          content: bytes,
+        });
+        if (presentation.type !== "hyperlink") {
+          return yield* new IpcHandlerError({
+            cause: null,
+            message: "This snippet is not a link.",
+          });
+        }
+        yield* Effect.tryPromise({
+          try: () => shell.openExternal(presentation.url),
+          catch: (cause) =>
+            new IpcHandlerError({ cause, message: "Could not open this snippet link." }),
+        });
+      }),
+    );
+  }).pipe(asIpcFailure("Could not open this snippet link.")),
 );
 
 handle(ipcMethods.snippetRead, (id) =>

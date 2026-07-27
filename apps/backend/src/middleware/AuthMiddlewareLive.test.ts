@@ -1,14 +1,13 @@
 import { CurrentUser } from "@plakk/shared/PlakkApi";
 import { describe, expect, it, vi } from "vite-plus/test";
-import { Effect } from "effect";
+import { DateTime, Effect } from "effect";
 
 import { AccountCapability } from "../account/AccountCapability.ts";
 import { runAuthenticatedRpc } from "./AuthMiddlewareLive.ts";
 
 const activeTrial = {
   status: "TRIAL_ACTIVE" as const,
-  trialStartedAt: "2026-07-27T10:15:30.000Z",
-  trialEndsAt: "2026-08-10T10:15:30.000Z",
+  trialEndsAt: DateTime.makeUnsafe("2026-08-10T10:15:30.000Z"),
 };
 
 const capabilityService = (

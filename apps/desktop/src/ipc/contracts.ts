@@ -244,6 +244,11 @@ export const ipcMethods = {
     payload: SnippetIdSchema,
     result: Schema.Void,
   }),
+  snippetOpen: method({
+    channel: "snippet:open",
+    payload: SnippetIdSchema,
+    result: Schema.Void,
+  }),
   snippetRead: method({
     channel: "snippet:read",
     payload: SnippetIdSchema,

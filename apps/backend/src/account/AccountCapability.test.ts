@@ -1,6 +1,6 @@
 import { StorageProvider } from "../storage/StorageProvider.ts";
 import { describe, expect, it, vi } from "vite-plus/test";
-import { Effect, Layer } from "effect";
+import { DateTime, Effect, Layer } from "effect";
 import { TestClock } from "effect/testing";
 
 import {
@@ -93,10 +93,10 @@ describe("account trial capability", () => {
     );
 
     expect(repository.trials.size).toBe(1);
-    expect(new Set(entitlements.map(({ trialStartedAt }) => trialStartedAt))).toEqual(
-      new Set(["2026-07-27T10:15:30.000Z"]),
+    expect(repository.trials.get("user-1")?.startedAt.toISOString()).toBe(
+      "2026-07-27T10:15:30.000Z",
     );
-    expect(new Set(entitlements.map(({ trialEndsAt }) => trialEndsAt))).toEqual(
+    expect(new Set(entitlements.map(({ trialEndsAt }) => DateTime.formatIso(trialEndsAt)))).toEqual(
       new Set(["2026-08-10T10:15:30.000Z"]),
     );
   });

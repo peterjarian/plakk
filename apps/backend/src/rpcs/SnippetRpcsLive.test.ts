@@ -88,8 +88,7 @@ const accountCapabilityService = (
       Effect.succeed({
         accessEntitlement: {
           status: "TRIAL_ACTIVE",
-          trialStartedAt: "2026-07-20T20:00:00.000Z",
-          trialEndsAt: "2026-08-03T20:00:00.000Z",
+          trialEndsAt: DateTime.makeUnsafe("2026-08-03T20:00:00.000Z"),
         },
         blockedReasons: [],
         canSync: true,
@@ -98,8 +97,7 @@ const accountCapabilityService = (
     startTrial: () =>
       Effect.succeed({
         status: "TRIAL_ACTIVE",
-        trialStartedAt: "2026-07-20T20:00:00.000Z",
-        trialEndsAt: "2026-08-03T20:00:00.000Z",
+        trialEndsAt: DateTime.makeUnsafe("2026-08-03T20:00:00.000Z"),
       }),
     ...overrides,
   });

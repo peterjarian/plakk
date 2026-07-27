@@ -2,7 +2,9 @@ import { expect, test } from "@playwright/test";
 
 import { CONTROLLED_PRODUCT_ORIGIN } from "./controlled-product/config.ts";
 
-test("active trial and billing restriction stay visible and honest at Home", async ({ page }) => {
+test("active trial and exact-expiry restriction stay visible and honest at Home", async ({
+  page,
+}) => {
   await page.goto(CONTROLLED_PRODUCT_ORIGIN);
 
   await expect(page.getByText("Trial active", { exact: false })).toBeVisible();
@@ -10,7 +12,7 @@ test("active trial and billing restriction stay visible and honest at Home", asy
   await expect(page.getByText("Initial snapshot.png")).toBeVisible();
   await expect(page.getByText("Billing access required", { exact: false })).toHaveCount(0);
 
-  await page.goto(`${CONTROLLED_PRODUCT_ORIGIN}/?billing-restricted=true`);
+  await page.goto(`${CONTROLLED_PRODUCT_ORIGIN}/?trial-at-exact-expiry=true`);
 
   await expect(page.getByText("Billing access required", { exact: false })).toBeVisible();
   await expect(page.getByText("Your snippets are preserved", { exact: false })).toBeVisible();

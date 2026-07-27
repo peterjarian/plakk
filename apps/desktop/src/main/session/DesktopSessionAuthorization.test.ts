@@ -2,7 +2,7 @@ import { NodeFileSystem } from "@effect/platform-node";
 import type { User } from "@plakk/shared";
 import { RpcError } from "@plakk/shared/RpcError";
 import { describe, expect, it } from "@effect/vitest";
-import { Deferred, Effect, Fiber, Layer, Stream } from "effect";
+import { DateTime, Deferred, Effect, Fiber, Layer, Stream } from "effect";
 import { TestClock } from "effect/testing";
 
 import { AuthService } from "../auth/AuthService.ts";
@@ -159,8 +159,7 @@ const dependencies = (options: {
             Effect.succeed({
               accessEntitlement: {
                 status: "TRIAL_ACTIVE",
-                trialStartedAt: "2026-07-27T00:00:00.000Z",
-                trialEndsAt: "2026-08-10T00:00:00.000Z",
+                trialEndsAt: DateTime.makeUnsafe("2026-08-10T00:00:00.000Z"),
               },
               canSync: false,
               storageProvider: null,
@@ -171,6 +170,100 @@ const dependencies = (options: {
   );
 
 describe("DesktopSession command authority", () => {
+  it.effect("runs a local product command only after the backend confirms active access", () =>
+    Effect.gen(function* () {
+      const localStateUpdates: Array<LocalStateUpdate> = [];
+      let commandRan = false;
+      const layer = dependencies({
+        getSession: () => Effect.succeed({ accessToken: "token", user: firstAccount }),
+        localStateUpdates,
+        purge: () => Effect.void,
+        rpc: PlakkRpcClient.of({
+          GetAccountStatus: () =>
+            Effect.succeed({
+              accessEntitlement: {
+                status: "TRIAL_ACTIVE",
+                trialEndsAt: DateTime.makeUnsafe("2026-08-10T00:00:00.000Z"),
+              },
+              canSync: false,
+              storageProvider: null,
+              blockedReasons: ["storage"],
+            }),
+        } as never),
+      });
+
+      const result = yield* Effect.gen(function* () {
+        const session = yield* DesktopSession;
+        yield* session.start;
+        yield* session.refresh;
+        return yield* session.withCurrentProductAccess(() =>
+          Effect.sync(() => {
+            commandRan = true;
+            return "ran" as const;
+          }),
+        );
+      }).pipe(
+        Effect.provide(
+          DesktopSessionLive.pipe(Layer.provide(Layer.merge(layer, NodeFileSystem.layer))),
+        ),
+      );
+
+      expect(result).toBe("ran");
+      expect(commandRan).toBe(true);
+    }),
+  );
+
+  it.effect("rejects a local product command when billing is restricted", () =>
+    Effect.gen(function* () {
+      const localStateUpdates: Array<LocalStateUpdate> = [];
+      let commandRan = false;
+      const layer = dependencies({
+        getSession: () => Effect.succeed({ accessToken: "token", user: firstAccount }),
+        localStateUpdates,
+        purge: () => Effect.void,
+        rpc: PlakkRpcClient.of({
+          GetAccountStatus: () =>
+            Effect.succeed({
+              accessEntitlement: {
+                status: "BILLING_RESTRICTED",
+                trialEndsAt: DateTime.makeUnsafe("2026-08-10T00:00:00.000Z"),
+              },
+              canSync: false,
+              storageProvider: "GOOGLE_DRIVE",
+              blockedReasons: ["billing"],
+            }),
+          GetStorageProviderStatus: () =>
+            Effect.succeed({
+              storageProvider: "GOOGLE_DRIVE",
+              status: "CONNECTED",
+              externalDestinationUrl: "https://drive.google.com/drive/folders/plakk",
+            }),
+        } as never),
+      });
+
+      const failure = yield* Effect.gen(function* () {
+        const session = yield* DesktopSession;
+        yield* session.start;
+        yield* session.refresh;
+        return yield* session
+          .withCurrentProductAccess(() =>
+            Effect.sync(() => {
+              commandRan = true;
+            }),
+          )
+          .pipe(Effect.flip);
+      }).pipe(
+        Effect.provide(
+          DesktopSessionLive.pipe(Layer.provide(Layer.merge(layer, NodeFileSystem.layer))),
+        ),
+      );
+
+      expect(failure).toBeInstanceOf(DesktopSessionCommandError);
+      expect(failure.reason).toBe("Restore billing access to use this action.");
+      expect(commandRan).toBe(false);
+    }),
+  );
+
   it.effect(
     "refreshes credentials and restarts live invalidations after authentication failure",
     () =>
@@ -212,8 +305,7 @@ describe("DesktopSession command authority", () => {
               Effect.succeed({
                 accessEntitlement: {
                   status: "TRIAL_ACTIVE",
-                  trialStartedAt: "2026-07-27T00:00:00.000Z",
-                  trialEndsAt: "2026-08-10T00:00:00.000Z",
+                  trialEndsAt: DateTime.makeUnsafe("2026-08-10T00:00:00.000Z"),
                 },
                 canSync: true,
                 storageProvider: "GOOGLE_DRIVE",
@@ -273,8 +365,7 @@ describe("DesktopSession command authority", () => {
             Effect.succeed({
               accessEntitlement: {
                 status: "TRIAL_ACTIVE",
-                trialStartedAt: "2026-07-27T00:00:00.000Z",
-                trialEndsAt: "2026-08-10T00:00:00.000Z",
+                trialEndsAt: DateTime.makeUnsafe("2026-08-10T00:00:00.000Z"),
               },
               canSync: true,
               storageProvider: "GOOGLE_DRIVE",
@@ -312,8 +403,7 @@ describe("DesktopSession command authority", () => {
         accountStatus: {
           accessEntitlement: {
             status: "TRIAL_ACTIVE",
-            trialStartedAt: "2026-07-27T00:00:00.000Z",
-            trialEndsAt: "2026-08-10T00:00:00.000Z",
+            trialEndsAt: DateTime.makeUnsafe("2026-08-10T00:00:00.000Z"),
           },
           canSync: true,
           storageProvider: "GOOGLE_DRIVE",
@@ -372,8 +462,7 @@ describe("DesktopSession command authority", () => {
               return {
                 accessEntitlement: {
                   status: "TRIAL_ACTIVE",
-                  trialStartedAt: "2026-07-27T00:00:00.000Z",
-                  trialEndsAt: "2026-08-10T00:00:00.000Z",
+                  trialEndsAt: DateTime.makeUnsafe("2026-08-10T00:00:00.000Z"),
                 },
                 canSync: true,
                 storageProvider: "GOOGLE_DRIVE",
@@ -698,8 +787,7 @@ describe("DesktopSession command authority", () => {
             Effect.succeed({
               accessEntitlement: {
                 status: "TRIAL_ACTIVE",
-                trialStartedAt: "2026-07-27T00:00:00.000Z",
-                trialEndsAt: "2026-08-10T00:00:00.000Z",
+                trialEndsAt: DateTime.makeUnsafe("2026-08-10T00:00:00.000Z"),
               },
               canSync: true,
               storageProvider: "GOOGLE_DRIVE",

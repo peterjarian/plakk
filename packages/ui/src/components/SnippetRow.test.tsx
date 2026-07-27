@@ -225,6 +225,36 @@ describe("SnippetRow", () => {
     expect(markup).toContain("group-hover:visible");
     expect(markup).not.toContain('aria-label="Copy"');
   });
+
+  it("keeps restricted product actions visible but disabled while Delete remains available", () => {
+    const markup = renderToStaticMarkup(
+      <SnippetRow
+        snippet={{
+          ...snippet,
+          localContentAvailability: { status: "NOT_AVAILABLE" },
+        }}
+        presentation={{
+          type: "hyperlink",
+          title: "https://example.com",
+          url: "https://example.com",
+        }}
+        now={now}
+        copied={false}
+        productActionsDisabled
+        onCopy={() => undefined}
+        onDelete={() => undefined}
+        onDownload={() => undefined}
+        onOpenLink={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain('aria-label="Download to this device"');
+    expect(markup).toContain('aria-label="Open link"');
+    expect(markup).toContain('aria-label="Delete"');
+    expect(markup).toMatch(/disabled=""[^>]+aria-label="Download to this device"/);
+    expect(markup).toMatch(/disabled=""[^>]+aria-label="Open link"/);
+    expect(markup).not.toMatch(/disabled=""[^>]+aria-label="Delete"/);
+  });
 });
 
 describe("formatSnippetDate", () => {

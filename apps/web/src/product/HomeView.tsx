@@ -14,8 +14,8 @@ const storageProviderLabel = {
   ONE_DRIVE: "OneDrive",
 } as const satisfies Record<StorageProviderStatus["storageProvider"], string>;
 
-const trialEndDate = (trialEndsAt: string) =>
-  DateTime.formatUtc(DateTime.makeUnsafe(trialEndsAt), {
+const trialEndDate = (trialEndsAt: DateTime.Utc) =>
+  DateTime.formatUtc(trialEndsAt, {
     dateStyle: "long",
     locale: "en",
   });

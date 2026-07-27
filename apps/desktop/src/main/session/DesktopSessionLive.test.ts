@@ -1,7 +1,7 @@
 import type { User } from "@plakk/shared";
 import { NodeFileSystem } from "@effect/platform-node";
 import { describe, expect, it } from "@effect/vitest";
-import { Deferred, Effect, Fiber, Layer, Stream } from "effect";
+import { DateTime, Deferred, Effect, Fiber, Layer, Stream } from "effect";
 
 import { AuthService } from "../auth/AuthService.ts";
 import { LocalState, type LocalStateUpdate } from "../local-state/LocalState.ts";
@@ -179,8 +179,7 @@ describe("DesktopSession", () => {
               Effect.succeed({
                 accessEntitlement: {
                   status: "TRIAL_ACTIVE",
-                  trialStartedAt: "2026-07-27T00:00:00.000Z",
-                  trialEndsAt: "2026-08-10T00:00:00.000Z",
+                  trialEndsAt: DateTime.makeUnsafe("2026-08-10T00:00:00.000Z"),
                 },
                 canSync: true,
                 storageProvider: "GOOGLE_DRIVE",
@@ -268,8 +267,7 @@ describe("DesktopSession", () => {
           accountStatus: {
             accessEntitlement: {
               status: "TRIAL_ACTIVE",
-              trialStartedAt: "2026-07-27T00:00:00.000Z",
-              trialEndsAt: "2026-08-10T00:00:00.000Z",
+              trialEndsAt: DateTime.makeUnsafe("2026-08-10T00:00:00.000Z"),
             },
             canSync: true,
             storageProvider: "GOOGLE_DRIVE",

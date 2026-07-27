@@ -4,6 +4,7 @@ import {
   type AccountStatus,
 } from "@plakk/shared/PlakkApi";
 import { RpcError } from "@plakk/shared/RpcError";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -18,8 +19,7 @@ import {
 const account: AccountStatus = {
   accessEntitlement: {
     status: "TRIAL_ACTIVE",
-    trialStartedAt: "2026-07-27T00:00:00.000Z",
-    trialEndsAt: "2026-08-10T00:00:00.000Z",
+    trialEndsAt: DateTime.makeUnsafe("2026-08-10T00:00:00.000Z"),
   },
   canSync: true,
   storageProvider: "DROPBOX",

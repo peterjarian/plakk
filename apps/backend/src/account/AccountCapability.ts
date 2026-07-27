@@ -96,8 +96,7 @@ const entitlementFromTrial = (
   nowMillis: number,
 ): AccountAccessEntitlement => ({
   status: nowMillis < trial.endsAt.getTime() ? "TRIAL_ACTIVE" : "BILLING_RESTRICTED",
-  trialStartedAt: trial.startedAt.toISOString(),
-  trialEndsAt: trial.endsAt.toISOString(),
+  trialEndsAt: DateTime.makeUnsafe(trial.endsAt),
 });
 
 export class AccountCapability extends Context.Service<

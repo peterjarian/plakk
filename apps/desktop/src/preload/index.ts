@@ -68,6 +68,7 @@ export type DesktopApi = {
     readonly delete: (id: string) => Promise<void>;
     readonly download: (id: string) => Promise<void>;
     readonly discard: (id: string) => Promise<void>;
+    readonly open: (id: string) => Promise<void>;
     readonly ingest: (payload: RendererSnippetIngestPayload) => Promise<SnippetIngestResult>;
     readonly read: (id: string) => Promise<Uint8Array>;
   };
@@ -124,6 +125,7 @@ export const desktopApi = {
     delete: (snippet) => invoke(ipcMethods.snippetDelete, snippet),
     download: (snippet) => invoke(ipcMethods.snippetDownload, snippet),
     discard: (snippet) => invoke(ipcMethods.snippetDiscard, snippet),
+    open: (snippet) => invoke(ipcMethods.snippetOpen, snippet),
     ingest: ({ file, ...payload }: RendererSnippetIngestPayload) => {
       const invocation =
         payload.bytes !== undefined || payload.sourceId !== undefined

@@ -25,7 +25,11 @@ export function Tray() {
   const auth = useAuth();
   const provider = useLinkedStorageProvider();
   const storageStatus = useStorageStatus();
-  const liveConnection = useLocalState().localState.liveConnection;
+  const localState = useLocalState().localState;
+  const liveConnection = localState.liveConnection;
+  const billingRestricted =
+    localState.capability.status === "ONLINE" &&
+    localState.capability.account.blockedReasons.includes("billing");
   const ingestionAllowed = storageStatus.kind === "connected" && storageStatus.canSync;
   const syncStatus: SyncStatus =
     storageStatus.kind === "loading"
@@ -41,6 +45,7 @@ export function Tray() {
   const { error: snippetReadError, items, reload: reloadSnippets } = useSnippets();
   const latest = items.at(0);
   const copyDisabled =
+    billingRestricted ||
     latest === undefined ||
     latest.kind !== "PUBLISHED" ||
     latest.localContentAvailability.status !== "AVAILABLE";
@@ -198,6 +203,7 @@ export function Tray() {
               copied={isCopied}
               copying={isCopying}
               copyDisabled={copyDisabled}
+              productActionsDisabled={billingRestricted}
               readError={snippetReadError}
               onReload={reloadSnippets}
               {...(currentCopyError === null ? {} : { copyError: currentCopyError })}
@@ -215,10 +221,11 @@ export function Tray() {
               onDownload={() =>
                 runLatestAction(window.ipc.snippets.download, "Could not download this snippet.")
               }
-              onOpenLink={(url) => {
+              onOpenLink={() => {
                 setError(null);
-                void window.ipc
-                  .openExternal(url)
+                if (latest === undefined) return;
+                void window.ipc.snippets
+                  .open(latest.id)
                   .catch(() => setError("Plakk couldn’t open this link."));
               }}
             />

@@ -62,7 +62,7 @@ const makeLocalState = Effect.gen(function* () {
           storageUsageBytes: initialStorageUsageBytes,
           snippets: initialItems,
         };
-  yield* Schema.decodeUnknownEffect(LocalStateSchema)(initial).pipe(
+  yield* Schema.decodeUnknownEffect(Schema.toType(LocalStateSchema))(initial).pipe(
     Effect.mapError(
       (cause) =>
         new LocalStateError({
@@ -82,7 +82,7 @@ const makeLocalState = Effect.gen(function* () {
   ) {
     const current = yield* Ref.get(state);
     const materialized: LocalStateValue = { ...next, revision: current.revision + 1 };
-    yield* Schema.decodeUnknownEffect(LocalStateSchema)(materialized).pipe(
+    yield* Schema.decodeUnknownEffect(Schema.toType(LocalStateSchema))(materialized).pipe(
       Effect.mapError(
         (cause) =>
           new LocalStateError({

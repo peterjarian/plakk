@@ -1,6 +1,7 @@
 import type { User } from "@plakk/shared";
 import type { AccountStatus, ApiSnippet } from "@plakk/shared/PlakkApi";
 import { RpcError } from "@plakk/shared/RpcError";
+import * as DateTime from "effect/DateTime";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -18,8 +19,7 @@ const user: User = {
 const account: AccountStatus = {
   accessEntitlement: {
     status: "TRIAL_ACTIVE",
-    trialStartedAt: "2026-07-27T00:00:00.000Z",
-    trialEndsAt: "2026-08-10T00:00:00.000Z",
+    trialEndsAt: DateTime.makeUnsafe("2026-08-10T00:00:00.000Z"),
   },
   canSync: true,
   storageProvider: "GOOGLE_DRIVE",

@@ -1,7 +1,7 @@
 import type { AccountStatus, ApiSnippet } from "@plakk/shared/PlakkApi";
 import { RpcError } from "@plakk/shared/RpcError";
 import { describe, expect, it } from "@effect/vitest";
-import { Data, Deferred, Effect, Fiber, Layer, Queue, Ref, Stream } from "effect";
+import { Data, DateTime, Deferred, Effect, Fiber, Layer, Queue, Ref, Stream } from "effect";
 import { TestClock } from "effect/testing";
 
 import { AccountProductLifetime, clearProductThenSignOut } from "./account-product-lifetime.ts";
@@ -15,8 +15,7 @@ import {
 const account: AccountStatus = {
   accessEntitlement: {
     status: "TRIAL_ACTIVE",
-    trialStartedAt: "2026-07-27T00:00:00.000Z",
-    trialEndsAt: "2026-08-10T00:00:00.000Z",
+    trialEndsAt: DateTime.makeUnsafe("2026-08-10T00:00:00.000Z"),
   },
   canSync: true,
   storageProvider: "GOOGLE_DRIVE",

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
+import * as DateTime from "effect/DateTime";
 
 import type { LocalState } from "../../ipc/contracts.ts";
 import { storageStatusFromLocalState } from "./useStorageStatus.tsx";
@@ -32,8 +33,7 @@ describe("storage status from the local state", () => {
           account: {
             accessEntitlement: {
               status: "TRIAL_ACTIVE",
-              trialStartedAt: "2026-07-27T00:00:00.000Z",
-              trialEndsAt: "2026-08-10T00:00:00.000Z",
+              trialEndsAt: DateTime.makeUnsafe("2026-08-10T00:00:00.000Z"),
             },
             canSync: true,
             storageProvider: "GOOGLE_DRIVE",
@@ -65,8 +65,7 @@ describe("storage status from the local state", () => {
           account: {
             accessEntitlement: {
               status: "BILLING_RESTRICTED",
-              trialStartedAt: "2026-07-27T00:00:00.000Z",
-              trialEndsAt: "2026-08-10T00:00:00.000Z",
+              trialEndsAt: DateTime.makeUnsafe("2026-08-10T00:00:00.000Z"),
             },
             canSync: false,
             storageProvider: "GOOGLE_DRIVE",
@@ -87,7 +86,7 @@ describe("storage status from the local state", () => {
       account: {
         accessEntitlement: {
           status: "BILLING_RESTRICTED",
-          trialEndsAt: "2026-08-10T00:00:00.000Z",
+          trialEndsAt: DateTime.makeUnsafe("2026-08-10T00:00:00.000Z"),
         },
         blockedReasons: ["billing"],
       },
@@ -103,8 +102,7 @@ describe("storage status from the local state", () => {
           account: {
             accessEntitlement: {
               status: "TRIAL_ACTIVE",
-              trialStartedAt: "2026-07-27T00:00:00.000Z",
-              trialEndsAt: "2026-08-10T00:00:00.000Z",
+              trialEndsAt: DateTime.makeUnsafe("2026-08-10T00:00:00.000Z"),
             },
             canSync: false,
             storageProvider: null,

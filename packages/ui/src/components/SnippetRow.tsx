@@ -154,6 +154,7 @@ export function SnippetRow(props: {
   onOpenLink?: (url: string) => void;
   thumbnailUrl?: string | null;
   copyDisabled?: boolean;
+  productActionsDisabled?: boolean;
   copying?: boolean;
   copyError?: string;
   showActions?: boolean;
@@ -169,6 +170,7 @@ export function SnippetRow(props: {
     onOpenLink,
     thumbnailUrl,
     copyDisabled = false,
+    productActionsDisabled = false,
     copying = false,
     copyError,
     showActions = true,
@@ -224,6 +226,7 @@ export function SnippetRow(props: {
                   : "Download to this device"
               }
               onClick={onDownload}
+              disabled={productActionsDisabled}
             >
               {snippet.localContentAvailability.status === "FAILED" ? <RotateCw /> : <Download />}
             </Button>
@@ -250,7 +253,7 @@ export function SnippetRow(props: {
                   variant="ghost"
                   size="icon-sm"
                   aria-label={copying ? "Copying" : copied ? "Copied" : "Copy"}
-                  disabled={copying || copyDisabled}
+                  disabled={copying || copyDisabled || productActionsDisabled}
                   onClick={onCopy}
                 >
                   {copying ? (
@@ -268,6 +271,7 @@ export function SnippetRow(props: {
                   variant="ghost"
                   size="icon-sm"
                   aria-label="Open link"
+                  disabled={productActionsDisabled}
                   onClick={() => onOpenLink(presentation.url)}
                 >
                   <ArrowUpRight />

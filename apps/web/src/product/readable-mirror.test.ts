@@ -1,6 +1,6 @@
 import type { AccountStatus, ApiSnippet } from "@plakk/shared/PlakkApi";
 import { expect, it } from "@effect/vitest";
-import { Effect, Stream } from "effect";
+import { DateTime, Effect, Stream } from "effect";
 
 import {
   AccountProductMirror,
@@ -16,8 +16,7 @@ import {
 const account: AccountStatus = {
   accessEntitlement: {
     status: "TRIAL_ACTIVE",
-    trialStartedAt: "2026-07-27T00:00:00.000Z",
-    trialEndsAt: "2026-08-10T00:00:00.000Z",
+    trialEndsAt: DateTime.makeUnsafe("2026-08-10T00:00:00.000Z"),
   },
   blockedReasons: [],
   canSync: true,

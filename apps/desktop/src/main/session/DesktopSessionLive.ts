@@ -493,7 +493,7 @@ const makeDesktopSession = Effect.gen(function* () {
 
   const withCurrentAccount: DesktopSessionShape["withCurrentAccount"] = Effect.fn(
     "DesktopSession.withCurrentAccount",
-  )(function* <A, E>(command: (account: DesktopSessionAccount) => Effect.Effect<A, E>) {
+  )(function* <A, E, R>(command: (account: DesktopSessionAccount) => Effect.Effect<A, E, R>) {
     return yield* commandLock.withPermit(
       Effect.gen(function* () {
         const current = yield* Ref.get(status);
@@ -503,6 +503,38 @@ const makeDesktopSession = Effect.gen(function* () {
           });
         }
         return yield* command({ id: current.user.id, accessToken: current.accessToken });
+      }),
+    );
+  });
+
+  const withCurrentProductAccess: DesktopSessionShape["withCurrentProductAccess"] = Effect.fn(
+    "DesktopSession.withCurrentProductAccess",
+  )(function* <A, E, R>(command: (account: DesktopSessionAccount) => Effect.Effect<A, E, R>) {
+    return yield* withCurrentAccount(
+      Effect.fn("DesktopSession.withAuthorizedProductAccount")(function* (account) {
+        if (account.accessToken === null) {
+          return yield* new DesktopSessionCommandError({
+            reason: "Reconnect Plakk before using this action.",
+          });
+        }
+        const accountStatus = yield* rpc
+          .GetAccountStatus(undefined, {
+            headers: { authorization: `Bearer ${account.accessToken}` },
+          })
+          .pipe(
+            Effect.mapError(
+              () =>
+                new DesktopSessionCommandError({
+                  reason: "Plakk could not confirm account access.",
+                }),
+            ),
+          );
+        if (accountStatus.accessEntitlement.status === "BILLING_RESTRICTED") {
+          return yield* new DesktopSessionCommandError({
+            reason: "Restore billing access to use this action.",
+          });
+        }
+        return yield* command(account);
       }),
     );
   });
@@ -533,6 +565,7 @@ const makeDesktopSession = Effect.gen(function* () {
     signOut,
     start,
     withCurrentAccount,
+    withCurrentProductAccess,
   } satisfies DesktopSessionShape;
 });
 
