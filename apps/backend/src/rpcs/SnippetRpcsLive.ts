@@ -244,8 +244,8 @@ const prepareSnippetDownload = Effect.fn("SnippetRpcs.prepareDownload")(function
   snippetId: string,
 ) {
   const snippet = yield* loadAuthorizedSnippet(drizzle, capability, ownerWorkosUserId, snippetId);
-  const download = yield* storage
-    .getDownloadTarget({
+  const url = yield* storage
+    .getDownloadUrl({
       storageProvider: snippet.storageProvider,
       storageObjectId: snippet.storageObjectId,
       workosUserId: ownerWorkosUserId,
@@ -256,7 +256,9 @@ const prepareSnippetDownload = Effect.fn("SnippetRpcs.prepareDownload")(function
     storageProvider: snippet.storageProvider,
     fileName: snippet.fileName,
     byteSize: snippet.byteSize,
-    download,
+    // Provider credentials remain backend-owned. The empty collection preserves
+    // compatibility with Desktop clients that predate signed browser downloads.
+    download: { url, headers: [] },
   };
 });
 

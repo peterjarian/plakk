@@ -34,6 +34,7 @@ const run = (
       readonly byteSize: number;
     }>;
     readonly read?: WebSnippetActionRemote["Service"]["read"];
+    readonly prepareDownload?: WebSnippetActionRemote["Service"]["prepareDownload"];
   } = {},
 ) => {
   const browser = WebSnippetActionBrowser.of({
@@ -48,11 +49,15 @@ const run = (
         catch: (cause) => new WebSnippetBrowserError({ cause, message: "text failure" }),
       }).pipe(Effect.asVoid),
     download: () => Effect.void,
+    downloadUrl: () => Effect.void,
     open: () => Effect.void,
     ...options.browser,
   });
   const remote = WebSnippetActionRemote.of({
     delete: () => Effect.void,
+    prepareDownload:
+      options.prepareDownload ??
+      (() => Effect.die("Prepared downloads are not used for buffered action tests.")),
     read:
       options.read ??
       (() =>
@@ -203,6 +208,89 @@ describe("Web Snippet actions", () => {
         "This snippet is too large for browser Copy. Download it from the storage provider instead.",
     });
     expect(read).not.toHaveBeenCalled();
+  });
+
+  it("uses a trusted provider download without buffering oversized file content", async () => {
+    const target = snippet({
+      byteSize: WEB_SNIPPET_CONTENT_MAX_BYTES + 1,
+      fileName: "Large archive.zip",
+    });
+    const read = vi.fn(() => Effect.die("must not buffer oversized content"));
+    const prepareDownload = vi.fn(() =>
+      Effect.succeed({
+        storageProvider: target.storageProvider,
+        fileName: target.fileName,
+        byteSize: target.byteSize,
+        download: { url: "https://drive.usercontent.google.com/download/large", headers: [] },
+      }),
+    );
+    const downloadUrl = vi.fn(() => Effect.void);
+
+    await run(new Uint8Array(), (actions) => actions.download(target), {
+      browser: { downloadUrl },
+      prepareDownload,
+      read,
+    });
+
+    expect(prepareDownload).toHaveBeenCalledWith(target.id);
+    expect(downloadUrl).toHaveBeenCalledWith(
+      "https://drive.usercontent.google.com/download/large",
+      target.fileName,
+    );
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it("rejects mismatched or untrusted prepared downloads", async () => {
+    const target = snippet({
+      byteSize: WEB_SNIPPET_CONTENT_MAX_BYTES + 1,
+      fileName: "Large archive.zip",
+    });
+    const downloadUrl = vi.fn(() => Effect.void);
+
+    await expect(
+      run(new Uint8Array(), (actions) => actions.download(target), {
+        browser: { downloadUrl },
+        prepareDownload: () =>
+          Effect.succeed({
+            storageProvider: target.storageProvider,
+            fileName: target.fileName,
+            byteSize: target.byteSize,
+            download: { url: "https://attacker.example/private", headers: [] },
+          }),
+      }),
+    ).rejects.toMatchObject({
+      _tag: "WebSnippetActionError",
+      message: "The storage provider returned an invalid download.",
+    });
+    expect(downloadUrl).not.toHaveBeenCalled();
+  });
+
+  it("never forwards provider authorization headers into a browser download", async () => {
+    const target = snippet({
+      byteSize: WEB_SNIPPET_CONTENT_MAX_BYTES + 1,
+      fileName: "Large archive.zip",
+    });
+    const downloadUrl = vi.fn(() => Effect.void);
+
+    await expect(
+      run(new Uint8Array(), (actions) => actions.download(target), {
+        browser: { downloadUrl },
+        prepareDownload: () =>
+          Effect.succeed({
+            storageProvider: target.storageProvider,
+            fileName: target.fileName,
+            byteSize: target.byteSize,
+            download: {
+              url: "https://drive.usercontent.google.com/download/large",
+              headers: [{ name: "Authorization", value: "Bearer provider-token" }],
+            },
+          }),
+      }),
+    ).rejects.toMatchObject({
+      _tag: "WebSnippetActionError",
+      message: "The storage provider returned an invalid download.",
+    });
+    expect(downloadUrl).not.toHaveBeenCalled();
   });
 
   it("downloads a text-named file when complete content is not decodable text", async () => {

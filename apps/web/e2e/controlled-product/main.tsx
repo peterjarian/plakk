@@ -1,5 +1,10 @@
 import type { StorageProvider, User } from "@plakk/shared";
-import { accountCanSync, type AccountStatus, type ApiSnippet } from "@plakk/shared/PlakkApi";
+import {
+  accountCanSync,
+  WEB_SNIPPET_CONTENT_MAX_BYTES,
+  type AccountStatus,
+  type ApiSnippet,
+} from "@plakk/shared/PlakkApi";
 import { RpcError } from "@plakk/shared/RpcError";
 import { Button } from "@plakk/ui/components/primitives/button";
 import * as DateTime from "effect/DateTime";
@@ -116,6 +121,11 @@ let snapshot: ReadonlyArray<ApiSnippet> = snippetActionsProof
         "16d1e2f3-a456-4890-8abc-def012345678",
         "Undecodable image.png",
         new Uint8Array([0, 1, 2, 3]),
+      ),
+      snippet(
+        "17d1e2f3-a456-4890-8abc-def012345678",
+        "Large archive.zip",
+        WEB_SNIPPET_CONTENT_MAX_BYTES + 1,
       ),
     ]
   : [snippet("0d1e2f3a-4567-4890-8abc-def012345678", "Initial snapshot.png")];
@@ -272,6 +282,32 @@ const snippetActionRemoteLayer = Layer.succeed(
           document.documentElement.dataset.providerCleanupFailure = "observed-after-authority";
         }
         return Effect.void;
+      }),
+    prepareDownload: (id) =>
+      Effect.suspend(() => {
+        const target = snapshot.find((candidate) => candidate.id === id);
+        if (target === undefined) {
+          return Effect.fail(
+            new RpcError({ code: "NOT_FOUND", message: "Controlled Snippet is gone." }),
+          );
+        }
+        if (!accountCanSync(controlledAccount)) {
+          return Effect.fail(
+            new RpcError({
+              code: "FORBIDDEN",
+              message: "Controlled account restriction blocked this action.",
+            }),
+          );
+        }
+        return Effect.succeed({
+          storageProvider: target.storageProvider,
+          fileName: target.fileName,
+          byteSize: target.byteSize,
+          download: {
+            url: "https://drive.usercontent.google.com/controlled-large-download",
+            headers: [],
+          },
+        });
       }),
     read: (id) =>
       Effect.suspend(() => {

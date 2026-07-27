@@ -17,7 +17,7 @@ test.beforeEach(async ({ context, page }) => {
     })
     .catch(() => undefined);
   await page.goto(proofUrl);
-  await expect(page.locator("[data-snippet-row]")).toHaveCount(7);
+  await expect(page.locator("[data-snippet-row]")).toHaveCount(8);
 });
 
 test("copies text through the real clipboard without retaining content between actions", async ({
@@ -87,6 +87,29 @@ test("downloads arbitrary files with their authoritative name", async ({ page })
   await expect(row).toContainText("Downloaded");
 });
 
+test("streams oversized files from the trusted provider download target", async ({
+  context,
+  page,
+}) => {
+  await context.route("https://drive.usercontent.google.com/controlled-large-download", (route) =>
+    route.fulfill({
+      status: 200,
+      headers: {
+        "Content-Disposition": 'attachment; filename="Large archive.zip"',
+        "Content-Type": "application/zip",
+      },
+      body: "controlled provider bytes",
+    }),
+  );
+  const row = await revealRow(page, 7);
+  const downloadPromise = page.waitForEvent("download");
+  await row.getByRole("button", { name: "Download" }).click();
+  const download = await downloadPromise;
+
+  expect(download.suggestedFilename()).toBe("Large archive.zip");
+  await expect(row).toContainText("Downloaded");
+});
+
 test("opens only a fetched and explicitly confirmed hyperlink", async ({ context, page }) => {
   await context.route("https://example.com/**", (route) =>
     route.fulfill({ status: 200, body: "controlled external destination" }),
@@ -103,14 +126,14 @@ test("opens only a fetched and explicitly confirmed hyperlink", async ({ context
   expect(popup.url()).toBe("https://example.com/browser-proof");
 });
 
-test("reports a blocked external tab on the originating row", async ({ page }) => {
+test("does not misreport a noopener null result as a blocked external tab", async ({ page }) => {
   await page.evaluate(() => {
     window.open = () => null;
   });
   const row = await revealRow(page, 1);
   await row.getByRole("button", { name: "Open link" }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Open link" }).click();
-  await expect(row).toContainText("This link could not be opened. Try again.");
+  await expect(row).not.toContainText("This link could not be opened.");
 });
 
 test("keeps the primary action visible on touch widths and Delete in overflow", async ({
@@ -153,7 +176,7 @@ test("gates content actions while Delete converges despite provider cleanup fail
   await expect(row.getByRole("button", { name: "Delete" })).toBeEnabled();
   await row.getByRole("button", { name: "Delete" }).click();
 
-  await expect(page.locator("[data-snippet-row]")).toHaveCount(6);
+  await expect(page.locator("[data-snippet-row]")).toHaveCount(7);
   await expect(page.locator("html")).toHaveAttribute(
     "data-provider-cleanup-failure",
     "observed-after-authority",

@@ -65,6 +65,7 @@ const productClientLayer = (
         delete:
           overrides.delete ??
           (() => Effect.die("Snippet deletion is not used in this identity test.")),
+        prepareDownload: () => Effect.die("Prepared downloads are not used in this identity test."),
         read: () => Effect.die("Snippet content is not used in this identity test."),
       }),
     ),

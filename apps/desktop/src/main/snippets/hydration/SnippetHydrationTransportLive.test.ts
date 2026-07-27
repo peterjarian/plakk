@@ -40,7 +40,6 @@ describe("SnippetHydrationTransport", () => {
         byteSize: snippet.byteSize,
         download: {
           url: "https://www.googleapis.com/drive/v3/files/object-1?alt=media",
-          headers: [{ name: "Authorization", value: "Bearer provider-token" }],
         },
       }),
     );
@@ -66,7 +65,6 @@ describe("SnippetHydrationTransport", () => {
     expect(fetch).toHaveBeenCalledWith(
       "https://www.googleapis.com/drive/v3/files/object-1?alt=media",
       {
-        headers: { Authorization: "Bearer provider-token" },
         signal: expect.any(AbortSignal),
       },
     );
@@ -82,7 +80,7 @@ describe("SnippetHydrationTransport", () => {
         storageProvider: "GOOGLE_DRIVE" as const,
         fileName: snippet.fileName,
         byteSize: snippet.byteSize,
-        download: { url: "https://localhost/private", headers: [] },
+        download: { url: "https://localhost/private" },
       }),
     );
     const fetch = vi.fn();
@@ -119,7 +117,6 @@ describe("SnippetHydrationTransport", () => {
         byteSize: 5,
         download: {
           url: "https://www.googleapis.com/drive/v3/files/object-1?alt=media",
-          headers: [],
         },
       }),
     );
@@ -141,7 +138,6 @@ describe("SnippetHydrationTransport", () => {
         byteSize: snippet.byteSize,
         download: {
           url: "https://www.googleapis.com/drive/v3/files/object-1?alt=media",
-          headers: [],
         },
       }),
     );

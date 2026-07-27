@@ -502,22 +502,22 @@ describe("complete Snippet snapshots", () => {
 describe("stored snippet download preparation", () => {
   it("returns only durable metadata and a short-lived download target", async () => {
     const stored = snippet();
-    const download = { url: "https://download.example/object", headers: [] };
-    const getDownloadTarget = vi.fn(() => Effect.succeed(download));
+    const downloadUrl = "https://download.example/object";
+    const getDownloadUrl = vi.fn(() => Effect.succeed(downloadUrl));
 
     const result = await runSnippetEffect(
       (rpcs) => rpcs.PrepareSnippetDownload({ id: stored.id }),
       downloadDatabase([stored]),
-      storageService({ getDownloadTarget }),
+      storageService({ getDownloadUrl }),
     );
 
     expect(result).toEqual({
       storageProvider: "GOOGLE_DRIVE",
       fileName: "note.txt",
       byteSize: 4,
-      download,
+      download: { url: downloadUrl, headers: [] },
     });
-    expect(getDownloadTarget).toHaveBeenCalledWith({
+    expect(getDownloadUrl).toHaveBeenCalledWith({
       storageProvider: "GOOGLE_DRIVE",
       storageObjectId: "drive-object",
       workosUserId: currentUser.id,
@@ -525,16 +525,16 @@ describe("stored snippet download preparation", () => {
   });
 
   it("does not resolve a download target when no uploaded object is available", async () => {
-    const getDownloadTarget = vi.fn(storageService().getDownloadTarget);
+    const getDownloadUrl = vi.fn(storageService().getDownloadUrl);
 
     await expect(
       runSnippetEffect(
         (rpcs) => rpcs.PrepareSnippetDownload({ id: publication.id }),
         downloadDatabase([]),
-        storageService({ getDownloadTarget }),
+        storageService({ getDownloadUrl }),
       ),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
-    expect(getDownloadTarget).not.toHaveBeenCalled();
+    expect(getDownloadUrl).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -566,13 +566,13 @@ describe("stored snippet download preparation", () => {
       "GOOGLE_DRIVE: provider failed",
     ],
   ] as const)("maps %s to %s", async (storageError, code, message) => {
-    const getDownloadTarget = () => Effect.fail(storageError as StorageDownloadError);
+    const getDownloadUrl = () => Effect.fail(storageError as StorageDownloadError);
 
     await expect(
       runSnippetEffect(
         (rpcs) => rpcs.PrepareSnippetDownload({ id: publication.id }),
         downloadDatabase([snippet()]),
-        storageService({ getDownloadTarget }),
+        storageService({ getDownloadUrl }),
       ),
     ).rejects.toMatchObject({ code, message });
   });
@@ -663,9 +663,9 @@ describe("account capability enforcement", () => {
       const capability = accountCapabilityService({ authorizeProductCommand });
       const store = publicationDatabase({ inserted: [snippet()] });
       const prepareUpload = vi.fn(storageService().prepareUpload);
-      const getDownloadTarget = vi.fn(storageService().getDownloadTarget);
+      const getDownloadUrl = vi.fn(storageService().getDownloadUrl);
       const downloadObject = vi.fn(storageService().downloadObject);
-      const storage = storageService({ downloadObject, getDownloadTarget, prepareUpload });
+      const storage = storageService({ downloadObject, getDownloadUrl, prepareUpload });
 
       await expect(
         runSnippetEffect(
@@ -714,7 +714,7 @@ describe("account capability enforcement", () => {
       expect(authorizeProductCommand).toHaveBeenCalledTimes(4);
       expect(prepareUpload).not.toHaveBeenCalled();
       expect(store.insertedValues).toEqual([]);
-      expect(getDownloadTarget).not.toHaveBeenCalled();
+      expect(getDownloadUrl).not.toHaveBeenCalled();
       expect(downloadObject).not.toHaveBeenCalled();
     },
   );

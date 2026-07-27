@@ -56,6 +56,12 @@ export const makeWebProductClientLayer = (options: {
                 authenticatedRpcOptions(options.getAccessToken).pipe(
                   Effect.flatMap((requestOptions) => rpc.DeleteSnippet({ id }, requestOptions)),
                 ),
+              prepareDownload: (id) =>
+                authenticatedRpcOptions(options.getAccessToken).pipe(
+                  Effect.flatMap((requestOptions) =>
+                    rpc.PrepareSnippetDownload({ id }, requestOptions),
+                  ),
+                ),
               read: (id) =>
                 authenticatedRpcOptions(options.getAccessToken).pipe(
                   Effect.flatMap((requestOptions) => rpc.GetSnippetContent({ id }, requestOptions)),

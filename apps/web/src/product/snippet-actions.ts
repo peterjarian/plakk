@@ -3,9 +3,14 @@ import {
   deriveSnippetPresentation,
   isHttpUrl,
   isTextSnippetFileName,
+  isTrustedStorageDownloadUrl,
   type StorageProvider,
 } from "@plakk/shared";
-import { WEB_SNIPPET_CONTENT_MAX_BYTES, type ApiSnippet } from "@plakk/shared/PlakkApi";
+import {
+  WEB_SNIPPET_CONTENT_MAX_BYTES,
+  type ApiSnippet,
+  type PreparedSnippetDownload,
+} from "@plakk/shared/PlakkApi";
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
@@ -35,6 +40,9 @@ export class WebSnippetActionRemote extends Context.Service<
   WebSnippetActionRemote,
   {
     readonly delete: (id: string) => Effect.Effect<void, AccountProductReadError>;
+    readonly prepareDownload: (
+      id: string,
+    ) => Effect.Effect<PreparedSnippetDownload, AccountProductReadError>;
     readonly read: (id: string) => Effect.Effect<WebSnippetContent, AccountProductReadError>;
   }
 >()("@plakk/web/product/snippet-actions/WebSnippetActionRemote") {}
@@ -49,6 +57,10 @@ export class WebSnippetActionBrowser extends Context.Service<
     readonly copyText: (text: Promise<string>) => Effect.Effect<void, WebSnippetBrowserError>;
     readonly download: (
       content: Uint8Array,
+      fileName: string,
+    ) => Effect.Effect<void, WebSnippetBrowserError>;
+    readonly downloadUrl: (
+      url: string,
       fileName: string,
     ) => Effect.Effect<void, WebSnippetBrowserError>;
     readonly open: (url: string) => Effect.Effect<void, WebSnippetBrowserError>;
@@ -171,10 +183,26 @@ export class WebSnippetActions extends Context.Service<
 
       const download = Effect.fn("WebSnippetActions.download")(function* (snippet: ApiSnippet) {
         if (snippet.byteSize > WEB_SNIPPET_CONTENT_MAX_BYTES) {
-          return yield* actionError(
-            null,
-            "This snippet is too large for browser Download. Download it from the storage provider instead.",
-          );
+          const prepared = yield* remote.prepareDownload(snippet.id);
+          if (
+            prepared.storageProvider !== snippet.storageProvider ||
+            prepared.fileName !== snippet.fileName ||
+            prepared.byteSize !== snippet.byteSize
+          ) {
+            return yield* actionError(
+              null,
+              "The prepared download did not match this snippet. Try again.",
+            );
+          }
+          if (
+            prepared.download.headers.length !== 0 ||
+            !isTrustedStorageDownloadUrl(prepared.storageProvider, prepared.download.url)
+          ) {
+            return yield* actionError(null, "The storage provider returned an invalid download.");
+          }
+          return yield* browser
+            .downloadUrl(prepared.download.url, snippet.fileName)
+            .pipe(Effect.mapError(browserActionError));
         }
         const content = yield* read(snippet);
         yield* browser
@@ -264,6 +292,10 @@ const downloadableFileName = (fileName: string) =>
 
 const triggerDownload = (content: Uint8Array, fileName: string) => {
   const url = URL.createObjectURL(blobFromBytes(content, "application/octet-stream"));
+  triggerDownloadUrl(url, fileName, () => URL.revokeObjectURL(url));
+};
+
+const triggerDownloadUrl = (url: string, fileName: string, onRemove?: () => void) => {
   const anchor = document.createElement("a");
   anchor.hidden = true;
   anchor.href = url;
@@ -273,7 +305,7 @@ const triggerDownload = (content: Uint8Array, fileName: string) => {
   anchor.click();
   window.setTimeout(() => {
     anchor.remove();
-    URL.revokeObjectURL(url);
+    onRemove?.();
   }, 1_000);
 };
 
@@ -370,12 +402,18 @@ export const webSnippetActionBrowserLayer: Layer.Layer<WebSnippetActionBrowser> 
             message: "This snippet could not be downloaded. Try again.",
           }),
       }),
+    downloadUrl: (url, fileName) =>
+      Effect.try({
+        try: () => triggerDownloadUrl(url, fileName),
+        catch: (cause) =>
+          new WebSnippetBrowserError({
+            cause,
+            message: "This snippet could not be downloaded. Try again.",
+          }),
+      }),
     open: (url) =>
       Effect.try({
-        try: () => {
-          const popup = window.open(url, "_blank", "noopener,noreferrer");
-          if (popup === null) throw new Error("The browser blocked the new tab.");
-        },
+        try: () => void window.open(url, "_blank", "noopener,noreferrer"),
         catch: (cause) =>
           new WebSnippetBrowserError({
             cause,
