@@ -19,7 +19,7 @@ export function HomeView(props: {
   readonly state: AccountProductState;
   readonly onRetry: (() => void) | null;
   readonly onSignOut: () => void;
-  readonly signOutError: { readonly cause: unknown } | null;
+  readonly signOutError: "product-purge" | "workos" | null;
 }) {
   const { onRetry, onSignOut, signOutError, state, user } = props;
   const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
@@ -69,8 +69,9 @@ export function HomeView(props: {
             className="mb-4 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive"
             role="alert"
           >
-            Plakk cleared this account’s product data, but WorkOS could not sign you out. Try
-            signing out again.
+            {signOutError === "product-purge"
+              ? "Plakk could not confirm that this account’s local product data was cleared, so sign-out was stopped. Try signing out again."
+              : "Plakk cleared this account’s product data, but WorkOS could not sign you out. Try signing out again."}
           </div>
         )}
 

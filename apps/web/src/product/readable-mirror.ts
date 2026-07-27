@@ -7,6 +7,7 @@ import * as Stream from "effect/Stream";
 import type { AccountProductSnapshot } from "./product-reader.ts";
 
 export type LocalReadPerformance = "accelerated" | "degraded";
+export type AccountProductMirrorChange = "purge" | "rebuild" | "replace";
 
 export class AccountProductMirrorError extends Schema.TaggedErrorClass<AccountProductMirrorError>()(
   "AccountProductMirrorError",
@@ -17,13 +18,16 @@ export class AccountProductMirrorError extends Schema.TaggedErrorClass<AccountPr
 ) {}
 
 export interface AccountProductMirrorShape {
-  readonly changes: Stream.Stream<void>;
+  readonly changes: Stream.Stream<AccountProductMirrorChange>;
   readonly purge: Effect.Effect<void, AccountProductMirrorError>;
   readonly read: Effect.Effect<AccountProductSnapshot | null, AccountProductMirrorError>;
-  readonly readPerformance: LocalReadPerformance;
+  readonly readPerformance: () => LocalReadPerformance;
   readonly replace: (
     snapshot: AccountProductSnapshot,
   ) => Effect.Effect<void, AccountProductMirrorError>;
+  readonly synchronize: <A, E, R>(
+    operation: Effect.Effect<A, E, R>,
+  ) => Effect.Effect<A, E | AccountProductMirrorError, R>;
 }
 
 export class AccountProductMirror extends Context.Service<
@@ -80,8 +84,16 @@ export const makeRuntimeFallbackAccountProductMirror = (
     changes: primary.changes,
     purge,
     read,
-    readPerformance: primary.readPerformance,
+    readPerformance: () => (useSessionMemory ? "degraded" : primary.readPerformance()),
     replace,
+    synchronize: (operation) =>
+      Effect.suspend(() => (useSessionMemory ? operation : primary.synchronize(operation))).pipe(
+        Effect.catch((error) =>
+          Effect.sync(() => {
+            useSessionMemory = true;
+          }).pipe(Effect.andThen(Effect.fail(error))),
+        ),
+      ),
   });
 };
 
@@ -98,10 +110,11 @@ export const makeSessionMemoryAccountProductMirrorLayer = (options?: {
         snapshot = null;
       }),
       read: Effect.sync(() => snapshot),
-      readPerformance: options?.readPerformance ?? "degraded",
+      readPerformance: () => options?.readPerformance ?? "degraded",
       replace: (next) =>
         Effect.sync(() => {
           snapshot = next;
         }),
+      synchronize: (operation) => operation,
     });
   });

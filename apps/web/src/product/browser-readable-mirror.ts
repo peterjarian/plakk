@@ -6,6 +6,7 @@ import * as PubSub from "effect/PubSub";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { isSqlError } from "effect/unstable/sql/SqlError";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 
 import type { AccountProductSnapshot } from "./product-reader.ts";
@@ -20,6 +21,7 @@ const LOCK_RETRY_DELAY = "10 millis";
 const MAX_LOCK_RETRIES = 200;
 const MIGRATION_LOCK_TIMEOUT_MILLIS = 10_000;
 const WRITE_LOCK_TIMEOUT_MILLIS = 15_000;
+const SYNCHRONIZATION_LOCK_TIMEOUT_MILLIS = 30_000;
 
 const StoredSnapshotCodec = Schema.fromJsonString(
   Schema.Struct({
@@ -66,7 +68,24 @@ const errorDescriptions = (error: unknown): ReadonlyArray<string> => {
   ];
 };
 
+const errorValues = (error: unknown): ReadonlyArray<unknown> => {
+  if (typeof error !== "object" || error === null) return [error];
+  const record = error as Readonly<Record<string, unknown>>;
+  const reason =
+    typeof record.reason === "object" && record.reason !== null
+      ? (record.reason as Readonly<Record<string, unknown>>)
+      : null;
+  return [error, record.cause, record.reason, reason?.cause];
+};
+
 const isTransientLock = (error: unknown): boolean =>
+  errorValues(error).some(
+    (value) =>
+      isSqlError(value) &&
+      (value.reason._tag === "LockTimeoutError" ||
+        value.reason._tag === "SerializationError" ||
+        value.reason._tag === "DeadlockError"),
+  ) ||
   errorDescriptions(error).some(
     (description) =>
       description.includes("database is locked") ||
@@ -92,18 +111,25 @@ const retryTransientLock = Effect.fn("WebReadableMirror.retryTransientLock")(fun
 const mapMirrorError = (reason: string) => (cause: unknown) =>
   new AccountProductMirrorError({ cause, reason });
 
-const withBrowserLock = Effect.fn("WebReadableMirror.withBrowserLock")(function* <A, E>(
+const withBrowserLock = Effect.fn("WebReadableMirror.withBrowserLock")(function* <A, E, R>(
   lockName: string,
-  operation: Effect.Effect<A, E>,
+  operation: Effect.Effect<A, E, R>,
   timeoutMillis: number,
   failureReason: string,
-): Effect.fn.Return<A, AccountProductMirrorError> {
-  return yield* Effect.tryPromise({
-    try: (signal) =>
-      navigator.locks.request(lockName, { signal }, () =>
-        Effect.runPromise(retryTransientLock(operation)),
-      ),
-    catch: mapMirrorError(failureReason),
+): Effect.fn.Return<A, AccountProductMirrorError, R> {
+  return yield* Effect.callback<A, E | AccountProductMirrorError, R>((resume, signal) => {
+    navigator.locks
+      .request(
+        lockName,
+        { signal },
+        () =>
+          new Promise<void>((resolve) => {
+            resume(retryTransientLock(operation).pipe(Effect.onExit(() => Effect.sync(resolve))));
+          }),
+      )
+      .catch((cause) =>
+        resume(Effect.fail(new AccountProductMirrorError({ cause, reason: failureReason }))),
+      );
   }).pipe(
     Effect.timeout(`${timeoutMillis} millis`),
     Effect.mapError(mapMirrorError(failureReason)),
@@ -113,6 +139,7 @@ const withBrowserLock = Effect.fn("WebReadableMirror.withBrowserLock")(function*
 const makeSqlAccountProductMirrorLayer = (
   channelName: string,
   migrationLockName: string,
+  synchronizationLockName: string,
   writeLockName: string,
 ): Layer.Layer<AccountProductMirror, AccountProductMirrorError, SqlClient.SqlClient> =>
   Layer.effect(
@@ -132,13 +159,13 @@ const makeSqlAccountProductMirrorLayer = (
         Effect.mapError(mapMirrorError("Could not configure the readable mirror.")),
       );
 
-      const notifications = yield* PubSub.unbounded<void>();
+      const notifications = yield* PubSub.unbounded<"purge" | "rebuild" | "replace">();
       const channel = yield* Effect.acquireRelease(
         Effect.sync(() => new BroadcastChannel(channelName)),
         (activeChannel) => Effect.sync(() => activeChannel.close()),
       );
-      const onMessage = () => {
-        PubSub.publishUnsafe(notifications, undefined);
+      const onMessage = (event: MessageEvent<"purge" | "rebuild" | "replace">) => {
+        PubSub.publishUnsafe(notifications, event.data);
       };
       yield* Effect.acquireRelease(
         Effect.sync(() => channel.addEventListener("message", onMessage)),
@@ -156,7 +183,7 @@ const makeSqlAccountProductMirrorLayer = (
         `,
       });
 
-      const purgeSql = withBrowserLock(
+      const deleteSnapshot = withBrowserLock(
         writeLockName,
         sql`
             DELETE FROM readable_mirror
@@ -169,13 +196,25 @@ const makeSqlAccountProductMirrorLayer = (
         Effect.asVoid,
       );
 
+      const purgeSql = withBrowserLock(
+        synchronizationLockName,
+        deleteSnapshot,
+        SYNCHRONIZATION_LOCK_TIMEOUT_MILLIS,
+        "Could not serialize the readable mirror purge with refreshes.",
+      );
+
       const read = retryTransientLock(readRows(undefined)).pipe(
         Effect.mapError(mapMirrorError("Could not read the readable mirror.")),
         Effect.flatMap((rows) => {
           const row = rows[0];
           if (row === undefined) return Effect.succeed(null);
           return Schema.decodeEffect(StoredSnapshotCodec)(row.snapshotJson).pipe(
-            Effect.catch(() => purgeSql.pipe(Effect.as(null))),
+            Effect.catch(() =>
+              deleteSnapshot.pipe(
+                Effect.tap(() => Effect.sync(() => channel.postMessage("rebuild"))),
+                Effect.as(null),
+              ),
+            ),
             Effect.map((snapshot) => snapshot satisfies AccountProductSnapshot | null),
           );
         }),
@@ -198,16 +237,23 @@ const makeSqlAccountProductMirrorLayer = (
           WRITE_LOCK_TIMEOUT_MILLIS,
           "Could not serialize the readable mirror replacement.",
         ).pipe(Effect.mapError(mapMirrorError("Could not replace the readable mirror.")));
-        yield* Effect.sync(() => channel.postMessage(undefined));
+        yield* Effect.sync(() => channel.postMessage("replace"));
       });
 
       return makeRuntimeFallbackAccountProductMirror(
         AccountProductMirror.of({
           changes: Stream.fromPubSub(notifications),
-          purge: purgeSql.pipe(Effect.tap(() => Effect.sync(() => channel.postMessage(undefined)))),
+          purge: purgeSql.pipe(Effect.tap(() => Effect.sync(() => channel.postMessage("purge")))),
           read,
-          readPerformance: "accelerated",
+          readPerformance: () => "accelerated",
           replace,
+          synchronize: (operation) =>
+            withBrowserLock(
+              synchronizationLockName,
+              operation,
+              SYNCHRONIZATION_LOCK_TIMEOUT_MILLIS,
+              "Could not serialize an authoritative readable mirror refresh.",
+            ),
         }),
       );
     }),
@@ -248,16 +294,18 @@ export const makeBrowserAccountProductMirrorLayer = (
           name: databaseId,
           type: "module",
         });
-        if (options?.onTestWriteStarted !== undefined) {
+        if (import.meta.env.DEV && options?.onTestWriteStarted !== undefined) {
           worker.addEventListener("message", (event) => {
             if (event.data?.[0] === "plakk_test_write_started") {
               options.onTestWriteStarted?.();
             }
           });
         }
-        options?.installTestWriteDelay?.((milliseconds) => {
-          worker.postMessage(["plakk_test_write_delay", milliseconds]);
-        });
+        if (import.meta.env.DEV) {
+          options?.installTestWriteDelay?.((milliseconds) => {
+            worker.postMessage(["plakk_test_write_delay", milliseconds]);
+          });
+        }
         return worker;
       }),
       (worker) => Effect.sync(() => worker.terminate()),
@@ -267,6 +315,7 @@ export const makeBrowserAccountProductMirrorLayer = (
   return makeSqlAccountProductMirrorLayer(
     `${databaseId}:changes`,
     `${databaseId}:migrations`,
+    `${databaseId}:synchronization`,
     `${databaseId}:writes`,
   ).pipe(
     Layer.provide(sqliteLayer),

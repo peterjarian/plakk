@@ -5,12 +5,16 @@ import { CONTROLLED_PRODUCT_ORIGIN } from "./controlled-product/config.ts";
 const controlledUrl = (
   accountId: string,
   options?: {
+    readonly backendUnavailable?: boolean;
     readonly forceSessionMemory?: boolean;
     readonly holdBackendRefresh?: boolean;
   },
 ) => {
   const url = new URL(CONTROLLED_PRODUCT_ORIGIN);
   url.searchParams.set("account", accountId);
+  if (options?.backendUnavailable === true) {
+    url.searchParams.set("backend-unavailable", "true");
+  }
   if (options?.forceSessionMemory === true) {
     url.searchParams.set("force-session-memory", "true");
   }
@@ -37,9 +41,13 @@ test("an account mirror converges across tabs, survives handoff, reopens, and pu
   await expect(first.getByText("Fast local reads are unavailable")).toHaveCount(0);
   await expect(second.getByText("Fast local reads are unavailable")).toHaveCount(0);
 
-  await first.getByRole("button", { name: "Replace snapshot", exact: true }).click();
+  await first.getByRole("button", { name: "Start stale delayed refresh" }).click();
+  await expect(first.locator("html")).toHaveAttribute("data-backend-read-started", "true");
+  await second.getByRole("button", { name: "Replace snapshot", exact: true }).click();
   await expect(first.getByText("Replacement snapshot.png")).toBeVisible({ timeout: 25_000 });
   await expect(second.getByText("Replacement snapshot.png")).toBeVisible({ timeout: 25_000 });
+  await expect(first.getByText("Stale snapshot.png")).toHaveCount(0);
+  await expect(second.getByText("Stale snapshot.png")).toHaveCount(0);
 
   await first.getByRole("button", { name: "Start interruptible replacement" }).click();
   await expect(first.locator("html")).toHaveAttribute("data-mirror-write-started", "true");
@@ -52,15 +60,22 @@ test("an account mirror converges across tabs, survives handoff, reopens, and pu
   await reopened.goto(controlledUrl(accountId, { holdBackendRefresh: true }));
   await expect(reopened.getByText("After close.png")).toBeVisible({ timeout: 20_000 });
   await expect(reopened.getByText("Fast local reads are unavailable")).toHaveCount(0);
+  await reopened.close();
+
+  const purging = await context.newPage();
+  await purging.goto(controlledUrl(accountId, { backendUnavailable: true }));
+  await expect(purging.getByText("After close.png")).toBeVisible({ timeout: 20_000 });
+  await expect(purging.getByText("API unavailable")).toBeVisible();
 
   await second.getByRole("button", { name: "Start interruptible replacement" }).click();
   await expect(second.locator("html")).toHaveAttribute("data-mirror-write-started", "true");
-  await reopened.getByRole("button", { name: "Purge account facts" }).click();
-  await expect(reopened.getByText("After close.png")).toHaveCount(0);
+  await purging.getByRole("button", { name: "Purge account facts" }).click();
+  await expect(purging.getByText("After close.png")).toHaveCount(0, { timeout: 20_000 });
   await expect(second.getByText("After close.png")).toHaveCount(0, { timeout: 20_000 });
   await expect(second.getByText("Loading snippets")).toBeVisible();
 
   await second.close();
+  await purging.close();
   const afterPurge = await context.newPage();
   await afterPurge.goto(controlledUrl(accountId, { holdBackendRefresh: true }));
   await expect(afterPurge.getByText("Loading snippets")).toBeVisible();

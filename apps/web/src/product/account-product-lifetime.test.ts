@@ -1,7 +1,7 @@
 import type { AccountStatus, ApiSnippet } from "@plakk/shared/PlakkApi";
 import { RpcError } from "@plakk/shared/RpcError";
 import { describe, expect, it } from "@effect/vitest";
-import { Data, Deferred, Effect, Layer, Ref, Stream } from "effect";
+import { Data, Deferred, Effect, Fiber, Layer, Ref, Stream } from "effect";
 import { TestClock } from "effect/testing";
 
 import { AccountProductLifetime, clearProductThenSignOut } from "./account-product-lifetime.ts";
@@ -111,18 +111,19 @@ describe("account product lifetime", () => {
       const mirrorLayer = Layer.succeed(
         AccountProductMirror,
         AccountProductMirror.of({
-          changes: Stream.fromEffect(Deferred.await(mirrorChanged)).pipe(
-            Stream.concat(Stream.never),
-          ),
+          changes: Stream.fromEffect(
+            Deferred.await(mirrorChanged).pipe(Effect.as("purge" as const)),
+          ).pipe(Stream.concat(Stream.never)),
           purge: Effect.sync(() => {
             mirrored = null;
           }),
           read: Effect.sync(() => mirrored),
-          readPerformance: "accelerated",
+          readPerformance: () => "accelerated",
           replace: (snapshot) =>
             Effect.sync(() => {
               mirrored = snapshot;
             }),
+          synchronize: (operation) => operation,
         }),
       );
 
@@ -143,6 +144,93 @@ describe("account product lifetime", () => {
     }),
   );
 
+  it.effect("rebuilds after a corrupt-row purge without waiting for another invalidation", () =>
+    Effect.gen(function* () {
+      const mirrorChanged = yield* Deferred.make<void>();
+      const rebuilt = yield* Deferred.make<AccountProductSnapshot>();
+      let mirrored: AccountProductSnapshot | null = {
+        account,
+        snippets: [snippet("mirrored")],
+      };
+      const mirrorLayer = Layer.succeed(
+        AccountProductMirror,
+        AccountProductMirror.of({
+          changes: Stream.fromEffect(
+            Deferred.await(mirrorChanged).pipe(Effect.as("rebuild" as const)),
+          ).pipe(Stream.concat(Stream.never)),
+          purge: Effect.void,
+          read: Effect.sync(() => mirrored),
+          readPerformance: () => "accelerated",
+          replace: (snapshot) =>
+            Effect.sync(() => {
+              mirrored = snapshot;
+            }),
+          synchronize: (operation) => operation,
+        }),
+      );
+
+      yield* Effect.gen(function* () {
+        const lifetime = yield* AccountProductLifetime;
+        yield* lifetime.enter("user_1");
+        expect(lifetime.getSnapshot()).toMatchObject({ snippets: [snippet("mirrored")] });
+
+        mirrored = null;
+        yield* Deferred.succeed(mirrorChanged, undefined);
+        yield* Effect.yieldNow;
+        expect(lifetime.getSnapshot()).toEqual({ accountId: "user_1", kind: "loading" });
+
+        yield* Deferred.succeed(rebuilt, { account, snippets: [snippet("rebuilt")] });
+        yield* Effect.yieldNow;
+        expect(lifetime.getSnapshot()).toMatchObject({
+          apiAvailability: "available",
+          snippets: [snippet("rebuilt")],
+        });
+      }).pipe(Effect.provide(provideLifetime(Deferred.await(rebuilt), Stream.never, mirrorLayer)));
+    }),
+  );
+
+  it.effect("subscribes before hydration so a racing mirror replacement cannot be lost", () =>
+    Effect.gen(function* () {
+      const initialRead = yield* Deferred.make<AccountProductSnapshot | null>();
+      const mirrorChanged = yield* Deferred.make<void>();
+      let reads = 0;
+      const replacement = { account, snippets: [snippet("replacement")] };
+      const mirrorLayer = Layer.succeed(
+        AccountProductMirror,
+        AccountProductMirror.of({
+          changes: Stream.fromEffect(
+            Deferred.await(mirrorChanged).pipe(Effect.as("replace" as const)),
+          ).pipe(Stream.concat(Stream.never)),
+          purge: Effect.void,
+          read: Effect.suspend(() => {
+            reads += 1;
+            return reads === 1 ? Deferred.await(initialRead) : Effect.succeed(replacement);
+          }),
+          readPerformance: () => "accelerated",
+          replace: () => Effect.void,
+          synchronize: (operation) => operation,
+        }),
+      );
+
+      yield* Effect.gen(function* () {
+        const lifetime = yield* AccountProductLifetime;
+        const enterFiber = yield* Effect.forkChild(lifetime.enter("user_1"), {
+          startImmediately: true,
+        });
+        yield* Effect.yieldNow;
+        yield* Deferred.succeed(mirrorChanged, undefined);
+        yield* Effect.yieldNow;
+        yield* Deferred.succeed(initialRead, { account, snippets: [snippet("stale")] });
+        yield* Fiber.join(enterFiber);
+        yield* Effect.yieldNow;
+
+        expect(lifetime.getSnapshot()).toMatchObject({
+          snippets: [snippet("replacement")],
+        });
+      }).pipe(Effect.provide(provideLifetime(Effect.never, Stream.never, mirrorLayer)));
+    }),
+  );
+
   it.effect("publishes degraded performance when a mirror notification read fails", () =>
     Effect.gen(function* () {
       const mirrorChanged = yield* Deferred.make<void>();
@@ -151,20 +239,25 @@ describe("account product lifetime", () => {
         reason: "Could not read the readable mirror.",
       });
       let firstRead = true;
+      let readPerformance: "accelerated" | "degraded" = "accelerated";
       const mirrorLayer = Layer.succeed(
         AccountProductMirror,
         AccountProductMirror.of({
-          changes: Stream.fromEffect(Deferred.await(mirrorChanged)).pipe(
-            Stream.concat(Stream.never),
-          ),
+          changes: Stream.fromEffect(
+            Deferred.await(mirrorChanged).pipe(Effect.as("replace" as const)),
+          ).pipe(Stream.concat(Stream.never)),
           purge: Effect.void,
           read: Effect.suspend(() => {
-            if (!firstRead) return Effect.fail(mirrorFailure);
+            if (!firstRead) {
+              readPerformance = "degraded";
+              return Effect.fail(mirrorFailure);
+            }
             firstRead = false;
             return Effect.succeed({ account, snippets: [snippet("mirrored")] });
           }),
-          readPerformance: "accelerated",
+          readPerformance: () => readPerformance,
           replace: () => Effect.void,
+          synchronize: (operation) => operation,
         }),
       );
 
@@ -255,6 +348,47 @@ describe("account product lifetime", () => {
         expect(yield* Ref.get(interrupted)).toBe(true);
         expect(lifetime.getSnapshot()).toEqual({ kind: "idle" });
       }).pipe(Effect.provide(provideLifetime(read)));
+    }),
+  );
+
+  it.effect("restores an actionable degraded account state when durable purge fails", () =>
+    Effect.gen(function* () {
+      const purgeFailure = new AccountProductMirrorError({
+        cause: new Error("OPFS unavailable"),
+        reason: "Could not purge the readable mirror.",
+      });
+      const mirrorLayer = Layer.succeed(
+        AccountProductMirror,
+        AccountProductMirror.of({
+          changes: Stream.never,
+          purge: Effect.fail(purgeFailure),
+          read: Effect.succeed({ account, snippets: [snippet("mirrored")] }),
+          readPerformance: () => "degraded",
+          replace: () => Effect.void,
+          synchronize: (operation) => operation,
+        }),
+      );
+
+      yield* Effect.gen(function* () {
+        const lifetime = yield* AccountProductLifetime;
+        yield* lifetime.enter("user_1");
+        expect(yield* lifetime.clear.pipe(Effect.flip)).toBe(purgeFailure);
+        yield* Effect.yieldNow;
+
+        expect(lifetime.getSnapshot()).toMatchObject({
+          accountId: "user_1",
+          kind: "ready",
+          localReadPerformance: "degraded",
+        });
+      }).pipe(
+        Effect.provide(
+          provideLifetime(
+            Effect.succeed({ account, snippets: [snippet("remote")] }),
+            Stream.never,
+            mirrorLayer,
+          ),
+        ),
+      );
     }),
   );
 

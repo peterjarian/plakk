@@ -79,6 +79,7 @@ function IdentityProductResource(props: {
   readonly readerLayer: Layer.Layer<AccountProductReader>;
 }) {
   const { accountId, children, delegateSignOut, readerLayer } = props;
+  // The account-keyed ProductIdentityBoundary remounts this resource; live layer swaps are unsupported.
   const mirrorLayer = useState(
     () => props.mirrorLayer ?? makeBrowserAccountProductMirrorLayer(accountId),
   )[0];

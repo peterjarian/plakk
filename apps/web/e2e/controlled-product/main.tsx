@@ -22,6 +22,7 @@ const query = new URLSearchParams(location.search);
 const accountId = query.get("account") ?? "controlled-user";
 const forceSessionMemory = query.get("force-session-memory") === "true";
 const holdBackendRefresh = query.get("hold-backend-refresh") === "true";
+const startBackendUnavailable = query.get("backend-unavailable") === "true";
 
 const account: AccountStatus = {
   canSync: true,
@@ -51,7 +52,8 @@ const snippet = (id: string, fileName: string): ApiSnippet => ({
 let snapshot: ReadonlyArray<ApiSnippet> = [
   snippet("0d1e2f3a-4567-4890-8abc-def012345678", "Initial snapshot.png"),
 ];
-let apiUnavailable = false;
+let apiUnavailable = startBackendUnavailable;
+let nextBackendReadDelayMillis = 0;
 let activeController: ReadableStreamDefaultController<void> | null = null;
 
 const invalidations = Stream.fromReadableStream({
@@ -76,18 +78,23 @@ const readerLayer = Layer.succeed(
   AccountProductReader,
   AccountProductReader.of({
     invalidations,
-    read: Effect.suspend(() =>
-      holdBackendRefresh
-        ? Effect.never
-        : apiUnavailable
-          ? Effect.fail(
-              new RpcError({
-                code: "INTERNAL_SERVER_ERROR",
-                message: "controlled API outage",
-              }),
-            )
-          : Effect.succeed({ account, snippets: snapshot }),
-    ),
+    read: Effect.suspend(() => {
+      if (holdBackendRefresh) return Effect.never;
+      if (apiUnavailable) {
+        return Effect.fail(
+          new RpcError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "controlled API outage",
+          }),
+        );
+      }
+      const response = { account, snippets: snapshot };
+      if (nextBackendReadDelayMillis === 0) return Effect.succeed(response);
+      const delayMillis = nextBackendReadDelayMillis;
+      nextBackendReadDelayMillis = 0;
+      document.documentElement.dataset.backendReadStarted = "true";
+      return Effect.sleep(`${delayMillis} millis`).pipe(Effect.as(response));
+    }),
   }),
 );
 let delayNextMirrorWrite: () => void = () => undefined;
@@ -113,6 +120,17 @@ function Controls() {
       aria-label="Controlled transport"
       className="fixed right-3 bottom-3 z-50 flex gap-2 rounded-lg border bg-background p-2 shadow"
     >
+      <Button
+        type="button"
+        size="sm"
+        onClick={() => {
+          snapshot = [snippet("4d1e2f3a-4567-4890-8abc-def012345672", "Stale snapshot.png")];
+          nextBackendReadDelayMillis = 3_000;
+          invalidate();
+        }}
+      >
+        Start stale delayed refresh
+      </Button>
       <Button
         type="button"
         size="sm"

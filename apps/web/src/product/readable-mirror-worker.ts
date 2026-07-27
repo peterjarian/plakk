@@ -62,11 +62,15 @@ const run = Effect.gen(function* () {
     let testWriteDelayMillis = 0;
     const onMessage = async (event: MessageEvent<WorkerMessage>) => {
       let messageId = -1;
+      let testTransactionStarted = false;
       try {
         const message = event.data;
+        if (import.meta.env.DEV && message[0] === "plakk_test_write_delay") {
+          testWriteDelayMillis = message[1];
+          return;
+        }
         switch (message[0]) {
           case "close": {
-            workerScope.close();
             resume(Effect.void);
             return;
           }
@@ -91,12 +95,12 @@ const run = Effect.gen(function* () {
             });
             return;
           }
-          case "plakk_test_write_delay": {
-            testWriteDelayMillis = message[1];
-            return;
-          }
           default: {
-            const [id, sql, params] = message;
+            const [id, sql, params] = message as [
+              id: number,
+              sql: string,
+              params: ReadonlyArray<unknown>,
+            ];
             messageId = id;
             const isTestDelayedWrite =
               testWriteDelayMillis > 0 && sql.includes("INSERT INTO readable_mirror");
@@ -106,7 +110,10 @@ const run = Effect.gen(function* () {
                   sqlite3.step(statement);
                 }
               });
-              workerScope.postMessage(["plakk_test_write_started", undefined, undefined]);
+              testTransactionStarted = true;
+              if (import.meta.env.DEV) {
+                workerScope.postMessage(["plakk_test_write_started", undefined, undefined]);
+              }
               await Effect.runPromise(Effect.sleep(`${testWriteDelayMillis} millis`));
             }
             const [columns, rows] = await withOwnershipHandoff(factory as RetryableModule, () => {
@@ -127,11 +134,21 @@ const run = Effect.gen(function* () {
                   sqlite3.step(statement);
                 }
               });
+              testTransactionStarted = false;
             }
             workerScope.postMessage([id, undefined, [columns, rows]]);
           }
         }
       } catch (cause) {
+        if (testTransactionStarted) {
+          try {
+            for (const statement of sqlite3.statements(database, "ROLLBACK")) {
+              sqlite3.step(statement);
+            }
+          } catch {
+            // The original statement failure is the useful protocol error.
+          }
+        }
         workerScope.postMessage([
           messageId,
           cause instanceof Error ? cause.message : String(cause),
@@ -164,4 +181,7 @@ const activateUnavailableProtocol = () => {
 
 void Effect.runPromise(
   run.pipe(Effect.tapCause((cause) => Effect.logError("Readable mirror worker failed", cause))),
-).catch(activateUnavailableProtocol);
+).then(
+  () => workerScope.close(),
+  () => activateUnavailableProtocol(),
+);

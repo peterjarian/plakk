@@ -33,7 +33,7 @@ it.effect("session memory implements the readable mirror contract and purges acc
   Effect.gen(function* () {
     const mirror = yield* AccountProductMirror;
 
-    expect(mirror.readPerformance).toBe("degraded");
+    expect(mirror.readPerformance()).toBe("degraded");
     expect(yield* mirror.read).toBeNull();
 
     yield* mirror.replace({ account, snippets: [snippet] });
@@ -66,7 +66,7 @@ it("requires every cooperative SQLite capability instead of sniffing a browser n
 it.effect("forced capability failure keeps the product mirror available in session memory", () =>
   Effect.gen(function* () {
     const mirror = yield* AccountProductMirror;
-    expect(mirror.readPerformance).toBe("degraded");
+    expect(mirror.readPerformance()).toBe("degraded");
     yield* mirror.replace({ account, snippets: [snippet] });
     expect(yield* mirror.read).toEqual({ account, snippets: [snippet] });
   }).pipe(
@@ -92,12 +92,14 @@ it.effect("a runtime durable failure selects session memory for later operations
           purgeCalls += 1;
         }),
         read: Effect.fail(failure),
-        readPerformance: "accelerated",
+        readPerformance: () => "accelerated",
         replace: () => Effect.fail(failure),
+        synchronize: (operation) => operation,
       }),
     );
 
     expect(yield* mirror.read.pipe(Effect.flip)).toBe(failure);
+    expect(mirror.readPerformance()).toBe("degraded");
     yield* mirror.replace({ account, snippets: [snippet] });
     expect(yield* mirror.read).toEqual({ account, snippets: [snippet] });
     yield* mirror.purge;
@@ -117,8 +119,9 @@ it.effect("durable purge remains fail-closed after runtime fallback", () =>
         changes: Stream.never,
         purge: Effect.fail(failure),
         read: Effect.fail(failure),
-        readPerformance: "accelerated",
+        readPerformance: () => "accelerated",
         replace: () => Effect.fail(failure),
+        synchronize: (operation) => operation,
       }),
     );
 
