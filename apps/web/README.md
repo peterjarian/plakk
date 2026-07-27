@@ -31,25 +31,7 @@ WORKOS_API_KEY=sk_...
 WORKOS_CLIENT_ID=client_...
 WORKOS_REDIRECT_URI=http://localhost:3000/api/auth/callback
 WORKOS_COOKIE_PASSWORD=32+ chars
-VITE_PLAKK_API_ORIGIN=http://localhost:3100
-VITE_PLAKK_ENVIRONMENT=development
-VITE_PLAKK_RELEASE=development
-PLAKK_WEB_ORIGIN=http://localhost:3000
 ```
-
-Production is deliberately stricter:
-
-- `PLAKK_WEB_ORIGIN=https://app.plakk.io`
-- `VITE_PLAKK_API_ORIGIN=https://api.plakk.io`
-- `WORKOS_REDIRECT_URI=https://app.plakk.io/api/auth/callback`
-- `WORKOS_COOKIE_PASSWORD` is a server-only secret of at least 32 characters
-- `WORKOS_COOKIE_DOMAIN` stays unset and `WORKOS_COOKIE_SAME_SITE`, when set, is `lax`
-- environment and immutable release identity are explicit in
-  `VITE_PLAKK_ENVIRONMENT` and `VITE_PLAKK_RELEASE`
-
-The server validates these values before serving production traffic. WorkOS keys and cookie
-material are never `VITE_` variables. The only browser-exposed values are the public API origin
-and non-secret environment/release identity.
 
 ## Backend ownership
 
@@ -58,15 +40,3 @@ product RPC commands or live updates.
 
 Desktop connects directly to the independently deployed backend using `PLAKK_RPC_URL` for commands
 and live Snippet invalidations.
-
-The browser uses `VITE_PLAKK_API_ORIGIN` as an exact HTTP(S) origin and calls
-`/api/rpc` there with a fresh WorkOS bearer token. The backend admits that browser origin through
-its exact `PLAKK_WEB_ORIGIN` CORS setting while retaining the Desktop `plakk-app://renderer`
-origin. Local development falls back to `http://localhost:3100`; production requires an explicit
-canonical HTTPS API value and fails closed when it is missing or invalid. The browser adds W3C
-trace context to authenticated product actions and sends a narrow, content-free completion
-envelope to the backend telemetry route. The backend authenticates and rate-limits that route and
-owns the Axiom/OTLP credentials.
-
-When `PLAKK_WEB_ORIGIN` is absent in development, the backend remains available to Desktop but
-admits no browser origin. Production requires the canonical Web origin.

@@ -5,49 +5,26 @@ import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { BatchLogRecordProcessor } from "@opentelemetry/sdk-logs";
 import { PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics";
 import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-base";
+import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Tracer from "effect/Tracer";
+import * as Option from "effect/Option";
 
-import { TelemetryConfig, TelemetryConfigLive } from "./telemetry/TelemetryConfig.ts";
-import { makeSanitizedTracer } from "./telemetry/TelemetrySanitization.ts";
+const telemetryEnabled = Config.option(Config.string("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"));
 
 export const TelemetryLive = Layer.unwrap(
-  TelemetryConfig.pipe(
-    Effect.map((config) => {
-      if (config.signals === null) return Layer.empty;
-      const signals = config.signals;
-      const sdk = NodeSdk.layer(() => ({
-        spanProcessor: new BatchSpanProcessor(
-          new OTLPTraceExporter({
-            headers: signals.traces.headers,
-            url: signals.traces.url,
-          }),
-        ),
-        logRecordProcessor: new BatchLogRecordProcessor(
-          new OTLPLogExporter({
-            headers: signals.logs.headers,
-            url: signals.logs.url,
-          }),
-        ),
-        metricReader: new PeriodicExportingMetricReader({
-          exporter: new OTLPMetricExporter({
-            headers: signals.metrics.headers,
-            url: signals.metrics.url,
-          }),
-        }),
-        resource: {
-          attributes: {
-            "deployment.environment.name": config.environment,
-            "service.namespace": "plakk",
-          },
-          serviceName: "plakk-backend",
-          serviceVersion: config.release,
-        },
-      }));
-      return Layer.effect(Tracer.Tracer, Tracer.Tracer.pipe(Effect.map(makeSanitizedTracer))).pipe(
-        Layer.provideMerge(sdk),
-      );
-    }),
+  telemetryEnabled.pipe(
+    Effect.map((endpoint) =>
+      Option.isNone(endpoint)
+        ? Layer.empty
+        : NodeSdk.layer(() => ({
+            spanProcessor: new BatchSpanProcessor(new OTLPTraceExporter()),
+            logRecordProcessor: new BatchLogRecordProcessor(new OTLPLogExporter()),
+            metricReader: new PeriodicExportingMetricReader({
+              exporter: new OTLPMetricExporter(),
+            }),
+            resource: { serviceName: "plakk-backend" },
+          })),
+    ),
   ),
-).pipe(Layer.provide(TelemetryConfigLive));
+);

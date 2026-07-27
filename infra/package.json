@@ -9,12 +9,11 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
-    "@plakk/shared": "workspace:*",
     "alchemy": "2.0.0-beta.56",
     "effect": "catalog:"
   },
   "devDependencies": {
-    "@effect/vitest": "4.0.0-beta.99",
+    "@effect/vitest": "4.0.0-beta.92",
     "@types/node": "catalog:",
     "typescript": "catalog:",
     "vite-plus": "catalog:"

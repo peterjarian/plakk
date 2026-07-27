@@ -1,13 +1,7 @@
 import type { User } from "@plakk/shared";
-import {
-  accountCanSyncWithConnection,
-  accountEntitlementEndsAtMillis,
-  accountEntitlementExpiryDelayMillis,
-  accountWithBillingRestriction,
-} from "@plakk/shared/PlakkApi";
+import { accountCanSyncWithConnection } from "@plakk/shared/PlakkApi";
 import { RpcError } from "@plakk/shared/RpcError";
 import {
-  DateTime,
   Effect,
   Fiber,
   FileSystem,
@@ -77,8 +71,6 @@ const makeDesktopSession = Effect.gen(function* () {
   const syncFiber = yield* Ref.make<Fiber.Fiber<void, unknown> | null>(null);
   const syncConnectionStatus = yield* Ref.make<"CONNECTED" | "RECONNECTING" | null>(null);
   const capabilityFiber = yield* Ref.make<Fiber.Fiber<void, never> | null>(null);
-  const entitlementExpiryFiber = yield* Ref.make<Fiber.Fiber<void, never> | null>(null);
-  const capabilityOnline = yield* Ref.make(false);
   const connectionRefresh = yield* Ref.make<Effect.Effect<void, DesktopSessionTransitionError>>(
     Effect.void,
   );
@@ -88,10 +80,6 @@ const makeDesktopSession = Effect.gen(function* () {
 
   const publishIssue = Effect.fn("DesktopSession.publishIssue")(function* (message: string) {
     yield* PubSub.publish(issues, message);
-  });
-  const clearEntitlementExpiry = Effect.gen(function* () {
-    const fiber = yield* Ref.getAndSet(entitlementExpiryFiber, null);
-    if (fiber !== null) yield* Fiber.interrupt(fiber);
   });
   const clearFileSources = Effect.suspend(() =>
     Effect.forEach(
@@ -199,8 +187,6 @@ const makeDesktopSession = Effect.gen(function* () {
     const accessTokenChanged = previous.accessToken !== next.accessToken;
     if (accountChanged) {
       yield* Ref.update(generation, (value) => value + 1);
-      yield* Ref.set(capabilityOnline, false);
-      yield* clearEntitlementExpiry;
       yield* Ref.set(status, {
         ...previous,
         accessToken: null,
@@ -271,68 +257,6 @@ const makeDesktopSession = Effect.gen(function* () {
       );
   });
 
-  const scheduleEntitlementExpiry = Effect.fn("DesktopSession.scheduleEntitlementExpiry")(
-    function* (
-      account: Parameters<typeof accountEntitlementExpiryDelayMillis>[0],
-      connection: Parameters<typeof accountCanSyncWithConnection>[1],
-      accountUser: User,
-      checkedGeneration: number,
-      accessToken: string,
-    ) {
-      yield* clearEntitlementExpiry;
-      const now = yield* DateTime.now;
-      const delayMillis = accountEntitlementExpiryDelayMillis(account, DateTime.toEpochMillis(now));
-      if (delayMillis === null) return;
-      const expectedStatus = account.accessEntitlement.status;
-      const expectedEndsAt = accountEntitlementEndsAtMillis(account.accessEntitlement);
-      const fiber = yield* Effect.gen(function* () {
-        yield* Effect.sleep(delayMillis);
-        const latest = yield* Ref.get(status);
-        if (
-          checkedGeneration !== (yield* Ref.get(generation)) ||
-          latest.user?.id !== accountUser.id ||
-          latest.accessToken !== accessToken ||
-          !(yield* Ref.get(capabilityOnline))
-        ) {
-          return;
-        }
-        const currentLocalState = yield* localState.current;
-        if (
-          currentLocalState.account?.id !== accountUser.id ||
-          currentLocalState.capability.status !== "ONLINE" ||
-          currentLocalState.capability.account.accessEntitlement.status !== expectedStatus ||
-          accountEntitlementEndsAtMillis(currentLocalState.capability.account.accessEntitlement) !==
-            expectedEndsAt
-        ) {
-          return;
-        }
-        if (
-          currentLocalState.capability.account.accessEntitlement.status === "PAID_ACTIVE" &&
-          !currentLocalState.capability.account.accessEntitlement.cancelAtPeriodEnd
-        ) {
-          // A renewable subscription boundary is owned by Polar. Refresh authority instead of
-          // inferring either a successful renewal or a restriction from the previous paid-through.
-          yield* Ref.get(connectionRefresh).pipe(Effect.flatten);
-          return;
-        }
-        yield* stopSync;
-        yield* hydration.pause;
-        yield* localState.update({
-          kind: "online",
-          account: accountUser,
-          accountStatus: accountWithBillingRestriction(currentLocalState.capability.account),
-          connection,
-        });
-      }).pipe(
-        Effect.catchCause((cause) =>
-          Effect.logError("Could not publish expired desktop entitlement capability", { cause }),
-        ),
-        Effect.forkDetach,
-      );
-      yield* Ref.set(entitlementExpiryFiber, fiber);
-    },
-  );
-
   const refreshCapability = Effect.fn("DesktopSession.refreshCapability")(function* () {
     const current = yield* Ref.get(status);
     if (current.user === null || current.accessToken === null || !current.commandsAuthorized)
@@ -345,7 +269,7 @@ const makeDesktopSession = Effect.gen(function* () {
         account.storageProvider === null
           ? null
           : yield* rpc.GetStorageProviderStatus(
-              { consumeAuthorization: false, storageProvider: account.storageProvider },
+              { storageProvider: account.storageProvider },
               { headers },
             );
       return { account, connection };
@@ -358,7 +282,6 @@ const makeDesktopSession = Effect.gen(function* () {
       return;
     }
     if (Result.isFailure(result)) {
-      yield* Ref.set(capabilityOnline, false);
       yield* hydration.pause;
       if (Schema.is(RpcError)(result.failure) && result.failure.code === "UNAUTHENTICATED") {
         yield* setStatus({
@@ -393,14 +316,6 @@ const makeDesktopSession = Effect.gen(function* () {
           Effect.logError("Could not confirm the local state capability", { cause }),
         ),
       );
-    yield* Ref.set(capabilityOnline, true);
-    yield* scheduleEntitlementExpiry(
-      account,
-      connection,
-      current.user,
-      checkedGeneration,
-      current.accessToken,
-    );
     if (canSync) {
       yield* startSync({ user: current.user, accessToken: current.accessToken });
       yield* resumeBackgroundWork({ user: current.user, accessToken: current.accessToken });
@@ -485,8 +400,6 @@ const makeDesktopSession = Effect.gen(function* () {
 
   const signOut = Effect.gen(function* () {
     yield* Ref.update(generation, (value) => value + 1);
-    yield* Ref.set(capabilityOnline, false);
-    yield* clearEntitlementExpiry;
     yield* Ref.update(status, (current) => ({
       ...current,
       accessToken: null,
@@ -580,7 +493,7 @@ const makeDesktopSession = Effect.gen(function* () {
 
   const withCurrentAccount: DesktopSessionShape["withCurrentAccount"] = Effect.fn(
     "DesktopSession.withCurrentAccount",
-  )(function* <A, E, R>(command: (account: DesktopSessionAccount) => Effect.Effect<A, E, R>) {
+  )(function* <A, E>(command: (account: DesktopSessionAccount) => Effect.Effect<A, E>) {
     return yield* commandLock.withPermit(
       Effect.gen(function* () {
         const current = yield* Ref.get(status);
@@ -594,38 +507,6 @@ const makeDesktopSession = Effect.gen(function* () {
     );
   });
 
-  const withCurrentProductAccess: DesktopSessionShape["withCurrentProductAccess"] = Effect.fn(
-    "DesktopSession.withCurrentProductAccess",
-  )(function* <A, E, R>(command: (account: DesktopSessionAccount) => Effect.Effect<A, E, R>) {
-    return yield* withCurrentAccount(
-      Effect.fn("DesktopSession.withAuthorizedProductAccount")(function* (account) {
-        if (account.accessToken === null) {
-          return yield* new DesktopSessionCommandError({
-            reason: "Reconnect Plakk before using this action.",
-          });
-        }
-        const accountStatus = yield* rpc
-          .GetAccountStatus(undefined, {
-            headers: { authorization: `Bearer ${account.accessToken}` },
-          })
-          .pipe(
-            Effect.mapError(
-              () =>
-                new DesktopSessionCommandError({
-                  reason: "Plakk could not confirm account access.",
-                }),
-            ),
-          );
-        if (accountStatus.accessEntitlement.status === "BILLING_RESTRICTED") {
-          return yield* new DesktopSessionCommandError({
-            reason: "Restore billing access to use this action.",
-          });
-        }
-        return yield* command(account);
-      }),
-    );
-  });
-
   yield* Effect.addFinalizer(() =>
     Effect.all(
       [
@@ -635,7 +516,6 @@ const makeDesktopSession = Effect.gen(function* () {
         Ref.get(capabilityFiber).pipe(
           Effect.flatMap((fiber) => (fiber === null ? Effect.void : Fiber.interrupt(fiber))),
         ),
-        clearEntitlementExpiry,
       ],
       { discard: true },
     ),
@@ -653,7 +533,6 @@ const makeDesktopSession = Effect.gen(function* () {
     signOut,
     start,
     withCurrentAccount,
-    withCurrentProductAccess,
   } satisfies DesktopSessionShape;
 });
 

@@ -52,22 +52,6 @@ _Avoid_: Authoritative content type
 The account most recently confirmed as signed in on a device and not subsequently signed out. Its cached identity may be displayed offline but does not prove that online commands are currently available.
 _Avoid_: Active token, online session
 
-**Account trial**:
-The single immutable 14-day evaluation window granted to an account at its first successful Plakk sign-in. It is shared by every client and cannot be delayed or restarted by storage setup, device changes, or later use.
-_Avoid_: Browser trial, device trial, usage trial
-
-**Access entitlement**:
-The backend-confirmed account state that permits or restricts normal Plakk product commands. During the account trial it is active strictly before the trial end instant and restricted at or after that instant.
-_Avoid_: Web entitlement, route access, client permission
-
-**Billing blocker**:
-An account restriction caused by the absence of an active access entitlement. It pauses normal product commands without deleting Snippets or provider content and remains independent of storage readiness.
-_Avoid_: Paywall state, subscription route
-
-**Storage blocker**:
-An account restriction caused by linked storage being absent or unusable. It remains independent of billing, so resolving one blocker never implies that the other is resolved.
-_Avoid_: Billing failure, offline state
-
 **Linked storage provider**:
 The storage provider most recently confirmed as linked to the current account. The cached provider remains displayable offline but does not imply that the provider is currently reachable.
 _Avoid_: Available provider, live connection

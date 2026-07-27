@@ -1,4 +1,1 @@
-@import "@plakk/ui/globals.css";
-
-@source ".";
-@source "../e2e";
+@import "tailwindcss";

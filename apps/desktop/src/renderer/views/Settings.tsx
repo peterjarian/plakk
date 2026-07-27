@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { formatFileSize } from "@plakk/shared";
-import { formatAccountBillingInstant, type AccountAccessEntitlement } from "@plakk/shared/PlakkApi";
 import {
   ArrowLeft,
   ArrowUpRight,
@@ -62,54 +61,6 @@ const appearanceLabels = {
   system: "System",
 } as const;
 
-export const desktopBillingPresentation = (
-  entitlement: AccountAccessEntitlement | null,
-): {
-  readonly action: "Manage" | "Open" | "Recover" | "Upgrade";
-  readonly badge: "Grace" | "Pro" | "Restricted" | "Trial" | "Unknown";
-  readonly description: string;
-  readonly title: string;
-} => {
-  switch (entitlement?.status) {
-    case "TRIAL_ACTIVE":
-      return {
-        action: "Upgrade",
-        badge: "Trial",
-        description: `Billing starts immediately. Upgrading permanently ends unused trial time. Trial ends exactly ${formatAccountBillingInstant(entitlement.trialEndsAt)}.`,
-        title: "Plakk trial",
-      };
-    case "PAID_ACTIVE":
-      return {
-        action: "Manage",
-        badge: "Pro",
-        description: `${entitlement.cancelAtPeriodEnd ? "Canceled; access remains active" : "Paid access active"} through ${formatAccountBillingInstant(entitlement.paidThrough)}.`,
-        title: "Plakk Pro",
-      };
-    case "GRACE_ACTIVE":
-      return {
-        action: "Recover",
-        badge: "Grace",
-        description: `Normal use continues through ${formatAccountBillingInstant(entitlement.graceEndsAt)}. Update payment before then.`,
-        title: "Payment needs attention",
-      };
-    case "BILLING_RESTRICTED":
-      return {
-        action: "Recover",
-        badge: "Restricted",
-        description: "Your snippets are preserved. Recover billing to resume product actions.",
-        title: "Billing access required",
-      };
-    default:
-      return {
-        action: "Open",
-        badge: "Unknown",
-        description:
-          "Billing status is unavailable. Reconnect or open the Plakk web app to manage billing.",
-        title: "Billing status unavailable",
-      };
-  }
-};
-
 export function Settings() {
   const auth = useAuth();
   const linkedProvider = useLinkedStorageProvider();
@@ -137,11 +88,6 @@ export function Settings() {
   const [appearanceError, setAppearanceError] = useState<string | null>(null);
   const [savingAppearance, setSavingAppearance] = useState(false);
   const user = auth.user;
-  const billing = desktopBillingPresentation(
-    localState.capability.status === "ONLINE"
-      ? localState.capability.account.accessEntitlement
-      : null,
-  );
 
   useEffect(() => {
     let active = true;
@@ -214,7 +160,7 @@ export function Settings() {
                   />
                 </SettingsRowMain>
                 <span className="rounded-full bg-muted px-2 py-1 text-[11px] leading-none font-medium text-muted-foreground">
-                  {billing.badge}
+                  Pro
                 </span>
               </SettingsRow>
 
@@ -223,11 +169,7 @@ export function Settings() {
                   <SettingsRowIcon>
                     <CreditCard className="size-4 text-muted-foreground" aria-hidden="true" />
                   </SettingsRowIcon>
-                  <SettingsRowText
-                    title={billing.title}
-                    description={billing.description}
-                    descriptionClassName="overflow-visible text-clip whitespace-normal"
-                  />
+                  <SettingsRowText title="Plakk Pro" description="Current plan" />
                 </SettingsRowMain>
                 <Button
                   type="button"
@@ -235,7 +177,7 @@ export function Settings() {
                   size="sm"
                   onClick={() => void window.ipc.openExternal("https://app.plakk.io/billing")}
                 >
-                  {billing.action}
+                  Manage
                   <ArrowUpRight />
                 </Button>
               </SettingsRow>
@@ -342,7 +284,7 @@ export function Settings() {
           <SettingsSection>
             <SettingsSectionTitle>Device storage</SettingsSectionTitle>
             <SettingsSectionBody>
-              <SettingsRow className="items-start sm:items-start">
+              <SettingsRow className="items-start">
                 <SettingsRowMain className="flex-1 items-start">
                   <HardDrive
                     className="mt-0.5 size-4 shrink-0 text-muted-foreground"

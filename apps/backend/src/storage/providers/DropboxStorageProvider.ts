@@ -36,7 +36,6 @@ const DropboxDownloadArg = Schema.fromJsonString(Schema.Struct({ path: Schema.St
 const DropboxTemporaryLinkRequest = Schema.fromJsonString(Schema.Struct({ path: Schema.String }));
 const DropboxTemporaryLink = Schema.Struct({ link: Schema.String });
 const DropboxDeleteRequest = Schema.fromJsonString(Schema.Struct({ path: Schema.String }));
-const DropboxDeleteError = Schema.Struct({ error_summary: Schema.String });
 const DropboxDownloadError = Schema.Struct({ error_summary: Schema.String });
 
 const asDropboxPath = (snippetId: string, fileName: string) =>
@@ -71,14 +70,6 @@ export const DropboxStorageProvider = {
       ),
     );
     if (response.status >= 200 && response.status < 300) return;
-    if (response.status === 409) {
-      const error = yield* HttpClientResponse.schemaBodyJson(DropboxDeleteError)(response).pipe(
-        Effect.mapError((cause) =>
-          providerError(input, "Stored object deletion error response was invalid.", cause),
-        ),
-      );
-      if (error.error_summary.startsWith("path_lookup/not_found/")) return;
-    }
     return yield* providerError(input, `Stored object deletion failed: ${response.status}`);
   }),
   getDestination: () =>

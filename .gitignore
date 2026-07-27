@@ -16,8 +16,6 @@ out
 .tanstack
 .wrangler
 .output
-playwright-report
-test-results
 .alchemy/
 .vinxi
 __unconfig*

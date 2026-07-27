@@ -89,18 +89,6 @@ export const SnippetUploadEngineLive = Layer.effect(
         prepared,
         filePath,
       });
-      const candidateUpdatedAt = DateTime.formatIso(yield* DateTime.now);
-      yield* replica.update(account.id, (current) => ({
-        items: current.items.map((record) =>
-          record.kind === "LOCAL" && record.id === input.id
-            ? {
-                ...record,
-                publicationCandidate: { storageObjectId: uploaded.storageObjectId },
-                updatedAt: candidateUpdatedAt,
-              }
-            : record,
-        ),
-      }));
       const published = yield* remote.publish(account.accessToken, {
         id: input.id,
         fileName: input.fileName,
@@ -174,7 +162,6 @@ export const SnippetUploadEngineLive = Layer.effect(
         storageProvider: input.storageProvider,
         status: "UPLOADING",
         errorMessage: null,
-        publicationCandidate: null,
         createdAt,
         updatedAt: createdAt,
       };

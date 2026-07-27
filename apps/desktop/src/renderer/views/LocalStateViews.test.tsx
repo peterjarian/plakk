@@ -1,5 +1,4 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import * as DateTime from "effect/DateTime";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import type { LocalState } from "../../ipc/contracts.ts";
@@ -11,18 +10,6 @@ const state = vi.hoisted(() => {
   let liveConnection: { readonly status: "CONNECTED" | "RECONNECTING" } | null = null;
   let storageUsageBytes = 0;
   let capability: LocalState["capability"] = { status: "OFFLINE" };
-  let snippet: LocalState["snippets"][number] = {
-    id: "0d1e2f3a-4567-4890-8abc-def012345678",
-    fileName: "same-local-state.txt",
-    byteSize: 4,
-    storageProvider: "GOOGLE_DRIVE",
-    kind: "PUBLISHED",
-    createdAt: "2026-07-16T00:00:00.000Z",
-    updatedAt: "2026-07-16T00:00:00.000Z",
-    localState: null,
-    localTextPreview: "same",
-    localContentAvailability: { status: "AVAILABLE" },
-  };
   const account = {
     id: "user_1",
     email: "reader@example.com",
@@ -44,9 +31,20 @@ const state = vi.hoisted(() => {
     get storageUsageBytes() {
       return storageUsageBytes;
     },
-    get snippets() {
-      return [snippet];
-    },
+    snippets: [
+      {
+        id: "0d1e2f3a-4567-4890-8abc-def012345678",
+        fileName: "same-local-state.txt",
+        byteSize: 4,
+        storageProvider: "GOOGLE_DRIVE",
+        kind: "PUBLISHED",
+        createdAt: "2026-07-16T00:00:00.000Z",
+        updatedAt: "2026-07-16T00:00:00.000Z",
+        localState: null,
+        localTextPreview: "same",
+        localContentAvailability: { status: "AVAILABLE" },
+      },
+    ],
   } as const;
   return {
     account,
@@ -59,9 +57,6 @@ const state = vi.hoisted(() => {
     },
     setStorageUsageBytes: (next: number) => {
       storageUsageBytes = next;
-    },
-    setSnippet: (next: typeof snippet) => {
-      snippet = next;
     },
   };
 });
@@ -101,10 +96,6 @@ describe("local state views", () => {
     state.setCapability({
       status: "ONLINE",
       account: {
-        accessEntitlement: {
-          status: "TRIAL_ACTIVE",
-          trialEndsAt: DateTime.makeUnsafe("2026-08-10T00:00:00.000Z"),
-        },
         canSync: true,
         storageProvider: "GOOGLE_DRIVE",
         blockedReasons: [],
@@ -135,103 +126,6 @@ describe("local state views", () => {
     expect(connectedTray).not.toContain(">Live<");
 
     state.setLiveConnection(null);
-    state.setCapability({ status: "OFFLINE" });
-  });
-
-  it("keeps Home and Tray rows visible but disables product actions when billing is restricted", () => {
-    state.setCapability({
-      status: "ONLINE",
-      account: {
-        accessEntitlement: {
-          status: "BILLING_RESTRICTED",
-        },
-        canSync: false,
-        storageProvider: "GOOGLE_DRIVE",
-        blockedReasons: ["billing"],
-      },
-      connection: {
-        storageProvider: "GOOGLE_DRIVE",
-        status: "CONNECTED",
-        externalDestinationUrl: "https://drive.google.com/drive/folders/plakk",
-      },
-    });
-    state.setSnippet({
-      ...state.localState.snippets[0],
-      fileName: "https://example.com.txt",
-      localTextPreview: "https://example.com",
-      localContentAvailability: { status: "NOT_AVAILABLE" },
-    });
-
-    const home = renderToStaticMarkup(<Home />);
-    const tray = renderToStaticMarkup(<Tray />);
-
-    for (const markup of [home, tray]) {
-      expect(markup).toContain('aria-label="Download to this device"');
-      expect(markup).toContain('aria-label="Open link"');
-      expect(markup).toContain('aria-label="Delete"');
-      expect(markup).toMatch(/disabled=""[^>]+aria-label="Download to this device"/);
-      expect(markup).toMatch(/disabled=""[^>]+aria-label="Open link"/);
-      expect(markup).not.toMatch(/disabled=""[^>]+aria-label="Delete"/);
-    }
-    expect(home).toContain("Recover billing");
-
-    state.setCapability({ status: "OFFLINE" });
-    state.setSnippet({
-      ...state.localState.snippets[0],
-      fileName: "same-local-state.txt",
-      localTextPreview: "same",
-      localContentAvailability: { status: "AVAILABLE" },
-    });
-  });
-
-  it("presents exact trial upgrades and prominent grace recovery from backend state", () => {
-    state.setCapability({
-      status: "ONLINE",
-      account: {
-        accessEntitlement: {
-          status: "TRIAL_ACTIVE",
-          trialEndsAt: DateTime.makeUnsafe("2026-08-10T10:15:30.000Z"),
-        },
-        canSync: true,
-        storageProvider: "GOOGLE_DRIVE",
-        blockedReasons: [],
-      },
-      connection: {
-        storageProvider: "GOOGLE_DRIVE",
-        status: "CONNECTED",
-        externalDestinationUrl: "https://drive.google.com/drive/folders/plakk",
-      },
-    });
-
-    const trialSettings = renderToStaticMarkup(<Settings />);
-    expect(trialSettings).toContain("Billing starts immediately.");
-    expect(trialSettings).toContain("permanently ends unused trial time");
-    expect(trialSettings).toContain("August 10, 2026 at 10:15 AM");
-    expect(trialSettings).toContain(">Upgrade<");
-
-    state.setCapability({
-      status: "ONLINE",
-      account: {
-        accessEntitlement: {
-          status: "GRACE_ACTIVE",
-          graceEndsAt: DateTime.makeUnsafe("2026-08-17T10:15:30.000Z"),
-        },
-        canSync: true,
-        storageProvider: "GOOGLE_DRIVE",
-        blockedReasons: [],
-      },
-      connection: {
-        storageProvider: "GOOGLE_DRIVE",
-        status: "CONNECTED",
-        externalDestinationUrl: "https://drive.google.com/drive/folders/plakk",
-      },
-    });
-
-    const graceHome = renderToStaticMarkup(<Home />);
-    expect(graceHome).toContain("Payment needs attention.");
-    expect(graceHome).toContain("August 17, 2026 at 10:15 AM");
-    expect(graceHome).toContain("Recover billing");
-
     state.setCapability({ status: "OFFLINE" });
   });
 

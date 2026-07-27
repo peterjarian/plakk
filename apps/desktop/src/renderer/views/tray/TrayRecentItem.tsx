@@ -8,7 +8,6 @@ export function TrayRecentItem({
   copied,
   copying,
   copyDisabled,
-  productActionsDisabled = false,
   copyError,
   readError,
   onReload,
@@ -21,7 +20,6 @@ export function TrayRecentItem({
   copied: boolean;
   copying: boolean;
   copyDisabled: boolean;
-  productActionsDisabled?: boolean;
   copyError?: string;
   readError: string | null;
   onReload: () => void;
@@ -64,7 +62,6 @@ export function TrayRecentItem({
           copied={copied}
           copying={copying}
           copyDisabled={copyDisabled}
-          productActionsDisabled={productActionsDisabled}
           thumbnailUrl={snippet.thumbnailUrl}
           {...(copyError === undefined ? {} : { copyError })}
           onCopy={onCopy}

@@ -1,19 +1,35 @@
-import {
-  DeviceSnippetRecordSchema,
-  deviceSnippetRecordId,
-  type DeviceSnippetRecord,
-  type LocalUploadRecord,
-  type PublishedSnippetRecord,
-} from "@plakk/shared";
+import { StorageProviderLiteral } from "@plakk/shared";
+import { ApiSnippetSchema, SnippetIdSchema } from "@plakk/shared/PlakkApi";
 import { Context, type Effect, Schema, type Stream } from "effect";
 
-export {
-  DeviceSnippetRecordSchema,
-  deviceSnippetRecordId,
-  type DeviceSnippetRecord,
-  type LocalUploadRecord,
-  type PublishedSnippetRecord,
-};
+export const LocalUploadRecordSchema = Schema.Struct({
+  kind: Schema.Literal("LOCAL"),
+  id: SnippetIdSchema,
+  fileName: Schema.String,
+  byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  storageProvider: StorageProviderLiteral,
+  status: Schema.Literals(["UPLOADING", "FAILED"] as const),
+  errorMessage: Schema.NullOr(Schema.String),
+  createdAt: Schema.String,
+  updatedAt: Schema.String,
+});
+
+export type LocalUploadRecord = typeof LocalUploadRecordSchema.Type;
+
+export const PublishedSnippetRecordSchema = Schema.Struct({
+  kind: Schema.Literal("PUBLISHED"),
+  snippet: ApiSnippetSchema,
+});
+
+export type PublishedSnippetRecord = typeof PublishedSnippetRecordSchema.Type;
+export const DeviceSnippetRecordSchema = Schema.Union([
+  LocalUploadRecordSchema,
+  PublishedSnippetRecordSchema,
+]);
+export type DeviceSnippetRecord = LocalUploadRecord | PublishedSnippetRecord;
+
+export const deviceSnippetRecordId = (record: DeviceSnippetRecord) =>
+  record.kind === "LOCAL" ? record.id : record.snippet.id;
 
 export const SnippetReplicaStateSchema = Schema.Struct({
   items: Schema.Array(DeviceSnippetRecordSchema),

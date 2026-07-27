@@ -1,1 +1,0 @@
-ALTER TABLE "storage_authorization_intents" ADD COLUMN "expires_at" timestamp with time zone NOT NULL;

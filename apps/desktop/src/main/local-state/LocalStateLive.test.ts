@@ -2,7 +2,7 @@ import { NodeFileSystem } from "@effect/platform-node";
 import { UserSchema, type User } from "@plakk/shared";
 import type { AccountStatus, StorageProviderStatus } from "@plakk/shared/PlakkApi";
 import { expect, it } from "@effect/vitest";
-import { DateTime, Effect, FileSystem, Layer, ManagedRuntime, Schema, Stream } from "effect";
+import { Effect, FileSystem, Layer, ManagedRuntime, Schema, Stream } from "effect";
 import ElectronStore from "electron-store";
 
 import type { DesktopSnippet } from "../../ipc/contracts.ts";
@@ -34,10 +34,6 @@ const snippet = (id: string, fileName: string): DesktopSnippet => ({
 });
 
 const onlineAccount: AccountStatus = {
-  accessEntitlement: {
-    status: "TRIAL_ACTIVE",
-    trialEndsAt: DateTime.makeUnsafe("2026-08-10T00:00:00.000Z"),
-  },
   canSync: true,
   storageProvider: "GOOGLE_DRIVE",
   blockedReasons: [],

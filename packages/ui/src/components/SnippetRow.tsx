@@ -1,10 +1,5 @@
-import {
-  formatFileSize,
-  isTextSnippetFileName,
-  type LocalUploadRecord,
-  type SnippetPresentation,
-} from "@plakk/shared";
-import { WEB_SNIPPET_CONTENT_MAX_BYTES, type ApiSnippet } from "@plakk/shared/PlakkApi";
+import { formatFileSize, type SnippetPresentation } from "@plakk/shared";
+import type { ApiSnippet } from "@plakk/shared/PlakkApi";
 import type { LocalContentAvailability } from "@plakk/shared";
 import * as DateTime from "effect/DateTime";
 import {
@@ -16,20 +11,12 @@ import {
   ImageIcon,
   LoaderCircle,
   LinkIcon,
-  MoreHorizontal,
   RotateCw,
   Trash2,
   Type,
   X,
 } from "lucide-react";
-import type { ReactNode } from "react";
 import { Button } from "./primitives/button.tsx";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "./primitives/dropdown-menu.tsx";
 
 export type SnippetRowItem = Omit<ApiSnippet, "storageObjectId"> & {
   readonly kind: "LOCAL" | "PUBLISHED";
@@ -89,26 +76,59 @@ export function formatSnippetDate(
   return createdAt.slice(0, 10);
 }
 
-const snippetMetadata = (
-  snippet: Pick<ApiSnippet, "byteSize" | "createdAt" | "fileName">,
-  presentation: SnippetPresentation,
-  now: number,
-) => {
-  const time = formatSnippetDate(snippet.createdAt, now);
-  return presentation.type === "file" || presentation.type === "image"
-    ? `${fileSubtitle(snippet)} · ${time}`
-    : `${formatFileSize(snippet.byteSize)} · ${time}`;
-};
-
-function SnippetRowLayout(props: {
-  readonly presentation: SnippetPresentation;
-  readonly statusMessage?: string;
-  readonly subtitle: string;
-  readonly thumbnailUrl?: string | null;
-  readonly trailing?: ReactNode;
+export function SnippetRow(props: {
+  snippet: SnippetRowItem;
+  presentation: SnippetPresentation;
+  now: number;
+  copied: boolean;
+  onCopy: () => void;
+  onDelete: () => void;
+  onDownload?: () => void;
+  onOpenLink?: (url: string) => void;
+  thumbnailUrl?: string | null;
+  copyDisabled?: boolean;
+  copying?: boolean;
+  copyError?: string;
+  showActions?: boolean;
 }) {
-  const { presentation, statusMessage, subtitle, thumbnailUrl, trailing } = props;
+  const {
+    snippet,
+    presentation,
+    now,
+    copied,
+    onCopy,
+    onDelete,
+    onDownload,
+    onOpenLink,
+    thumbnailUrl,
+    copyDisabled = false,
+    copying = false,
+    copyError,
+    showActions = true,
+  } = props;
   const { Icon } = presentationMeta[presentation.type];
+  const localState = snippet.localState;
+  const isUploading = localState?.status === "UPLOADING";
+  const isFailed = localState?.status === "FAILED";
+  const isDownloading = snippet.localContentAvailability.status === "DOWNLOADING";
+  const needsDownload =
+    snippet.kind === "PUBLISHED" &&
+    (snippet.localContentAvailability.status === "NOT_AVAILABLE" ||
+      snippet.localContentAvailability.status === "FAILED");
+  const title = presentation.title;
+  const time = formatSnippetDate(snippet.createdAt, now);
+  const metadata =
+    presentation.type === "file" || presentation.type === "image"
+      ? `${fileSubtitle(snippet)} · ${time}`
+      : `${formatFileSize(snippet.byteSize)} · ${time}`;
+  const subtitle =
+    copyError !== undefined
+      ? copyError
+      : isFailed
+        ? (localState?.errorMessage ?? "Upload failed. Dismiss it and add the content again.")
+        : snippet.localContentAvailability.status === "FAILED"
+          ? snippet.localContentAvailability.message
+          : metadata;
 
   return (
     <li>
@@ -126,270 +146,10 @@ function SnippetRowLayout(props: {
         </span>
 
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium">{presentation.title}</p>
-          <p className="truncate text-xs text-muted-foreground">{subtitle}</p>
+          <p className="truncate text-sm font-medium">{title}</p>
+          {subtitle && <p className="truncate text-xs text-muted-foreground">{subtitle}</p>}
         </div>
 
-        {trailing}
-        {statusMessage && (
-          <span className="sr-only" role="status">
-            {statusMessage}
-          </span>
-        )}
-      </div>
-    </li>
-  );
-}
-
-export function PublishedSnippetRow(props: {
-  readonly snippet: ApiSnippet;
-  readonly presentation: SnippetPresentation;
-  readonly now: number;
-  readonly actionMessage?: string;
-  readonly actionStatus?: "busy" | "copied" | "idle" | "notice";
-  readonly deleteDisabled?: boolean;
-  readonly onCopy?: () => void;
-  readonly onDelete?: () => void;
-  readonly onDownload?: () => void;
-  readonly onOpenLink?: () => void;
-  readonly productActionsDisabled?: boolean;
-}) {
-  const {
-    actionMessage,
-    actionStatus = "idle",
-    deleteDisabled = false,
-    now,
-    onCopy,
-    onDelete,
-    onDownload,
-    onOpenLink,
-    presentation,
-    productActionsDisabled = false,
-    snippet,
-  } = props;
-  const isTextCandidate = isTextSnippetFileName(snippet.fileName);
-  const isCopyCandidate = isTextCandidate || presentation.type === "image";
-  const copyAvailable = isCopyCandidate && snippet.byteSize <= WEB_SNIPPET_CONTENT_MAX_BYTES;
-  const downloadAvailable =
-    (!isTextCandidate && presentation.type === "file") ||
-    (isCopyCandidate && snippet.byteSize > WEB_SNIPPET_CONTENT_MAX_BYTES);
-  const busy = actionStatus === "busy";
-  const primaryAction =
-    copyAvailable && onCopy !== undefined ? (
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-sm"
-        aria-label={actionStatus === "copied" ? "Copied" : "Copy"}
-        disabled={productActionsDisabled}
-        onClick={onCopy}
-      >
-        {actionStatus === "copied" ? <Check className="text-emerald-500" /> : <Copy />}
-      </Button>
-    ) : downloadAvailable && onDownload !== undefined ? (
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-sm"
-        aria-label="Download"
-        disabled={productActionsDisabled}
-        onClick={onDownload}
-      >
-        <Download />
-      </Button>
-    ) : null;
-  return (
-    <SnippetRowLayout
-      presentation={presentation}
-      subtitle={actionMessage ?? snippetMetadata(snippet, presentation, now)}
-      {...(actionMessage === undefined ? {} : { statusMessage: actionMessage })}
-      trailing={
-        onDelete === undefined ? undefined : (
-          <div className="flex shrink-0 items-center justify-end">
-            <div
-              className="flex items-center gap-0.5 md:invisible md:group-hover:visible md:group-focus-within:visible"
-              data-snippet-actions=""
-            >
-              {busy ? (
-                <span
-                  className="flex size-7 items-center justify-center"
-                  role="status"
-                  aria-label="Working on snippet"
-                >
-                  <LoaderCircle
-                    className="size-4 animate-spin text-muted-foreground"
-                    aria-hidden="true"
-                  />
-                </span>
-              ) : (
-                <>
-                  {primaryAction}
-                  {isTextCandidate && onOpenLink !== undefined && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      aria-label="Open link"
-                      className="hidden md:inline-flex"
-                      disabled={productActionsDisabled}
-                      onClick={onOpenLink}
-                    >
-                      <ArrowUpRight />
-                    </Button>
-                  )}
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label="Delete"
-                    className="hidden hover:bg-destructive/10 hover:text-destructive md:inline-flex"
-                    data-snippet-desktop-delete=""
-                    disabled={deleteDisabled}
-                    onClick={onDelete}
-                  >
-                    <Trash2 />
-                  </Button>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger
-                      aria-label="More snippet actions"
-                      className="flex size-7 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 md:hidden"
-                      data-snippet-compact-actions=""
-                    >
-                      <MoreHorizontal className="size-4" />
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      {isTextCandidate && onOpenLink !== undefined && (
-                        <DropdownMenuItem disabled={productActionsDisabled} onClick={onOpenLink}>
-                          <ArrowUpRight />
-                          Open link
-                        </DropdownMenuItem>
-                      )}
-                      <DropdownMenuItem
-                        variant="destructive"
-                        disabled={deleteDisabled}
-                        onClick={onDelete}
-                      >
-                        <Trash2 />
-                        Delete
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </>
-              )}
-            </div>
-          </div>
-        )
-      }
-    />
-  );
-}
-
-export function LocalUploadSnippetRow(props: {
-  readonly now: number;
-  readonly onDismiss: () => void;
-  readonly presentation: SnippetPresentation;
-  readonly snippet: LocalUploadRecord;
-}) {
-  const { now, onDismiss, presentation, snippet } = props;
-  const isUploading = snippet.status === "UPLOADING";
-  const subtitle =
-    snippet.status === "FAILED"
-      ? (snippet.errorMessage ?? "Upload failed. Dismiss it and add the content again.")
-      : snippetMetadata(snippet, presentation, now);
-
-  return (
-    <SnippetRowLayout
-      presentation={presentation}
-      subtitle={subtitle}
-      trailing={
-        <div className="flex shrink-0 items-center justify-end">
-          {isUploading && (
-            <span
-              className="flex size-7 items-center justify-center"
-              role="status"
-              aria-label="Syncing"
-            >
-              <LoaderCircle
-                className="size-4 animate-spin text-muted-foreground"
-                aria-hidden="true"
-              />
-            </span>
-          )}
-          {snippet.status === "FAILED" && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              data-persistent-action="dismiss"
-              aria-label="Dismiss failed upload"
-              onClick={onDismiss}
-            >
-              <X />
-            </Button>
-          )}
-        </div>
-      }
-    />
-  );
-}
-
-export function SnippetRow(props: {
-  snippet: SnippetRowItem;
-  presentation: SnippetPresentation;
-  now: number;
-  copied: boolean;
-  onCopy: () => void;
-  onDelete: () => void;
-  onDownload?: () => void;
-  onOpenLink?: (url: string) => void;
-  thumbnailUrl?: string | null;
-  copyDisabled?: boolean;
-  productActionsDisabled?: boolean;
-  copying?: boolean;
-  copyError?: string;
-  showActions?: boolean;
-}) {
-  const {
-    snippet,
-    presentation,
-    now,
-    copied,
-    onCopy,
-    onDelete,
-    onDownload,
-    onOpenLink,
-    thumbnailUrl,
-    copyDisabled = false,
-    productActionsDisabled = false,
-    copying = false,
-    copyError,
-    showActions = true,
-  } = props;
-  const localState = snippet.localState;
-  const isUploading = localState?.status === "UPLOADING";
-  const isFailed = localState?.status === "FAILED";
-  const isDownloading = snippet.localContentAvailability.status === "DOWNLOADING";
-  const needsDownload =
-    snippet.kind === "PUBLISHED" &&
-    (snippet.localContentAvailability.status === "NOT_AVAILABLE" ||
-      snippet.localContentAvailability.status === "FAILED");
-  const metadata = snippetMetadata(snippet, presentation, now);
-  const subtitle =
-    copyError !== undefined
-      ? copyError
-      : isFailed
-        ? (localState?.errorMessage ?? "Upload failed. Dismiss it and add the content again.")
-        : snippet.localContentAvailability.status === "FAILED"
-          ? snippet.localContentAvailability.message
-          : metadata;
-
-  return (
-    <SnippetRowLayout
-      presentation={presentation}
-      subtitle={subtitle}
-      {...(copyError === undefined ? {} : { statusMessage: copyError })}
-      {...(thumbnailUrl === undefined ? {} : { thumbnailUrl })}
-      trailing={
         <div className="flex shrink-0 items-center justify-end">
           {(isUploading || isDownloading) && (
             <span
@@ -416,7 +176,6 @@ export function SnippetRow(props: {
                   : "Download to this device"
               }
               onClick={onDownload}
-              disabled={productActionsDisabled}
             >
               {snippet.localContentAvailability.status === "FAILED" ? <RotateCw /> : <Download />}
             </Button>
@@ -443,7 +202,7 @@ export function SnippetRow(props: {
                   variant="ghost"
                   size="icon-sm"
                   aria-label={copying ? "Copying" : copied ? "Copied" : "Copy"}
-                  disabled={copying || copyDisabled || productActionsDisabled}
+                  disabled={copying || copyDisabled}
                   onClick={onCopy}
                 >
                   {copying ? (
@@ -461,7 +220,6 @@ export function SnippetRow(props: {
                   variant="ghost"
                   size="icon-sm"
                   aria-label="Open link"
-                  disabled={productActionsDisabled}
                   onClick={() => onOpenLink(presentation.url)}
                 >
                   <ArrowUpRight />
@@ -480,7 +238,12 @@ export function SnippetRow(props: {
             </div>
           )}
         </div>
-      }
-    />
+        {copyError && (
+          <span className="sr-only" role="status">
+            {copyError}
+          </span>
+        )}
+      </div>
+    </li>
   );
 }

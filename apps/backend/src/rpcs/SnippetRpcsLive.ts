@@ -1,4 +1,3 @@
-import { isSupportedProviderUploadTarget } from "@plakk/shared";
 import {
   and,
   desc,
@@ -6,15 +5,14 @@ import {
   eq,
   PostgresNotifications,
   type PostgresNotificationEvent,
+  sql,
   type DrizzleService,
 } from "@plakk/db";
 import { snippets, type SnippetRow } from "@plakk/db/schema";
 import {
-  AuthenticatedRpcRequest,
   CurrentUser,
   SNIPPET_INVALIDATION_KEEP_ALIVE,
   SNIPPETS_CHANGED,
-  WEB_SNIPPET_CONTENT_MAX_BYTES,
   type ApiSnippet,
   type PrepareSnippetUploadPayload,
   type PublishSnippetPayload,
@@ -22,22 +20,21 @@ import {
   SnippetRpcs,
 } from "@plakk/shared/PlakkApi";
 import { RpcError } from "@plakk/shared/RpcError";
-import * as Cause from "effect/Cause";
-import * as Config from "effect/Config";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Schedule from "effect/Schedule";
 import * as Stream from "effect/Stream";
 
-import { AccountCapability } from "../account/AccountCapability.ts";
-import {
-  notifySnippetChanges,
-  SNIPPET_INVALIDATION_CHANNEL,
-} from "../snippets/SnippetInvalidation.ts";
-import { lockStorageLifecycleState } from "../storage/StorageLifecycle.ts";
 import { type StorageDownloadError, StorageProvider } from "../storage/StorageProvider.ts";
-import { configuredWebOrigin as validateConfiguredWebOrigin } from "../WebOrigin.ts";
-import { telemetryErrorAttributes } from "../telemetry/TelemetrySanitization.ts";
+
+const SNIPPET_INVALIDATION_CHANNEL = "plakk_snippet_invalidations";
+
+const notifySnippetChanges = Effect.fn("notifySnippetChanges")(function* (
+  db: Pick<DrizzleService["db"], "execute">,
+  ownerWorkosUserId: string,
+) {
+  yield* db.execute(sql`select pg_notify(${SNIPPET_INVALIDATION_CHANNEL}, ${ownerWorkosUserId})`);
+});
 
 const reconnectSnippetNotifications = <E>(
   listen: () => Stream.Stream<PostgresNotificationEvent, E>,
@@ -49,10 +46,7 @@ const reconnectSnippetNotifications = <E>(
       return listen().pipe(Stream.filter((event) => event._tag !== "Connected" || attempts > 1));
     }).pipe(
       Stream.tapError((error) =>
-        Effect.logWarning(
-          "PostgreSQL notification listener disconnected",
-          telemetryErrorAttributes(error),
-        ),
+        Effect.logWarning("PostgreSQL notification listener disconnected", { error }),
       ),
       Stream.retry(Schedule.spaced("1 second")),
     );
@@ -128,28 +122,6 @@ const prepareSnippetUpload = Effect.fn("SnippetRpcs.prepareUpload")(function* (
     .pipe(mapStorageErrorsToRpc);
 });
 
-const snippetUploadRequestKind = Effect.fn("SnippetRpcs.snippetUploadRequestKind")(function* (
-  requestOrigin: string | null,
-) {
-  if (requestOrigin === null || requestOrigin === "plakk-app://renderer") {
-    return "DESKTOP" as const;
-  }
-  const { configuredWebOrigin, nodeEnv } = yield* Effect.all({
-    configuredWebOrigin: Config.string("PLAKK_WEB_ORIGIN"),
-    nodeEnv: Config.string("NODE_ENV").pipe(Config.withDefault("development")),
-  }).pipe(Effect.orDie);
-  const webOrigin = yield* Effect.sync(() =>
-    validateConfiguredWebOrigin(configuredWebOrigin, nodeEnv === "production"),
-  ).pipe(Effect.orDie);
-  if (requestOrigin !== webOrigin) {
-    return yield* new RpcError({
-      code: "FORBIDDEN",
-      message: "Web upload preparation is unavailable from this origin.",
-    });
-  }
-  return "WEB" as const;
-});
-
 const publishSnippet = Effect.fn("SnippetRpcs.publish")(function* (
   drizzle: DrizzleService,
   ownerWorkosUserId: string,
@@ -159,9 +131,6 @@ const publishSnippet = Effect.fn("SnippetRpcs.publish")(function* (
   const result = yield* drizzle.db
     .transaction((tx) =>
       Effect.gen(function* () {
-        if ((yield* lockStorageLifecycleState(tx, ownerWorkosUserId)) !== null) {
-          return { type: "cleanup" as const };
-        }
         const [inserted] = yield* tx
           .insert(snippets)
           .values({
@@ -196,12 +165,6 @@ const publishSnippet = Effect.fn("SnippetRpcs.publish")(function* (
       message: "Snippet identifier is already used by different content.",
     });
   }
-  if (result.type === "cleanup") {
-    return yield* new RpcError({
-      code: "CONFLICT",
-      message: "Storage cleanup is in progress. Publishing this Snippet was rejected.",
-    });
-  }
   return toApiSnippet(result.snippet);
 });
 
@@ -221,9 +184,9 @@ const getSnippetSnapshot = Effect.fn("SnippetRpcs.getSnapshot")(function* (
   return rows.map(toApiSnippet);
 });
 
-const loadAuthorizedSnippet = Effect.fn("SnippetRpcs.loadAuthorizedSnippet")(function* (
+const prepareSnippetDownload = Effect.fn("SnippetRpcs.prepareDownload")(function* (
   drizzle: DrizzleService,
-  capability: AccountCapability["Service"],
+  storage: StorageProvider["Service"],
   ownerWorkosUserId: string,
   snippetId: string,
 ) {
@@ -241,20 +204,8 @@ const loadAuthorizedSnippet = Effect.fn("SnippetRpcs.loadAuthorizedSnippet")(fun
     });
   }
 
-  yield* capability.authorizeProductCommand(ownerWorkosUserId, snippet.storageProvider);
-  return snippet;
-});
-
-const prepareSnippetDownload = Effect.fn("SnippetRpcs.prepareDownload")(function* (
-  drizzle: DrizzleService,
-  capability: AccountCapability["Service"],
-  storage: StorageProvider["Service"],
-  ownerWorkosUserId: string,
-  snippetId: string,
-) {
-  const snippet = yield* loadAuthorizedSnippet(drizzle, capability, ownerWorkosUserId, snippetId);
-  const url = yield* storage
-    .getDownloadUrl({
+  const download = yield* storage
+    .getDownloadTarget({
       storageProvider: snippet.storageProvider,
       storageObjectId: snippet.storageObjectId,
       workosUserId: ownerWorkosUserId,
@@ -265,46 +216,7 @@ const prepareSnippetDownload = Effect.fn("SnippetRpcs.prepareDownload")(function
     storageProvider: snippet.storageProvider,
     fileName: snippet.fileName,
     byteSize: snippet.byteSize,
-    // Provider credentials remain backend-owned. The empty collection preserves
-    // compatibility with Desktop clients that predate signed browser downloads.
-    download: { url, headers: [] },
-  };
-});
-
-const getSnippetContent = Effect.fn("SnippetRpcs.getContent")(function* (
-  drizzle: DrizzleService,
-  capability: AccountCapability["Service"],
-  storage: StorageProvider["Service"],
-  ownerWorkosUserId: string,
-  snippetId: string,
-) {
-  const snippet = yield* loadAuthorizedSnippet(drizzle, capability, ownerWorkosUserId, snippetId);
-  if (snippet.byteSize > WEB_SNIPPET_CONTENT_MAX_BYTES) {
-    return yield* new RpcError({
-      code: "FORBIDDEN",
-      message: "This snippet is too large for browser Copy or Open. Download it instead.",
-    });
-  }
-
-  const content = yield* storage
-    .downloadObject({
-      storageProvider: snippet.storageProvider,
-      storageObjectId: snippet.storageObjectId,
-      expectedByteSize: snippet.byteSize,
-      workosUserId: ownerWorkosUserId,
-    })
-    .pipe(mapStorageErrorsToRpc);
-  if (content.byteLength !== snippet.byteSize) {
-    return yield* new RpcError({
-      code: "INTERNAL_SERVER_ERROR",
-      message: "Stored object size does not match snippet metadata.",
-    });
-  }
-  return {
-    storageProvider: snippet.storageProvider,
-    fileName: snippet.fileName,
-    byteSize: snippet.byteSize,
-    content,
+    download,
   };
 });
 
@@ -317,41 +229,31 @@ const deleteSnippet = Effect.fn("SnippetRpcs.delete")(function* (
   const deleted = yield* drizzle.db
     .transaction((tx) =>
       Effect.gen(function* () {
-        if ((yield* lockStorageLifecycleState(tx, ownerWorkosUserId)) !== null) {
-          return { type: "cleanup" as const };
-        }
         const [removed] = yield* tx
           .delete(snippets)
           .where(and(eq(snippets.id, snippetId), eq(snippets.ownerWorkosUserId, ownerWorkosUserId)))
           .returning();
         if (removed !== undefined) yield* notifySnippetChanges(tx, ownerWorkosUserId);
-        return { type: "deleted" as const, snippet: removed };
+        return removed;
       }),
     )
     .pipe(Effect.orDie);
-  if (deleted.type === "cleanup") {
-    return yield* new RpcError({
-      code: "CONFLICT",
-      message: "Storage cleanup is in progress. Deleting this Snippet was rejected.",
-    });
-  }
-  if (deleted.snippet === undefined) return;
+  if (deleted === undefined) return;
 
   yield* storage
     .deleteObject({
-      storageProvider: deleted.snippet.storageProvider,
-      storageObjectId: deleted.snippet.storageObjectId,
-      workosUserId: deleted.snippet.ownerWorkosUserId,
+      storageProvider: deleted.storageProvider,
+      storageObjectId: deleted.storageObjectId,
+      workosUserId: deleted.ownerWorkosUserId,
     })
     .pipe(
       Effect.catchCause((cause) =>
         Effect.logWarning("Could not delete orphaned provider content", {
-          ...telemetryErrorAttributes(Cause.squash(cause)),
-          snippetId: deleted.snippet.id,
-          storageProvider: deleted.snippet.storageProvider,
+          cause,
+          snippetId: deleted.id,
+          storageProvider: deleted.storageProvider,
         }),
       ),
-      Effect.forkDetach({ startImmediately: true }),
     );
 });
 
@@ -371,35 +273,15 @@ export const SnippetRpcsLive = Effect.gen(function* () {
 
   return SnippetRpcs.of({
     PrepareSnippetUpload: Effect.fn("rpc.PrepareSnippetUpload")(function* (input) {
-      const capability = yield* AccountCapability;
-      const request = yield* AuthenticatedRpcRequest;
       const storage = yield* StorageProvider;
       const currentUser = yield* CurrentUser;
-      const requestKind = yield* snippetUploadRequestKind(request.origin);
-      yield* capability.authorizeProductCommand(currentUser.id, input.storageProvider);
-      const prepared = yield* prepareSnippetUpload(storage, currentUser.id, input).pipe(
+      return yield* prepareSnippetUpload(storage, currentUser.id, input).pipe(
         Effect.annotateSpans({ id: input.id }),
       );
-      if (
-        requestKind === "WEB" &&
-        (prepared.storageProvider !== input.storageProvider ||
-          !isSupportedProviderUploadTarget(input.storageProvider, prepared.upload.url))
-      ) {
-        yield* Effect.logError("Provider returned an unsupported Web upload target", {
-          storageProvider: input.storageProvider,
-        });
-        return yield* new RpcError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: "The storage provider did not return a supported Web upload target.",
-        });
-      }
-      return prepared;
     }),
     PublishSnippet: Effect.fn("rpc.PublishSnippet")(function* (input) {
-      const capability = yield* AccountCapability;
       const drizzle = yield* Drizzle;
       const currentUser = yield* CurrentUser;
-      yield* capability.authorizeProductCommand(currentUser.id, input.storageProvider);
       return yield* publishSnippet(drizzle, currentUser.id, input).pipe(
         Effect.annotateSpans({ id: input.id }),
       );
@@ -421,7 +303,7 @@ export const SnippetRpcsLive = Effect.gen(function* () {
           ).pipe(
             Stream.tapError((cause) =>
               Effect.logError("Snippet invalidation stream failed", {
-                ...telemetryErrorAttributes(cause),
+                cause,
                 ownerWorkosUserId: currentUser.id,
               }),
             ),
@@ -436,35 +318,19 @@ export const SnippetRpcsLive = Effect.gen(function* () {
         }),
       ),
     PrepareSnippetDownload: Effect.fn("rpc.PrepareSnippetDownload")(function* (input) {
-      const capability = yield* AccountCapability;
       const drizzle = yield* Drizzle;
       const storage = yield* StorageProvider;
       const currentUser = yield* CurrentUser;
-      return yield* prepareSnippetDownload(
-        drizzle,
-        capability,
-        storage,
-        currentUser.id,
-        input.id,
-      ).pipe(Effect.annotateSpans({ id: input.id }));
-    }),
-    GetSnippetContent: Effect.fn("rpc.GetSnippetContent")(function* (input) {
-      const capability = yield* AccountCapability;
-      const drizzle = yield* Drizzle;
-      const storage = yield* StorageProvider;
-      const currentUser = yield* CurrentUser;
-      return yield* getSnippetContent(drizzle, capability, storage, currentUser.id, input.id).pipe(
+      return yield* prepareSnippetDownload(drizzle, storage, currentUser.id, input.id).pipe(
         Effect.annotateSpans({ id: input.id }),
       );
     }),
     DeleteSnippet: Effect.fn("rpc.DeleteSnippet")(function* (input) {
-      const capability = yield* AccountCapability;
       const drizzle = yield* Drizzle;
       const storage = yield* StorageProvider;
       const currentUser = yield* CurrentUser;
 
       yield* Effect.logInfo("Deleting snippet", { id: input.id });
-      yield* capability.authorizeSnippetDeletion(currentUser.id);
       return yield* deleteSnippet(drizzle, storage, currentUser.id, input.id).pipe(
         Effect.annotateSpans({ id: input.id }),
       );

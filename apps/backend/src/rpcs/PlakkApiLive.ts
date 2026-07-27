@@ -1,17 +1,14 @@
 import {
   AccountRpcs,
-  BillingRpcs,
   CurrentUser,
   HealthRpcs,
   PlakkApi,
   type AccountStatus,
 } from "@plakk/shared/PlakkApi";
+import { RpcError } from "@plakk/shared/RpcError";
 import * as Effect from "effect/Effect";
 
-import { AccountCapability } from "../account/AccountCapability.ts";
-import { AccountBilling } from "../billing/AccountBilling.ts";
-import { telemetryErrorAttributes } from "../telemetry/TelemetrySanitization.ts";
-import { RpcError } from "@plakk/shared/RpcError";
+import { StorageProvider } from "../storage/StorageProvider.ts";
 import { SnippetRpcsLive } from "./SnippetRpcsLive.ts";
 import { StorageRpcsLive } from "./StorageRpcsLive.ts";
 
@@ -22,50 +19,26 @@ const HealthRpcsLive = HealthRpcs.of({
 const AccountRpcsLive = AccountRpcs.of({
   GetAccountStatus: Effect.fn("rpc.GetAccountStatus")(function* () {
     const currentUser = yield* CurrentUser;
-    const capability = yield* AccountCapability;
-    const accountStatus: AccountStatus = yield* capability.getStatus(currentUser.id);
+    const storage = yield* StorageProvider;
+    const storageProvider = yield* storage.getLinkedProvider(currentUser.id).pipe(
+      Effect.mapError(
+        (error) =>
+          new RpcError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: error.message,
+          }),
+      ),
+    );
+    const accountStatus: AccountStatus = {
+      canSync: true,
+      storageProvider,
+      blockedReasons: [],
+    };
     yield* Effect.logInfo("Returning account status", {
-      blockedReasons: accountStatus.blockedReasons,
-      entitlementStatus: accountStatus.accessEntitlement.status,
-      storageProvider: accountStatus.storageProvider,
+      storageProvider,
       workosUserId: currentUser.id,
     });
     return accountStatus;
-  }),
-});
-
-const BillingRpcsLive = BillingRpcs.of({
-  BeginBillingCheckout: Effect.fn("rpc.BeginBillingCheckout")(function* ({ plan }) {
-    const currentUser = yield* CurrentUser;
-    const billing = yield* AccountBilling;
-    return yield* billing.beginCheckout(currentUser.id, plan).pipe(
-      Effect.tapError((error) =>
-        Effect.logError("Could not begin Polar checkout", telemetryErrorAttributes(error)),
-      ),
-      Effect.mapError(
-        () =>
-          new RpcError({
-            code: "INTERNAL_SERVER_ERROR",
-            message: "Billing checkout is temporarily unavailable.",
-          }),
-      ),
-    );
-  }),
-  OpenBillingPortal: Effect.fn("rpc.OpenBillingPortal")(function* () {
-    const currentUser = yield* CurrentUser;
-    const billing = yield* AccountBilling;
-    return yield* billing.openPortal(currentUser.id).pipe(
-      Effect.tapError((error) =>
-        Effect.logError("Could not open Polar billing portal", telemetryErrorAttributes(error)),
-      ),
-      Effect.mapError(
-        () =>
-          new RpcError({
-            code: "INTERNAL_SERVER_ERROR",
-            message: "Billing recovery is temporarily unavailable.",
-          }),
-      ),
-    );
   }),
 });
 
@@ -75,7 +48,6 @@ export const PlakkApiLive = PlakkApi.toLayer(
     return PlakkApi.of({
       ...HealthRpcsLive,
       ...AccountRpcsLive,
-      ...BillingRpcsLive,
       ...StorageRpcsLive,
       ...snippetRpcs,
     });

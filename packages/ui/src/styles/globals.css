@@ -149,23 +149,3 @@
     -webkit-app-region: no-drag;
   }
 }
-
-@media (hover: none), (pointer: coarse) {
-  [data-snippet-actions] {
-    visibility: visible;
-  }
-
-  [data-snippet-actions] [data-snippet-desktop-delete] {
-    display: none;
-  }
-
-  [data-snippet-actions] [data-snippet-compact-actions] {
-    display: flex;
-  }
-
-  [data-snippet-actions] button,
-  [data-snippet-actions] [data-slot="dropdown-menu-trigger"] {
-    min-width: 2.25rem;
-    min-height: 2.25rem;
-  }
-}
