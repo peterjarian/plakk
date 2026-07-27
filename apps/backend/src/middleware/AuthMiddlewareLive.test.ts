@@ -1,4 +1,4 @@
-import { CurrentUser } from "@plakk/shared/PlakkApi";
+import { AuthenticatedRpcRequest, CurrentUser } from "@plakk/shared/PlakkApi";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { DateTime, Effect } from "effect";
 
@@ -40,9 +40,9 @@ describe("backend authentication", () => {
         return { id: "user-1" };
       });
 
-    const user = await Effect.runPromise(
+    const authenticated = await Effect.runPromise(
       runAuthenticatedRpc(
-        CurrentUser.pipe(
+        Effect.all({ request: AuthenticatedRpcRequest, user: CurrentUser }).pipe(
           Effect.tap(() =>
             Effect.sync(() => {
               events.push("rpc");
@@ -56,9 +56,9 @@ describe("backend authentication", () => {
       ),
     );
 
-    expect(user).toEqual({
-      id: "user-1",
-      requestOrigin: "https://app.plakk.io",
+    expect(authenticated).toEqual({
+      request: { origin: "https://app.plakk.io" },
+      user: { id: "user-1" },
     });
     expect(events).toEqual(["verified:workos-token", "trial:user-1", "rpc"]);
   });

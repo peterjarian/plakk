@@ -136,6 +136,23 @@ export class WebSnippetUploads extends Context.Service<WebSnippetUploads, WebSni
         );
       };
 
+      const recordPublicationCandidate = Effect.fn("WebSnippetUploads.recordPublicationCandidate")(
+        function* (id: string, storageObjectId: string) {
+          const updatedAt = DateTime.formatIso(yield* DateTime.now);
+          publish(
+            records.map((record) =>
+              record.kind === "LOCAL" && record.id === id
+                ? {
+                    ...record,
+                    publicationCandidate: { storageObjectId },
+                    updatedAt,
+                  }
+                : record,
+            ),
+          );
+        },
+      );
+
       const upload = Effect.fn("WebSnippetUploads.upload")(function* (
         input: WebSnippetUploadInput,
       ) {
@@ -149,6 +166,7 @@ export class WebSnippetUploads extends Context.Service<WebSnippetUploads, WebSni
           storageProvider: input.storageProvider,
           status: "UPLOADING",
           errorMessage: null,
+          publicationCandidate: null,
           createdAt,
           updatedAt: createdAt,
         };
@@ -156,7 +174,6 @@ export class WebSnippetUploads extends Context.Service<WebSnippetUploads, WebSni
 
         yield* Effect.gen(function* () {
           const prepared = yield* remote.prepare({
-            client: "WEB",
             id: input.id,
             fileName: input.fileName,
             byteSize: input.content.size,
@@ -169,6 +186,7 @@ export class WebSnippetUploads extends Context.Service<WebSnippetUploads, WebSni
             });
           }
           const transferred = yield* transfer.upload({ content: input.content, prepared });
+          yield* recordPublicationCandidate(input.id, transferred.storageObjectId);
           const snippet = yield* remote.publish({
             id: input.id,
             fileName: input.fileName,
@@ -187,9 +205,13 @@ export class WebSnippetUploads extends Context.Service<WebSnippetUploads, WebSni
         clear: Effect.sync(() => publish([])),
         dismiss: (id) =>
           Effect.sync(() => {
-            const record = records.find((candidate) => deviceSnippetRecordId(candidate) === id);
+            const record = records.find(
+              (candidate) => candidate.kind === "LOCAL" && candidate.id === id,
+            );
             if (record?.kind === "LOCAL" && record.status === "FAILED") {
-              publish(records.filter((candidate) => deviceSnippetRecordId(candidate) !== id));
+              publish(
+                records.filter((candidate) => !(candidate.kind === "LOCAL" && candidate.id === id)),
+              );
             }
           }),
         getSnapshot: () => records,

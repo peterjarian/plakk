@@ -62,6 +62,25 @@ describe("browser provider transfer", () => {
     expect(uploadFetch).not.toHaveBeenCalled();
   });
 
+  it.each([202, 308])(
+    "does not publish a single-request upload after non-final status %s",
+    async (status) => {
+      const uploadFetch = vi.fn(() => Promise.resolve(new Response(null, { status })));
+
+      await expect(
+        Effect.runPromise(
+          uploadPreparedBrowserContent(
+            { content: new Blob(["hello"]), prepared: prepared() },
+            uploadFetch,
+          ),
+        ),
+      ).rejects.toMatchObject({
+        _tag: "WebProviderTransferError",
+        message: "The upload provider did not confirm completion.",
+      });
+    },
+  );
+
   it("uploads byte ranges sequentially and uses the provider's returned object identity", async () => {
     const uploadFetch = vi
       .fn<typeof fetch>()

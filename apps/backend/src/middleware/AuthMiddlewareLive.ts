@@ -1,4 +1,4 @@
-import { AuthMiddleware, CurrentUser } from "@plakk/shared/PlakkApi";
+import { AuthenticatedRpcRequest, AuthMiddleware, CurrentUser } from "@plakk/shared/PlakkApi";
 import { RpcError } from "@plakk/shared/RpcError";
 import { WorkOS } from "@workos-inc/node";
 import * as Config from "effect/Config";
@@ -18,7 +18,7 @@ export const runAuthenticatedRpc = <A, E, R>(
   requestOrigin: string | undefined,
   verifyAccessToken: AccessTokenVerifier,
   accountCapability: AccountCapability["Service"],
-): Effect.Effect<A, E | RpcError, Exclude<R, CurrentUser>> =>
+): Effect.Effect<A, E | RpcError, Exclude<Exclude<R, CurrentUser>, AuthenticatedRpcRequest>> =>
   Effect.gen(function* () {
     const [scheme, accessToken] = authorization?.split(" ", 2) ?? [];
     if (scheme?.toLowerCase() !== "bearer" || accessToken === undefined || accessToken === "") {
@@ -30,10 +30,10 @@ export const runAuthenticatedRpc = <A, E, R>(
 
     const currentUser = yield* verifyAccessToken(accessToken);
     yield* accountCapability.startTrial(currentUser.id);
-    return yield* Effect.provideService(effect, CurrentUser, {
-      ...currentUser,
-      requestOrigin: requestOrigin ?? null,
-    });
+    return yield* effect.pipe(
+      Effect.provideService(CurrentUser, currentUser),
+      Effect.provideService(AuthenticatedRpcRequest, { origin: requestOrigin ?? null }),
+    );
   });
 
 const makeAuthMiddleware = (

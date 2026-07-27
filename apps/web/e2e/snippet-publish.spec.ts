@@ -138,7 +138,12 @@ test("converges lost responses, exposes conflicts and failures, and enforces res
   await expect(
     page.getByText("Snippet identifier is already used by different content."),
   ).toBeVisible();
+  await page.getByRole("button", { name: "Refresh upload snapshot" }).click();
+  await expect(
+    page.getByText("Snippet identifier is already used by different content."),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Dismiss failed upload" }).click();
+  await expect(page.getByText("conflict.bin")).toBeVisible();
 
   await fileInput.setInputFiles({
     name: "lost-response.bin",
@@ -150,7 +155,7 @@ test("converges lost responses, exposes conflicts and failures, and enforces res
   await expect(page.getByText("lost-response.bin")).toBeVisible();
   await expect(page.getByText("Controlled publication response was lost.")).toHaveCount(0);
 
-  await page.getByRole("button", { name: "Restrict billing" }).click();
+  await page.getByRole("button", { name: "Restrict billing" }).dispatchEvent("click");
   await expect(page.getByText("Billing access required.")).toBeVisible();
   await expect(page.getByPlaceholder("Paste or write whatever you want")).toHaveCount(0);
   const billingPrepareCount = await page.locator("html").getAttribute("data-prepare-count");
@@ -166,8 +171,8 @@ test("converges lost responses, exposes conflicts and failures, and enforces res
     billingPrepareCount ?? "0",
   );
 
-  await page.getByRole("button", { name: "Restore commands" }).click();
-  await page.getByRole("button", { name: "Restrict storage" }).click();
+  await page.getByRole("button", { name: "Restore commands" }).dispatchEvent("click");
+  await page.getByRole("button", { name: "Restrict storage" }).dispatchEvent("click");
   await expect(page.getByPlaceholder("Paste or write whatever you want")).toHaveCount(0);
   const storagePrepareCount = await page.locator("html").getAttribute("data-prepare-count");
   await page.getByRole("main", { name: "Plakk" }).evaluate((main) => {

@@ -115,6 +115,9 @@ export const uploadPreparedBrowserContent = Effect.fn("WebProviderTransfer.uploa
         range: null,
         uploadFetch,
       });
+      if (response.status === 202 || response.status === 308) {
+        return yield* transferError("The upload provider did not confirm completion.");
+      }
       return { storageObjectId: yield* responseObjectId(response, prepared) };
     }
 

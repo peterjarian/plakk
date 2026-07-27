@@ -1,7 +1,6 @@
-import { parseExactHttpOrigin } from "@plakk/shared/ExactHttpOrigin";
 import * as Data from "effect/Data";
 
-const invalidOriginMessage = "PLAKK_WEB_ORIGIN must be an exact HTTP(S) origin.";
+import { configuredWebOrigin as validateConfiguredWebOrigin } from "./WebOrigin.ts";
 
 export class InvalidCorsConfiguration extends Data.TaggedError("InvalidCorsConfiguration")<{
   readonly cause: unknown;
@@ -12,12 +11,12 @@ export const allowedBackendOrigins = (
   configuredWebOrigin: string | undefined,
 ): ReadonlyArray<string> => {
   if (configuredWebOrigin === undefined) return ["plakk-app://renderer"];
-  const webOrigin = parseExactHttpOrigin(configuredWebOrigin);
-  if (webOrigin === null) {
+  try {
+    return ["plakk-app://renderer", validateConfiguredWebOrigin(configuredWebOrigin)];
+  } catch {
     throw new InvalidCorsConfiguration({
       cause: "redacted-invalid-web-origin",
-      message: invalidOriginMessage,
+      message: "PLAKK_WEB_ORIGIN must be an exact HTTP(S) origin.",
     });
   }
-  return ["plakk-app://renderer", webOrigin];
 };

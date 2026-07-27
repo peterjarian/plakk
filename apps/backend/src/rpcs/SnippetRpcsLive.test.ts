@@ -6,6 +6,7 @@ import {
 } from "@plakk/db";
 import { snippets, type SnippetRow } from "@plakk/db/schema";
 import {
+  AuthenticatedRpcRequest,
   CurrentUser,
   SNIPPET_INVALIDATION_KEEP_ALIVE,
   SNIPPETS_CHANGED,
@@ -32,7 +33,6 @@ type SnippetRpcsHandlers = Effect.Success<typeof SnippetRpcsLive>;
 const timestamp = DateTime.toDateUtc(DateTime.makeUnsafe("2026-07-20T20:00:00.000Z"));
 const currentUser = {
   id: "user-1",
-  requestOrigin: "https://app.plakk.io",
   firstName: null,
   lastName: null,
   email: null,
@@ -118,15 +118,21 @@ const withSnippetRpcs = <A, E, R>(
 const runSnippetEffect = <A, E>(
   use: (
     rpcs: SnippetRpcsHandlers,
-  ) => Effect.Effect<A, E, AccountCapability | CurrentUser | Drizzle | StorageProvider>,
+  ) => Effect.Effect<
+    A,
+    E,
+    AccountCapability | AuthenticatedRpcRequest | CurrentUser | Drizzle | StorageProvider
+  >,
   db: DrizzleService["db"],
   storage: StorageProvider["Service"] = storageService(),
   user: CurrentUser["Service"] = currentUser,
   capability: AccountCapability["Service"] = accountCapabilityService(),
+  requestOrigin = "https://app.plakk.io",
 ) =>
   Effect.runPromise(
     withSnippetRpcs(use).pipe(
       Effect.provideService(AccountCapability, capability),
+      Effect.provideService(AuthenticatedRpcRequest, { origin: requestOrigin }),
       Effect.provideService(CurrentUser, user),
       Effect.provideService(Drizzle, { db }),
       Effect.provideService(StorageProvider, storage),
@@ -319,7 +325,7 @@ describe("completed Snippet publication", () => {
     const { storageObjectId: _storageObjectId, ...prepareInput } = input;
 
     await runSnippetEffect(
-      (rpcs) => rpcs.PrepareSnippetUpload({ ...prepareInput, client: "WEB" } as never),
+      (rpcs) => rpcs.PrepareSnippetUpload(prepareInput),
       store.db,
       storageService({ prepareUpload }),
     );
@@ -345,10 +351,12 @@ describe("completed Snippet publication", () => {
 
     await expect(
       runSnippetEffect(
-        (rpcs) => rpcs.PrepareSnippetUpload({ ...prepareInput, client: "WEB" } as never),
+        (rpcs) => rpcs.PrepareSnippetUpload(prepareInput),
         store.db,
         storageService({ prepareUpload }),
-        { ...currentUser, requestOrigin: "https://evil.example" },
+        currentUser,
+        accountCapabilityService(),
+        "https://evil.example",
       ),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
 
@@ -377,11 +385,45 @@ describe("completed Snippet publication", () => {
 
     await expect(
       runSnippetEffect(
-        (rpcs) => rpcs.PrepareSnippetUpload({ ...prepareInput, client: "WEB" } as never),
+        (rpcs) => rpcs.PrepareSnippetUpload(prepareInput),
         store.db,
         storageService({ prepareUpload }),
       ),
     ).rejects.toMatchObject({ code: "INTERNAL_SERVER_ERROR" });
+  });
+
+  it("keeps Desktop preparation on the native request origin", async () => {
+    const store = publicationDatabase();
+    const prepareUpload = vi.fn(() =>
+      Effect.succeed({
+        storageProvider: "GOOGLE_DRIVE" as const,
+        storageObjectId: null,
+        upload: {
+          method: "PUT" as const,
+          url: "https://desktop-provider-upload.example/upload",
+          headers: [],
+          strategy: { type: "single_request" as const },
+        },
+        expiresAt: null,
+      }),
+    );
+    const { storageObjectId: _storageObjectId, ...prepareInput } = {
+      ...publication,
+      mediaType: "text/plain",
+    };
+
+    await expect(
+      runSnippetEffect(
+        (rpcs) => rpcs.PrepareSnippetUpload(prepareInput),
+        store.db,
+        storageService({ prepareUpload }),
+        currentUser,
+        accountCapabilityService(),
+        "plakk-app://renderer",
+      ),
+    ).resolves.toMatchObject({
+      upload: { url: "https://desktop-provider-upload.example/upload" },
+    });
   });
 
   it("inserts only the completed Snippet and notifies before commit", async () => {
@@ -554,7 +596,6 @@ describe("account capability enforcement", () => {
         runSnippetEffect(
           (rpcs) =>
             rpcs.PrepareSnippetUpload({
-              client: "WEB",
               id: publication.id,
               fileName: publication.fileName,
               byteSize: publication.byteSize,

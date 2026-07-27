@@ -6,7 +6,10 @@ import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 import * as RpcMiddleware from "effect/unstable/rpc/RpcMiddleware";
 
 import { StorageProviderLiteral } from "../StorageProvider.ts";
+import { AuthenticatedRpcRequest } from "./AuthenticatedRpcRequest.ts";
 import { RpcError } from "./RpcError.ts";
+
+export { AuthenticatedRpcRequest } from "./AuthenticatedRpcRequest.ts";
 
 export const AccountBlockedReasonSchema = Schema.Literals(["billing", "storage"] as const);
 
@@ -133,7 +136,6 @@ export const SnippetInvalidationEventSchema = Schema.Literals([
 export type SnippetInvalidationEvent = typeof SnippetInvalidationEventSchema.Type;
 
 export const PrepareSnippetUploadPayloadSchema = Schema.Struct({
-  client: Schema.Literals(["DESKTOP", "WEB"] as const),
   id: SnippetIdSchema,
   fileName: Schema.String,
   byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
@@ -153,10 +155,9 @@ export const PublishSnippetPayloadSchema = Schema.Struct({
 
 export type PublishSnippetPayload = typeof PublishSnippetPayloadSchema.Type;
 
-export class CurrentUser extends Context.Service<
-  CurrentUser,
-  { readonly id: string; readonly requestOrigin: string | null }
->()("@plakk/shared/api/PlakkApi/CurrentUser") {}
+export class CurrentUser extends Context.Service<CurrentUser, { readonly id: string }>()(
+  "@plakk/shared/api/PlakkApi/CurrentUser",
+) {}
 
 export class InternalServerErrorMiddleware extends RpcMiddleware.Service<InternalServerErrorMiddleware>()(
   "InternalServerErrorMiddleware",
@@ -165,7 +166,7 @@ export class InternalServerErrorMiddleware extends RpcMiddleware.Service<Interna
 
 export class AuthMiddleware extends RpcMiddleware.Service<
   AuthMiddleware,
-  { provides: CurrentUser }
+  { provides: AuthenticatedRpcRequest | CurrentUser }
 >()("AuthMiddleware", { error: RpcError }) {}
 
 export const HealthRpcs = RpcGroup.make(

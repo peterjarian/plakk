@@ -1,9 +1,9 @@
-import { deriveSnippetPresentation, type DeviceSnippetRecord, type User } from "@plakk/shared";
+import { deriveSnippetPresentation, type User } from "@plakk/shared";
 import type { StorageProviderStatus } from "@plakk/shared/PlakkApi";
 import { AppHeader } from "@plakk/ui/components/AppHeader";
 import { SnippetComposer } from "@plakk/ui/components/SnippetComposer";
 import { SnippetList } from "@plakk/ui/components/SnippetList";
-import { SnippetRow, type SnippetRowItem } from "@plakk/ui/components/SnippetRow";
+import { LocalUploadSnippetRow, PublishedSnippetRow } from "@plakk/ui/components/SnippetRow";
 import { Button } from "@plakk/ui/components/primitives/button";
 import * as DateTime from "effect/DateTime";
 import { useState, type ClipboardEvent, type DragEvent } from "react";
@@ -230,18 +230,25 @@ export function HomeView(props: {
               emptyDescription="Published snippets from your Plakk account will appear here."
             >
               {state.snippets.map((record) => {
-                const snippet = webSnippetRowItem(record);
+                if (record.kind === "PUBLISHED") {
+                  return (
+                    <PublishedSnippetRow
+                      key={`published:${record.snippet.id}`}
+                      snippet={record.snippet}
+                      presentation={deriveSnippetPresentation({
+                        fileName: record.snippet.fileName,
+                      })}
+                      now={now}
+                    />
+                  );
+                }
                 return (
-                  <SnippetRow
-                    key={snippet.id}
-                    snippet={snippet}
-                    presentation={deriveSnippetPresentation({ fileName: snippet.fileName })}
+                  <LocalUploadSnippetRow
+                    key={`local:${record.id}`}
+                    snippet={record}
+                    presentation={deriveSnippetPresentation({ fileName: record.fileName })}
                     now={now}
-                    copied={false}
-                    onCopy={() => undefined}
-                    onDelete={() => onDismissUpload(snippet.id)}
-                    productActionsDisabled={uploadsDisabled}
-                    showActions={false}
+                    onDismiss={() => onDismissUpload(record.id)}
                   />
                 );
               })}
@@ -252,26 +259,3 @@ export function HomeView(props: {
     </main>
   );
 }
-
-const webSnippetRowItem = (record: DeviceSnippetRecord): SnippetRowItem =>
-  record.kind === "PUBLISHED"
-    ? {
-        ...record.snippet,
-        kind: "PUBLISHED",
-        localContentAvailability: { status: "NOT_AVAILABLE" },
-        localState: null,
-      }
-    : {
-        id: record.id,
-        fileName: record.fileName,
-        byteSize: record.byteSize,
-        storageProvider: record.storageProvider,
-        createdAt: record.createdAt,
-        updatedAt: record.updatedAt,
-        kind: "LOCAL",
-        localContentAvailability: { status: "NOT_AVAILABLE" },
-        localState: {
-          status: record.status,
-          errorMessage: record.errorMessage,
-        },
-      };

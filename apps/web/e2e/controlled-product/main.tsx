@@ -165,6 +165,13 @@ const snippetUploadsLayer = WebSnippetUploads.layer.pipe(
                 );
               }
               if (input.fileName.toLowerCase().includes("conflict")) {
+                snapshot = [
+                  {
+                    ...snippet(input.id, input.fileName),
+                    storageObjectId: `different-${input.storageObjectId}`,
+                  },
+                  ...snapshot.filter(({ id }) => id !== input.id),
+                ];
                 return Effect.fail(
                   new RpcError({
                     code: "CONFLICT",
@@ -223,7 +230,7 @@ function Controls() {
   return (
     <aside
       aria-label="Controlled transport"
-      className="fixed inset-x-3 bottom-3 z-50 grid grid-cols-4 gap-2 rounded-lg border bg-background p-2 shadow"
+      className="fixed inset-x-3 bottom-3 z-50 grid max-h-[calc(100vh-1.5rem)] grid-cols-4 gap-2 overflow-y-auto rounded-lg border bg-background p-2 shadow"
     >
       <Button
         type="button"

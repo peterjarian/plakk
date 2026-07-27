@@ -1,5 +1,4 @@
 import { isSupportedProviderUploadTarget } from "@plakk/shared";
-import { parseExactHttpOrigin } from "@plakk/shared/ExactHttpOrigin";
 import {
   and,
   desc,
@@ -12,6 +11,7 @@ import {
 } from "@plakk/db";
 import { snippets, type SnippetRow } from "@plakk/db/schema";
 import {
+  AuthenticatedRpcRequest,
   CurrentUser,
   SNIPPET_INVALIDATION_KEEP_ALIVE,
   SNIPPETS_CHANGED,
@@ -30,6 +30,7 @@ import * as Stream from "effect/Stream";
 
 import { AccountCapability } from "../account/AccountCapability.ts";
 import { type StorageDownloadError, StorageProvider } from "../storage/StorageProvider.ts";
+import { configuredWebOrigin as validateConfiguredWebOrigin } from "../WebOrigin.ts";
 
 const SNIPPET_INVALIDATION_CHANNEL = "plakk_snippet_invalidations";
 
@@ -126,29 +127,24 @@ const prepareSnippetUpload = Effect.fn("SnippetRpcs.prepareUpload")(function* (
     .pipe(mapStorageErrorsToRpc);
 });
 
-const authorizeWebUploadOrigin = Effect.fn("SnippetRpcs.authorizeWebUploadOrigin")(function* (
+const snippetUploadRequestKind = Effect.fn("SnippetRpcs.snippetUploadRequestKind")(function* (
   requestOrigin: string | null,
 ) {
+  if (requestOrigin === "plakk-app://renderer") return "DESKTOP" as const;
   const { configuredWebOrigin, nodeEnv } = yield* Effect.all({
     configuredWebOrigin: Config.string("PLAKK_WEB_ORIGIN"),
     nodeEnv: Config.string("NODE_ENV").pipe(Config.withDefault("development")),
   }).pipe(Effect.orDie);
-  const webOrigin = parseExactHttpOrigin(configuredWebOrigin);
-  if (webOrigin === null || (nodeEnv === "production" && !webOrigin.startsWith("https://"))) {
-    return yield* Effect.die(
-      new Error(
-        nodeEnv === "production"
-          ? "PLAKK_WEB_ORIGIN must be an exact HTTPS origin in production."
-          : "PLAKK_WEB_ORIGIN must be an exact HTTP(S) origin.",
-      ),
-    );
-  }
+  const webOrigin = yield* Effect.sync(() =>
+    validateConfiguredWebOrigin(configuredWebOrigin, nodeEnv === "production"),
+  ).pipe(Effect.orDie);
   if (requestOrigin !== webOrigin) {
     return yield* new RpcError({
       code: "FORBIDDEN",
       message: "Web upload preparation is unavailable from this origin.",
     });
   }
+  return "WEB" as const;
 });
 
 const publishSnippet = Effect.fn("SnippetRpcs.publish")(function* (
@@ -305,17 +301,16 @@ export const SnippetRpcsLive = Effect.gen(function* () {
   return SnippetRpcs.of({
     PrepareSnippetUpload: Effect.fn("rpc.PrepareSnippetUpload")(function* (input) {
       const capability = yield* AccountCapability;
+      const request = yield* AuthenticatedRpcRequest;
       const storage = yield* StorageProvider;
       const currentUser = yield* CurrentUser;
-      if (input.client === "WEB") {
-        yield* authorizeWebUploadOrigin(currentUser.requestOrigin);
-      }
+      const requestKind = yield* snippetUploadRequestKind(request.origin);
       yield* capability.authorizeProductCommand(currentUser.id, input.storageProvider);
       const prepared = yield* prepareSnippetUpload(storage, currentUser.id, input).pipe(
         Effect.annotateSpans({ id: input.id }),
       );
       if (
-        input.client === "WEB" &&
+        requestKind === "WEB" &&
         (prepared.storageProvider !== input.storageProvider ||
           !isSupportedProviderUploadTarget(input.storageProvider, prepared.upload.url))
       ) {

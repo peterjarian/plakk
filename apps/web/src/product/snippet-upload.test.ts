@@ -95,7 +95,6 @@ describe("Web page-lifetime Snippet uploads", () => {
     await test.runtime.runPromise(uploads.upload(input));
 
     expect(test.prepare).toHaveBeenCalledWith({
-      client: "WEB",
       id: input.id,
       fileName: input.fileName,
       byteSize: 4,
@@ -161,8 +160,23 @@ describe("Web page-lifetime Snippet uploads", () => {
         errorMessage: "Snippet identifier is already used by different content.",
       },
     ]);
+    const conflictingPublished = {
+      ...published,
+      storageObjectId: "different-drive-object",
+    };
+    await test.runtime.runPromise(uploads.replacePublished([conflictingPublished]));
+    expect(uploads.getSnapshot()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "LOCAL",
+          status: "FAILED",
+          errorMessage: "Snippet identifier is already used by different content.",
+        }),
+        { kind: "PUBLISHED", snippet: conflictingPublished },
+      ]),
+    );
     await test.runtime.runPromise(uploads.dismiss(input.id));
-    expect(uploads.getSnapshot()).toEqual([]);
+    expect(uploads.getSnapshot()).toEqual([{ kind: "PUBLISHED", snippet: conflictingPublished }]);
     await test.runtime.dispose();
   });
 

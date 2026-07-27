@@ -1,5 +1,4 @@
 import type { StorageProvider as StorageProviderName } from "@plakk/shared";
-import { parseExactHttpOrigin } from "@plakk/shared/ExactHttpOrigin";
 import {
   CurrentUser,
   StorageRpcs,
@@ -18,6 +17,7 @@ import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 
 import { getProviderSlug, StorageProvider } from "../storage/StorageProvider.ts";
+import { configuredWebOrigin as validateConfiguredWebOrigin } from "../WebOrigin.ts";
 
 const WORKOS_BASE_URL = "https://api.workos.com";
 
@@ -35,15 +35,7 @@ export const storageProviderReturnUrl = (
   origin: StorageOnboardingOrigin,
   requireHttps = false,
 ): string => {
-  const webOrigin = parseExactHttpOrigin(configuredWebOrigin);
-  if (webOrigin === null || (requireHttps && !webOrigin.startsWith("https://"))) {
-    throw new TypeError(
-      requireHttps
-        ? "PLAKK_WEB_ORIGIN must be an exact HTTPS origin in production."
-        : "PLAKK_WEB_ORIGIN must be an exact HTTP(S) origin.",
-    );
-  }
-
+  const webOrigin = validateConfiguredWebOrigin(configuredWebOrigin, requireHttps);
   const returnUrl = new URL("/storage", webOrigin);
   returnUrl.search = storageOnboardingRouteSearchParams(
     storageOnboardingReturnSearch(storageProvider, origin),
