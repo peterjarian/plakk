@@ -3,6 +3,7 @@
   "include": [
     "config.ts",
     "Issue130Proof.tsx",
+    "Issue132Proof.tsx",
     "main.tsx",
     "StorageManagementProof.tsx",
     "StorageOnboardingProof.tsx",

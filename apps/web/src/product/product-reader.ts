@@ -1,4 +1,5 @@
 import { parseExactHttpOrigin } from "@plakk/shared/ExactHttpOrigin";
+import { PLAKK_PRODUCTION_IDENTITIES } from "@plakk/shared/ProductionIdentities";
 import {
   SNIPPETS_CHANGED,
   type AccountStatus,
@@ -11,6 +12,8 @@ import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
 import { RpcClientError } from "effect/unstable/rpc/RpcClientError";
+
+import { observeBrowserRpc, type BrowserTelemetry } from "./browser-telemetry.ts";
 
 export type RpcRequestOptions = {
   readonly headers: Readonly<Record<string, string>>;
@@ -84,11 +87,22 @@ export const authenticatedRpcOptions = Effect.fn("WebProductReader.authorize")(f
 export const readAuthenticatedProduct = Effect.fn("WebProductReader.read")(function* (
   rpc: WebProductRpcClient,
   getAccessToken: () => Promise<string | undefined>,
+  telemetry?: BrowserTelemetry,
 ): Effect.fn.Return<AccountProductSnapshot, AccountProductReadError> {
   const options = yield* authenticatedRpcOptions(getAccessToken);
-  const [account, snippets] = yield* Effect.all(
-    [rpc.GetAccountStatus(undefined, options), rpc.GetSnippetSnapshot(undefined, options)],
-    { concurrency: "unbounded" },
+  const invoke = (requestOptions: RpcRequestOptions) =>
+    Effect.all(
+      [
+        rpc.GetAccountStatus(undefined, requestOptions),
+        rpc.GetSnippetSnapshot(undefined, requestOptions),
+      ],
+      { concurrency: "unbounded" },
+    );
+  const [account, snippets] = yield* observeBrowserRpc(
+    telemetry,
+    "account.refresh",
+    options,
+    invoke,
   );
   return { account, snippets };
 });
@@ -121,6 +135,11 @@ export const resolveProductRpcUrl = (
   }
   if (!allowDevelopmentFallback && !origin.startsWith("https://")) {
     throw new Error("VITE_PLAKK_API_ORIGIN must use HTTPS outside local development.");
+  }
+  if (!allowDevelopmentFallback && origin !== PLAKK_PRODUCTION_IDENTITIES.api) {
+    throw new Error(
+      `VITE_PLAKK_API_ORIGIN must be ${PLAKK_PRODUCTION_IDENTITIES.api} in production.`,
+    );
   }
   return `${origin}/api/rpc`;
 };

@@ -15,6 +15,14 @@
       "import": "./src/api/ExactHttpOrigin.ts",
       "types": "./src/api/ExactHttpOrigin.ts"
     },
+    "./BrowserTelemetry": {
+      "import": "./src/api/BrowserTelemetry.ts",
+      "types": "./src/api/BrowserTelemetry.ts"
+    },
+    "./ProductionIdentities": {
+      "import": "./src/api/ProductionIdentities.ts",
+      "types": "./src/api/ProductionIdentities.ts"
+    },
     "./RpcError": {
       "import": "./src/api/RpcError.ts",
       "types": "./src/api/RpcError.ts"

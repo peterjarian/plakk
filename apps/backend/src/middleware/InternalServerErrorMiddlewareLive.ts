@@ -3,6 +3,8 @@ import { RpcError } from "@plakk/shared/RpcError";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
+import { telemetryErrorAttributes } from "../telemetry/TelemetrySanitization.ts";
+
 export const InternalServerErrorMiddlewareLive = Layer.succeed(InternalServerErrorMiddleware)(
   InternalServerErrorMiddleware.of((effect) =>
     effect.pipe(
@@ -13,7 +15,10 @@ export const InternalServerErrorMiddlewareLive = Layer.succeed(InternalServerErr
             Effect.orElseSucceed(() => "untraced"),
           );
 
-          yield* Effect.logError("Unhandled RPC defect", { defect, traceId });
+          yield* Effect.logError("Unhandled RPC defect", {
+            ...telemetryErrorAttributes(defect),
+            traceId,
+          });
 
           return yield* new RpcError({
             code: "INTERNAL_SERVER_ERROR",

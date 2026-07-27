@@ -15,6 +15,7 @@ import {
   type MissingAccessToken,
   type RpcRequestOptions,
 } from "./product-reader.ts";
+import { observeBrowserRpc, type BrowserTelemetry } from "./browser-telemetry.ts";
 
 export type StorageOnboardingRead = {
   readonly account: AccountStatus;
@@ -67,21 +68,27 @@ export const readStorageOnboarding = Effect.fn("StorageOnboardingClient.read")(f
   getAccessToken: () => Promise<string | undefined>,
   providerHint: StorageProvider | null,
   consumeAuthorization: boolean,
+  telemetry?: BrowserTelemetry,
 ): Effect.fn.Return<StorageOnboardingRead, StorageOnboardingClientError> {
   const options = yield* authenticatedRpcOptions(getAccessToken);
-  const initialAccount = yield* rpc.GetAccountStatus(undefined, options);
-  const provider = initialAccount.storageProvider ?? providerHint;
-  if (provider === null) return { account: initialAccount, providerStatus: null };
+  const invoke = Effect.fn("StorageOnboardingClient.readObserved")(function* (
+    requestOptions: RpcRequestOptions,
+  ) {
+    const initialAccount = yield* rpc.GetAccountStatus(undefined, requestOptions);
+    const provider = initialAccount.storageProvider ?? providerHint;
+    if (provider === null) return { account: initialAccount, providerStatus: null };
 
-  const providerStatus = yield* rpc.GetStorageProviderStatus(
-    { consumeAuthorization, storageProvider: provider },
-    options,
-  );
-  const account =
-    providerStatus.status === "CONNECTED"
-      ? yield* rpc.GetAccountStatus(undefined, options)
-      : initialAccount;
-  return { account, providerStatus };
+    const providerStatus = yield* rpc.GetStorageProviderStatus(
+      { consumeAuthorization, storageProvider: provider },
+      requestOptions,
+    );
+    const account =
+      providerStatus.status === "CONNECTED"
+        ? yield* rpc.GetAccountStatus(undefined, requestOptions)
+        : initialAccount;
+    return { account, providerStatus };
+  });
+  return yield* observeBrowserRpc(telemetry, "storage.status", options, invoke);
 });
 
 export const beginStorageProviderLink = Effect.fn("StorageOnboardingClient.begin")(function* (
@@ -89,7 +96,10 @@ export const beginStorageProviderLink = Effect.fn("StorageOnboardingClient.begin
   getAccessToken: () => Promise<string | undefined>,
   storageProvider: StorageProvider,
   origin: StorageOnboardingOrigin,
+  telemetry?: BrowserTelemetry,
 ): Effect.fn.Return<{ readonly url: string }, StorageOnboardingClientError> {
   const options = yield* authenticatedRpcOptions(getAccessToken);
-  return yield* rpc.BeginStorageProviderLink({ storageProvider, origin }, options);
+  const invoke = (requestOptions: RpcRequestOptions) =>
+    rpc.BeginStorageProviderLink({ storageProvider, origin }, requestOptions);
+  return yield* observeBrowserRpc(telemetry, "storage.begin-link", options, invoke);
 });

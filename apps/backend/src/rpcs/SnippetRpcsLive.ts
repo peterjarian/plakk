@@ -36,6 +36,7 @@ import {
 import { lockStorageLifecycleState } from "../storage/StorageLifecycle.ts";
 import { type StorageDownloadError, StorageProvider } from "../storage/StorageProvider.ts";
 import { configuredWebOrigin as validateConfiguredWebOrigin } from "../WebOrigin.ts";
+import { telemetryErrorAttributes } from "../telemetry/TelemetrySanitization.ts";
 
 const reconnectSnippetNotifications = <E>(
   listen: () => Stream.Stream<PostgresNotificationEvent, E>,
@@ -47,7 +48,10 @@ const reconnectSnippetNotifications = <E>(
       return listen().pipe(Stream.filter((event) => event._tag !== "Connected" || attempts > 1));
     }).pipe(
       Stream.tapError((error) =>
-        Effect.logWarning("PostgreSQL notification listener disconnected", { error }),
+        Effect.logWarning(
+          "PostgreSQL notification listener disconnected",
+          telemetryErrorAttributes(error),
+        ),
       ),
       Stream.retry(Schedule.spaced("1 second")),
     );
@@ -341,7 +345,7 @@ const deleteSnippet = Effect.fn("SnippetRpcs.delete")(function* (
     .pipe(
       Effect.catchCause((cause) =>
         Effect.logWarning("Could not delete orphaned provider content", {
-          cause,
+          ...telemetryErrorAttributes(cause),
           snippetId: deleted.snippet.id,
           storageProvider: deleted.snippet.storageProvider,
         }),
@@ -416,7 +420,7 @@ export const SnippetRpcsLive = Effect.gen(function* () {
           ).pipe(
             Stream.tapError((cause) =>
               Effect.logError("Snippet invalidation stream failed", {
-                cause,
+                ...telemetryErrorAttributes(cause),
                 ownerWorkosUserId: currentUser.id,
               }),
             ),

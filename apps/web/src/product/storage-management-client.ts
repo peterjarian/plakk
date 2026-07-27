@@ -15,6 +15,7 @@ import {
   type MissingAccessToken,
   type RpcRequestOptions,
 } from "./product-reader.ts";
+import { observeBrowserRpc, type BrowserTelemetry } from "./browser-telemetry.ts";
 
 export interface StorageManagementRpcClient {
   readonly BeginStorageCleanup: (
@@ -70,9 +71,12 @@ export class StorageManagementClient extends Context.Service<
 export const readStorageManagement = Effect.fn("StorageManagementClient.read")(function* (
   rpc: StorageManagementRpcClient,
   getAccessToken: () => Promise<string | undefined>,
+  telemetry?: BrowserTelemetry,
 ) {
   const options = yield* authenticatedRpcOptions(getAccessToken);
-  return yield* rpc.GetStorageManagementState(undefined, options);
+  const invoke = (requestOptions: RpcRequestOptions) =>
+    rpc.GetStorageManagementState(undefined, requestOptions);
+  return yield* observeBrowserRpc(telemetry, "storage.management", options, invoke);
 });
 
 export const beginStorageCleanup = Effect.fn("StorageManagementClient.beginCleanup")(function* (
@@ -81,26 +85,32 @@ export const beginStorageCleanup = Effect.fn("StorageManagementClient.beginClean
   action: StorageCleanupAction,
   storageProvider: StorageProvider,
   expectedSnippetCount: number,
+  telemetry?: BrowserTelemetry,
 ) {
   const options = yield* authenticatedRpcOptions(getAccessToken);
-  return yield* rpc.BeginStorageCleanup(
-    {
-      action,
-      confirmation: "DELETE",
-      expectedSnippetCount,
-      storageProvider,
-    },
-    options,
-  );
+  const invoke = (requestOptions: RpcRequestOptions) =>
+    rpc.BeginStorageCleanup(
+      {
+        action,
+        confirmation: "DELETE",
+        expectedSnippetCount,
+        storageProvider,
+      },
+      requestOptions,
+    );
+  return yield* observeBrowserRpc(telemetry, "storage.begin-cleanup", options, invoke);
 });
 
 export const retryStorageCleanup = Effect.fn("StorageManagementClient.retryCleanup")(function* (
   rpc: StorageManagementRpcClient,
   getAccessToken: () => Promise<string | undefined>,
   storageProvider: StorageProvider,
+  telemetry?: BrowserTelemetry,
 ) {
   const options = yield* authenticatedRpcOptions(getAccessToken);
-  return yield* rpc.RetryStorageCleanup({ storageProvider }, options);
+  const invoke = (requestOptions: RpcRequestOptions) =>
+    rpc.RetryStorageCleanup({ storageProvider }, requestOptions);
+  return yield* observeBrowserRpc(telemetry, "storage.retry-cleanup", options, invoke);
 });
 
 export const reauthorizeStorageProvider = Effect.fn("StorageManagementClient.reauthorize")(
@@ -108,8 +118,11 @@ export const reauthorizeStorageProvider = Effect.fn("StorageManagementClient.rea
     rpc: StorageManagementRpcClient,
     getAccessToken: () => Promise<string | undefined>,
     storageProvider: StorageProvider,
+    telemetry?: BrowserTelemetry,
   ) {
     const options = yield* authenticatedRpcOptions(getAccessToken);
-    return yield* rpc.BeginStorageProviderLink({ origin: "WEB", storageProvider }, options);
+    const invoke = (requestOptions: RpcRequestOptions) =>
+      rpc.BeginStorageProviderLink({ origin: "WEB", storageProvider }, requestOptions);
+    return yield* observeBrowserRpc(telemetry, "storage.begin-link", options, invoke);
   },
 );

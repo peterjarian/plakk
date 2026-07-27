@@ -26,6 +26,15 @@ import {
 } from "./storage-management-client.ts";
 import { WebSnippetActionRemote } from "./snippet-actions.ts";
 import { WebSnippetUploadRemote } from "./snippet-upload.ts";
+import { makeBrowserTelemetry, makeBrowserTelemetryExporter } from "./browser-telemetry.ts";
+
+export const resolveBrowserTelemetryProxyUrl = (rpcUrl: string): string => {
+  const url = new URL(rpcUrl);
+  if (url.pathname !== "/api/rpc" || url.search !== "" || url.hash !== "") {
+    throw new Error("The product RPC URL must be the canonical /api/rpc endpoint.");
+  }
+  return `${url.origin}/api/telemetry/v1/traces`;
+};
 
 export const makeWebProductClientLayer = (options: {
   readonly getAccessToken: () => Promise<string | undefined>;
@@ -45,19 +54,24 @@ export const makeWebProductClientLayer = (options: {
 
   return Layer.effectContext(
     RpcClient.make(PlakkApi).pipe(
-      Effect.map((rpc) =>
-        Context.make(
+      Effect.map((rpc) => {
+        const telemetry = makeBrowserTelemetry({
+          exporter: makeBrowserTelemetryExporter(resolveBrowserTelemetryProxyUrl(options.rpcUrl)),
+        });
+
+        return Context.make(
           AccountProductReader,
           AccountProductReader.of({
             invalidations: watchAuthenticatedInvalidations(rpc, options.getAccessToken),
-            read: readAuthenticatedProduct(rpc, options.getAccessToken),
+            read: readAuthenticatedProduct(rpc, options.getAccessToken, telemetry),
           }),
         ).pipe(
           Context.add(
             BillingClient,
             BillingClient.of({
-              beginCheckout: (plan) => beginBillingCheckout(rpc, options.getAccessToken, plan),
-              openPortal: openBillingPortal(rpc, options.getAccessToken),
+              beginCheckout: (plan) =>
+                beginBillingCheckout(rpc, options.getAccessToken, plan, telemetry),
+              openPortal: openBillingPortal(rpc, options.getAccessToken, telemetry),
             }),
           ),
           Context.add(
@@ -70,25 +84,33 @@ export const makeWebProductClientLayer = (options: {
                   action,
                   storageProvider,
                   expectedSnippetCount,
+                  telemetry,
                 ),
-              read: readStorageManagement(rpc, options.getAccessToken),
+              read: readStorageManagement(rpc, options.getAccessToken, telemetry),
               reauthorize: (storageProvider) =>
-                reauthorizeStorageProvider(rpc, options.getAccessToken, storageProvider),
+                reauthorizeStorageProvider(rpc, options.getAccessToken, storageProvider, telemetry),
               retryCleanup: (storageProvider) =>
-                retryStorageCleanup(rpc, options.getAccessToken, storageProvider),
+                retryStorageCleanup(rpc, options.getAccessToken, storageProvider, telemetry),
             }),
           ),
           Context.add(
             StorageOnboardingClient,
             StorageOnboardingClient.of({
               begin: (storageProvider, origin) =>
-                beginStorageProviderLink(rpc, options.getAccessToken, storageProvider, origin),
+                beginStorageProviderLink(
+                  rpc,
+                  options.getAccessToken,
+                  storageProvider,
+                  origin,
+                  telemetry,
+                ),
               read: (providerHint, consumeAuthorization) =>
                 readStorageOnboarding(
                   rpc,
                   options.getAccessToken,
                   providerHint,
                   consumeAuthorization,
+                  telemetry,
                 ),
             }),
           ),
@@ -97,17 +119,29 @@ export const makeWebProductClientLayer = (options: {
             WebSnippetActionRemote.of({
               delete: (id) =>
                 authenticatedRpcOptions(options.getAccessToken).pipe(
-                  Effect.flatMap((requestOptions) => rpc.DeleteSnippet({ id }, requestOptions)),
+                  Effect.flatMap((requestOptions) =>
+                    telemetry.observeRpc("snippet.delete", requestOptions, (tracedOptions) =>
+                      rpc.DeleteSnippet({ id }, tracedOptions),
+                    ),
+                  ),
                 ),
               prepareDownload: (id) =>
                 authenticatedRpcOptions(options.getAccessToken).pipe(
                   Effect.flatMap((requestOptions) =>
-                    rpc.PrepareSnippetDownload({ id }, requestOptions),
+                    telemetry.observeRpc(
+                      "snippet.prepare-download",
+                      requestOptions,
+                      (tracedOptions) => rpc.PrepareSnippetDownload({ id }, tracedOptions),
+                    ),
                   ),
                 ),
               read: (id) =>
                 authenticatedRpcOptions(options.getAccessToken).pipe(
-                  Effect.flatMap((requestOptions) => rpc.GetSnippetContent({ id }, requestOptions)),
+                  Effect.flatMap((requestOptions) =>
+                    telemetry.observeRpc("snippet.read-content", requestOptions, (tracedOptions) =>
+                      rpc.GetSnippetContent({ id }, tracedOptions),
+                    ),
+                  ),
                 ),
             }),
           ),
@@ -117,17 +151,25 @@ export const makeWebProductClientLayer = (options: {
               prepare: (input) =>
                 authenticatedRpcOptions(options.getAccessToken).pipe(
                   Effect.flatMap((requestOptions) =>
-                    rpc.PrepareSnippetUpload(input, requestOptions),
+                    telemetry.observeRpc(
+                      "snippet.prepare-upload",
+                      requestOptions,
+                      (tracedOptions) => rpc.PrepareSnippetUpload(input, tracedOptions),
+                    ),
                   ),
                 ),
               publish: (input) =>
                 authenticatedRpcOptions(options.getAccessToken).pipe(
-                  Effect.flatMap((requestOptions) => rpc.PublishSnippet(input, requestOptions)),
+                  Effect.flatMap((requestOptions) =>
+                    telemetry.observeRpc("snippet.publish", requestOptions, (tracedOptions) =>
+                      rpc.PublishSnippet(input, tracedOptions),
+                    ),
+                  ),
                 ),
             }),
           ),
-        ),
-      ),
+        );
+      }),
       Effect.provide(protocolLayer),
     ),
   );

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { allowedBackendOrigins, InvalidCorsConfiguration } from "./cors.ts";
+import {
+  allowedBackendOrigins,
+  BACKEND_CORS_ALLOWED_HEADERS,
+  InvalidCorsConfiguration,
+} from "./cors.ts";
 
 describe("backend CORS origins", () => {
   it("retains a Desktop-only allowlist when no Web client is configured", () => {
@@ -26,6 +30,18 @@ describe("backend CORS origins", () => {
     expect(() => allowedBackendOrigins("http://app.plakk.io", true)).toThrow(
       "PLAKK_WEB_ORIGIN must be an exact HTTP(S) origin.",
     );
+    expect(() => allowedBackendOrigins(undefined, true)).toThrow(
+      "PLAKK_WEB_ORIGIN is required in production.",
+    );
+  });
+
+  it("admits standard trace propagation without broadening request headers", () => {
+    expect(BACKEND_CORS_ALLOWED_HEADERS).toEqual([
+      "authorization",
+      "content-type",
+      "traceparent",
+      "tracestate",
+    ]);
   });
 
   it("rejects paths, credentials, and non-HTTP Web origins", () => {
