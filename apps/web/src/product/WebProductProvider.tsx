@@ -24,6 +24,12 @@ import { AccountProductReader, resolveProductRpcUrl } from "./product-reader.ts"
 import { makeBrowserAccountProductMirrorLayer } from "./browser-readable-mirror.ts";
 import type { AccountProductMirror } from "./readable-mirror.ts";
 import { StorageOnboardingClient } from "./storage-onboarding-client.ts";
+import {
+  makeWebProviderTransferLayer,
+  WebSnippetUploadRemote,
+  WebSnippetUploads,
+  type WebSnippetUploadsShape,
+} from "./snippet-upload.ts";
 import { makeWebProductClientLayer } from "./web-product-client-layer.ts";
 import { WebProductContext, type WebProductContextValue } from "./web-product-context.tsx";
 
@@ -37,18 +43,20 @@ const signedOutContext: WebProductContextValue = {
   signOut: null,
   state: { kind: "idle" },
   storageOnboarding: null,
+  snippetUploads: null,
 };
 
 function ActiveIdentityProduct(props: {
   readonly children: ReactNode;
   readonly lifetime: AccountProductLifetimeShape;
   readonly runtime: ManagedRuntime.ManagedRuntime<
-    AccountProductLifetime | StorageOnboardingClient,
+    AccountProductLifetime | StorageOnboardingClient | WebSnippetUploads,
     never
   >;
   readonly signOut: () => Promise<void>;
+  readonly uploads: WebSnippetUploadsShape;
 }) {
-  const { children, lifetime, runtime, signOut } = props;
+  const { children, lifetime, runtime, signOut, uploads } = props;
   const state = useSyncExternalStore(
     lifetime.subscribe,
     lifetime.getSnapshot,
@@ -82,6 +90,10 @@ function ActiveIdentityProduct(props: {
         signOut,
         state,
         storageOnboarding: { begin, read },
+        snippetUploads: {
+          dismiss: (id) => runtime.runPromise(uploads.dismiss(id)),
+          upload: (input) => runtime.runPromise(uploads.upload(input)),
+        },
       }}
     >
       {children}
@@ -94,7 +106,9 @@ function IdentityProductResource(props: {
   readonly children: ReactNode;
   readonly delegateSignOut: () => Promise<void>;
   readonly mirrorLayer?: Layer.Layer<AccountProductMirror>;
-  readonly productClientLayer: Layer.Layer<AccountProductReader | StorageOnboardingClient>;
+  readonly productClientLayer: Layer.Layer<
+    AccountProductReader | StorageOnboardingClient | WebSnippetUploadRemote
+  >;
 }) {
   const { accountId, children, delegateSignOut, productClientLayer } = props;
   // The account-keyed ProductIdentityBoundary remounts this resource; live layer swaps are unsupported.
@@ -102,14 +116,18 @@ function IdentityProductResource(props: {
     () => props.mirrorLayer ?? makeBrowserAccountProductMirrorLayer(accountId),
   )[0];
   type IdentityRuntime = {
-    readonly lifetimePromise: Promise<AccountProductLifetimeShape>;
+    readonly productPromise: Promise<{
+      readonly lifetime: AccountProductLifetimeShape;
+      readonly uploads: WebSnippetUploadsShape;
+    }>;
     readonly runtime: ManagedRuntime.ManagedRuntime<
-      AccountProductLifetime | StorageOnboardingClient,
+      AccountProductLifetime | StorageOnboardingClient | WebSnippetUploads,
       never
     >;
   };
   type ActiveIdentityRuntime = IdentityRuntime & {
     readonly lifetime: AccountProductLifetimeShape;
+    readonly uploads: WebSnippetUploadsShape;
   };
   const resourceRef = useRef<IdentityRuntime | null>(null);
   const [activeResource, setActiveResource] = useState<ActiveIdentityRuntime | null>(null);
@@ -121,22 +139,29 @@ function IdentityProductResource(props: {
     let mounted = true;
     setActiveResource(null);
     setInitializationFailure(null);
+    const providerTransferLayer = makeWebProviderTransferLayer();
+    const snippetUploadsLayer = WebSnippetUploads.layer.pipe(
+      Layer.provide(Layer.merge(productClientLayer, providerTransferLayer)),
+    );
     const runtime = ManagedRuntime.make(
-      Layer.merge(
+      Layer.mergeAll(
         AccountProductLifetime.layer.pipe(
-          Layer.provide(Layer.merge(productClientLayer, mirrorLayer)),
+          Layer.provide(Layer.mergeAll(productClientLayer, mirrorLayer, snippetUploadsLayer)),
         ),
         productClientLayer,
+        snippetUploadsLayer,
       ),
     );
-    const lifetimePromise = runtime.runPromise(AccountProductLifetime);
-    const resource = { lifetimePromise, runtime };
+    const productPromise = runtime.runPromise(
+      Effect.all({ lifetime: AccountProductLifetime, uploads: WebSnippetUploads }),
+    );
+    const resource = { productPromise, runtime };
     resourceRef.current = resource;
-    void lifetimePromise.then(
-      (lifetime) => {
+    void productPromise.then(
+      ({ lifetime, uploads }) => {
         if (!mounted) return;
         runtime.runFork(lifetime.enter(accountId));
-        setActiveResource({ ...resource, lifetime });
+        setActiveResource({ ...resource, lifetime, uploads });
       },
       (cause) => {
         if (!mounted) return;
@@ -158,7 +183,7 @@ function IdentityProductResource(props: {
     }
     let productLifetime: AccountProductLifetimeShape;
     try {
-      productLifetime = await resource.lifetimePromise;
+      productLifetime = (await resource.productPromise).lifetime;
     } catch {
       await delegateSignOut();
       return;
@@ -179,7 +204,7 @@ function IdentityProductResource(props: {
     if (resource === null) {
       throw new Error("The account product is not initialized.");
     }
-    const productLifetime = await resource.lifetimePromise;
+    const productLifetime = (await resource.productPromise).lifetime;
     await resource.runtime.runPromise(productLifetime.refresh);
   }, []);
 
@@ -198,6 +223,7 @@ function IdentityProductResource(props: {
               ? { accountId, kind: "loading" }
               : { accountId, cause: initializationFailure, kind: "failed" },
           storageOnboarding: null,
+          snippetUploads: null,
         }}
       >
         {children}
@@ -210,6 +236,7 @@ function IdentityProductResource(props: {
       lifetime={activeResource.lifetime}
       runtime={activeResource.runtime}
       signOut={signOut}
+      uploads={activeResource.uploads}
     >
       {children}
     </ActiveIdentityProduct>
@@ -221,7 +248,9 @@ export function ProductIdentityBoundary(props: {
   readonly children: ReactNode;
   readonly delegateSignOut: () => Promise<void>;
   readonly mirrorLayer?: Layer.Layer<AccountProductMirror>;
-  readonly productClientLayer: Layer.Layer<AccountProductReader | StorageOnboardingClient>;
+  readonly productClientLayer: Layer.Layer<
+    AccountProductReader | StorageOnboardingClient | WebSnippetUploadRemote
+  >;
 }) {
   return <IdentityProductResource key={props.accountId} {...props} />;
 }

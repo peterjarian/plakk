@@ -1,10 +1,12 @@
 import { deriveSnippetPresentation, type User } from "@plakk/shared";
 import type { StorageProviderStatus } from "@plakk/shared/PlakkApi";
 import { AppHeader } from "@plakk/ui/components/AppHeader";
+import { SnippetComposer } from "@plakk/ui/components/SnippetComposer";
 import { SnippetList } from "@plakk/ui/components/SnippetList";
-import { PublishedSnippetRow } from "@plakk/ui/components/SnippetRow";
+import { LocalUploadSnippetRow, PublishedSnippetRow } from "@plakk/ui/components/SnippetRow";
 import { Button } from "@plakk/ui/components/primitives/button";
 import * as DateTime from "effect/DateTime";
+import { useState, type ClipboardEvent, type DragEvent } from "react";
 
 import type { AccountProductState } from "./account-product-lifetime.ts";
 
@@ -26,13 +28,79 @@ export function HomeView(props: {
   readonly onRetry: (() => void) | null;
   readonly onSignOut: () => void;
   readonly signOutError: "product-purge" | "workos" | null;
+  readonly onAddFiles: (files: ReadonlyArray<File>) => void;
+  readonly onAddText: (text: string) => void;
+  readonly onDismissUpload: (id: string) => void;
+  readonly uploadsDisabled: boolean;
 }) {
-  const { onRetry, onSignOut, signOutError, state, user } = props;
+  const {
+    onAddFiles,
+    onAddText,
+    onDismissUpload,
+    onRetry,
+    onSignOut,
+    signOutError,
+    state,
+    uploadsDisabled,
+    user,
+  } = props;
+  const [isDragging, setIsDragging] = useState(false);
   const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
   const storageProvider = state.kind === "ready" ? state.account.storageProvider : null;
 
+  const addDroppedFiles = (event: DragEvent<HTMLElement>) => {
+    event.preventDefault();
+    setIsDragging(false);
+    if (!uploadsDisabled && event.dataTransfer.files.length > 0) {
+      onAddFiles(Array.from(event.dataTransfer.files));
+    }
+  };
+  const addPastedContent = (event: ClipboardEvent<HTMLElement>) => {
+    if (uploadsDisabled) return;
+    if (
+      event.target instanceof Element &&
+      event.target.closest(
+        "input, textarea, select, [contenteditable]:not([contenteditable='false'])",
+      ) !== null
+    ) {
+      return;
+    }
+    const files = Array.from(event.clipboardData.files);
+    if (files.length > 0) {
+      event.preventDefault();
+      onAddFiles(files);
+      return;
+    }
+    const text = event.clipboardData.getData("text/plain").trim();
+    if (text !== "") {
+      event.preventDefault();
+      onAddText(text);
+    }
+  };
+
   return (
-    <main className="flex min-h-screen flex-col bg-background text-foreground" aria-label="Plakk">
+    <main
+      className="relative flex min-h-screen flex-col bg-background text-foreground"
+      aria-label="Plakk"
+      onDragEnter={(event) => {
+        if (!uploadsDisabled && event.dataTransfer.types.includes("Files")) {
+          event.preventDefault();
+          setIsDragging(true);
+        }
+      }}
+      onDragOver={(event) => {
+        if (!uploadsDisabled && event.dataTransfer.types.includes("Files")) {
+          event.preventDefault();
+        }
+      }}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          setIsDragging(false);
+        }
+      }}
+      onDrop={addDroppedFiles}
+      onPaste={addPastedContent}
+    >
       <AppHeader
         className="h-14 border-b border-border"
         user={user}
@@ -43,6 +111,14 @@ export function HomeView(props: {
           </span>
         }
       />
+      {isDragging && (
+        <div
+          className="pointer-events-none absolute inset-3 z-20 grid place-items-center rounded-xl border-2 border-dashed border-primary bg-background/90 text-sm font-medium"
+          role="status"
+        >
+          Drop files to publish
+        </div>
+      )}
 
       <div className="mx-auto flex w-full max-w-3xl min-h-0 flex-1 flex-col px-6 py-8">
         <div className="mb-7">
@@ -59,6 +135,14 @@ export function HomeView(props: {
               </p>
             )}
         </div>
+
+        {!uploadsDisabled && (
+          <SnippetComposer
+            className="mb-6"
+            onFiles={(files) => onAddFiles(Array.from(files))}
+            onSubmit={onAddText}
+          />
+        )}
 
         {state.kind === "ready" && state.localReadPerformance === "degraded" && (
           <p
@@ -153,14 +237,29 @@ export function HomeView(props: {
               empty={state.snippets.length === 0}
               emptyDescription="Published snippets from your Plakk account will appear here."
             >
-              {state.snippets.map((snippet) => (
-                <PublishedSnippetRow
-                  key={snippet.id}
-                  snippet={snippet}
-                  presentation={deriveSnippetPresentation({ fileName: snippet.fileName })}
-                  now={now}
-                />
-              ))}
+              {state.snippets.map((record) => {
+                if (record.kind === "PUBLISHED") {
+                  return (
+                    <PublishedSnippetRow
+                      key={`published:${record.snippet.id}`}
+                      snippet={record.snippet}
+                      presentation={deriveSnippetPresentation({
+                        fileName: record.snippet.fileName,
+                      })}
+                      now={now}
+                    />
+                  );
+                }
+                return (
+                  <LocalUploadSnippetRow
+                    key={`local:${record.id}`}
+                    snippet={record}
+                    presentation={deriveSnippetPresentation({ fileName: record.fileName })}
+                    now={now}
+                    onDismiss={() => onDismissUpload(record.id)}
+                  />
+                );
+              })}
             </SnippetList>
           </>
         )}

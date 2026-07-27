@@ -1,5 +1,5 @@
-import type { User } from "@plakk/shared";
-import type { AccountStatus, ApiSnippet } from "@plakk/shared/PlakkApi";
+import type { StorageProvider, User } from "@plakk/shared";
+import { accountCanSync, type AccountStatus, type ApiSnippet } from "@plakk/shared/PlakkApi";
 import { RpcError } from "@plakk/shared/RpcError";
 import { Button } from "@plakk/ui/components/primitives/button";
 import * as DateTime from "effect/DateTime";
@@ -18,6 +18,13 @@ import {
 import { makeBrowserAccountProductMirrorLayer } from "../../src/product/browser-readable-mirror.ts";
 import { AccountProductReader } from "../../src/product/product-reader.ts";
 import { StorageOnboardingProof } from "./StorageOnboardingProof.tsx";
+import {
+  WebProviderTransfer,
+  WebSnippetUploadRemote,
+  WebSnippetUploads,
+  type WebSnippetUploadsShape,
+} from "../../src/product/snippet-upload.ts";
+import { uploadPreparedBrowserContent } from "../../src/product/provider-transfer.ts";
 import "../../src/styles.css";
 
 const query = new URLSearchParams(location.search);
@@ -37,6 +44,7 @@ const account: AccountStatus = {
   storageProvider: "GOOGLE_DRIVE",
   blockedReasons: trialAtExactExpiry ? ["billing"] : [],
 };
+let controlledAccount = account;
 
 const user: User = {
   id: accountId,
@@ -96,7 +104,7 @@ const readerLayer = Layer.succeed(
           }),
         );
       }
-      const response = { account, snippets: snapshot };
+      const response = { account: controlledAccount, snippets: snapshot };
       if (nextBackendReadDelayMillis === 0) return Effect.succeed(response);
       const delayMillis = nextBackendReadDelayMillis;
       nextBackendReadDelayMillis = 0;
@@ -104,6 +112,103 @@ const readerLayer = Layer.succeed(
       return Effect.sleep(`${delayMillis} millis`).pipe(Effect.as(response));
     }),
   }),
+);
+const snippetUploadsLayer = WebSnippetUploads.layer.pipe(
+  Layer.provide(
+    Layer.merge(
+      Layer.succeed(
+        WebSnippetUploadRemote,
+        WebSnippetUploadRemote.of({
+          prepare: (input) =>
+            Effect.suspend(() => {
+              const prepareCount = Number(document.documentElement.dataset.prepareCount ?? "0") + 1;
+              document.documentElement.dataset.prepareCount = String(prepareCount);
+              if (!accountCanSync(controlledAccount)) {
+                return Effect.fail(
+                  new RpcError({
+                    code: "FORBIDDEN",
+                    message: "Controlled account restriction blocked preparation.",
+                  }),
+                );
+              }
+              const mode = input.fileName.toLowerCase().includes("failure")
+                ? "failure"
+                : input.fileName.toLowerCase().includes("interrupted")
+                  ? "interrupt"
+                  : input.fileName.toLowerCase().includes("pending")
+                    ? "pending"
+                    : "success";
+              return Effect.succeed({
+                storageProvider: input.storageProvider,
+                storageObjectId: null,
+                upload: {
+                  method: "PUT" as const,
+                  url: `https://www.googleapis.com/upload/drive/v3/files?upload_id=${input.id}&mode=${mode}`,
+                  headers: [
+                    { name: "Content-Type", value: input.mediaType ?? "application/octet-stream" },
+                  ],
+                  strategy:
+                    input.byteSize === 0
+                      ? {
+                          type: "byte_range" as const,
+                          maxPartByteSize: 262_144,
+                          partByteMultiple: 262_144,
+                        }
+                      : { type: "single_request" as const },
+                },
+                expiresAt: null,
+              });
+            }),
+          publish: (input) =>
+            Effect.suspend(() => {
+              const publishCount = Number(document.documentElement.dataset.publishCount ?? "0") + 1;
+              document.documentElement.dataset.publishCount = String(publishCount);
+              if (!accountCanSync(controlledAccount)) {
+                return Effect.fail(
+                  new RpcError({
+                    code: "FORBIDDEN",
+                    message: "Controlled account restriction blocked publication.",
+                  }),
+                );
+              }
+              if (input.fileName.toLowerCase().includes("conflict")) {
+                snapshot = [
+                  {
+                    ...snippet(input.id, input.fileName),
+                    storageObjectId: `different-${input.storageObjectId}`,
+                  },
+                  ...snapshot.filter(({ id }) => id !== input.id),
+                ];
+                return Effect.fail(
+                  new RpcError({
+                    code: "CONFLICT",
+                    message: "Snippet identifier is already used by different content.",
+                  }),
+                );
+              }
+              const published = snippet(input.id, input.fileName);
+              const complete = { ...published, ...input };
+              snapshot = [complete, ...snapshot.filter(({ id }) => id !== input.id)];
+              if (input.fileName.toLowerCase().includes("lost-response")) {
+                return Effect.fail(
+                  new RpcError({
+                    code: "INTERNAL_SERVER_ERROR",
+                    message: "Controlled publication response was lost.",
+                  }),
+                );
+              }
+              return Effect.succeed(complete);
+            }),
+        }),
+      ),
+      Layer.succeed(
+        WebProviderTransfer,
+        WebProviderTransfer.of({
+          upload: (input) => uploadPreparedBrowserContent(input, window.fetch.bind(window)),
+        }),
+      ),
+    ),
+  ),
 );
 let delayNextMirrorWrite: () => void = () => undefined;
 const mirrorLayer = makeBrowserAccountProductMirrorLayer(accountId, {
@@ -116,9 +221,15 @@ const mirrorLayer = makeBrowserAccountProductMirrorLayer(accountId, {
   },
 });
 const runtime = ManagedRuntime.make(
-  AccountProductLifetime.layer.pipe(Layer.provide(Layer.merge(readerLayer, mirrorLayer))),
+  Layer.merge(
+    AccountProductLifetime.layer.pipe(
+      Layer.provide(Layer.mergeAll(readerLayer, mirrorLayer, snippetUploadsLayer)),
+    ),
+    snippetUploadsLayer,
+  ),
 );
 const lifetimePromise = runtime.runPromise(AccountProductLifetime);
+const uploadsPromise = runtime.runPromise(WebSnippetUploads);
 
 const invalidate = () => activeController?.enqueue(undefined);
 
@@ -126,7 +237,7 @@ function Controls() {
   return (
     <aside
       aria-label="Controlled transport"
-      className="fixed right-3 bottom-3 z-50 flex gap-2 rounded-lg border bg-background p-2 shadow"
+      className="fixed inset-x-3 bottom-3 z-50 grid max-h-[calc(100vh-1.5rem)] grid-cols-4 gap-2 overflow-y-auto rounded-lg border bg-background p-2 shadow"
     >
       <Button
         type="button"
@@ -210,16 +321,86 @@ function Controls() {
       >
         Disconnect stream
       </Button>
+      <Button type="button" size="sm" onClick={invalidate}>
+        Refresh upload snapshot
+      </Button>
+      <Button
+        type="button"
+        size="sm"
+        onClick={() => {
+          controlledAccount = {
+            ...account,
+            accessEntitlement: {
+              ...account.accessEntitlement,
+              status: "BILLING_RESTRICTED",
+            },
+            blockedReasons: ["billing"],
+            canSync: false,
+          };
+          invalidate();
+        }}
+      >
+        Restrict billing
+      </Button>
+      <Button
+        type="button"
+        size="sm"
+        onClick={() => {
+          controlledAccount = {
+            ...account,
+            blockedReasons: ["storage"],
+            canSync: false,
+          };
+          invalidate();
+        }}
+      >
+        Restrict storage
+      </Button>
+      <Button
+        type="button"
+        size="sm"
+        onClick={() => {
+          controlledAccount = account;
+          invalidate();
+        }}
+      >
+        Restore commands
+      </Button>
     </aside>
   );
 }
 
-function ActiveProduct({ lifetime }: { readonly lifetime: AccountProductLifetimeShape }) {
+function ActiveProduct(props: {
+  readonly lifetime: AccountProductLifetimeShape;
+  readonly uploads: WebSnippetUploadsShape;
+}) {
+  const { lifetime, uploads } = props;
   const state = useSyncExternalStore(
     lifetime.subscribe,
     lifetime.getSnapshot,
     lifetime.getSnapshot,
   );
+  const uploadProvider =
+    state.kind === "ready" && state.apiAvailability === "available" && accountCanSync(state.account)
+      ? state.account.storageProvider
+      : null;
+  const uploadFile = (
+    storageProvider: StorageProvider,
+    content: Blob,
+    fileName: string | null,
+    mediaType: string | null,
+  ) => {
+    const id = crypto.randomUUID();
+    return runtime.runPromise(
+      uploads.upload({
+        id,
+        content,
+        fileName: fileName ?? `${id}.txt`,
+        mediaType,
+        storageProvider,
+      }),
+    );
+  };
   return (
     <>
       <HomeView
@@ -228,6 +409,23 @@ function ActiveProduct({ lifetime }: { readonly lifetime: AccountProductLifetime
         onRetry={() => runtime.runFork(lifetime.retry)}
         onSignOut={() => undefined}
         signOutError={null}
+        onAddFiles={(files) => {
+          if (uploadProvider === null) return;
+          for (const file of files) {
+            void uploadFile(uploadProvider, file, file.name, file.type || null);
+          }
+        }}
+        onAddText={(text) => {
+          if (uploadProvider === null) return;
+          void uploadFile(
+            uploadProvider,
+            new Blob([text], { type: "text/plain; charset=utf-8" }),
+            null,
+            "text/plain; charset=utf-8",
+          );
+        }}
+        onDismissUpload={(id) => void runtime.runPromise(uploads.dismiss(id))}
+        uploadsDisabled={uploadProvider === null}
       />
       <Controls />
     </>
@@ -236,21 +434,25 @@ function ActiveProduct({ lifetime }: { readonly lifetime: AccountProductLifetime
 
 function Product() {
   const [lifetime, setLifetime] = useState<AccountProductLifetimeShape | null>(null);
+  const [uploads, setUploads] = useState<WebSnippetUploadsShape | null>(null);
   useEffect(() => {
     let mounted = true;
-    void lifetimePromise.then((productLifetime) => {
-      if (!mounted) return;
-      runtime.runFork(productLifetime.enter(accountId));
-      setLifetime(productLifetime);
-    });
+    void Promise.all([lifetimePromise, uploadsPromise]).then(
+      ([productLifetime, snippetUploads]) => {
+        if (!mounted) return;
+        runtime.runFork(productLifetime.enter(accountId));
+        setLifetime(productLifetime);
+        setUploads(snippetUploads);
+      },
+    );
     return () => {
       mounted = false;
     };
   }, []);
-  return lifetime === null ? (
+  return lifetime === null || uploads === null ? (
     <span>Loading controlled product</span>
   ) : (
-    <ActiveProduct lifetime={lifetime} />
+    <ActiveProduct lifetime={lifetime} uploads={uploads} />
   );
 }
 

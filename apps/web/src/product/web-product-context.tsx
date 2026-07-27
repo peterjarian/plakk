@@ -3,6 +3,7 @@ import type { StorageOnboardingOrigin } from "@plakk/shared/PlakkApi";
 import { createContext, useContext } from "react";
 
 import type { AccountProductState } from "./account-product-lifetime.ts";
+import type { WebSnippetUploadInput } from "./snippet-upload.ts";
 import type { StorageOnboardingRead } from "./storage-onboarding-client.ts";
 
 export type StorageOnboardingActions = {
@@ -19,6 +20,10 @@ export type WebProductContextValue = {
   readonly signOut: (() => Promise<void>) | null;
   readonly state: AccountProductState;
   readonly storageOnboarding: StorageOnboardingActions | null;
+  readonly snippetUploads: {
+    readonly dismiss: (id: string) => Promise<void>;
+    readonly upload: (input: WebSnippetUploadInput) => Promise<void>;
+  } | null;
 };
 
 export const WebProductContext = createContext<WebProductContextValue | null>(null);

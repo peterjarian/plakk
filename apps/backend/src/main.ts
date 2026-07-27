@@ -52,11 +52,15 @@ const HealthRoute = HttpRouter.add(
 ).pipe(HttpRouter.serve);
 
 const CorsLive = Layer.unwrap(
-  Config.option(Config.string("PLAKK_WEB_ORIGIN")).pipe(
-    Effect.map(Option.getOrUndefined),
-    Effect.flatMap((configuredWebOrigin) =>
+  Effect.all({
+    configuredWebOrigin: Config.option(Config.string("PLAKK_WEB_ORIGIN")).pipe(
+      Effect.map(Option.getOrUndefined),
+    ),
+    nodeEnv: Config.string("NODE_ENV").pipe(Config.withDefault("development")),
+  }).pipe(
+    Effect.flatMap(({ configuredWebOrigin, nodeEnv }) =>
       Effect.try({
-        try: () => allowedBackendOrigins(configuredWebOrigin),
+        try: () => allowedBackendOrigins(configuredWebOrigin, nodeEnv === "production"),
         catch: (cause) =>
           cause instanceof InvalidCorsConfiguration
             ? cause

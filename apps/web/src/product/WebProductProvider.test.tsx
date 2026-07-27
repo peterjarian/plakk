@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { AccountProductReader } from "./product-reader.ts";
 import { StorageOnboardingClient } from "./storage-onboarding-client.ts";
+import { WebSnippetUploadRemote } from "./snippet-upload.ts";
 import { ProductIdentityBoundary, useWebProduct } from "./WebProductProvider.tsx";
 
 const account: AccountStatus = {
@@ -42,7 +43,7 @@ const storageOnboardingLayer = Layer.succeed(
   }),
 );
 const productClientLayer = (id: string) =>
-  Layer.merge(
+  Layer.mergeAll(
     Layer.succeed(
       AccountProductReader,
       AccountProductReader.of({
@@ -51,6 +52,13 @@ const productClientLayer = (id: string) =>
       }),
     ),
     storageOnboardingLayer,
+    Layer.succeed(
+      WebSnippetUploadRemote,
+      WebSnippetUploadRemote.of({
+        prepare: () => Effect.die("Snippet upload is not used in this identity test."),
+        publish: () => Effect.die("Snippet upload is not used in this identity test."),
+      }),
+    ),
   );
 
 function ProductProbe() {
@@ -60,7 +68,11 @@ function ProductProbe() {
     <>
       <output>
         {state.kind === "ready"
-          ? `${state.accountId}:${state.snippets[0]?.fileName}`
+          ? `${state.accountId}:${
+              state.snippets[0]?.kind === "PUBLISHED"
+                ? state.snippets[0].snippet.fileName
+                : state.snippets[0]?.fileName
+            }`
           : `${state.kind}:${state.kind === "loading" ? state.accountId : "none"}`}
       </output>
       <span data-sign-out-result>{signOutFailed ? "failed" : "not-attempted"}</span>

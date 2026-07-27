@@ -5,8 +5,11 @@ import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 import * as RpcMiddleware from "effect/unstable/rpc/RpcMiddleware";
 
-import { StorageProviderLiteral } from "../index.ts";
+import { StorageProviderLiteral } from "../StorageProvider.ts";
+import { AuthenticatedRpcRequest } from "./AuthenticatedRpcRequest.ts";
 import { RpcError } from "./RpcError.ts";
+
+export { AuthenticatedRpcRequest } from "./AuthenticatedRpcRequest.ts";
 
 export const AccountBlockedReasonSchema = Schema.Literals(["billing", "storage"] as const);
 
@@ -163,7 +166,7 @@ export class InternalServerErrorMiddleware extends RpcMiddleware.Service<Interna
 
 export class AuthMiddleware extends RpcMiddleware.Service<
   AuthMiddleware,
-  { provides: CurrentUser }
+  { provides: AuthenticatedRpcRequest | CurrentUser }
 >()("AuthMiddleware", { error: RpcError }) {}
 
 export const HealthRpcs = RpcGroup.make(

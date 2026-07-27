@@ -1,4 +1,4 @@
-import { formatFileSize, type SnippetPresentation } from "@plakk/shared";
+import { formatFileSize, type LocalUploadRecord, type SnippetPresentation } from "@plakk/shared";
 import type { ApiSnippet } from "@plakk/shared/PlakkApi";
 import type { LocalContentAvailability } from "@plakk/shared";
 import * as DateTime from "effect/DateTime";
@@ -139,6 +139,55 @@ export function PublishedSnippetRow(props: {
     <SnippetRowLayout
       presentation={presentation}
       subtitle={snippetMetadata(snippet, presentation, now)}
+    />
+  );
+}
+
+export function LocalUploadSnippetRow(props: {
+  readonly now: number;
+  readonly onDismiss: () => void;
+  readonly presentation: SnippetPresentation;
+  readonly snippet: LocalUploadRecord;
+}) {
+  const { now, onDismiss, presentation, snippet } = props;
+  const isUploading = snippet.status === "UPLOADING";
+  const subtitle =
+    snippet.status === "FAILED"
+      ? (snippet.errorMessage ?? "Upload failed. Dismiss it and add the content again.")
+      : snippetMetadata(snippet, presentation, now);
+
+  return (
+    <SnippetRowLayout
+      presentation={presentation}
+      subtitle={subtitle}
+      trailing={
+        <div className="flex shrink-0 items-center justify-end">
+          {isUploading && (
+            <span
+              className="flex size-7 items-center justify-center"
+              role="status"
+              aria-label="Syncing"
+            >
+              <LoaderCircle
+                className="size-4 animate-spin text-muted-foreground"
+                aria-hidden="true"
+              />
+            </span>
+          )}
+          {snippet.status === "FAILED" && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              data-persistent-action="dismiss"
+              aria-label="Dismiss failed upload"
+              onClick={onDismiss}
+            >
+              <X />
+            </Button>
+          )}
+        </div>
+      }
     />
   );
 }

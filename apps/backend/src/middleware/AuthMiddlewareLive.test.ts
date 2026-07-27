@@ -1,4 +1,4 @@
-import { CurrentUser } from "@plakk/shared/PlakkApi";
+import { AuthenticatedRpcRequest, CurrentUser } from "@plakk/shared/PlakkApi";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { DateTime, Effect } from "effect";
 
@@ -40,23 +40,26 @@ describe("backend authentication", () => {
         return { id: "user-1" };
       });
 
-    const userId = await Effect.runPromise(
+    const authenticated = await Effect.runPromise(
       runAuthenticatedRpc(
-        CurrentUser.pipe(
+        Effect.all({ request: AuthenticatedRpcRequest, user: CurrentUser }).pipe(
           Effect.tap(() =>
             Effect.sync(() => {
               events.push("rpc");
             }),
           ),
-          Effect.map(({ id }) => id),
         ),
         "Bearer workos-token",
+        "https://app.plakk.io",
         verify,
         capabilityService(startTrial),
       ),
     );
 
-    expect(userId).toBe("user-1");
+    expect(authenticated).toEqual({
+      request: { origin: "https://app.plakk.io" },
+      user: { id: "user-1" },
+    });
     expect(events).toEqual(["verified:workos-token", "trial:user-1", "rpc"]);
   });
 
@@ -65,9 +68,13 @@ describe("backend authentication", () => {
     const startTrial = vi.fn(() => Effect.succeed(activeTrial));
 
     const result = await Effect.runPromise(
-      runAuthenticatedRpc(Effect.void, undefined, verify, capabilityService(startTrial)).pipe(
-        Effect.result,
-      ),
+      runAuthenticatedRpc(
+        Effect.void,
+        undefined,
+        undefined,
+        verify,
+        capabilityService(startTrial),
+      ).pipe(Effect.result),
     );
 
     expect(result).toMatchObject({

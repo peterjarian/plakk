@@ -1,3 +1,4 @@
+import { isSupportedProviderUploadTarget } from "@plakk/shared";
 import {
   and,
   desc,
@@ -10,6 +11,7 @@ import {
 } from "@plakk/db";
 import { snippets, type SnippetRow } from "@plakk/db/schema";
 import {
+  AuthenticatedRpcRequest,
   CurrentUser,
   SNIPPET_INVALIDATION_KEEP_ALIVE,
   SNIPPETS_CHANGED,
@@ -21,12 +23,14 @@ import {
 } from "@plakk/shared/PlakkApi";
 import { RpcError } from "@plakk/shared/RpcError";
 import * as DateTime from "effect/DateTime";
+import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
 import * as Schedule from "effect/Schedule";
 import * as Stream from "effect/Stream";
 
 import { AccountCapability } from "../account/AccountCapability.ts";
 import { type StorageDownloadError, StorageProvider } from "../storage/StorageProvider.ts";
+import { configuredWebOrigin as validateConfiguredWebOrigin } from "../WebOrigin.ts";
 
 const SNIPPET_INVALIDATION_CHANNEL = "plakk_snippet_invalidations";
 
@@ -121,6 +125,28 @@ const prepareSnippetUpload = Effect.fn("SnippetRpcs.prepareUpload")(function* (
       workosUserId: ownerWorkosUserId,
     })
     .pipe(mapStorageErrorsToRpc);
+});
+
+const snippetUploadRequestKind = Effect.fn("SnippetRpcs.snippetUploadRequestKind")(function* (
+  requestOrigin: string | null,
+) {
+  if (requestOrigin === null || requestOrigin === "plakk-app://renderer") {
+    return "DESKTOP" as const;
+  }
+  const { configuredWebOrigin, nodeEnv } = yield* Effect.all({
+    configuredWebOrigin: Config.string("PLAKK_WEB_ORIGIN"),
+    nodeEnv: Config.string("NODE_ENV").pipe(Config.withDefault("development")),
+  }).pipe(Effect.orDie);
+  const webOrigin = yield* Effect.sync(() =>
+    validateConfiguredWebOrigin(configuredWebOrigin, nodeEnv === "production"),
+  ).pipe(Effect.orDie);
+  if (requestOrigin !== webOrigin) {
+    return yield* new RpcError({
+      code: "FORBIDDEN",
+      message: "Web upload preparation is unavailable from this origin.",
+    });
+  }
+  return "WEB" as const;
 });
 
 const publishSnippet = Effect.fn("SnippetRpcs.publish")(function* (
@@ -277,12 +303,28 @@ export const SnippetRpcsLive = Effect.gen(function* () {
   return SnippetRpcs.of({
     PrepareSnippetUpload: Effect.fn("rpc.PrepareSnippetUpload")(function* (input) {
       const capability = yield* AccountCapability;
+      const request = yield* AuthenticatedRpcRequest;
       const storage = yield* StorageProvider;
       const currentUser = yield* CurrentUser;
+      const requestKind = yield* snippetUploadRequestKind(request.origin);
       yield* capability.authorizeProductCommand(currentUser.id, input.storageProvider);
-      return yield* prepareSnippetUpload(storage, currentUser.id, input).pipe(
+      const prepared = yield* prepareSnippetUpload(storage, currentUser.id, input).pipe(
         Effect.annotateSpans({ id: input.id }),
       );
+      if (
+        requestKind === "WEB" &&
+        (prepared.storageProvider !== input.storageProvider ||
+          !isSupportedProviderUploadTarget(input.storageProvider, prepared.upload.url))
+      ) {
+        yield* Effect.logError("Provider returned an unsupported Web upload target", {
+          storageProvider: input.storageProvider,
+        });
+        return yield* new RpcError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "The storage provider did not return a supported Web upload target.",
+        });
+      }
+      return prepared;
     }),
     PublishSnippet: Effect.fn("rpc.PublishSnippet")(function* (input) {
       const capability = yield* AccountCapability;

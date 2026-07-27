@@ -1,4 +1,5 @@
-import type { User } from "@plakk/shared";
+import type { StorageProvider, User } from "@plakk/shared";
+import { accountCanSync } from "@plakk/shared/PlakkApi";
 import * as Schema from "effect/Schema";
 import { useCallback, useEffect, useState } from "react";
 
@@ -13,6 +14,25 @@ export function AuthenticatedHome(props: {
 }) {
   const { onStorageOnboardingRequired, user } = props;
   const product = useWebProduct();
+  const upload = useCallback(
+    (
+      storageProvider: StorageProvider,
+      content: Blob,
+      fileName: string | null,
+      mediaType: string | null,
+    ) => {
+      if (product.snippetUploads === null) return;
+      const id = crypto.randomUUID();
+      void product.snippetUploads.upload({
+        id,
+        content,
+        fileName: fileName ?? `${id}.txt`,
+        mediaType,
+        storageProvider,
+      });
+    },
+    [product.snippetUploads],
+  );
   const [signOutError, setSignOutError] = useState<"product-purge" | "workos" | null>(null);
   const handleSignOut = useCallback(async () => {
     if (product.signOut === null) return;
@@ -28,6 +48,12 @@ export function AuthenticatedHome(props: {
     product.state.kind === "ready" &&
     product.state.apiAvailability === "available" &&
     accountNeedsStorageOnboarding(product.state.account);
+  const uploadProvider =
+    product.state.kind === "ready" &&
+    product.state.apiAvailability === "available" &&
+    accountCanSync(product.state.account)
+      ? product.state.account.storageProvider
+      : null;
   useEffect(() => {
     if (storageOnboardingRequired) {
       onStorageOnboardingRequired();
@@ -47,6 +73,23 @@ export function AuthenticatedHome(props: {
       onRetry={product.retry}
       onSignOut={() => void handleSignOut()}
       signOutError={signOutError}
+      onAddFiles={(files) => {
+        if (uploadProvider === null) return;
+        for (const file of files) {
+          upload(uploadProvider, file, file.name, file.type || null);
+        }
+      }}
+      onAddText={(text) => {
+        if (uploadProvider === null) return;
+        upload(
+          uploadProvider,
+          new Blob([text], { type: "text/plain; charset=utf-8" }),
+          null,
+          "text/plain; charset=utf-8",
+        );
+      }}
+      onDismissUpload={(id) => void product.snippetUploads?.dismiss(id)}
+      uploadsDisabled={uploadProvider === null || product.snippetUploads === null}
     />
   );
 }

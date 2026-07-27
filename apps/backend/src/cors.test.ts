@@ -18,6 +18,16 @@ describe("backend CORS origins", () => {
     ]);
   });
 
+  it("requires an exact HTTPS Web origin in production", () => {
+    expect(allowedBackendOrigins("https://app.plakk.io", true)).toEqual([
+      "plakk-app://renderer",
+      "https://app.plakk.io",
+    ]);
+    expect(() => allowedBackendOrigins("http://app.plakk.io", true)).toThrow(
+      "PLAKK_WEB_ORIGIN must be an exact HTTP(S) origin.",
+    );
+  });
+
   it("rejects paths, credentials, and non-HTTP Web origins", () => {
     for (const value of [
       "https://app.plakk.io/path",
