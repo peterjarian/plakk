@@ -34,6 +34,10 @@ export type BrowserTelemetryErrorKind = typeof BrowserTelemetryErrorKindSchema.T
 
 const TraceIdSchema = Schema.String.check(Schema.isPattern(/^[0-9a-f]{32}$/));
 const SpanIdSchema = Schema.String.check(Schema.isPattern(/^[0-9a-f]{16}$/));
+const ReleaseSchema = Schema.String.check(
+  Schema.isMaxLength(128),
+  Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
+);
 
 export const BrowserTelemetrySpanSchema = Schema.Struct({
   durationMillis: Schema.Finite.check(
@@ -54,6 +58,7 @@ export const BrowserTelemetrySpanSchema = Schema.Struct({
 export type BrowserTelemetrySpan = typeof BrowserTelemetrySpanSchema.Type;
 
 export const BrowserTelemetryExportSchema = Schema.Struct({
+  release: ReleaseSchema,
   schemaVersion: Schema.Literal(BROWSER_TELEMETRY_SCHEMA_VERSION),
   span: BrowserTelemetrySpanSchema,
 });

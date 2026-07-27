@@ -1,5 +1,7 @@
 import { PLAKK_PRODUCTION_IDENTITIES } from "@plakk/shared/ProductionIdentities";
 
+import { parseOtlpHeaders, validatedTelemetryEndpoint } from "./telemetry/TelemetryConfig.ts";
+
 type Environment = Readonly<Record<string, string | undefined>>;
 
 export type BackendProductionConfiguration = {
@@ -26,23 +28,6 @@ const required = (env: Environment, name: string, issues: Array<string>): string
     return "";
   }
   return value;
-};
-
-const requireHttpsUrl = (name: string, value: string, issues: Array<string>): void => {
-  if (value === "") return;
-  try {
-    const url = new URL(value);
-    if (
-      url.protocol !== "https:" ||
-      url.username !== "" ||
-      url.password !== "" ||
-      url.hash !== ""
-    ) {
-      issues.push(`${name} must be a credential-free HTTPS URL.`);
-    }
-  } catch {
-    issues.push(`${name} must be a credential-free HTTPS URL.`);
-  }
 };
 
 const requirePostgresUrl = (value: string, issues: Array<string>): void => {
@@ -89,7 +74,14 @@ export const validateBackendProductionEnvironment = (
     "OTEL_EXPORTER_OTLP_METRICS_HEADERS",
     "OTEL_EXPORTER_OTLP_TRACES_HEADERS",
   ]) {
-    required(env, name, issues);
+    const value = required(env, name, issues);
+    if (value !== "") {
+      try {
+        parseOtlpHeaders(value);
+      } catch {
+        issues.push(`${name} is invalid.`);
+      }
+    }
   }
 
   for (const name of [
@@ -98,7 +90,13 @@ export const validateBackendProductionEnvironment = (
     "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
   ]) {
     const value = required(env, name, issues);
-    requireHttpsUrl(name, value, issues);
+    if (value !== "") {
+      try {
+        validatedTelemetryEndpoint(value, true);
+      } catch {
+        issues.push(`${name} must be a credential-free HTTPS URL.`);
+      }
+    }
   }
 
   requirePostgresUrl(databaseUrl, issues);

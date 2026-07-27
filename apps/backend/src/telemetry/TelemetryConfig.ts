@@ -1,4 +1,5 @@
 import * as Config from "effect/Config";
+import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -136,12 +137,13 @@ export const TelemetryConfigLive = Layer.effect(
       signals,
     });
   }).pipe(
-    Effect.catch((cause) =>
-      Effect.die(
-        cause instanceof Error
-          ? cause
+    Effect.catchCause((cause) => {
+      const failure = Cause.squash(cause);
+      return Effect.die(
+        failure instanceof Error
+          ? failure
           : new Error("Telemetry configuration could not be validated."),
-      ),
-    ),
+      );
+    }),
   ),
 );

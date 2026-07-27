@@ -1,12 +1,13 @@
 import {
   BrowserTelemetryExportSchema,
-  type BrowserTelemetrySpan,
+  BrowserTelemetrySpanSchema,
+  type BrowserTelemetryExport,
 } from "@plakk/shared/BrowserTelemetry";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
-const MAX_BROWSER_TELEMETRY_BYTES = 16_384;
+export const MAX_BROWSER_TELEMETRY_BYTES = 16_384;
 const MAX_CLOCK_SKEW_MILLIS = 300_000;
 
 type ProxyRejectionCode =
@@ -34,7 +35,7 @@ export type BrowserTelemetryProxyRequest = {
 
 export type BrowserTelemetryProxyDependencies = {
   readonly allow: (workosUserId: string) => Effect.Effect<boolean>;
-  readonly exportSpan: (span: BrowserTelemetrySpan) => Effect.Effect<void, Error>;
+  readonly exportSpan: (telemetry: BrowserTelemetryExport) => Effect.Effect<void, Error>;
   readonly now: () => number;
   readonly verifyAccessToken: (
     accessToken: string,
@@ -51,17 +52,11 @@ const hasExactKeys = (value: unknown, keys: ReadonlyArray<string>): boolean => {
 };
 
 const isStrictEnvelope = (value: unknown): boolean => {
-  if (!hasExactKeys(value, ["schemaVersion", "span"])) return false;
+  if (!hasExactKeys(value, Object.keys(BrowserTelemetryExportSchema.fields).toSorted())) {
+    return false;
+  }
   const span = (value as { readonly span?: unknown }).span;
-  return hasExactKeys(span, [
-    "durationMillis",
-    "errorKind",
-    "name",
-    "spanId",
-    "startedAtUnixMillis",
-    "status",
-    "traceId",
-  ]);
+  return hasExactKeys(span, Object.keys(BrowserTelemetrySpanSchema.fields).toSorted());
 };
 
 export const ingestBrowserTelemetry = Effect.fn("BrowserTelemetryProxy.ingest")(function* (
@@ -109,6 +104,6 @@ export const ingestBrowserTelemetry = Effect.fn("BrowserTelemetryProxy.ingest")(
   }
 
   yield* dependencies
-    .exportSpan(telemetry.span)
+    .exportSpan(telemetry)
     .pipe(Effect.mapError(() => reject("UPSTREAM_UNAVAILABLE", 502)));
 });

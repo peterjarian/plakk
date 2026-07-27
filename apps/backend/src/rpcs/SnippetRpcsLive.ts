@@ -22,8 +22,9 @@ import {
   SnippetRpcs,
 } from "@plakk/shared/PlakkApi";
 import { RpcError } from "@plakk/shared/RpcError";
-import * as DateTime from "effect/DateTime";
+import * as Cause from "effect/Cause";
 import * as Config from "effect/Config";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Schedule from "effect/Schedule";
 import * as Stream from "effect/Stream";
@@ -345,7 +346,7 @@ const deleteSnippet = Effect.fn("SnippetRpcs.delete")(function* (
     .pipe(
       Effect.catchCause((cause) =>
         Effect.logWarning("Could not delete orphaned provider content", {
-          ...telemetryErrorAttributes(cause),
+          ...telemetryErrorAttributes(Cause.squash(cause)),
           snippetId: deleted.snippet.id,
           storageProvider: deleted.snippet.storageProvider,
         }),

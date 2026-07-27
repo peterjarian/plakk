@@ -7,6 +7,7 @@ import { TestClock } from "effect/testing";
 import {
   BrowserTelemetryRateLimiter,
   BrowserTelemetryRateLimiterLive,
+  makeBrowserTelemetryRateLimiter,
 } from "./BrowserTelemetryRateLimiter.ts";
 
 it.effect("limits each authenticated user to one bounded window", () =>
@@ -26,4 +27,38 @@ it.effect("limits each authenticated user to one bounded window", () =>
     yield* TestClock.adjust("1 minute");
     expect(yield* limiter.allow("workos-user-a")).toBe(true);
   }).pipe(Effect.provide(Layer.merge(BrowserTelemetryRateLimiterLive, TestClock.layer()))),
+);
+
+it.effect("evicts expired and oldest identities instead of growing without bound", () =>
+  Effect.gen(function* () {
+    const limiter = yield* BrowserTelemetryRateLimiter;
+    yield* TestClock.setTime(1_000);
+    expect(yield* limiter.allow("user-a")).toBe(true);
+    expect(yield* limiter.allow("user-b")).toBe(true);
+    expect(yield* limiter.allow("user-c")).toBe(true);
+    expect(yield* limiter.allow("user-d")).toBe(true);
+
+    const admittedAfterEviction = yield* Effect.forEach(
+      Array.from({ length: 60 }),
+      () => limiter.allow("user-a"),
+      { concurrency: 1 },
+    );
+    expect(admittedAfterEviction).toEqual(Array.from({ length: 60 }, () => true));
+
+    yield* TestClock.adjust("1 minute");
+    expect(yield* limiter.allow("user-e")).toBe(true);
+    const admittedAfterExpiry = yield* Effect.forEach(
+      Array.from({ length: 60 }),
+      () => limiter.allow("user-b"),
+      { concurrency: 1 },
+    );
+    expect(admittedAfterExpiry).toEqual(Array.from({ length: 60 }, () => true));
+  }).pipe(
+    Effect.provide(
+      Layer.merge(
+        Layer.succeed(BrowserTelemetryRateLimiter, makeBrowserTelemetryRateLimiter(3)),
+        TestClock.layer(),
+      ),
+    ),
+  ),
 );

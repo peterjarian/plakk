@@ -7,15 +7,13 @@ import {
   makeBrowserTelemetryExporter,
 } from "../../src/product/browser-telemetry.ts";
 
-const protectedFailure =
-  "private filename.txt clipboard content cookie authorization-code signed-provider-url";
-
 export function Issue132Proof() {
   const [state, setState] = useState("Ready");
   const telemetry = useMemo(
     () =>
       makeBrowserTelemetry({
         exporter: makeBrowserTelemetryExporter(`${location.origin}/api/telemetry/v1/traces`),
+        release: "controlled-e2e",
       }),
     [],
   );
@@ -34,9 +32,10 @@ export function Issue132Proof() {
                   headers: requestOptions.headers,
                   method: "POST",
                 });
-                if (!response.ok) throw new Error(protectedFailure);
+                const providerBody = await response.text();
+                if (!response.ok) throw new Error(providerBody);
               },
-              catch: () => ({ _tag: "ControlledRpcFailure" as const }),
+              catch: (cause) => cause,
             }),
         )
         .pipe(Effect.result),

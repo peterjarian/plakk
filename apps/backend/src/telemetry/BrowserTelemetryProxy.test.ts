@@ -9,6 +9,7 @@ import {
 } from "./BrowserTelemetryProxy.ts";
 
 const body = JSON.stringify({
+  release: "web-release-abc123",
   schemaVersion: 1,
   span: {
     durationMillis: 25,
@@ -49,13 +50,17 @@ describe("authenticated browser telemetry proxy", () => {
     expect(deps.verifyAccessToken).toHaveBeenCalledWith("access-token");
     expect(deps.allow).toHaveBeenCalledWith("workos-user");
     expect(deps.exportSpan).toHaveBeenCalledWith({
-      durationMillis: 25,
-      errorKind: null,
-      name: "snippet.delete",
-      spanId: "0123456789abcdef",
-      startedAtUnixMillis: 1_000,
-      status: "OK",
-      traceId: "0123456789abcdef0123456789abcdef",
+      release: "web-release-abc123",
+      schemaVersion: 1,
+      span: {
+        durationMillis: 25,
+        errorKind: null,
+        name: "snippet.delete",
+        spanId: "0123456789abcdef",
+        startedAtUnixMillis: 1_000,
+        status: "OK",
+        traceId: "0123456789abcdef0123456789abcdef",
+      },
     });
   });
 

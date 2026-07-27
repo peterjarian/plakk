@@ -8,7 +8,8 @@ test("serves restrictive browser headers and server-managed AuthKit cookies", as
   const headers = pageResponse!.headers();
   expect(headers["content-security-policy"]).toContain("default-src 'self'");
   expect(headers["content-security-policy"]).toContain("frame-ancestors 'none'");
-  expect(headers["content-security-policy"]).not.toContain("*");
+  expect(headers["content-security-policy"]).toContain("https://*.up.1drv.com");
+  expect(headers["content-security-policy"]).not.toContain("connect-src *");
   expect(headers["cross-origin-opener-policy"]).toBe("same-origin");
   expect(headers["permissions-policy"]).toContain("camera=()");
   expect(headers["referrer-policy"]).toBe("no-referrer");

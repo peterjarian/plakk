@@ -20,7 +20,8 @@ describe("Web response security headers", () => {
     expect(headers["Content-Security-Policy"]).toContain("frame-ancestors 'none'");
     expect(headers["Content-Security-Policy"]).toContain("script-src-attr 'none'");
     expect(headers["Content-Security-Policy"]).toContain("https://api.plakk.io");
-    expect(headers["Content-Security-Policy"]).not.toContain("*");
+    expect(headers["Content-Security-Policy"]).toContain("https://*.up.1drv.com");
+    expect(headers["Content-Security-Policy"]).not.toContain("connect-src *");
     expect(headers["Content-Security-Policy"]).not.toContain("http:");
   });
 

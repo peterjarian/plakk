@@ -3,7 +3,10 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 
 import { makeBrowserTelemetry } from "./browser-telemetry.ts";
-import { resolveBrowserTelemetryProxyUrl } from "./web-product-client-layer.ts";
+import {
+  resolveBrowserTelemetryProxyUrl,
+  resolveBrowserTelemetryRelease,
+} from "./web-product-client-layer.ts";
 
 const deterministicBytes = (length: number): Uint8Array =>
   Uint8Array.from({ length }, (_, index) => index + 1);
@@ -15,6 +18,15 @@ describe("browser action telemetry", () => {
     );
     expect(() => resolveBrowserTelemetryProxyUrl("https://api.plakk.io/other")).toThrow(
       "canonical /api/rpc",
+    );
+  });
+
+  it("requires the bounded Web release outside local development", () => {
+    expect(resolveBrowserTelemetryRelease("web-abc123", false)).toBe("web-abc123");
+    expect(resolveBrowserTelemetryRelease(undefined, true)).toBe("development");
+    expect(() => resolveBrowserTelemetryRelease(undefined, false)).toThrow("VITE_PLAKK_RELEASE");
+    expect(() => resolveBrowserTelemetryRelease("release with spaces", false)).toThrow(
+      "VITE_PLAKK_RELEASE",
     );
   });
 
@@ -31,6 +43,7 @@ describe("browser action telemetry", () => {
       },
       now,
       randomBytes: deterministicBytes,
+      release: "web-release-abc123",
     });
     let requestHeaders: Readonly<Record<string, string>> = {};
     const failure = new RpcError({
@@ -60,6 +73,7 @@ describe("browser action telemetry", () => {
       {
         authorization: "Bearer browser-access-token",
         body: {
+          release: "web-release-abc123",
           schemaVersion: 1,
           span: {
             durationMillis: 25,
@@ -82,6 +96,7 @@ describe("browser action telemetry", () => {
       exporter: () => Promise.reject(new Error("Axiom unavailable")),
       now: () => 1_000,
       randomBytes: deterministicBytes,
+      release: "web-release-abc123",
     });
 
     await expect(

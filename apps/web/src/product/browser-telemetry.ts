@@ -69,6 +69,7 @@ export const makeBrowserTelemetry = (options: {
   readonly exporter: BrowserTelemetryExporter;
   readonly now?: () => number;
   readonly randomBytes?: (length: number) => Uint8Array;
+  readonly release: string;
 }): BrowserTelemetry => {
   const now = options.now ?? Date.now;
   const randomBytes = options.randomBytes ?? defaultRandomBytes;
@@ -90,6 +91,7 @@ export const makeBrowserTelemetry = (options: {
           Effect.sync(() => {
             const failed = Exit.isFailure(exit);
             const body: BrowserTelemetryExport = {
+              release: options.release,
               schemaVersion: BROWSER_TELEMETRY_SCHEMA_VERSION,
               span: {
                 durationMillis: Math.min(

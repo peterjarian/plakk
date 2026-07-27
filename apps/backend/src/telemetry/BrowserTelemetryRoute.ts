@@ -3,15 +3,14 @@ import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
 import { WorkosAccessTokenVerifier } from "../middleware/WorkosAccessTokenVerifier.ts";
 import { BrowserTelemetryRateLimiter } from "./BrowserTelemetryRateLimiter.ts";
-import { ingestBrowserTelemetry } from "./BrowserTelemetryProxy.ts";
+import { ingestBrowserTelemetry, MAX_BROWSER_TELEMETRY_BYTES } from "./BrowserTelemetryProxy.ts";
 import { BrowserTelemetrySink } from "./BrowserTelemetrySink.ts";
-
-const MAX_BROWSER_TELEMETRY_BYTES = 16_384;
 
 export const handleBrowserTelemetryRequest = (expectedOrigin: string) =>
   Effect.gen(function* () {
@@ -54,13 +53,17 @@ export const handleBrowserTelemetryRequest = (expectedOrigin: string) =>
   });
 
 export const BrowserTelemetryRoute = Layer.unwrap(
-  Config.nonEmptyString("PLAKK_WEB_ORIGIN").pipe(
-    Effect.map((expectedOrigin) =>
-      HttpRouter.add(
-        "POST",
-        "/api/telemetry/v1/traces",
-        handleBrowserTelemetryRequest(expectedOrigin),
-      ).pipe(HttpRouter.serve),
+  Config.option(Config.nonEmptyString("PLAKK_WEB_ORIGIN")).pipe(
+    Effect.map(
+      Option.match({
+        onNone: () => Layer.empty,
+        onSome: (expectedOrigin) =>
+          HttpRouter.add(
+            "POST",
+            "/api/telemetry/v1/traces",
+            handleBrowserTelemetryRequest(expectedOrigin),
+          ).pipe(HttpRouter.serve),
+      }),
     ),
   ),
 );

@@ -69,6 +69,8 @@ describe("backend production configuration", () => {
       { PLAKK_WEB_ORIGIN: "https://preview.plakk.io" },
       { PLAKK_API_ORIGIN: "http://api.plakk.io" },
       { OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://api.axiom.co/v1/traces" },
+      { OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "https://user:secret@api.axiom.co/v1/traces" },
+      { OTEL_EXPORTER_OTLP_TRACES_HEADERS: "Authorization" },
       { POLAR_SERVER: "sandbox" },
     ]) {
       expect(() =>

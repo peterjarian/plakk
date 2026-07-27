@@ -1,4 +1,4 @@
-import type { BrowserTelemetrySpan } from "@plakk/shared/BrowserTelemetry";
+import type { BrowserTelemetryExport, BrowserTelemetrySpan } from "@plakk/shared/BrowserTelemetry";
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
@@ -11,6 +11,8 @@ type BrowserTelemetryResource = {
   readonly environment: string;
   readonly release: string;
 };
+
+export const BROWSER_TELEMETRY_EXPORT_TIMEOUT = "5 seconds";
 
 const stringAttribute = (key: string, value: string) => ({
   key,
@@ -65,7 +67,7 @@ export class BrowserTelemetrySink extends Context.Service<
   BrowserTelemetrySink,
   {
     readonly exportSpan: (
-      span: BrowserTelemetrySpan,
+      telemetry: BrowserTelemetryExport,
     ) => Effect.Effect<void, BrowserTelemetrySinkError>;
   }
 >()("@plakk/backend/telemetry/BrowserTelemetrySink") {}
@@ -76,11 +78,14 @@ export const BrowserTelemetrySinkLive = Layer.effect(
     const config = yield* TelemetryConfig;
     const httpClient = yield* HttpClient.HttpClient;
     return BrowserTelemetrySink.of({
-      exportSpan: (span) => {
+      exportSpan: (telemetry) => {
         if (config.signals === null) {
           return Effect.fail(new BrowserTelemetrySinkError({ code: "NOT_CONFIGURED" }));
         }
-        const payload = browserSpanToOtlp(span, config);
+        const payload = browserSpanToOtlp(telemetry.span, {
+          environment: config.environment,
+          release: telemetry.release,
+        });
         return httpClient
           .post(config.signals.traces.url, {
             body: HttpBody.text(JSON.stringify(payload), "application/json"),
@@ -89,6 +94,7 @@ export const BrowserTelemetrySinkLive = Layer.effect(
           .pipe(
             Effect.flatMap(HttpClientResponse.filterStatusOk),
             Effect.asVoid,
+            Effect.timeout(BROWSER_TELEMETRY_EXPORT_TIMEOUT),
             Effect.mapError(() => new BrowserTelemetrySinkError({ code: "UPSTREAM_REJECTED" })),
           );
       },

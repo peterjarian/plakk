@@ -4,6 +4,7 @@ import * as Schema from "effect/Schema";
 import { BrowserTelemetryExportSchema, type BrowserTelemetryExport } from "./BrowserTelemetry.ts";
 
 const validExport: BrowserTelemetryExport = {
+  release: "web-d216771c",
   schemaVersion: 1,
   span: {
     durationMillis: 25,
@@ -36,5 +37,11 @@ describe("browser telemetry envelope", () => {
         }),
       ).toThrow();
     }
+    expect(() =>
+      Schema.decodeUnknownSync(BrowserTelemetryExportSchema)({
+        ...validExport,
+        release: "release containing spaces",
+      }),
+    ).toThrow();
   });
 });

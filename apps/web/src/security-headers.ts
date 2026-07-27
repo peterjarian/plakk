@@ -1,6 +1,7 @@
 const providerTransferOrigins = [
   "https://content.dropboxapi.com",
   "https://graph.microsoft.com",
+  "https://*.up.1drv.com",
   "https://www.googleapis.com",
 ] as const;
 

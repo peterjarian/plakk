@@ -11,6 +11,7 @@ import { BrowserTelemetrySink } from "./BrowserTelemetrySink.ts";
 
 const telemetryBody = () =>
   JSON.stringify({
+    release: "web-release-abc123",
     schemaVersion: 1,
     span: {
       durationMillis: 25,

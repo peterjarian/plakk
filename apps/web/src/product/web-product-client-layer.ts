@@ -1,4 +1,5 @@
 import { PlakkApi } from "@plakk/shared/PlakkApi";
+import type { BrowserTelemetryOperation } from "@plakk/shared/BrowserTelemetry";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -26,7 +27,11 @@ import {
 } from "./storage-management-client.ts";
 import { WebSnippetActionRemote } from "./snippet-actions.ts";
 import { WebSnippetUploadRemote } from "./snippet-upload.ts";
-import { makeBrowserTelemetry, makeBrowserTelemetryExporter } from "./browser-telemetry.ts";
+import {
+  makeBrowserTelemetry,
+  makeBrowserTelemetryExporter,
+  type ObservedRpcOptions,
+} from "./browser-telemetry.ts";
 
 export const resolveBrowserTelemetryProxyUrl = (rpcUrl: string): string => {
   const url = new URL(rpcUrl);
@@ -36,8 +41,21 @@ export const resolveBrowserTelemetryProxyUrl = (rpcUrl: string): string => {
   return `${url.origin}/api/telemetry/v1/traces`;
 };
 
+export const resolveBrowserTelemetryRelease = (
+  configuredRelease: string | undefined,
+  localDevelopment: boolean,
+): string => {
+  const release = configuredRelease?.trim();
+  if (release !== undefined && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(release)) {
+    return release;
+  }
+  if (localDevelopment && (release === undefined || release === "")) return "development";
+  throw new Error("VITE_PLAKK_RELEASE must be a bounded release identifier.");
+};
+
 export const makeWebProductClientLayer = (options: {
   readonly getAccessToken: () => Promise<string | undefined>;
+  readonly release: string;
   readonly rpcUrl: string;
 }): Layer.Layer<
   | AccountProductReader
@@ -57,7 +75,17 @@ export const makeWebProductClientLayer = (options: {
       Effect.map((rpc) => {
         const telemetry = makeBrowserTelemetry({
           exporter: makeBrowserTelemetryExporter(resolveBrowserTelemetryProxyUrl(options.rpcUrl)),
+          release: options.release,
         });
+        const observeAuthenticatedRpc = <A, E, R>(
+          operation: BrowserTelemetryOperation,
+          invoke: (requestOptions: ObservedRpcOptions) => Effect.Effect<A, E, R>,
+        ) =>
+          authenticatedRpcOptions(options.getAccessToken).pipe(
+            Effect.flatMap((requestOptions) =>
+              telemetry.observeRpc(operation, requestOptions, invoke),
+            ),
+          );
 
         return Context.make(
           AccountProductReader,
@@ -118,30 +146,16 @@ export const makeWebProductClientLayer = (options: {
             WebSnippetActionRemote,
             WebSnippetActionRemote.of({
               delete: (id) =>
-                authenticatedRpcOptions(options.getAccessToken).pipe(
-                  Effect.flatMap((requestOptions) =>
-                    telemetry.observeRpc("snippet.delete", requestOptions, (tracedOptions) =>
-                      rpc.DeleteSnippet({ id }, tracedOptions),
-                    ),
-                  ),
+                observeAuthenticatedRpc("snippet.delete", (tracedOptions) =>
+                  rpc.DeleteSnippet({ id }, tracedOptions),
                 ),
               prepareDownload: (id) =>
-                authenticatedRpcOptions(options.getAccessToken).pipe(
-                  Effect.flatMap((requestOptions) =>
-                    telemetry.observeRpc(
-                      "snippet.prepare-download",
-                      requestOptions,
-                      (tracedOptions) => rpc.PrepareSnippetDownload({ id }, tracedOptions),
-                    ),
-                  ),
+                observeAuthenticatedRpc("snippet.prepare-download", (tracedOptions) =>
+                  rpc.PrepareSnippetDownload({ id }, tracedOptions),
                 ),
               read: (id) =>
-                authenticatedRpcOptions(options.getAccessToken).pipe(
-                  Effect.flatMap((requestOptions) =>
-                    telemetry.observeRpc("snippet.read-content", requestOptions, (tracedOptions) =>
-                      rpc.GetSnippetContent({ id }, tracedOptions),
-                    ),
-                  ),
+                observeAuthenticatedRpc("snippet.read-content", (tracedOptions) =>
+                  rpc.GetSnippetContent({ id }, tracedOptions),
                 ),
             }),
           ),
@@ -149,22 +163,12 @@ export const makeWebProductClientLayer = (options: {
             WebSnippetUploadRemote,
             WebSnippetUploadRemote.of({
               prepare: (input) =>
-                authenticatedRpcOptions(options.getAccessToken).pipe(
-                  Effect.flatMap((requestOptions) =>
-                    telemetry.observeRpc(
-                      "snippet.prepare-upload",
-                      requestOptions,
-                      (tracedOptions) => rpc.PrepareSnippetUpload(input, tracedOptions),
-                    ),
-                  ),
+                observeAuthenticatedRpc("snippet.prepare-upload", (tracedOptions) =>
+                  rpc.PrepareSnippetUpload(input, tracedOptions),
                 ),
               publish: (input) =>
-                authenticatedRpcOptions(options.getAccessToken).pipe(
-                  Effect.flatMap((requestOptions) =>
-                    telemetry.observeRpc("snippet.publish", requestOptions, (tracedOptions) =>
-                      rpc.PublishSnippet(input, tracedOptions),
-                    ),
-                  ),
+                observeAuthenticatedRpc("snippet.publish", (tracedOptions) =>
+                  rpc.PublishSnippet(input, tracedOptions),
                 ),
             }),
           ),
