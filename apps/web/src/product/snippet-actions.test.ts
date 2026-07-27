@@ -1,4 +1,4 @@
-import type { ApiSnippet } from "@plakk/shared/PlakkApi";
+import { WEB_SNIPPET_CONTENT_MAX_BYTES, type ApiSnippet } from "@plakk/shared/PlakkApi";
 import { RpcError } from "@plakk/shared/RpcError";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -186,6 +186,25 @@ describe("Web Snippet actions", () => {
     expect(download).toHaveBeenCalledWith(content, "Quarterly report.pdf");
   });
 
+  it("rejects oversized buffered Copy content before invoking the remote", async () => {
+    const read = vi.fn(() => Effect.die("must not read oversized content"));
+    const target = snippet({
+      byteSize: WEB_SNIPPET_CONTENT_MAX_BYTES + 1,
+      fileName: "oversized.txt",
+    });
+
+    await expect(
+      run(new Uint8Array(), (actions) => actions.copy(target), {
+        read,
+      }),
+    ).rejects.toMatchObject({
+      _tag: "WebSnippetActionError",
+      message:
+        "This snippet is too large for browser Copy. Download it from the storage provider instead.",
+    });
+    expect(read).not.toHaveBeenCalled();
+  });
+
   it("downloads a text-named file when complete content is not decodable text", async () => {
     const content = new Uint8Array([0xff, 0xfe]);
     const target = snippet({ byteSize: content.byteLength });
@@ -199,7 +218,7 @@ describe("Web Snippet actions", () => {
     expect(download).toHaveBeenCalledWith(content, "note.txt");
   });
 
-  it("rejects metadata and complete-size mismatches without invoking a browser action", async () => {
+  it("rejects metadata and complete-size mismatches without writing clipboard content", async () => {
     const content = new TextEncoder().encode("hello");
     const copyText = vi.fn((text: Promise<string>) =>
       Effect.tryPromise({

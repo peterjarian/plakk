@@ -13,7 +13,7 @@ import { LocalUploadSnippetRow, PublishedSnippetRow } from "@plakk/ui/components
 import { Button } from "@plakk/ui/components/primitives/button";
 import * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
-import { useEffect, useState, type ClipboardEvent, type DragEvent } from "react";
+import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent } from "react";
 
 import type { AccountProductState } from "./account-product-lifetime.ts";
 import { WebSnippetActionError, type WebSnippetCopyOutcome } from "./snippet-actions.ts";
@@ -40,6 +40,7 @@ export function HomeView(props: {
   readonly onAddFiles: (files: ReadonlyArray<File>) => void;
   readonly onAddText: (text: string) => void;
   readonly onDismissUpload: (id: string) => void;
+  readonly onStorageReconnect?: () => void;
   readonly snippetActions?: WebProductContextValue["snippetActions"];
   readonly uploadsDisabled: boolean;
 }) {
@@ -49,6 +50,7 @@ export function HomeView(props: {
     onDismissUpload,
     onRetry,
     onSignOut,
+    onStorageReconnect,
     signOutError,
     snippetActions = null,
     state,
@@ -71,6 +73,7 @@ export function HomeView(props: {
       >
     >
   >({});
+  const copiedTimers = useRef(new Map<string, number>());
   const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
   const storageProvider = state.kind === "ready" ? state.account.storageProvider : null;
   const remoteActionsAvailable =
@@ -83,6 +86,19 @@ export function HomeView(props: {
     if (productActionsDisabled) setPendingExternalLink(null);
   }, [productActionsDisabled]);
 
+  useEffect(
+    () => () => {
+      for (const timer of copiedTimers.current.values()) window.clearTimeout(timer);
+      copiedTimers.current.clear();
+    },
+    [],
+  );
+
+  const clearCopiedTimer = (id: string) => {
+    const timer = copiedTimers.current.get(id);
+    if (timer !== undefined) window.clearTimeout(timer);
+    copiedTimers.current.delete(id);
+  };
   const publishRowAction = (
     id: string,
     action: {
@@ -90,7 +106,28 @@ export function HomeView(props: {
       readonly status: "busy" | "copied" | "idle" | "notice";
     },
   ) => {
+    clearCopiedTimer(id);
     setRowActions((current) => ({ ...current, [id]: action }));
+  };
+  const clearRowAction = (id: string) => {
+    clearCopiedTimer(id);
+    setRowActions((current) => {
+      const { [id]: _removed, ...remaining } = current;
+      return remaining;
+    });
+  };
+  const scheduleCopiedReset = (id: string) => {
+    copiedTimers.current.set(
+      id,
+      window.setTimeout(() => {
+        copiedTimers.current.delete(id);
+        setRowActions((current) => {
+          if (current[id]?.status !== "copied") return current;
+          const { [id]: _removed, ...remaining } = current;
+          return remaining;
+        });
+      }, 1_200),
+    );
   };
   const rowActionError = (id: string, cause: unknown, fallback: string) => {
     const message =
@@ -127,6 +164,7 @@ export function HomeView(props: {
                 status: "notice",
               },
       );
+      if (outcome.kind === "COPIED") scheduleCopiedReset(snippet.id);
     } catch (cause) {
       rowActionError(snippet.id, cause, "Plakk couldn’t fetch this snippet. Try again.");
     }
@@ -169,6 +207,7 @@ export function HomeView(props: {
     publishRowAction(snippet.id, { status: "busy" });
     try {
       await snippetActions.delete(snippet.id);
+      clearRowAction(snippet.id);
     } catch (cause) {
       rowActionError(snippet.id, cause, "Plakk couldn’t delete this snippet. Try again.");
     }
@@ -306,6 +345,17 @@ export function HomeView(props: {
           >
             <strong>Storage access required.</strong> Your snippets remain visible. Reconnect
             storage to resume Copy, Download, and Open. Delete remains available.
+            {onStorageReconnect !== undefined && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="ml-3"
+                onClick={onStorageReconnect}
+              >
+                Reconnect storage
+              </Button>
+            )}
           </div>
         )}
 

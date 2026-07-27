@@ -181,6 +181,11 @@ describe("Web Home interactions", () => {
     });
     expect(copy).toHaveBeenCalledTimes(2);
     expect(container.textContent).toContain("Copied");
+
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 1_250));
+    });
+    expect(container.textContent).not.toContain("Copied");
   });
 
   it("requires explicit confirmation before opening a fetched hyperlink in a new tab", async () => {
@@ -228,6 +233,7 @@ describe("Web Home interactions", () => {
 
   it("keeps Delete enabled while storage restrictions disable content actions", async () => {
     const deleteSnippet = vi.fn().mockResolvedValue(undefined);
+    const onStorageReconnect = vi.fn();
     const container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
@@ -246,6 +252,7 @@ describe("Web Home interactions", () => {
           onAddFiles={vi.fn()}
           onAddText={vi.fn()}
           onDismissUpload={vi.fn()}
+          onStorageReconnect={onStorageReconnect}
           snippetActions={actions({ delete: deleteSnippet })}
           uploadsDisabled
         />,
@@ -259,8 +266,15 @@ describe("Web Home interactions", () => {
       container.querySelector<HTMLButtonElement>('button[aria-label="Delete"]')?.disabled,
     ).toBe(false);
     await act(async () => {
+      Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
+        .find((button) => button.textContent?.trim() === "Reconnect storage")
+        ?.click();
+    });
+    expect(onStorageReconnect).toHaveBeenCalledOnce();
+    await act(async () => {
       container.querySelector<HTMLButtonElement>('button[aria-label="Delete"]')?.click();
     });
     expect(deleteSnippet).toHaveBeenCalledWith(textSnippet.id);
+    expect(container.querySelector('[aria-label="Working on snippet"]')).toBeNull();
   });
 });

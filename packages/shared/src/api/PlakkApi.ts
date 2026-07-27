@@ -135,6 +135,8 @@ export const SnippetInvalidationEventSchema = Schema.Literals([
 
 export type SnippetInvalidationEvent = typeof SnippetInvalidationEventSchema.Type;
 
+export const WEB_SNIPPET_CONTENT_MAX_BYTES = 16 * 1024 * 1024;
+
 export const PrepareSnippetUploadPayloadSchema = Schema.Struct({
   id: SnippetIdSchema,
   fileName: Schema.String,

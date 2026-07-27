@@ -47,6 +47,7 @@ test("copies supported images and downloads the honest browser capability fallba
   const downloadPromise = page.waitForEvent("download", { timeout: 2_000 }).catch(() => null);
   await row.getByRole("button", { name: "Copy" }).click();
   await expect(row).toContainText(/Copied|Image Copy is unavailable in this browser/);
+  const copied = await row.getByRole("button", { name: "Copied" }).isVisible();
   const download = await downloadPromise;
   if (download !== null) {
     expect(download.suggestedFilename()).toBe("Copy image.png");
@@ -54,7 +55,7 @@ test("copies supported images and downloads the honest browser capability fallba
     return;
   }
 
-  await expect(row).toContainText("Copied");
+  expect(copied).toBe(true);
   const clipboardTypes = await page
     .evaluate(async () => {
       const items = await navigator.clipboard.read();
@@ -143,7 +144,8 @@ test("keeps fetch and integrity failures row-local and retryable", async ({ page
 test("gates content actions while Delete converges despite provider cleanup failure", async ({
   page,
 }) => {
-  await page.getByRole("button", { name: "Restrict billing" }).dispatchEvent("click");
+  await page.setViewportSize({ width: 1_280, height: 1_000 });
+  await page.getByRole("button", { name: "Restrict billing" }).click();
   await expect(page.getByText("Billing access required.")).toBeVisible();
 
   const row = await revealRow(page, 0);
@@ -157,9 +159,11 @@ test("gates content actions while Delete converges despite provider cleanup fail
     "observed-after-authority",
   );
 
-  await page.getByRole("button", { name: "Restore commands" }).dispatchEvent("click");
-  await page.getByRole("button", { name: "Restrict storage" }).dispatchEvent("click");
+  await page.getByRole("button", { name: "Restore commands" }).click();
+  await page.getByRole("button", { name: "Restrict storage" }).click();
   const storageRestrictedRow = await revealRow(page, 0);
   await expect(storageRestrictedRow.getByRole("button", { name: "Copy" })).toBeDisabled();
   await expect(storageRestrictedRow.getByRole("button", { name: "Delete" })).toBeEnabled();
+  await page.getByRole("button", { name: "Reconnect storage" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-storage-reconnect-requested", "true");
 });

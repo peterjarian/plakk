@@ -268,7 +268,9 @@ const snippetActionRemoteLayer = Layer.succeed(
     delete: (id) =>
       Effect.suspend(() => {
         snapshot = snapshot.filter((candidate) => candidate.id !== id);
-        document.documentElement.dataset.providerCleanupFailure = "observed-after-authority";
+        if (id === "10d1e2f3-a456-4890-8abc-def012345678") {
+          document.documentElement.dataset.providerCleanupFailure = "observed-after-authority";
+        }
         return Effect.void;
       }),
     read: (id) =>
@@ -532,6 +534,9 @@ function ActiveProduct(props: {
           );
         }}
         onDismissUpload={(id) => void runtime.runPromise(uploads.dismiss(id))}
+        onStorageReconnect={() => {
+          document.documentElement.dataset.storageReconnectRequested = "true";
+        }}
         snippetActions={{
           copy: (target) => runtime.runPromise(actions.copy(target)),
           delete: (id) =>

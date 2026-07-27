@@ -61,6 +61,7 @@ const snippetActions = {
 const render = (
   state: Parameters<typeof HomeView>[0]["state"],
   actions: WebProductContextValue["snippetActions"] = null,
+  overrides: Partial<Parameters<typeof HomeView>[0]> = {},
 ) =>
   renderToStaticMarkup(
     <HomeView
@@ -74,8 +75,12 @@ const render = (
       onDismissUpload={vi.fn()}
       snippetActions={actions}
       uploadsDisabled={false}
+      {...overrides}
     />,
   );
+
+const actionTag = (html: string, label: string) =>
+  html.match(new RegExp(`<button(?=[^>]*aria-label="${label}")[^>]*>`))?.[0] ?? "";
 
 describe("Web Home", () => {
   it("renders loading without presenting an empty account", () => {
@@ -230,8 +235,8 @@ describe("Web Home", () => {
     expect(html).toContain("Your snippets are preserved");
     expect(html).toContain("Restore billing access");
     expect(html).toContain("Add, Copy, Download, and Open remain unavailable");
-    expect(html).toMatch(/disabled=""[^>]+aria-label="Copy"/);
-    expect(html).not.toMatch(/disabled=""[^>]+aria-label="Delete"/);
+    expect(actionTag(html, "Copy")).toContain('disabled=""');
+    expect(actionTag(html, "Delete")).not.toContain('disabled=""');
   });
 
   it("gates content actions during storage restriction while keeping Delete available", () => {
@@ -250,12 +255,14 @@ describe("Web Home", () => {
         snippets: [photoRecord],
       },
       snippetActions,
+      { onStorageReconnect: vi.fn() },
     );
 
     expect(html).toContain("Storage access required");
     expect(html).toContain("Delete remains available");
-    expect(html).toMatch(/disabled=""[^>]+aria-label="Copy"/);
-    expect(html).not.toMatch(/disabled=""[^>]+aria-label="Delete"/);
+    expect(html).toContain(">Reconnect storage</button>");
+    expect(actionTag(html, "Copy")).toContain('disabled=""');
+    expect(actionTag(html, "Delete")).not.toContain('disabled=""');
   });
 
   it("keeps last-confirmed snippets visible while live updates reconnect", () => {

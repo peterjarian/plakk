@@ -20,6 +20,9 @@ const now = DateTime.toEpochMillis(DateTime.makeUnsafe("2026-07-11T12:00:00.000Z
 const dateAt = (millisecondsAgo: number) =>
   DateTime.formatIso(DateTime.makeUnsafe(now - millisecondsAgo));
 
+const actionTag = (markup: string, label: string) =>
+  markup.match(new RegExp(`<button(?=[^>]*aria-label="${label}")[^>]*>`))?.[0] ?? "";
+
 describe("SnippetRow", () => {
   it("does not make ordinary pointer clicks select row content", () => {
     const markup = renderToStaticMarkup(
@@ -251,9 +254,9 @@ describe("SnippetRow", () => {
     expect(markup).toContain('aria-label="Download to this device"');
     expect(markup).toContain('aria-label="Open link"');
     expect(markup).toContain('aria-label="Delete"');
-    expect(markup).toMatch(/disabled=""[^>]+aria-label="Download to this device"/);
-    expect(markup).toMatch(/disabled=""[^>]+aria-label="Open link"/);
-    expect(markup).not.toMatch(/disabled=""[^>]+aria-label="Delete"/);
+    expect(actionTag(markup, "Download to this device")).toContain('disabled=""');
+    expect(actionTag(markup, "Open link")).toContain('disabled=""');
+    expect(actionTag(markup, "Delete")).not.toContain('disabled=""');
   });
 });
 
@@ -298,9 +301,9 @@ describe("PublishedSnippetRow browser actions", () => {
   it("disables content actions while preserving authoritative Delete", () => {
     const markup = renderPublished("note.txt", { type: "file", title: "Text snippet" }, true);
 
-    expect(markup).toMatch(/disabled=""[^>]+aria-label="Copy"/);
-    expect(markup).toMatch(/disabled=""[^>]+aria-label="Open link"/);
-    expect(markup).not.toMatch(/disabled=""[^>]+aria-label="Delete"/);
+    expect(actionTag(markup, "Copy")).toContain('disabled=""');
+    expect(actionTag(markup, "Open link")).toContain('disabled=""');
+    expect(actionTag(markup, "Delete")).not.toContain('disabled=""');
   });
 });
 

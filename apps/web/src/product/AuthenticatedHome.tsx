@@ -90,6 +90,7 @@ export function AuthenticatedHome(props: {
         );
       }}
       onDismissUpload={(id) => void product.snippetUploads?.dismiss(id)}
+      onStorageReconnect={onStorageOnboardingRequired}
       snippetActions={product.snippetActions}
       uploadsDisabled={uploadProvider === null || product.snippetUploads === null}
     />

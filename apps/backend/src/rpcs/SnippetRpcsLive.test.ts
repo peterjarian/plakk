@@ -10,6 +10,7 @@ import {
   CurrentUser,
   SNIPPET_INVALIDATION_KEEP_ALIVE,
   SNIPPETS_CHANGED,
+  WEB_SNIPPET_CONTENT_MAX_BYTES,
 } from "@plakk/shared/PlakkApi";
 import { RpcError } from "@plakk/shared/RpcError";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -618,6 +619,22 @@ describe("on-demand stored Snippet content", () => {
       code: "INTERNAL_SERVER_ERROR",
       message: "Stored object size does not match snippet metadata.",
     });
+  });
+
+  it("rejects oversized buffered content before requesting the provider object", async () => {
+    const downloadObject = vi.fn(storageService().downloadObject);
+
+    await expect(
+      runSnippetEffect(
+        (rpcs) => rpcs.GetSnippetContent({ id: publication.id }),
+        downloadDatabase([snippet({ byteSize: WEB_SNIPPET_CONTENT_MAX_BYTES + 1 })]),
+        storageService({ downloadObject }),
+      ),
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "This snippet is too large for browser Copy or Open. Download it instead.",
+    });
+    expect(downloadObject).not.toHaveBeenCalled();
   });
 
   it("does not access a provider object owned by another account", async () => {

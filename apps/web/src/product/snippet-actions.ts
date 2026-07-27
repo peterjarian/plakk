@@ -5,7 +5,7 @@ import {
   isTextSnippetFileName,
   type StorageProvider,
 } from "@plakk/shared";
-import type { ApiSnippet } from "@plakk/shared/PlakkApi";
+import { WEB_SNIPPET_CONTENT_MAX_BYTES, type ApiSnippet } from "@plakk/shared/PlakkApi";
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
@@ -106,6 +106,12 @@ export class WebSnippetActions extends Context.Service<
       });
 
       const copy = Effect.fn("WebSnippetActions.copy")(function* (snippet: ApiSnippet) {
+        if (snippet.byteSize > WEB_SNIPPET_CONTENT_MAX_BYTES) {
+          return yield* actionError(
+            null,
+            "This snippet is too large for browser Copy. Download it from the storage provider instead.",
+          );
+        }
         const contentResultPromise = runPromise(read(snippet).pipe(Effect.result));
         const contentPromise = contentResultPromise.then((result) => {
           if (Result.isFailure(result)) throw result.failure;
@@ -164,6 +170,12 @@ export class WebSnippetActions extends Context.Service<
       });
 
       const download = Effect.fn("WebSnippetActions.download")(function* (snippet: ApiSnippet) {
+        if (snippet.byteSize > WEB_SNIPPET_CONTENT_MAX_BYTES) {
+          return yield* actionError(
+            null,
+            "This snippet is too large for browser Download. Download it from the storage provider instead.",
+          );
+        }
         const content = yield* read(snippet);
         yield* browser
           .download(content, snippet.fileName)
@@ -187,6 +199,12 @@ export class WebSnippetActions extends Context.Service<
       const prepareOpen = Effect.fn("WebSnippetActions.prepareOpen")(function* (
         snippet: ApiSnippet,
       ) {
+        if (snippet.byteSize > WEB_SNIPPET_CONTENT_MAX_BYTES) {
+          return yield* actionError(
+            null,
+            "This snippet is too large for browser Open. Download it instead.",
+          );
+        }
         return { url: yield* readHyperlink(snippet) };
       });
 
@@ -243,6 +261,21 @@ const blobFromBytes = (content: Uint8Array, type: string) =>
 
 const downloadableFileName = (fileName: string) =>
   fileName.split(/[\\/]/).filter(Boolean).pop() ?? "snippet";
+
+const triggerDownload = (content: Uint8Array, fileName: string) => {
+  const url = URL.createObjectURL(blobFromBytes(content, "application/octet-stream"));
+  const anchor = document.createElement("a");
+  anchor.hidden = true;
+  anchor.href = url;
+  anchor.download = downloadableFileName(fileName);
+  anchor.rel = "noopener";
+  document.body.append(anchor);
+  anchor.click();
+  window.setTimeout(() => {
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  }, 1_000);
+};
 
 export const webSnippetActionBrowserLayer: Layer.Layer<WebSnippetActionBrowser> = Layer.succeed(
   WebSnippetActionBrowser,
@@ -330,15 +363,7 @@ export const webSnippetActionBrowserLayer: Layer.Layer<WebSnippetActionBrowser> 
     },
     download: (content, fileName) =>
       Effect.try({
-        try: () => {
-          const url = URL.createObjectURL(blobFromBytes(content, "application/octet-stream"));
-          const anchor = document.createElement("a");
-          anchor.href = url;
-          anchor.download = downloadableFileName(fileName);
-          anchor.rel = "noopener";
-          anchor.click();
-          window.setTimeout(() => URL.revokeObjectURL(url), 0);
-        },
+        try: () => triggerDownload(content, fileName),
         catch: (cause) =>
           new WebSnippetBrowserError({
             cause,

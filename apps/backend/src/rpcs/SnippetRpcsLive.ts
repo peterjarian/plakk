@@ -15,6 +15,7 @@ import {
   CurrentUser,
   SNIPPET_INVALIDATION_KEEP_ALIVE,
   SNIPPETS_CHANGED,
+  WEB_SNIPPET_CONTENT_MAX_BYTES,
   type ApiSnippet,
   type PrepareSnippetUploadPayload,
   type PublishSnippetPayload,
@@ -211,10 +212,9 @@ const getSnippetSnapshot = Effect.fn("SnippetRpcs.getSnapshot")(function* (
   return rows.map(toApiSnippet);
 });
 
-const prepareSnippetDownload = Effect.fn("SnippetRpcs.prepareDownload")(function* (
+const loadAuthorizedSnippet = Effect.fn("SnippetRpcs.loadAuthorizedSnippet")(function* (
   drizzle: DrizzleService,
   capability: AccountCapability["Service"],
-  storage: StorageProvider["Service"],
   ownerWorkosUserId: string,
   snippetId: string,
 ) {
@@ -233,6 +233,17 @@ const prepareSnippetDownload = Effect.fn("SnippetRpcs.prepareDownload")(function
   }
 
   yield* capability.authorizeProductCommand(ownerWorkosUserId, snippet.storageProvider);
+  return snippet;
+});
+
+const prepareSnippetDownload = Effect.fn("SnippetRpcs.prepareDownload")(function* (
+  drizzle: DrizzleService,
+  capability: AccountCapability["Service"],
+  storage: StorageProvider["Service"],
+  ownerWorkosUserId: string,
+  snippetId: string,
+) {
+  const snippet = yield* loadAuthorizedSnippet(drizzle, capability, ownerWorkosUserId, snippetId);
   const download = yield* storage
     .getDownloadTarget({
       storageProvider: snippet.storageProvider,
@@ -256,21 +267,14 @@ const getSnippetContent = Effect.fn("SnippetRpcs.getContent")(function* (
   ownerWorkosUserId: string,
   snippetId: string,
 ) {
-  const [snippet] = yield* drizzle.db
-    .select()
-    .from(snippets)
-    .where(and(eq(snippets.id, snippetId), eq(snippets.ownerWorkosUserId, ownerWorkosUserId)))
-    .limit(1)
-    .pipe(Effect.orDie);
-
-  if (snippet === undefined) {
+  const snippet = yield* loadAuthorizedSnippet(drizzle, capability, ownerWorkosUserId, snippetId);
+  if (snippet.byteSize > WEB_SNIPPET_CONTENT_MAX_BYTES) {
     return yield* new RpcError({
-      code: "NOT_FOUND",
-      message: "Uploaded snippet was not found.",
+      code: "FORBIDDEN",
+      message: "This snippet is too large for browser Copy or Open. Download it instead.",
     });
   }
 
-  yield* capability.authorizeProductCommand(ownerWorkosUserId, snippet.storageProvider);
   const content = yield* storage
     .downloadObject({
       storageProvider: snippet.storageProvider,

@@ -11,6 +11,14 @@ import {
   DialogTitle,
 } from "./primitives/dialog.tsx";
 
+const externalLinkHost = (url: string) => {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+};
+
 export function ExternalLinkConfirmationDialog(props: {
   readonly description: string;
   readonly onCancel: () => void;
@@ -44,7 +52,7 @@ export function ExternalLinkConfirmationDialog(props: {
         {url !== null && (
           <div className="grid gap-3">
             <div className="rounded-lg border border-amber-300/70 bg-amber-50/70 px-3 py-2 text-sm dark:border-amber-400/25 dark:bg-amber-400/10">
-              <p className="truncate font-medium">{new URL(url).host}</p>
+              <p className="truncate font-medium">{externalLinkHost(url)}</p>
               <p className="truncate text-xs text-muted-foreground">{url}</p>
             </div>
             {preference}
