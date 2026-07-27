@@ -47,4 +47,6 @@ The browser uses `VITE_PLAKK_API_ORIGIN` as an exact HTTP(S) origin and calls
 `/api/rpc` there with a fresh WorkOS bearer token. The backend admits that browser origin through
 its exact `PLAKK_WEB_ORIGIN` CORS setting while retaining the Desktop `plakk-app://renderer`
 origin. Local development falls back to `http://localhost:3100`; production requires an explicit
-HTTPS value and fails closed when it is missing or invalid.
+HTTPS API value and fails closed when it is missing or invalid. When `PLAKK_WEB_ORIGIN` is absent,
+the backend remains available to Desktop but admits no browser origin; Web deployments inject the
+canonical HTTPS origin.

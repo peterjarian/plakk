@@ -8,7 +8,10 @@ export class InvalidCorsConfiguration extends Data.TaggedError("InvalidCorsConfi
   readonly message: string;
 }> {}
 
-export const allowedBackendOrigins = (configuredWebOrigin: string): ReadonlyArray<string> => {
+export const allowedBackendOrigins = (
+  configuredWebOrigin: string | undefined,
+): ReadonlyArray<string> => {
+  if (configuredWebOrigin === undefined) return ["plakk-app://renderer"];
   const webOrigin = parseExactHttpOrigin(configuredWebOrigin);
   if (webOrigin === null) {
     throw new InvalidCorsConfiguration({

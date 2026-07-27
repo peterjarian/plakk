@@ -6,6 +6,7 @@ import { PlakkApi } from "@plakk/shared/PlakkApi";
 import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import { FetchHttpClient, HttpRouter, HttpServerResponse } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 import { createServer } from "node:http";
@@ -45,7 +46,8 @@ const HealthRoute = HttpRouter.add(
 ).pipe(HttpRouter.serve);
 
 const CorsLive = Layer.unwrap(
-  Config.string("PLAKK_WEB_ORIGIN").pipe(
+  Config.option(Config.string("PLAKK_WEB_ORIGIN")).pipe(
+    Effect.map(Option.getOrUndefined),
     Effect.flatMap((configuredWebOrigin) =>
       Effect.try({
         try: () => allowedBackendOrigins(configuredWebOrigin),

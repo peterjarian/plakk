@@ -3,6 +3,10 @@ import { describe, expect, it } from "vite-plus/test";
 import { allowedBackendOrigins, InvalidCorsConfiguration } from "./cors.ts";
 
 describe("backend CORS origins", () => {
+  it("retains a Desktop-only allowlist when no Web client is configured", () => {
+    expect(allowedBackendOrigins(undefined)).toEqual(["plakk-app://renderer"]);
+  });
+
   it("retains Desktop and adds one exact configured Web origin", () => {
     expect(allowedBackendOrigins("https://app.plakk.io")).toEqual([
       "plakk-app://renderer",
