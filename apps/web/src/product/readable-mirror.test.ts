@@ -80,6 +80,34 @@ it.effect("forced capability failure keeps the product mirror available in sessi
 
 it.effect("a runtime durable failure selects session memory for later operations", () =>
   Effect.gen(function* () {
+    let purgeCalls = 0;
+    const failure = new AccountProductMirrorError({
+      cause: new Error("worker stopped"),
+      reason: "Durable mirror failed.",
+    });
+    const mirror = makeRuntimeFallbackAccountProductMirror(
+      AccountProductMirror.of({
+        changes: Stream.never,
+        purge: Effect.sync(() => {
+          purgeCalls += 1;
+        }),
+        read: Effect.fail(failure),
+        readPerformance: "accelerated",
+        replace: () => Effect.fail(failure),
+      }),
+    );
+
+    expect(yield* mirror.read.pipe(Effect.flip)).toBe(failure);
+    yield* mirror.replace({ account, snippets: [snippet] });
+    expect(yield* mirror.read).toEqual({ account, snippets: [snippet] });
+    yield* mirror.purge;
+    expect(purgeCalls).toBe(1);
+    expect(yield* mirror.read).toBeNull();
+  }),
+);
+
+it.effect("durable purge remains fail-closed after runtime fallback", () =>
+  Effect.gen(function* () {
     const failure = new AccountProductMirrorError({
       cause: new Error("worker stopped"),
       reason: "Durable mirror failed.",
@@ -94,10 +122,7 @@ it.effect("a runtime durable failure selects session memory for later operations
       }),
     );
 
-    expect(yield* mirror.read.pipe(Effect.flip)).toBe(failure);
-    yield* mirror.replace({ account, snippets: [snippet] });
-    expect(yield* mirror.read).toEqual({ account, snippets: [snippet] });
-    yield* mirror.purge;
-    expect(yield* mirror.read).toBeNull();
+    yield* mirror.read.pipe(Effect.flip);
+    expect(yield* mirror.purge.pipe(Effect.flip)).toBe(failure);
   }),
 );

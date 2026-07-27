@@ -8,6 +8,7 @@ import { AccountProductLifetime, clearProductThenSignOut } from "./account-produ
 import { AccountProductReader, type AccountProductSnapshot } from "./product-reader.ts";
 import {
   AccountProductMirror,
+  AccountProductMirrorError,
   makeSessionMemoryAccountProductMirrorLayer,
 } from "./readable-mirror.ts";
 
@@ -138,6 +139,50 @@ describe("account product lifetime", () => {
         yield* Effect.yieldNow;
 
         expect(lifetime.getSnapshot()).toEqual({ accountId: "user_1", kind: "loading" });
+      }).pipe(Effect.provide(provideLifetime(Effect.never, Stream.never, mirrorLayer)));
+    }),
+  );
+
+  it.effect("publishes degraded performance when a mirror notification read fails", () =>
+    Effect.gen(function* () {
+      const mirrorChanged = yield* Deferred.make<void>();
+      const mirrorFailure = new AccountProductMirrorError({
+        cause: new Error("worker stopped"),
+        reason: "Could not read the readable mirror.",
+      });
+      let firstRead = true;
+      const mirrorLayer = Layer.succeed(
+        AccountProductMirror,
+        AccountProductMirror.of({
+          changes: Stream.fromEffect(Deferred.await(mirrorChanged)).pipe(
+            Stream.concat(Stream.never),
+          ),
+          purge: Effect.void,
+          read: Effect.suspend(() => {
+            if (!firstRead) return Effect.fail(mirrorFailure);
+            firstRead = false;
+            return Effect.succeed({ account, snippets: [snippet("mirrored")] });
+          }),
+          readPerformance: "accelerated",
+          replace: () => Effect.void,
+        }),
+      );
+
+      yield* Effect.gen(function* () {
+        const lifetime = yield* AccountProductLifetime;
+        yield* lifetime.enter("user_1");
+        expect(lifetime.getSnapshot()).toMatchObject({
+          kind: "ready",
+          localReadPerformance: "accelerated",
+        });
+
+        yield* Deferred.succeed(mirrorChanged, undefined);
+        yield* Effect.yieldNow;
+
+        expect(lifetime.getSnapshot()).toMatchObject({
+          kind: "ready",
+          localReadPerformance: "degraded",
+        });
       }).pipe(Effect.provide(provideLifetime(Effect.never, Stream.never, mirrorLayer)));
     }),
   );

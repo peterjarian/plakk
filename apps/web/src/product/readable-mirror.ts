@@ -67,7 +67,6 @@ export const makeRuntimeFallbackAccountProductMirror = (
 
   const purge = Effect.suspend(() => {
     sessionSnapshot = null;
-    if (useSessionMemory) return Effect.void;
     return primary.purge.pipe(
       Effect.catch((error) =>
         Effect.sync(() => {

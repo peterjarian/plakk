@@ -53,9 +53,11 @@ test("an account mirror converges across tabs, survives handoff, reopens, and pu
   await expect(reopened.getByText("After close.png")).toBeVisible({ timeout: 20_000 });
   await expect(reopened.getByText("Fast local reads are unavailable")).toHaveCount(0);
 
+  await second.getByRole("button", { name: "Start interruptible replacement" }).click();
+  await expect(second.locator("html")).toHaveAttribute("data-mirror-write-started", "true");
   await reopened.getByRole("button", { name: "Purge account facts" }).click();
   await expect(reopened.getByText("After close.png")).toHaveCount(0);
-  await expect(second.getByText("After close.png")).toHaveCount(0);
+  await expect(second.getByText("After close.png")).toHaveCount(0, { timeout: 20_000 });
   await expect(second.getByText("Loading snippets")).toBeVisible();
 
   await second.close();

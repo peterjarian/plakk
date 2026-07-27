@@ -221,6 +221,9 @@ export class AccountProductLifetime extends Context.Service<
                 Effect.match({
                   onFailure: () => {
                     localReadPerformance = "degraded";
+                    if (state.kind === "ready" && state.accountId === accountId) {
+                      publish({ ...state, localReadPerformance });
+                    }
                   },
                   onSuccess: (snapshot) => {
                     if (!isCurrent(accountId, synchronizationGeneration)) {

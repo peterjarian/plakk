@@ -19,6 +19,7 @@ import {
 const LOCK_RETRY_DELAY = "10 millis";
 const MAX_LOCK_RETRIES = 200;
 const MIGRATION_LOCK_TIMEOUT_MILLIS = 10_000;
+const WRITE_LOCK_TIMEOUT_MILLIS = 15_000;
 
 const StoredSnapshotCodec = Schema.fromJsonString(
   Schema.Struct({
@@ -91,25 +92,28 @@ const retryTransientLock = Effect.fn("WebReadableMirror.retryTransientLock")(fun
 const mapMirrorError = (reason: string) => (cause: unknown) =>
   new AccountProductMirrorError({ cause, reason });
 
-const withMigrationLock = Effect.fn("WebReadableMirror.withMigrationLock")(function* <A, E>(
+const withBrowserLock = Effect.fn("WebReadableMirror.withBrowserLock")(function* <A, E>(
   lockName: string,
-  migration: Effect.Effect<A, E>,
+  operation: Effect.Effect<A, E>,
+  timeoutMillis: number,
+  failureReason: string,
 ): Effect.fn.Return<A, AccountProductMirrorError> {
   return yield* Effect.tryPromise({
     try: (signal) =>
       navigator.locks.request(lockName, { signal }, () =>
-        Effect.runPromise(retryTransientLock(migration)),
+        Effect.runPromise(retryTransientLock(operation)),
       ),
-    catch: mapMirrorError("Could not serialize readable mirror migrations."),
+    catch: mapMirrorError(failureReason),
   }).pipe(
-    Effect.timeout(`${MIGRATION_LOCK_TIMEOUT_MILLIS} millis`),
-    Effect.mapError(mapMirrorError("Could not serialize readable mirror migrations.")),
+    Effect.timeout(`${timeoutMillis} millis`),
+    Effect.mapError(mapMirrorError(failureReason)),
   );
 });
 
 const makeSqlAccountProductMirrorLayer = (
   channelName: string,
   migrationLockName: string,
+  writeLockName: string,
 ): Layer.Layer<AccountProductMirror, AccountProductMirrorError, SqlClient.SqlClient> =>
   Layer.effect(
     AccountProductMirror,
@@ -118,7 +122,12 @@ const makeSqlAccountProductMirrorLayer = (
       const migration = SqliteMigrator.run({ loader: migrationLoader }).pipe(
         Effect.provideService(SqlClient.SqlClient, sql),
       );
-      yield* withMigrationLock(migrationLockName, migration);
+      yield* withBrowserLock(
+        migrationLockName,
+        migration,
+        MIGRATION_LOCK_TIMEOUT_MILLIS,
+        "Could not serialize readable mirror migrations.",
+      );
       yield* retryTransientLock(sql.unsafe("PRAGMA busy_timeout = 2000")).pipe(
         Effect.mapError(mapMirrorError("Could not configure the readable mirror.")),
       );
@@ -147,11 +156,14 @@ const makeSqlAccountProductMirrorLayer = (
         `,
       });
 
-      const purgeSql = retryTransientLock(
+      const purgeSql = withBrowserLock(
+        writeLockName,
         sql`
-          DELETE FROM readable_mirror
-          WHERE singleton = 1
-        `,
+            DELETE FROM readable_mirror
+            WHERE singleton = 1
+          `,
+        WRITE_LOCK_TIMEOUT_MILLIS,
+        "Could not serialize the readable mirror purge.",
       ).pipe(
         Effect.mapError(mapMirrorError("Could not purge the readable mirror.")),
         Effect.asVoid,
@@ -175,13 +187,16 @@ const makeSqlAccountProductMirrorLayer = (
         const snapshotJson = yield* Schema.encodeEffect(StoredSnapshotCodec)(snapshot).pipe(
           Effect.mapError(mapMirrorError("Could not encode the readable mirror.")),
         );
-        yield* retryTransientLock(
+        yield* withBrowserLock(
+          writeLockName,
           sql`
-            INSERT INTO readable_mirror (singleton, snapshot_json)
-            VALUES (1, ${snapshotJson})
-            ON CONFLICT (singleton) DO UPDATE
-            SET snapshot_json = excluded.snapshot_json
-          `,
+              INSERT INTO readable_mirror (singleton, snapshot_json)
+              VALUES (1, ${snapshotJson})
+              ON CONFLICT (singleton) DO UPDATE
+              SET snapshot_json = excluded.snapshot_json
+            `,
+          WRITE_LOCK_TIMEOUT_MILLIS,
+          "Could not serialize the readable mirror replacement.",
         ).pipe(Effect.mapError(mapMirrorError("Could not replace the readable mirror.")));
         yield* Effect.sync(() => channel.postMessage(undefined));
       });
@@ -249,7 +264,11 @@ export const makeBrowserAccountProductMirrorLayer = (
     ),
   });
 
-  return makeSqlAccountProductMirrorLayer(`${databaseId}:changes`, `${databaseId}:migrations`).pipe(
+  return makeSqlAccountProductMirrorLayer(
+    `${databaseId}:changes`,
+    `${databaseId}:migrations`,
+    `${databaseId}:writes`,
+  ).pipe(
     Layer.provide(sqliteLayer),
     Layer.catch(() => makeSessionMemoryAccountProductMirrorLayer()),
   );
