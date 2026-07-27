@@ -6,7 +6,12 @@ import type {
 } from "@plakk/shared/PlakkApi";
 import { RpcError } from "@plakk/shared/RpcError";
 import { and, Drizzle, eq, isNull, lte, or, sql } from "@plakk/db";
-import { snippets, storageCleanupIntents, type StorageCleanupIntentRow } from "@plakk/db/schema";
+import {
+  snippets,
+  storageAuthorizationIntents,
+  storageCleanupIntents,
+  type StorageCleanupIntentRow,
+} from "@plakk/db/schema";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -55,6 +60,33 @@ export type BeginStorageCleanupInput = {
   readonly workosUserId: string;
 };
 
+type StorageLifecycleTransaction = Parameters<
+  Parameters<import("@plakk/db").DrizzleService["db"]["transaction"]>[0]
+>[0];
+
+const toCleanupRecord = (row: StorageCleanupIntentRow): StorageCleanupRecord => ({
+  action: row.action,
+  attemptId: row.attemptId,
+  lastFailure: row.lastFailure,
+  leaseExpiresAt: row.leaseExpiresAt,
+  storageProvider: row.storageProvider,
+  totalSnippetCount: row.totalSnippetCount,
+  workosUserId: row.workosUserId,
+});
+
+export const lockStorageLifecycleState = Effect.fn("StorageLifecycle.lockState")(function* (
+  tx: StorageLifecycleTransaction,
+  workosUserId: string,
+) {
+  yield* tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${workosUserId}, 0))`);
+  const [row] = yield* tx
+    .select()
+    .from(storageCleanupIntents)
+    .where(eq(storageCleanupIntents.workosUserId, workosUserId))
+    .limit(1);
+  return row === undefined ? null : toCleanupRecord(row);
+});
+
 export class StorageLifecycleStore extends Context.Service<
   StorageLifecycleStore,
   {
@@ -66,12 +98,13 @@ export class StorageLifecycleStore extends Context.Service<
       readonly cleanup: StorageCleanupRecord;
       readonly snippets: ReadonlyArray<StorageCleanupSnippet>;
     } | null>;
-    readonly complete: (workosUserId: string, attemptId: string) => Effect.Effect<void>;
+    readonly clearAuthorization: (workosUserId: string) => Effect.Effect<void>;
+    readonly complete: (workosUserId: string, attemptId: string) => Effect.Effect<boolean>;
     readonly completeSnippet: (
       workosUserId: string,
       attemptId: string,
       snippetId: string,
-    ) => Effect.Effect<void>;
+    ) => Effect.Effect<boolean>;
     readonly fail: (
       workosUserId: string,
       attemptId: string,
@@ -82,22 +115,17 @@ export class StorageLifecycleStore extends Context.Service<
       storageProvider: StorageProviderName | null,
     ) => Effect.Effect<StorageLifecycleStoreRead>;
     readonly isActive: (workosUserId: string) => Effect.Effect<boolean>;
+    readonly readyToDisconnect: (workosUserId: string, attemptId: string) => Effect.Effect<boolean>;
+    readonly reserveAuthorization: (
+      workosUserId: string,
+      storageProvider: StorageProviderName,
+    ) => Effect.Effect<StorageProviderName | null>;
   }
 >()("@plakk/backend/storage/StorageLifecycle/StorageLifecycleStore") {
   static readonly layer = Layer.effect(
     StorageLifecycleStore,
     Effect.gen(function* () {
       const { db } = yield* Drizzle;
-
-      const toRecord = (row: StorageCleanupIntentRow): StorageCleanupRecord => ({
-        action: row.action,
-        attemptId: row.attemptId,
-        lastFailure: row.lastFailure,
-        leaseExpiresAt: row.leaseExpiresAt,
-        storageProvider: row.storageProvider,
-        totalSnippetCount: row.totalSnippetCount,
-        workosUserId: row.workosUserId,
-      });
 
       const countSnippets = Effect.fn("StorageLifecycleStore.countSnippets")(function* (
         workosUserId: string,
@@ -126,7 +154,7 @@ export class StorageLifecycleStore extends Context.Service<
           .where(eq(storageCleanupIntents.workosUserId, workosUserId))
           .limit(1)
           .pipe(Effect.orDie);
-        const cleanup = row === undefined ? null : toRecord(row);
+        const cleanup = row === undefined ? null : toCleanupRecord(row);
         const effectiveProvider = cleanup?.storageProvider ?? storageProvider;
         const remainingSnippetCount =
           effectiveProvider === null ? 0 : yield* countSnippets(workosUserId, effectiveProvider);
@@ -144,15 +172,8 @@ export class StorageLifecycleStore extends Context.Service<
         return yield* db
           .transaction((tx) =>
             Effect.gen(function* () {
-              yield* tx.execute(
-                sql`select pg_advisory_xact_lock(hashtextextended(${input.workosUserId}, 0))`,
-              );
-              const [existing] = yield* tx
-                .select()
-                .from(storageCleanupIntents)
-                .where(eq(storageCleanupIntents.workosUserId, input.workosUserId))
-                .limit(1);
-              if (existing !== undefined) return toRecord(existing);
+              const existing = yield* lockStorageLifecycleState(tx, input.workosUserId);
+              if (existing !== null) return existing;
 
               const [count] = yield* tx
                 .select({ count: sql<number>`count(*)::int` })
@@ -173,7 +194,8 @@ export class StorageLifecycleStore extends Context.Service<
                   workosUserId: input.workosUserId,
                 })
                 .returning();
-              return created === undefined ? null : toRecord(created);
+              if (created !== undefined) yield* notifySnippetChanges(tx, input.workosUserId);
+              return created === undefined ? null : toCleanupRecord(created);
             }),
           )
           .pipe(Effect.orDie);
@@ -222,7 +244,7 @@ export class StorageLifecycleStore extends Context.Service<
                   ),
                 )
                 .orderBy(snippets.createdAt);
-              return { cleanup: toRecord(claimed), snippets: remaining };
+              return { cleanup: toCleanupRecord(claimed), snippets: remaining };
             }),
           )
           .pipe(Effect.orDie);
@@ -233,7 +255,7 @@ export class StorageLifecycleStore extends Context.Service<
         attemptId: string,
         snippetId: string,
       ) {
-        yield* db
+        return yield* db
           .transaction((tx) =>
             Effect.gen(function* () {
               const [active] = yield* tx
@@ -246,7 +268,7 @@ export class StorageLifecycleStore extends Context.Service<
                   ),
                 )
                 .limit(1);
-              if (active === undefined) return;
+              if (active === undefined) return false;
               const [removed] = yield* tx
                 .delete(snippets)
                 .where(
@@ -254,6 +276,7 @@ export class StorageLifecycleStore extends Context.Service<
                 )
                 .returning({ id: snippets.id });
               if (removed !== undefined) yield* notifySnippetChanges(tx, workosUserId);
+              return true;
             }),
           )
           .pipe(Effect.orDie);
@@ -265,18 +288,49 @@ export class StorageLifecycleStore extends Context.Service<
         message: string,
       ) {
         yield* db
-          .update(storageCleanupIntents)
-          .set({
-            attemptId: null,
-            lastFailure: message,
-            leaseExpiresAt: null,
-            updatedAt: DateTime.toDateUtc(yield* DateTime.now),
-          })
-          .where(
-            and(
-              eq(storageCleanupIntents.workosUserId, workosUserId),
-              eq(storageCleanupIntents.attemptId, attemptId),
-            ),
+          .transaction((tx) =>
+            Effect.gen(function* () {
+              const updated = yield* tx
+                .update(storageCleanupIntents)
+                .set({
+                  attemptId: null,
+                  lastFailure: message,
+                  leaseExpiresAt: null,
+                  updatedAt: DateTime.toDateUtc(yield* DateTime.now),
+                })
+                .where(
+                  and(
+                    eq(storageCleanupIntents.workosUserId, workosUserId),
+                    eq(storageCleanupIntents.attemptId, attemptId),
+                  ),
+                )
+                .returning({ workosUserId: storageCleanupIntents.workosUserId });
+              if (updated.length > 0) yield* notifySnippetChanges(tx, workosUserId);
+            }),
+          )
+          .pipe(Effect.orDie);
+      });
+
+      const readyToDisconnect = Effect.fn("StorageLifecycleStore.readyToDisconnect")(function* (
+        workosUserId: string,
+        attemptId: string,
+      ) {
+        return yield* db
+          .transaction((tx) =>
+            Effect.gen(function* () {
+              const cleanup = yield* lockStorageLifecycleState(tx, workosUserId);
+              if (cleanup?.attemptId !== attemptId) return false;
+              const [remaining] = yield* tx
+                .select({ count: sql<number>`count(*)::int` })
+                .from(snippets)
+                .where(
+                  and(
+                    eq(snippets.ownerWorkosUserId, workosUserId),
+                    eq(snippets.storageProvider, cleanup.storageProvider),
+                  ),
+                );
+              return (remaining?.count ?? 0) === 0;
+            }),
           )
           .pipe(Effect.orDie);
       });
@@ -285,18 +339,21 @@ export class StorageLifecycleStore extends Context.Service<
         workosUserId: string,
         attemptId: string,
       ) {
-        yield* db
+        return yield* db
           .transaction((tx) =>
             Effect.gen(function* () {
-              yield* tx
+              const removed = yield* tx
                 .delete(storageCleanupIntents)
                 .where(
                   and(
                     eq(storageCleanupIntents.workosUserId, workosUserId),
                     eq(storageCleanupIntents.attemptId, attemptId),
                   ),
-                );
+                )
+                .returning({ workosUserId: storageCleanupIntents.workosUserId });
+              if (removed.length === 0) return false;
               yield* notifySnippetChanges(tx, workosUserId);
+              return true;
             }),
           )
           .pipe(Effect.orDie);
@@ -314,14 +371,49 @@ export class StorageLifecycleStore extends Context.Service<
         return row !== undefined;
       });
 
+      const reserveAuthorization = Effect.fn("StorageLifecycleStore.reserveAuthorization")(
+        function* (workosUserId: string, storageProvider: StorageProviderName) {
+          return yield* db
+            .transaction((tx) =>
+              Effect.gen(function* () {
+                if ((yield* lockStorageLifecycleState(tx, workosUserId)) !== null) return null;
+                const [existing] = yield* tx
+                  .select({ storageProvider: storageAuthorizationIntents.storageProvider })
+                  .from(storageAuthorizationIntents)
+                  .where(eq(storageAuthorizationIntents.workosUserId, workosUserId))
+                  .limit(1);
+                if (existing !== undefined) return existing.storageProvider;
+                const [created] = yield* tx
+                  .insert(storageAuthorizationIntents)
+                  .values({ storageProvider, workosUserId })
+                  .returning({ storageProvider: storageAuthorizationIntents.storageProvider });
+                return created?.storageProvider ?? null;
+              }),
+            )
+            .pipe(Effect.orDie);
+        },
+      );
+
+      const clearAuthorization = Effect.fn("StorageLifecycleStore.clearAuthorization")(function* (
+        workosUserId: string,
+      ) {
+        yield* db
+          .delete(storageAuthorizationIntents)
+          .where(eq(storageAuthorizationIntents.workosUserId, workosUserId))
+          .pipe(Effect.orDie);
+      });
+
       return StorageLifecycleStore.of({
         begin,
         claim,
+        clearAuthorization,
         complete,
         completeSnippet,
         fail,
         get,
         isActive,
+        readyToDisconnect,
+        reserveAuthorization,
       });
     }),
   );
@@ -358,6 +450,10 @@ export class StorageLifecycle extends Context.Service<
     readonly getManagementState: (
       workosUserId: string,
     ) => Effect.Effect<StorageManagementState, RpcError>;
+    readonly getProviderStatus: (
+      workosUserId: string,
+      storageProvider: StorageProviderName,
+    ) => Effect.Effect<import("@plakk/shared/PlakkApi").StorageProviderStatus, RpcError>;
     readonly retryCleanup: (
       workosUserId: string,
       storageProvider: StorageProviderName,
@@ -391,6 +487,19 @@ export class StorageLifecycle extends Context.Service<
           return yield* conflict(
             "Unlink the current storage provider before choosing another provider.",
           );
+        }
+        if (linkedProvider === null) {
+          const reservedProvider = yield* store.reserveAuthorization(workosUserId, storageProvider);
+          if (reservedProvider === null) {
+            return yield* conflict("Storage cleanup is in progress. Finish it first.");
+          }
+          if (reservedProvider !== storageProvider) {
+            return yield* conflict(
+              "Another storage provider authorization is already in progress.",
+            );
+          }
+        } else {
+          yield* store.clearAuthorization(workosUserId);
         }
         return yield* storage
           .beginAuthorization({ returnTo, storageProvider, workosUserId })
@@ -451,9 +560,18 @@ export class StorageLifecycle extends Context.Service<
           if (deletion._tag === "Failure") {
             return yield* recordPartial(cleanup, cleanupFailureMessage(deletion.failure));
           }
-          yield* store.completeSnippet(workosUserId, attemptId, snippet.id);
+          if (!(yield* store.completeSnippet(workosUserId, attemptId, snippet.id))) {
+            return yield* conflict(
+              "Storage cleanup was superseded by another Retry. Refresh its progress.",
+            );
+          }
         }
 
+        if (!(yield* store.readyToDisconnect(workosUserId, attemptId))) {
+          return yield* conflict(
+            "Storage cleanup changed before credential disconnection. Refresh its progress.",
+          );
+        }
         const disconnected = yield* storage
           .disconnect({ storageProvider, workosUserId })
           .pipe(Effect.result);
@@ -463,7 +581,11 @@ export class StorageLifecycle extends Context.Service<
             "Provider content is removed, but credential disconnection still needs Retry.",
           );
         }
-        yield* store.complete(workosUserId, attemptId);
+        if (!(yield* store.complete(workosUserId, attemptId))) {
+          return yield* conflict(
+            "Storage cleanup was completed by another Retry. Refresh the account state.",
+          );
+        }
         return { action: cleanup.action, outcome: "COMPLETED" };
       });
 
@@ -506,6 +628,7 @@ export class StorageLifecycle extends Context.Service<
         const linkedProvider = yield* storage
           .getLinkedProvider(workosUserId)
           .pipe(Effect.mapError((error) => internal(error.message)));
+        if (linkedProvider !== null) yield* store.clearAuthorization(workosUserId);
         const stored = yield* store.get(workosUserId, linkedProvider);
         const effectiveProvider = stored.cleanup?.storageProvider ?? linkedProvider;
         const providerStatus =
@@ -535,11 +658,25 @@ export class StorageLifecycle extends Context.Service<
         };
       });
 
+      const getProviderStatus = Effect.fn("StorageLifecycle.getProviderStatus")(function* (
+        workosUserId: string,
+        storageProvider: StorageProviderName,
+      ) {
+        const status = yield* storage
+          .getStatus({ storageProvider, workosUserId })
+          .pipe(Effect.mapError((error) => internal(error.message)));
+        if (status.status !== "NEEDS_REAUTHORIZATION") {
+          yield* store.clearAuthorization(workosUserId);
+        }
+        return status;
+      });
+
       return StorageLifecycle.of({
         assertCommandsAllowed,
         beginAuthorization,
         beginCleanup,
         getManagementState,
+        getProviderStatus,
         retryCleanup,
       });
     }),

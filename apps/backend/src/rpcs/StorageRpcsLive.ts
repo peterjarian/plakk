@@ -1,6 +1,5 @@
 import type { StorageProvider as StorageProviderName } from "@plakk/shared";
 import { CurrentUser, StorageRpcs, type StorageOnboardingOrigin } from "@plakk/shared/PlakkApi";
-import { RpcError } from "@plakk/shared/RpcError";
 import {
   storageOnboardingReturnSearch,
   storageOnboardingRouteSearchParams,
@@ -9,7 +8,6 @@ import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
 
 import { StorageLifecycle } from "../storage/StorageLifecycle.ts";
-import { StorageProvider } from "../storage/StorageProvider.ts";
 import { configuredWebOrigin as validateConfiguredWebOrigin } from "../WebOrigin.ts";
 
 export const storageProviderReturnUrl = (
@@ -25,9 +23,6 @@ export const storageProviderReturnUrl = (
   ).toString();
   return returnUrl.href;
 };
-
-const storageStatusError = (message: string) =>
-  new RpcError({ code: "INTERNAL_SERVER_ERROR", message });
 
 export const StorageRpcsLive = StorageRpcs.of({
   BeginStorageProviderLink: Effect.fn("rpc.BeginStorageProviderLink")(function* (input) {
@@ -51,16 +46,10 @@ export const StorageRpcsLive = StorageRpcs.of({
   }),
   GetStorageProviderStatus: Effect.fn("rpc.GetStorageProviderStatus")(function* (input) {
     const currentUser = yield* CurrentUser;
-    const storage = yield* StorageProvider;
-    return yield* storage
-      .getStatus({
-        storageProvider: input.storageProvider,
-        workosUserId: currentUser.id,
-      })
-      .pipe(
-        Effect.mapError((error) => storageStatusError(error.message)),
-        Effect.annotateSpans({ storageProvider: input.storageProvider }),
-      );
+    const lifecycle = yield* StorageLifecycle;
+    return yield* lifecycle
+      .getProviderStatus(currentUser.id, input.storageProvider)
+      .pipe(Effect.annotateSpans({ storageProvider: input.storageProvider }));
   }),
   GetStorageManagementState: Effect.fn("rpc.GetStorageManagementState")(function* () {
     const currentUser = yield* CurrentUser;

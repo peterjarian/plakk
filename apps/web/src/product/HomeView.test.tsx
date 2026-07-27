@@ -239,7 +239,7 @@ describe("Web Home", () => {
     expect(actionTag(html, "Delete")).not.toContain('disabled=""');
   });
 
-  it("gates content actions during storage restriction while keeping Delete available", () => {
+  it("gates every provider-dependent action during storage restriction", () => {
     const html = render(
       {
         account: {
@@ -259,10 +259,10 @@ describe("Web Home", () => {
     );
 
     expect(html).toContain("Storage access required");
-    expect(html).toContain("Delete remains available");
+    expect(html).toContain("Copy, Download, Open, and Delete");
     expect(html).toContain(">Reconnect storage</button>");
     expect(actionTag(html, "Copy")).toContain('disabled=""');
-    expect(actionTag(html, "Delete")).not.toContain('disabled=""');
+    expect(actionTag(html, "Delete")).toContain('disabled=""');
   });
 
   it("keeps last-confirmed snippets visible while live updates reconnect", () => {

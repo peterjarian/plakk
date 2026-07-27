@@ -20,6 +20,12 @@ const lifecycle = (overrides: Partial<StorageLifecycle["Service"]> = {}) =>
         externalDestinationUrl: "https://drive.example/folder",
         storageProvider: "GOOGLE_DRIVE",
       }),
+    getProviderStatus: (_, storageProvider) =>
+      Effect.succeed({
+        externalDestinationUrl: "https://drive.example/folder",
+        status: "CONNECTED",
+        storageProvider,
+      }),
     retryCleanup: () => Effect.succeed({ action: "UNLINK", outcome: "COMPLETED" }),
     ...overrides,
   });
@@ -131,17 +137,27 @@ describe("storage authorization", () => {
 
 describe("authoritative storage management", () => {
   it("reads provider status through the backend provider owner", async () => {
+    const getProviderStatus = vi.fn(
+      (_: string, storageProvider: "DROPBOX" | "GOOGLE_DRIVE" | "ONE_DRIVE") =>
+        Effect.succeed({
+          externalDestinationUrl: "https://drive.example/folder",
+          status: "CONNECTED" as const,
+          storageProvider,
+        }),
+    );
     await expect(
       run(
         StorageRpcsLive.GetStorageProviderStatus({
           storageProvider: "ONE_DRIVE",
         }),
+        lifecycle({ getProviderStatus }),
       ),
     ).resolves.toEqual({
       externalDestinationUrl: "https://drive.example/folder",
       status: "CONNECTED",
       storageProvider: "ONE_DRIVE",
     });
+    expect(getProviderStatus).toHaveBeenCalledWith("user-account-bound", "ONE_DRIVE");
   });
 
   it("delegates exact-count cleanup and retry to the lifecycle owner", async () => {

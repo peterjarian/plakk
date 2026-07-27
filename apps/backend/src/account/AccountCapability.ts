@@ -215,6 +215,15 @@ export class AccountCapability extends Context.Service<
       const authorizeSnippetDeletion = Effect.fn("AccountCapability.authorizeSnippetDeletion")(
         function* (workosUserId: string) {
           yield* storageLifecycle.assertCommandsAllowed(workosUserId);
+          const linkedProvider = yield* storage
+            .getLinkedProvider(workosUserId)
+            .pipe(Effect.mapError(mapStorageReadError));
+          if (linkedProvider === null) {
+            return yield* forbiddenStorageError("Reconnect storage before deleting Snippets.");
+          }
+          yield* storage
+            .ensureConnected({ storageProvider: linkedProvider, workosUserId })
+            .pipe(Effect.mapError(mapStorageAuthorizationError));
         },
       );
 

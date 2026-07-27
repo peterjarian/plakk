@@ -7,9 +7,8 @@ import {
   PostgresNotifications,
   type PostgresNotificationEvent,
   type DrizzleService,
-  sql,
 } from "@plakk/db";
-import { snippets, storageCleanupIntents, type SnippetRow } from "@plakk/db/schema";
+import { snippets, type SnippetRow } from "@plakk/db/schema";
 import {
   AuthenticatedRpcRequest,
   CurrentUser,
@@ -34,6 +33,7 @@ import {
   notifySnippetChanges,
   SNIPPET_INVALIDATION_CHANNEL,
 } from "../snippets/SnippetInvalidation.ts";
+import { lockStorageLifecycleState } from "../storage/StorageLifecycle.ts";
 import { type StorageDownloadError, StorageProvider } from "../storage/StorageProvider.ts";
 import { configuredWebOrigin as validateConfiguredWebOrigin } from "../WebOrigin.ts";
 
@@ -106,20 +106,6 @@ const samePublication = (snippet: SnippetRow, input: PublishSnippetPayload) =>
   snippet.storageProvider === input.storageProvider &&
   snippet.storageObjectId === input.storageObjectId;
 
-type DrizzleTransaction = Parameters<Parameters<DrizzleService["db"]["transaction"]>[0]>[0];
-
-const assertNoCleanupInTransaction = Effect.fn("SnippetRpcs.assertNoCleanupInTransaction")(
-  function* (tx: DrizzleTransaction, ownerWorkosUserId: string) {
-    yield* tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${ownerWorkosUserId}, 0))`);
-    const [cleanup] = yield* tx
-      .select({ workosUserId: storageCleanupIntents.workosUserId })
-      .from(storageCleanupIntents)
-      .where(eq(storageCleanupIntents.workosUserId, ownerWorkosUserId))
-      .limit(1);
-    return cleanup === undefined;
-  },
-);
-
 const prepareSnippetUpload = Effect.fn("SnippetRpcs.prepareUpload")(function* (
   storage: StorageProvider["Service"],
   ownerWorkosUserId: string,
@@ -168,7 +154,7 @@ const publishSnippet = Effect.fn("SnippetRpcs.publish")(function* (
   const result = yield* drizzle.db
     .transaction((tx) =>
       Effect.gen(function* () {
-        if (!(yield* assertNoCleanupInTransaction(tx, ownerWorkosUserId))) {
+        if ((yield* lockStorageLifecycleState(tx, ownerWorkosUserId)) !== null) {
           return { type: "cleanup" as const };
         }
         const [inserted] = yield* tx
@@ -326,7 +312,7 @@ const deleteSnippet = Effect.fn("SnippetRpcs.delete")(function* (
   const deleted = yield* drizzle.db
     .transaction((tx) =>
       Effect.gen(function* () {
-        if (!(yield* assertNoCleanupInTransaction(tx, ownerWorkosUserId))) {
+        if ((yield* lockStorageLifecycleState(tx, ownerWorkosUserId)) !== null) {
           return { type: "cleanup" as const };
         }
         const [removed] = yield* tx

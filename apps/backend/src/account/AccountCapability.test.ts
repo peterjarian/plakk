@@ -1,4 +1,8 @@
-import { StorageCredentialsError, StorageProvider } from "../storage/StorageProvider.ts";
+import {
+  StorageCredentialsError,
+  StorageNeedsReauthorizationError,
+  StorageProvider,
+} from "../storage/StorageProvider.ts";
 import { RpcError } from "@plakk/shared/RpcError";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { DateTime, Effect, Layer } from "effect";
@@ -27,6 +31,12 @@ const storageLifecycleService = (
         connectionStatus: "CONNECTED",
         externalDestinationUrl: "https://drive.example/folder",
         storageProvider: "GOOGLE_DRIVE",
+      }),
+    getProviderStatus: (_, storageProvider) =>
+      Effect.succeed({
+        externalDestinationUrl: "https://drive.example/folder",
+        status: "CONNECTED",
+        storageProvider,
       }),
     retryCleanup: () => Effect.succeed({ action: "UNLINK", outcome: "COMPLETED" }),
     ...overrides,
@@ -408,5 +418,26 @@ describe("account trial capability", () => {
       failure: { code: "CONFLICT" },
     });
     expect(ensureConnected).not.toHaveBeenCalled();
+  });
+
+  it("rejects Snippet deletion while the linked provider needs reauthorization", async () => {
+    const result = await runCapability(
+      (capability) => capability.authorizeSnippetDeletion("user-1").pipe(Effect.result),
+      {
+        storage: storageService({
+          ensureConnected: () =>
+            Effect.fail(
+              new StorageNeedsReauthorizationError({
+                message: "Reconnect storage before deleting Snippets.",
+              }),
+            ),
+        }),
+      },
+    );
+
+    expect(result).toMatchObject({
+      _tag: "Failure",
+      failure: { code: "FORBIDDEN" },
+    });
   });
 });

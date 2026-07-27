@@ -212,4 +212,21 @@ describe("storage management view", () => {
     expect(reauthorize).toHaveBeenCalledWith("GOOGLE_DRIVE");
     expect(onRedirect).toHaveBeenCalledWith("https://workos.example/authorize");
   });
+
+  it("keeps a destructive failure visible after refreshing authoritative state", async () => {
+    const beginCleanup = vi
+      .fn<Props["beginCleanup"]>()
+      .mockRejectedValue(new Error("controlled count conflict"));
+    const { click, container } = await render({ beginCleanup });
+
+    await click("Unlink");
+    const input = container.querySelector("input") as HTMLInputElement;
+    await act(async () => {
+      setInputValue(input, "DELETE");
+    });
+    await click("Unlink permanently");
+
+    expect(container.textContent).toContain("Cleanup did not start");
+    expect(container.textContent).toContain("3 Snippets");
+  });
 });

@@ -8,16 +8,7 @@ import { Button } from "@plakk/ui/components/primitives/button";
 import { ExternalLink, LoaderCircle, RotateCcw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
-const providerLabel = (provider: StorageProvider): string => {
-  switch (provider) {
-    case "GOOGLE_DRIVE":
-      return "Google Drive";
-    case "ONE_DRIVE":
-      return "OneDrive";
-    case "DROPBOX":
-      return "Dropbox";
-  }
-};
+import { storageProviderLabel } from "./storage-provider-presentation.ts";
 
 const actionLabel = (action: StorageCleanupAction) =>
   action === "UNLINK" ? "Unlink" : "Switch provider";
@@ -27,7 +18,11 @@ const snippetCountLabel = (count: number) => `${count} ${count === 1 ? "Snippet"
 type ViewState =
   | { readonly kind: "loading" }
   | { readonly kind: "failed" }
-  | { readonly kind: "ready"; readonly snapshot: StorageManagementState }
+  | {
+      readonly kind: "ready";
+      readonly notice: string | null;
+      readonly snapshot: StorageManagementState;
+    }
   | {
       readonly action: StorageCleanupAction;
       readonly confirmation: string;
@@ -59,14 +54,17 @@ export function StorageManagementView(props: {
     });
   const [state, setState] = useState<ViewState>({ kind: "loading" });
 
-  const reconstruct = useCallback(async () => {
-    setState({ kind: "loading" });
-    try {
-      setState({ kind: "ready", snapshot: await props.read() });
-    } catch {
-      setState({ kind: "failed" });
-    }
-  }, [props.read]);
+  const reconstruct = useCallback(
+    async (notice: string | null = null) => {
+      setState({ kind: "loading" });
+      try {
+        setState({ kind: "ready", notice, snapshot: await props.read() });
+      } catch {
+        setState({ kind: "failed" });
+      }
+    },
+    [props.read],
+  );
 
   useEffect(() => {
     void reconstruct();
@@ -80,6 +78,7 @@ export function StorageManagementView(props: {
       }
       setState({
         kind: "ready",
+        notice: null,
         snapshot: {
           ...snapshot,
           affectedSnippetCount: result.progress.totalSnippetCount,
@@ -102,7 +101,9 @@ export function StorageManagementView(props: {
         snapshot,
       );
     } catch {
-      await reconstruct();
+      await reconstruct(
+        "Cleanup did not start. Review the refreshed provider state and Snippet count, then try again.",
+      );
     }
   }, [completeOrRetain, props.beginCleanup, reconstruct, state]);
 
@@ -116,7 +117,9 @@ export function StorageManagementView(props: {
     try {
       await completeOrRetain(await props.retryCleanup(storageProvider), snapshot);
     } catch {
-      await reconstruct();
+      await reconstruct(
+        "Cleanup Retry did not complete. The authoritative progress was refreshed; review it before trying again.",
+      );
     }
   }, [completeOrRetain, props.retryCleanup, reconstruct, state]);
 
@@ -144,6 +147,15 @@ export function StorageManagementView(props: {
             Manage storage
           </h1>
         </header>
+
+        {state.kind === "ready" && state.notice !== null && (
+          <div
+            className="rounded-xl border border-destructive/20 bg-destructive/10 p-4 text-sm"
+            role="alert"
+          >
+            {state.notice}
+          </div>
+        )}
 
         {state.kind === "loading" || state.kind === "cleaning" ? (
           <div className="grid min-h-48 place-items-center gap-3 text-center" role="status">
@@ -177,12 +189,12 @@ export function StorageManagementView(props: {
           <div className="grid gap-5 rounded-xl border border-destructive/30 bg-card p-6">
             <div className="grid gap-2">
               <h2 className="text-lg font-semibold">
-                {actionLabel(state.action)} {providerLabel(state.snapshot.storageProvider!)}?
+                {actionLabel(state.action)} {storageProviderLabel(state.snapshot.storageProvider!)}?
               </h2>
               <p className="text-sm text-muted-foreground">
                 This permanently deletes {snippetCountLabel(state.snapshot.affectedSnippetCount)}{" "}
                 and their provider content before disconnecting{" "}
-                {providerLabel(state.snapshot.storageProvider!)}.
+                {storageProviderLabel(state.snapshot.storageProvider!)}.
               </p>
               <p className="text-sm text-muted-foreground">
                 Switching offers no migration. A replacement provider can be chosen only after this
@@ -204,7 +216,7 @@ export function StorageManagementView(props: {
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => setState({ kind: "ready", snapshot: state.snapshot })}
+                onClick={() => setState({ kind: "ready", notice: null, snapshot: state.snapshot })}
               >
                 Cancel
               </Button>
@@ -247,7 +259,7 @@ export function StorageManagementView(props: {
             <div className="flex flex-wrap gap-2">
               {state.snapshot.connectionStatus !== "CONNECTED" && (
                 <Button type="button" variant="outline" onClick={() => void reauthorize()}>
-                  Reconnect {providerLabel(state.snapshot.storageProvider)}
+                  Reconnect {storageProviderLabel(state.snapshot.storageProvider)}
                 </Button>
               )}
               <Button type="button" onClick={() => void retryCleanup()}>
@@ -260,7 +272,7 @@ export function StorageManagementView(props: {
           <div className="grid gap-5 rounded-xl border border-amber-500/30 bg-card p-6">
             <div className="grid gap-2">
               <h2 className="font-semibold">
-                {providerLabel(state.snapshot.storageProvider)} needs reconnection
+                {storageProviderLabel(state.snapshot.storageProvider)} needs reconnection
               </h2>
               <p className="text-sm text-muted-foreground">
                 Snippets are preserved. Provider-dependent actions stay paused while you reauthorize
@@ -268,23 +280,23 @@ export function StorageManagementView(props: {
               </p>
             </div>
             <Button type="button" onClick={() => void reauthorize()}>
-              Reconnect {providerLabel(state.snapshot.storageProvider)}
+              Reconnect {storageProviderLabel(state.snapshot.storageProvider)}
             </Button>
           </div>
         ) : state.snapshot.connectionStatus === "NOT_CONNECTED" ? (
           <div className="grid gap-5 rounded-xl border border-amber-500/30 bg-card p-6">
             <h2 className="font-semibold">
-              {providerLabel(state.snapshot.storageProvider)} is not connected
+              {storageProviderLabel(state.snapshot.storageProvider)} is not connected
             </h2>
             <Button type="button" onClick={() => void reauthorize()}>
-              Reconnect {providerLabel(state.snapshot.storageProvider)}
+              Reconnect {storageProviderLabel(state.snapshot.storageProvider)}
             </Button>
           </div>
         ) : (
           <div className="grid gap-5 rounded-xl border border-border bg-card p-6">
             <div className="grid gap-2">
               <h2 className="text-lg font-semibold">
-                {providerLabel(state.snapshot.storageProvider)} connected
+                {storageProviderLabel(state.snapshot.storageProvider)} connected
               </h2>
               <p className="text-sm text-muted-foreground">
                 {snippetCountLabel(state.snapshot.affectedSnippetCount)} would be permanently

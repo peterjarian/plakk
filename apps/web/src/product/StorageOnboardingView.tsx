@@ -1,30 +1,15 @@
 import type { StorageProvider } from "@plakk/shared";
 import type { StorageOnboardingOrigin } from "@plakk/shared/PlakkApi";
 import { Button } from "@plakk/ui/components/primitives/button";
-import { DropboxIcon } from "@plakk/ui/icons/DropboxIcon";
-import { GoogleDriveIcon } from "@plakk/ui/icons/GoogleDriveIcon";
-import { OneDriveIcon } from "@plakk/ui/icons/OneDriveIcon";
 import { ArrowRight, Check, LoaderCircle, RotateCcw } from "lucide-react";
-import { useCallback, useEffect, useState, type ComponentType } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import type { StorageOnboardingRead } from "./storage-onboarding-client.ts";
+import { storageProviderChoices, storageProviderLabel } from "./storage-provider-presentation.ts";
 import {
   storageOnboardingDestination,
   type StorageOnboardingDestination,
 } from "./storage-onboarding.ts";
-
-const providerChoices: ReadonlyArray<{
-  readonly provider: StorageProvider;
-  readonly label: string;
-  readonly Icon: ComponentType<{ readonly className?: string }>;
-}> = [
-  { provider: "GOOGLE_DRIVE", label: "Google Drive", Icon: GoogleDriveIcon },
-  { provider: "ONE_DRIVE", label: "OneDrive", Icon: OneDriveIcon },
-  { provider: "DROPBOX", label: "Dropbox", Icon: DropboxIcon },
-];
-
-const providerLabel = (provider: StorageProvider) =>
-  providerChoices.find((choice) => choice.provider === provider)?.label ?? provider;
 
 type ViewState =
   | { readonly kind: "checking" }
@@ -174,7 +159,7 @@ export function StorageOnboardingView(props: {
           </div>
         ) : state.kind === "choose" ? (
           <div className="grid gap-3" aria-label="Storage providers">
-            {providerChoices.map(({ Icon, label, provider }) => (
+            {storageProviderChoices.map(({ Icon, label, provider }) => (
               <button
                 key={provider}
                 type="button"
@@ -194,7 +179,7 @@ export function StorageOnboardingView(props: {
               aria-hidden="true"
             />
             <p className="text-sm text-muted-foreground">
-              Opening {providerLabel(state.provider)} authorization…
+              Opening {storageProviderLabel(state.provider)} authorization…
             </p>
           </div>
         ) : state.kind === "return-desktop" ? (
@@ -226,8 +211,8 @@ export function StorageOnboardingView(props: {
               <p className="text-sm text-muted-foreground">
                 {state.kind === "retry"
                   ? state.action === "recheck"
-                    ? `${providerLabel(state.provider)} is connected, but the account has not finished updating yet. Try again to recheck it.`
-                    : `Plakk did not find an active ${providerLabel(state.provider)} connection for this account. Nothing was changed.`
+                    ? `${storageProviderLabel(state.provider)} is connected, but the account has not finished updating yet. Try again to recheck it.`
+                    : `Plakk did not find an active ${storageProviderLabel(state.provider)} connection for this account. Nothing was changed.`
                   : "Plakk could not confirm your account or contact the storage service. Try again."}
               </p>
             </div>

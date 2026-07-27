@@ -76,6 +76,14 @@ export const accountBillingStates = pgTable(
 
 export type AccountBillingStateRow = typeof accountBillingStates.$inferSelect;
 
+export const storageAuthorizationIntents = pgTable("storage_authorization_intents", {
+  workosUserId: text("workos_user_id").primaryKey(),
+  storageProvider: storageProvider("storage_provider").notNull(),
+  ...timestamps,
+});
+
+export type StorageAuthorizationIntentRow = typeof storageAuthorizationIntents.$inferSelect;
+
 export const storageCleanupIntents = pgTable(
   "storage_cleanup_intents",
   {
