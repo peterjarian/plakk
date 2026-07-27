@@ -148,7 +148,7 @@ export function WebProductProvider({ children }: Readonly<{ children: ReactNode 
     }),
   )[0];
 
-  if (auth.loading || auth.user === null) {
+  if (auth.user === null) {
     return (
       <WebProductContext.Provider value={signedOutContext}>{children}</WebProductContext.Provider>
     );
