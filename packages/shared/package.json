@@ -11,6 +11,10 @@
       "import": "./src/api/PlakkApi.ts",
       "types": "./src/api/PlakkApi.ts"
     },
+    "./ExactHttpOrigin": {
+      "import": "./src/api/ExactHttpOrigin.ts",
+      "types": "./src/api/ExactHttpOrigin.ts"
+    },
     "./RpcError": {
       "import": "./src/api/RpcError.ts",
       "types": "./src/api/RpcError.ts"

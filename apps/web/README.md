@@ -31,6 +31,8 @@ WORKOS_API_KEY=sk_...
 WORKOS_CLIENT_ID=client_...
 WORKOS_REDIRECT_URI=http://localhost:3000/api/auth/callback
 WORKOS_COOKIE_PASSWORD=32+ chars
+VITE_PLAKK_API_ORIGIN=http://localhost:3100
+PLAKK_WEB_ORIGIN=http://localhost:3000
 ```
 
 ## Backend ownership
@@ -40,3 +42,11 @@ product RPC commands or live updates.
 
 Desktop connects directly to the independently deployed backend using `PLAKK_RPC_URL` for commands
 and live Snippet invalidations.
+
+The browser uses `VITE_PLAKK_API_ORIGIN` as an exact HTTP(S) origin and calls
+`/api/rpc` there with a fresh WorkOS bearer token. The backend admits that browser origin through
+its exact `PLAKK_WEB_ORIGIN` CORS setting while retaining the Desktop `plakk-app://renderer`
+origin. Local development falls back to `http://localhost:3100`; production requires an explicit
+HTTPS API value and fails closed when it is missing or invalid. When `PLAKK_WEB_ORIGIN` is absent,
+the backend remains available to Desktop but admits no browser origin; Web deployments inject the
+canonical HTTPS origin.

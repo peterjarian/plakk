@@ -11,24 +11,7 @@ const root = fileURLToPath(new URL(".", import.meta.url));
 const config = defineConfig({
   root,
   resolve: { tsconfigPaths: true },
-  plugins: [
-    tailwindcss(),
-    tanstackStart(),
-    viteReact(),
-    nitro({
-      routeRules: {
-        "/api/**": {
-          cors: true,
-          headers: {
-            "access-control-allow-origin": "plakk-app://renderer",
-            "access-control-allow-methods": "GET, POST, OPTIONS",
-            "access-control-allow-headers": "authorization, content-type",
-            "access-control-max-age": "86400",
-          },
-        },
-      },
-    }),
-  ],
+  plugins: [tailwindcss(), tanstackStart(), viteReact(), nitro()],
 });
 
 export default config;

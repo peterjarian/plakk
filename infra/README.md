@@ -29,6 +29,8 @@ Copy `.env.example` to `.env` and fill in:
 `RAILWAY_WORKSPACE_ID` is optional. Without it, Railway creates the project in
 the token owner's personal workspace. `RAILWAY_REPOSITORY` and
 `RAILWAY_BRANCH` default to `peterjarian/plakk` and `main`.
+`PLAKK_WEB_ORIGIN` defaults to the canonical `https://app.plakk.io` Web origin
+and is injected into the backend's exact CORS allowlist.
 
 Before the first deployment, link the Railway account to GitHub and grant the
 Railway GitHub App access to the configured repository. For a private

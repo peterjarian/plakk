@@ -31,6 +31,9 @@ export default Alchemy.Stack(
     const stack = yield* Stack;
     const workosApiKey = yield* Config.redacted("WORKOS_API_KEY");
     const workosClientId = yield* Config.string("WORKOS_CLIENT_ID");
+    const webOrigin = yield* Config.string("PLAKK_WEB_ORIGIN").pipe(
+      Config.withDefault("https://app.plakk.io"),
+    );
     const repository = yield* Config.string("RAILWAY_REPOSITORY").pipe(
       Config.withDefault("peterjarian/plakk"),
     );
@@ -89,6 +92,7 @@ export default Alchemy.Stack(
         DATABASE_URL: database.pooledConnectionUri,
         NODE_ENV: "production",
         PLAKK_BACKEND_HOST: "0.0.0.0",
+        PLAKK_WEB_ORIGIN: webOrigin,
         WORKOS_API_KEY: workosApiKey,
         WORKOS_CLIENT_ID: workosClientId,
         OTEL_SERVICE_NAME: "plakk-backend",

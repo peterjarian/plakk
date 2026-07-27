@@ -54,11 +54,15 @@ export function AppHeader(props: {
                 <p className="truncate text-xs text-muted-foreground">{fallback}</p>
               </div>
             </div>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={onSettingsClick}>
-              <SettingsIcon />
-              Settings
-            </DropdownMenuItem>
+            {onSettingsClick !== undefined && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={onSettingsClick}>
+                  <SettingsIcon />
+                  Settings
+                </DropdownMenuItem>
+              </>
+            )}
             <DropdownMenuSeparator />
             <DropdownMenuItem variant="destructive" onClick={onSignOutClick}>
               Sign out

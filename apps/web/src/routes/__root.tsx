@@ -1,9 +1,14 @@
 import type { ReactNode } from "react";
 import { HeadContent, Outlet, Scripts, createRootRoute } from "@tanstack/react-router";
+import { AuthKitProvider } from "@workos/authkit-tanstack-react-start/client";
+import { getAuth } from "@workos/authkit-tanstack-react-start";
+import { TooltipProvider } from "@plakk/ui/components/primitives/tooltip";
 
+import { WebProductProvider } from "../product/WebProductProvider.tsx";
 import appCss from "../styles.css?url";
 
 export const Route = createRootRoute({
+  beforeLoad: async () => ({ auth: await getAuth() }),
   head: () => ({
     meta: [
       {
@@ -28,9 +33,16 @@ export const Route = createRootRoute({
 });
 
 function RootComponent() {
+  const { auth: initialAuth } = Route.useRouteContext();
   return (
     <RootDocument>
-      <Outlet />
+      <AuthKitProvider initialAuth={initialAuth}>
+        <TooltipProvider>
+          <WebProductProvider>
+            <Outlet />
+          </WebProductProvider>
+        </TooltipProvider>
+      </AuthKitProvider>
     </RootDocument>
   );
 }
