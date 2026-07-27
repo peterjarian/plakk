@@ -1,7 +1,8 @@
 import type { AccountStatus, ApiSnippet } from "@plakk/shared/PlakkApi";
 import { RpcError } from "@plakk/shared/RpcError";
 import { describe, expect, it } from "@effect/vitest";
-import { Data, Deferred, Effect, Layer, Ref } from "effect";
+import { Data, Deferred, Effect, Layer, Ref, Stream } from "effect";
+import { TestClock } from "effect/testing";
 
 import { AccountProductLifetime, clearProductThenSignOut } from "./account-product-lifetime.ts";
 import { AccountProductReader, type AccountProductSnapshot } from "./product-reader.ts";
@@ -22,9 +23,16 @@ const snippet = (id: string): ApiSnippet => ({
   updatedAt: "2026-07-27T00:00:00.000Z",
 });
 
-const provideLifetime = (read: AccountProductReader["Service"]["read"]) =>
+const provideLifetime = (
+  read: AccountProductReader["Service"]["read"],
+  invalidations: AccountProductReader["Service"]["invalidations"] = Stream.make(undefined).pipe(
+    Stream.concat(Stream.never),
+  ),
+) =>
   AccountProductLifetime.layer.pipe(
-    Layer.provide(Layer.succeed(AccountProductReader, AccountProductReader.of({ read }))),
+    Layer.provide(
+      Layer.succeed(AccountProductReader, AccountProductReader.of({ invalidations, read })),
+    ),
   );
 
 class PurgeFailure extends Data.TaggedError("PurgeFailure") {}
@@ -38,7 +46,9 @@ describe("account product lifetime", () => {
       expect(lifetime.getSnapshot()).toEqual({
         account,
         accountId: "user_1",
+        apiAvailability: "available",
         kind: "ready",
+        liveConnection: "connected",
         snippets: [expectedSnippet],
       });
     }).pipe(
@@ -72,7 +82,9 @@ describe("account product lifetime", () => {
         expect(lifetime.getSnapshot()).toEqual({
           account,
           accountId: "user_2",
+          apiAvailability: "available",
           kind: "ready",
+          liveConnection: "connected",
           snippets: [secondSnippet],
         });
       }).pipe(Effect.provide(lifetimeLayer));
@@ -123,11 +135,42 @@ describe("account product lifetime", () => {
         expect(lifetime.getSnapshot()).toEqual({
           account,
           accountId: "user_1",
+          apiAvailability: "available",
           kind: "ready",
+          liveConnection: "reconnecting",
           snippets: [],
         });
-      }).pipe(Effect.provide(provideLifetime(read)));
+      }).pipe(Effect.provide(provideLifetime(read, Stream.never)));
     }),
+  );
+
+  it.effect(
+    "loads independently and reports reconnecting when only the invalidation stream is unavailable",
+    () =>
+      Effect.gen(function* () {
+        const failure = new RpcError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "stream unavailable",
+        });
+
+        yield* Effect.gen(function* () {
+          const lifetime = yield* AccountProductLifetime;
+          yield* lifetime.enter("user_1");
+          yield* Effect.yieldNow;
+          expect(lifetime.getSnapshot()).toEqual({
+            account,
+            accountId: "user_1",
+            apiAvailability: "available",
+            kind: "ready",
+            liveConnection: "reconnecting",
+            snippets: [],
+          });
+        }).pipe(
+          Effect.provide(
+            provideLifetime(Effect.succeed({ account, snippets: [] }), Stream.fail(failure)),
+          ),
+        );
+      }),
   );
 
   it.effect("cleans product data before credential sign-out and fails closed", () =>
@@ -172,3 +215,143 @@ describe("account product lifetime", () => {
     }),
   );
 });
+
+it.effect("replaces the complete collection atomically on an invalidation", () =>
+  Effect.gen(function* () {
+    const nextInvalidation = yield* Deferred.make<void>();
+    const reads = yield* Ref.make(0);
+    const firstSnippet = snippet("first");
+    const secondSnippet = snippet("second");
+    const read = Ref.getAndUpdate(reads, (count) => count + 1).pipe(
+      Effect.map((count) => ({
+        account,
+        snippets: count < 2 ? [firstSnippet] : [secondSnippet],
+      })),
+    );
+    const invalidations = Stream.make(undefined).pipe(
+      Stream.concat(Stream.fromEffect(Deferred.await(nextInvalidation))),
+      Stream.concat(Stream.never),
+    );
+
+    yield* Effect.gen(function* () {
+      const lifetime = yield* AccountProductLifetime;
+      yield* lifetime.enter("user_1");
+      yield* Effect.yieldNow;
+      expect(lifetime.getSnapshot()).toMatchObject({
+        apiAvailability: "available",
+        liveConnection: "connected",
+        snippets: [firstSnippet],
+      });
+
+      yield* Deferred.succeed(nextInvalidation, undefined);
+      yield* Effect.yieldNow;
+      expect(lifetime.getSnapshot()).toEqual({
+        account,
+        accountId: "user_1",
+        apiAvailability: "available",
+        kind: "ready",
+        liveConnection: "connected",
+        snippets: [secondSnippet],
+      });
+    }).pipe(Effect.provide(provideLifetime(read, invalidations)));
+  }),
+);
+
+it.effect("refreshes the complete snapshot after stream reconnection", () =>
+  Effect.gen(function* () {
+    const connectionAttempts = yield* Ref.make(0);
+    const snapshotReads = yield* Ref.make(0);
+    const firstSnippet = snippet("first");
+    const secondSnippet = snippet("second");
+    const invalidations = Stream.unwrap(
+      Ref.getAndUpdate(connectionAttempts, (count) => count + 1).pipe(
+        Effect.map((count) =>
+          count === 0
+            ? Stream.make(undefined).pipe(
+                Stream.concat(
+                  Stream.fail(
+                    new RpcError({
+                      code: "INTERNAL_SERVER_ERROR",
+                      message: "stream disconnected",
+                    }),
+                  ),
+                ),
+              )
+            : Stream.make(undefined).pipe(Stream.concat(Stream.never)),
+        ),
+      ),
+    );
+    const read = Ref.getAndUpdate(snapshotReads, (count) => count + 1).pipe(
+      Effect.map((count) => ({
+        account,
+        snippets: count < 2 ? [firstSnippet] : [secondSnippet],
+      })),
+    );
+
+    yield* Effect.gen(function* () {
+      const lifetime = yield* AccountProductLifetime;
+      yield* lifetime.enter("user_1");
+      yield* Effect.yieldNow;
+      expect(lifetime.getSnapshot()).toMatchObject({
+        apiAvailability: "available",
+        liveConnection: "reconnecting",
+        snippets: [firstSnippet],
+      });
+
+      yield* TestClock.adjust("1 second");
+      yield* Effect.yieldNow;
+      expect(yield* Ref.get(connectionAttempts)).toBe(2);
+      expect(yield* Ref.get(snapshotReads)).toBe(3);
+      expect(lifetime.getSnapshot()).toEqual({
+        account,
+        accountId: "user_1",
+        apiAvailability: "available",
+        kind: "ready",
+        liveConnection: "connected",
+        snippets: [secondSnippet],
+      });
+    }).pipe(Effect.provide(Layer.merge(provideLifetime(read, invalidations), TestClock.layer())));
+  }),
+);
+
+it.effect("preserves the last-confirmed collection when the API becomes unavailable", () =>
+  Effect.gen(function* () {
+    const nextInvalidation = yield* Deferred.make<void>();
+    const reads = yield* Ref.make(0);
+    const expectedSnippet = snippet("confirmed");
+    const failure = new RpcError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "backend unavailable",
+    });
+    const read = Ref.getAndUpdate(reads, (count) => count + 1).pipe(
+      Effect.flatMap((count) =>
+        count < 2 ? Effect.succeed({ account, snippets: [expectedSnippet] }) : Effect.fail(failure),
+      ),
+    );
+    const invalidations = Stream.make(undefined).pipe(
+      Stream.concat(Stream.fromEffect(Deferred.await(nextInvalidation))),
+      Stream.concat(Stream.never),
+    );
+
+    yield* Effect.gen(function* () {
+      const lifetime = yield* AccountProductLifetime;
+      yield* lifetime.enter("user_1");
+      yield* Effect.yieldNow;
+      yield* Deferred.succeed(nextInvalidation, undefined);
+      yield* Effect.yieldNow;
+
+      expect(lifetime.getSnapshot()).toEqual({
+        account,
+        accountId: "user_1",
+        apiAvailability: "unavailable",
+        cause: failure,
+        kind: "ready",
+        liveConnection: "connected",
+        snippets: [expectedSnippet],
+      });
+      yield* TestClock.adjust("5 seconds");
+      yield* Effect.yieldNow;
+      expect(yield* Ref.get(reads)).toBe(3);
+    }).pipe(Effect.provide(Layer.merge(provideLifetime(read, invalidations), TestClock.layer())));
+  }),
+);

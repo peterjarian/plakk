@@ -7,11 +7,19 @@ export default defineConfig({
     baseURL: "http://127.0.0.1:3000",
     trace: "retain-on-failure",
   },
-  webServer: {
-    command:
-      "WORKOS_API_KEY=sk_test_browser_boundary WORKOS_CLIENT_ID=client_test_browser_boundary WORKOS_REDIRECT_URI=http://127.0.0.1:3000/api/auth/callback WORKOS_COOKIE_PASSWORD=browser-boundary-cookie-password-32-chars vp dev --host 127.0.0.1 --port 3000",
-    port: 3000,
-    reuseExistingServer: false,
-    timeout: 120_000,
-  },
+  webServer: [
+    {
+      command:
+        "WORKOS_API_KEY=sk_test_browser_boundary WORKOS_CLIENT_ID=client_test_browser_boundary WORKOS_REDIRECT_URI=http://127.0.0.1:3000/api/auth/callback WORKOS_COOKIE_PASSWORD=browser-boundary-cookie-password-32-chars vp dev --host 127.0.0.1 --port 3000",
+      port: 3000,
+      reuseExistingServer: false,
+      timeout: 120_000,
+    },
+    {
+      command: "vp dev --config e2e/controlled-product/vite.config.ts --host 127.0.0.1 --port 3001",
+      port: 3001,
+      reuseExistingServer: false,
+      timeout: 120_000,
+    },
+  ],
 });

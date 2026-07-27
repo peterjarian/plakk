@@ -1,10 +1,17 @@
 import { parseExactHttpOrigin } from "@plakk/shared/ExactHttpOrigin";
-import { PlakkApi, type AccountStatus, type ApiSnippet } from "@plakk/shared/PlakkApi";
+import {
+  PlakkApi,
+  SNIPPETS_CHANGED,
+  type AccountStatus,
+  type ApiSnippet,
+  type SnippetInvalidationEvent,
+} from "@plakk/shared/PlakkApi";
 import { RpcError } from "@plakk/shared/RpcError";
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Stream from "effect/Stream";
 import { FetchHttpClient } from "effect/unstable/http";
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 import { RpcClientError } from "effect/unstable/rpc/RpcClientError";
@@ -27,6 +34,10 @@ export interface WebProductRpcClient {
     payload: undefined,
     options: RpcRequestOptions,
   ) => Effect.Effect<ReadonlyArray<ApiSnippet>, RpcError | RpcClientError>;
+  readonly WatchSnippetInvalidations: (
+    payload: undefined,
+    options: RpcRequestOptions,
+  ) => Stream.Stream<SnippetInvalidationEvent, RpcError | RpcClientError>;
 }
 
 export class MissingAccessToken extends Data.TaggedError("MissingAccessToken")<{
@@ -47,17 +58,14 @@ export type AccountProductReadError =
 export class AccountProductReader extends Context.Service<
   AccountProductReader,
   {
+    readonly invalidations: Stream.Stream<void, AccountProductReadError>;
     readonly read: Effect.Effect<AccountProductSnapshot, AccountProductReadError>;
   }
 >()("@plakk/web/product/product-reader/AccountProductReader") {}
 
-export const readAuthenticatedProduct = Effect.fn("WebProductReader.read")(function* (
-  rpc: WebProductRpcClient,
+const authenticatedOptions = Effect.fn("WebProductReader.authorize")(function* (
   getAccessToken: () => Promise<string | undefined>,
-): Effect.fn.Return<
-  AccountProductSnapshot,
-  MissingAccessToken | AccessTokenFailure | RpcError | RpcClientError
-> {
+) {
   const accessToken = yield* Effect.tryPromise({
     try: getAccessToken,
     catch: (cause) =>
@@ -72,15 +80,35 @@ export const readAuthenticatedProduct = Effect.fn("WebProductReader.read")(funct
     });
   }
 
-  const options = {
+  return {
     headers: { authorization: `Bearer ${accessToken}` },
   } as const;
+});
+
+export const readAuthenticatedProduct = Effect.fn("WebProductReader.read")(function* (
+  rpc: WebProductRpcClient,
+  getAccessToken: () => Promise<string | undefined>,
+): Effect.fn.Return<AccountProductSnapshot, AccountProductReadError> {
+  const options = yield* authenticatedOptions(getAccessToken);
   const [account, snippets] = yield* Effect.all(
     [rpc.GetAccountStatus(undefined, options), rpc.GetSnippetSnapshot(undefined, options)],
     { concurrency: "unbounded" },
   );
   return { account, snippets };
 });
+
+export const watchAuthenticatedInvalidations = (
+  rpc: WebProductRpcClient,
+  getAccessToken: () => Promise<string | undefined>,
+): Stream.Stream<void, AccountProductReadError> =>
+  Stream.unwrap(
+    authenticatedOptions(getAccessToken).pipe(
+      Effect.map((options) => rpc.WatchSnippetInvalidations(undefined, options)),
+    ),
+  ).pipe(
+    Stream.filter((event) => event === SNIPPETS_CHANGED),
+    Stream.map(() => undefined),
+  );
 
 export const resolveProductRpcUrl = (
   configuredOrigin: string | undefined,
@@ -110,15 +138,16 @@ export const makeAccountProductReaderLayer = (options: {
     Layer.provideMerge(RpcSerialization.layerNdjson),
   );
 
-  return Layer.succeed(
+  return Layer.effect(
     AccountProductReader,
-    AccountProductReader.of({
-      read: Effect.scoped(
-        RpcClient.make(PlakkApi).pipe(
-          Effect.flatMap((rpc) => readAuthenticatedProduct(rpc, options.getAccessToken)),
-          Effect.provide(protocolLayer),
-        ),
+    RpcClient.make(PlakkApi).pipe(
+      Effect.map((rpc) =>
+        AccountProductReader.of({
+          invalidations: watchAuthenticatedInvalidations(rpc, options.getAccessToken),
+          read: readAuthenticatedProduct(rpc, options.getAccessToken),
+        }),
       ),
-    }),
+      Effect.provide(protocolLayer),
+    ),
   );
 };
