@@ -16,6 +16,11 @@ import {
 } from "./product-reader.ts";
 
 const account: AccountStatus = {
+  accessEntitlement: {
+    status: "TRIAL_ACTIVE",
+    trialStartedAt: "2026-07-27T00:00:00.000Z",
+    trialEndsAt: "2026-08-10T00:00:00.000Z",
+  },
   canSync: true,
   storageProvider: "DROPBOX",
   blockedReasons: [],

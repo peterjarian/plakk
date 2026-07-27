@@ -29,7 +29,16 @@ describe("storage status from the local state", () => {
         provider: { known: true, value: "GOOGLE_DRIVE" },
         capability: {
           status: "ONLINE",
-          account: { canSync: true, storageProvider: "GOOGLE_DRIVE", blockedReasons: [] },
+          account: {
+            accessEntitlement: {
+              status: "TRIAL_ACTIVE",
+              trialStartedAt: "2026-07-27T00:00:00.000Z",
+              trialEndsAt: "2026-08-10T00:00:00.000Z",
+            },
+            canSync: true,
+            storageProvider: "GOOGLE_DRIVE",
+            blockedReasons: [],
+          },
           connection: {
             storageProvider: "GOOGLE_DRIVE",
             status: "CONNECTED",
@@ -47,13 +56,60 @@ describe("storage status from the local state", () => {
     });
   });
 
+  it("consumes the shared billing-restricted capability without a Desktop trial lifecycle", () => {
+    const status = storageStatusFromLocalState(
+      localState({
+        provider: { known: true, value: "GOOGLE_DRIVE" },
+        capability: {
+          status: "ONLINE",
+          account: {
+            accessEntitlement: {
+              status: "BILLING_RESTRICTED",
+              trialStartedAt: "2026-07-27T00:00:00.000Z",
+              trialEndsAt: "2026-08-10T00:00:00.000Z",
+            },
+            canSync: false,
+            storageProvider: "GOOGLE_DRIVE",
+            blockedReasons: ["billing"],
+          },
+          connection: {
+            storageProvider: "GOOGLE_DRIVE",
+            status: "CONNECTED",
+            externalDestinationUrl: "https://drive.example.com/folder",
+          },
+        },
+      }),
+    );
+
+    expect(status).toMatchObject({
+      kind: "connected",
+      canSync: false,
+      account: {
+        accessEntitlement: {
+          status: "BILLING_RESTRICTED",
+          trialEndsAt: "2026-08-10T00:00:00.000Z",
+        },
+        blockedReasons: ["billing"],
+      },
+    });
+  });
+
   it("keeps a confirmed unlinked account distinct from offline capability", () => {
     const status = storageStatusFromLocalState(
       localState({
         provider: { known: true, value: null },
         capability: {
           status: "ONLINE",
-          account: { canSync: false, storageProvider: null, blockedReasons: ["storage"] },
+          account: {
+            accessEntitlement: {
+              status: "TRIAL_ACTIVE",
+              trialStartedAt: "2026-07-27T00:00:00.000Z",
+              trialEndsAt: "2026-08-10T00:00:00.000Z",
+            },
+            canSync: false,
+            storageProvider: null,
+            blockedReasons: ["storage"],
+          },
           connection: null,
         },
       }),

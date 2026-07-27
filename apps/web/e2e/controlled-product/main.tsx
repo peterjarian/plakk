@@ -23,11 +23,17 @@ const accountId = query.get("account") ?? "controlled-user";
 const forceSessionMemory = query.get("force-session-memory") === "true";
 const holdBackendRefresh = query.get("hold-backend-refresh") === "true";
 const startBackendUnavailable = query.get("backend-unavailable") === "true";
+const billingRestricted = query.get("billing-restricted") === "true";
 
 const account: AccountStatus = {
-  canSync: true,
+  accessEntitlement: {
+    status: billingRestricted ? "BILLING_RESTRICTED" : "TRIAL_ACTIVE",
+    trialStartedAt: "2026-07-27T10:15:30.000Z",
+    trialEndsAt: "2026-08-10T10:15:30.000Z",
+  },
+  canSync: !billingRestricted,
   storageProvider: "GOOGLE_DRIVE",
-  blockedReasons: [],
+  blockedReasons: billingRestricted ? ["billing"] : [],
 };
 
 const user: User = {

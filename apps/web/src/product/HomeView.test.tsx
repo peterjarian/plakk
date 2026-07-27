@@ -16,6 +16,11 @@ const user: User = {
 };
 
 const account: AccountStatus = {
+  accessEntitlement: {
+    status: "TRIAL_ACTIVE",
+    trialStartedAt: "2026-07-27T00:00:00.000Z",
+    trialEndsAt: "2026-08-10T00:00:00.000Z",
+  },
   canSync: true,
   storageProvider: "GOOGLE_DRIVE",
   blockedReasons: [],
@@ -111,6 +116,48 @@ describe("Web Home", () => {
     expect(html).toContain("Google Drive");
     expect(html).not.toContain('aria-label="Copy"');
     expect(html).not.toContain('aria-label="Delete"');
+  });
+
+  it("presents the active account trial and its backend-provided end instant", () => {
+    const html = render({
+      account,
+      accountId: user.id,
+      apiAvailability: "available",
+      kind: "ready",
+      liveConnection: "connected",
+      localReadPerformance: "accelerated",
+      snippets: [photo],
+    });
+
+    expect(html).toContain("Trial active");
+    expect(html).toContain("August 10, 2026");
+    expect(html).not.toContain("Billing access required");
+  });
+
+  it("keeps Snippets visible and gives honest recovery direction when billing is restricted", () => {
+    const html = render({
+      account: {
+        ...account,
+        accessEntitlement: {
+          ...account.accessEntitlement,
+          status: "BILLING_RESTRICTED",
+        },
+        blockedReasons: ["billing"],
+        canSync: false,
+      },
+      accountId: user.id,
+      apiAvailability: "available",
+      kind: "ready",
+      liveConnection: "connected",
+      localReadPerformance: "accelerated",
+      snippets: [photo],
+    });
+
+    expect(html).toContain("Billing access required");
+    expect(html).toContain("Summer photo.png");
+    expect(html).toContain("Your snippets are preserved");
+    expect(html).toContain("Restore billing access");
+    expect(html).toContain("Add, Copy, Download, and Open remain unavailable");
   });
 
   it("keeps last-confirmed snippets visible while live updates reconnect", () => {

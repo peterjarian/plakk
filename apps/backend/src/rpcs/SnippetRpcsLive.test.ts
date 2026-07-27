@@ -10,10 +10,12 @@ import {
   SNIPPET_INVALIDATION_KEEP_ALIVE,
   SNIPPETS_CHANGED,
 } from "@plakk/shared/PlakkApi";
+import { RpcError } from "@plakk/shared/RpcError";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { DateTime, Effect, Fiber, Stream } from "effect";
 import { TestClock } from "effect/testing";
 
+import { AccountCapability } from "../account/AccountCapability.ts";
 import {
   StorageCredentialsError,
   type StorageDownloadError,
@@ -77,6 +79,31 @@ const storageService = (
     ...overrides,
   });
 
+const accountCapabilityService = (
+  overrides: Partial<AccountCapability["Service"]> = {},
+): AccountCapability["Service"] =>
+  AccountCapability.of({
+    authorizeProductCommand: () => Effect.void,
+    getStatus: () =>
+      Effect.succeed({
+        accessEntitlement: {
+          status: "TRIAL_ACTIVE",
+          trialStartedAt: "2026-07-20T20:00:00.000Z",
+          trialEndsAt: "2026-08-03T20:00:00.000Z",
+        },
+        blockedReasons: [],
+        canSync: true,
+        storageProvider: "GOOGLE_DRIVE",
+      }),
+    startTrial: () =>
+      Effect.succeed({
+        status: "TRIAL_ACTIVE",
+        trialStartedAt: "2026-07-20T20:00:00.000Z",
+        trialEndsAt: "2026-08-03T20:00:00.000Z",
+      }),
+    ...overrides,
+  });
+
 const withSnippetRpcs = <A, E, R>(
   use: (rpcs: SnippetRpcsHandlers) => Effect.Effect<A, E, R>,
   listen: PostgresNotifications["Service"]["listen"] = () => Stream.never,
@@ -90,13 +117,17 @@ const withSnippetRpcs = <A, E, R>(
   );
 
 const runSnippetEffect = <A, E>(
-  use: (rpcs: SnippetRpcsHandlers) => Effect.Effect<A, E, CurrentUser | Drizzle | StorageProvider>,
+  use: (
+    rpcs: SnippetRpcsHandlers,
+  ) => Effect.Effect<A, E, AccountCapability | CurrentUser | Drizzle | StorageProvider>,
   db: DrizzleService["db"],
   storage: StorageProvider["Service"] = storageService(),
   user: CurrentUser["Service"] = currentUser,
+  capability: AccountCapability["Service"] = accountCapabilityService(),
 ) =>
   Effect.runPromise(
     withSnippetRpcs(use).pipe(
+      Effect.provideService(AccountCapability, capability),
       Effect.provideService(CurrentUser, user),
       Effect.provideService(Drizzle, { db }),
       Effect.provideService(StorageProvider, storage),
@@ -444,6 +475,85 @@ describe("stored snippet download preparation", () => {
         storageService({ getDownloadTarget }),
       ),
     ).rejects.toMatchObject({ code, message });
+  });
+});
+
+describe("account capability enforcement", () => {
+  it("rejects upload preparation, publication, and download preparation before side effects", async () => {
+    const denied = new RpcError({
+      code: "FORBIDDEN",
+      message: "Restore billing access to use this action.",
+    });
+    const authorizeProductCommand = vi.fn(() => Effect.fail(denied));
+    const capability = accountCapabilityService({ authorizeProductCommand });
+    const store = publicationDatabase({ inserted: [snippet()] });
+    const prepareUpload = vi.fn(storageService().prepareUpload);
+    const getDownloadTarget = vi.fn(storageService().getDownloadTarget);
+    const storage = storageService({ getDownloadTarget, prepareUpload });
+
+    await expect(
+      runSnippetEffect(
+        (rpcs) =>
+          rpcs.PrepareSnippetUpload({
+            id: publication.id,
+            fileName: publication.fileName,
+            byteSize: publication.byteSize,
+            storageProvider: publication.storageProvider,
+            mediaType: "text/plain",
+          }),
+        store.db,
+        storage,
+        currentUser,
+        capability,
+      ),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      runSnippetEffect(
+        (rpcs) => rpcs.PublishSnippet(publication),
+        store.db,
+        storage,
+        currentUser,
+        capability,
+      ),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      runSnippetEffect(
+        (rpcs) => rpcs.PrepareSnippetDownload({ id: publication.id }),
+        downloadDatabase([snippet()]),
+        storage,
+        currentUser,
+        capability,
+      ),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+    expect(authorizeProductCommand).toHaveBeenCalledTimes(3);
+    expect(prepareUpload).not.toHaveBeenCalled();
+    expect(store.insertedValues).toEqual([]);
+    expect(getDownloadTarget).not.toHaveBeenCalled();
+  });
+
+  it("keeps authoritative deletion available while billing is restricted", async () => {
+    const stored = snippet();
+    const store = deletionDatabase([stored]);
+    const capability = accountCapabilityService({
+      authorizeProductCommand: () =>
+        Effect.fail(
+          new RpcError({
+            code: "FORBIDDEN",
+            message: "Restore billing access to use this action.",
+          }),
+        ),
+    });
+
+    await runSnippetEffect(
+      (rpcs) => rpcs.DeleteSnippet({ id: stored.id }),
+      store.db,
+      storageService(),
+      currentUser,
+      capability,
+    );
+
+    expect(store.events).toEqual(["remove", "notify", "commit"]);
   });
 });
 

@@ -13,6 +13,11 @@ import { AccountProductReader } from "./product-reader.ts";
 import { ProductIdentityBoundary, useWebProduct } from "./WebProductProvider.tsx";
 
 const account: AccountStatus = {
+  accessEntitlement: {
+    status: "TRIAL_ACTIVE",
+    trialStartedAt: "2026-07-27T00:00:00.000Z",
+    trialEndsAt: "2026-08-10T00:00:00.000Z",
+  },
   canSync: true,
   storageProvider: "GOOGLE_DRIVE",
   blockedReasons: [],

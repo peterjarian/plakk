@@ -11,7 +11,16 @@ export const AccountBlockedReasonSchema = Schema.Literals(["billing", "storage"]
 
 export type AccountBlockedReason = typeof AccountBlockedReasonSchema.Type;
 
+export const AccountAccessEntitlementSchema = Schema.Struct({
+  status: Schema.Literals(["TRIAL_ACTIVE", "BILLING_RESTRICTED"] as const),
+  trialStartedAt: Schema.String,
+  trialEndsAt: Schema.String,
+});
+
+export type AccountAccessEntitlement = typeof AccountAccessEntitlementSchema.Type;
+
 export const AccountStatusSchema = Schema.Struct({
+  accessEntitlement: AccountAccessEntitlementSchema,
   canSync: Schema.Boolean,
   storageProvider: Schema.NullOr(StorageProviderLiteral),
   blockedReasons: Schema.Array(AccountBlockedReasonSchema),

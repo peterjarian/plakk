@@ -1,6 +1,7 @@
 import { STORAGE_PROVIDERS } from "@plakk/shared";
 import {
   bigint,
+  check,
   index,
   pgEnum,
   pgTable,
@@ -9,6 +10,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 export const storageProvider = pgEnum("storage_provider", STORAGE_PROVIDERS);
 
@@ -16,6 +18,24 @@ const timestamps = {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 };
+
+export const accountTrials = pgTable(
+  "account_trials",
+  {
+    workosUserId: text("workos_user_id").primaryKey(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    check(
+      "account_trials_exact_duration",
+      sql`extract(epoch from (${table.endsAt} - ${table.startedAt})) = 1209600`,
+    ),
+  ],
+);
+
+export type AccountTrialRow = typeof accountTrials.$inferSelect;
 
 export const snippets = pgTable(
   "snippets",

@@ -156,7 +156,16 @@ const dependencies = (options: {
       options.rpc ??
         PlakkRpcClient.of({
           GetAccountStatus: () =>
-            Effect.succeed({ canSync: false, storageProvider: null, blockedReasons: [] }),
+            Effect.succeed({
+              accessEntitlement: {
+                status: "TRIAL_ACTIVE",
+                trialStartedAt: "2026-07-27T00:00:00.000Z",
+                trialEndsAt: "2026-08-10T00:00:00.000Z",
+              },
+              canSync: false,
+              storageProvider: null,
+              blockedReasons: ["storage"],
+            }),
         } as never),
     ),
   );
@@ -201,6 +210,11 @@ describe("DesktopSession command authority", () => {
           rpc: PlakkRpcClient.of({
             GetAccountStatus: () =>
               Effect.succeed({
+                accessEntitlement: {
+                  status: "TRIAL_ACTIVE",
+                  trialStartedAt: "2026-07-27T00:00:00.000Z",
+                  trialEndsAt: "2026-08-10T00:00:00.000Z",
+                },
                 canSync: true,
                 storageProvider: "GOOGLE_DRIVE",
                 blockedReasons: [],
@@ -257,6 +271,11 @@ describe("DesktopSession command authority", () => {
         rpc: PlakkRpcClient.of({
           GetAccountStatus: () =>
             Effect.succeed({
+              accessEntitlement: {
+                status: "TRIAL_ACTIVE",
+                trialStartedAt: "2026-07-27T00:00:00.000Z",
+                trialEndsAt: "2026-08-10T00:00:00.000Z",
+              },
               canSync: true,
               storageProvider: "GOOGLE_DRIVE",
               blockedReasons: [],
@@ -291,6 +310,11 @@ describe("DesktopSession command authority", () => {
         kind: "online",
         account: firstAccount,
         accountStatus: {
+          accessEntitlement: {
+            status: "TRIAL_ACTIVE",
+            trialStartedAt: "2026-07-27T00:00:00.000Z",
+            trialEndsAt: "2026-08-10T00:00:00.000Z",
+          },
           canSync: true,
           storageProvider: "GOOGLE_DRIVE",
           blockedReasons: [],
@@ -346,6 +370,11 @@ describe("DesktopSession command authority", () => {
                 yield* Deferred.succeed(backgroundRefreshCompleted, undefined);
               }
               return {
+                accessEntitlement: {
+                  status: "TRIAL_ACTIVE",
+                  trialStartedAt: "2026-07-27T00:00:00.000Z",
+                  trialEndsAt: "2026-08-10T00:00:00.000Z",
+                },
                 canSync: true,
                 storageProvider: "GOOGLE_DRIVE",
                 blockedReasons: [],
@@ -667,6 +696,11 @@ describe("DesktopSession command authority", () => {
         rpc: PlakkRpcClient.of({
           GetAccountStatus: () =>
             Effect.succeed({
+              accessEntitlement: {
+                status: "TRIAL_ACTIVE",
+                trialStartedAt: "2026-07-27T00:00:00.000Z",
+                trialEndsAt: "2026-08-10T00:00:00.000Z",
+              },
               canSync: true,
               storageProvider: "GOOGLE_DRIVE",
               blockedReasons: [],
