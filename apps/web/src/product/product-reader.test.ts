@@ -3,6 +3,7 @@ import {
   SNIPPETS_CHANGED,
   type AccountStatus,
 } from "@plakk/shared/PlakkApi";
+import { RpcError } from "@plakk/shared/RpcError";
 import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -89,6 +90,39 @@ describe("authenticated product reader", () => {
       { authorization: "Bearer stream-token-1" },
       { authorization: "Bearer stream-token-2" },
     ]);
+  });
+
+  it("surfaces a missing stream token instead of completing silently", async () => {
+    const rpc = {
+      GetAccountStatus: vi.fn(),
+      GetSnippetSnapshot: vi.fn(),
+      WatchSnippetInvalidations: vi.fn(),
+    };
+
+    await expect(
+      Effect.runPromise(
+        watchAuthenticatedInvalidations(rpc, async () => undefined).pipe(Stream.runCollect),
+      ),
+    ).rejects.toThrow(MissingAccessToken);
+    expect(rpc.WatchSnippetInvalidations).not.toHaveBeenCalled();
+  });
+
+  it("surfaces an RPC stream failure instead of completing silently", async () => {
+    const failure = new RpcError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "stream unavailable",
+    });
+    const rpc = {
+      GetAccountStatus: vi.fn(),
+      GetSnippetSnapshot: vi.fn(),
+      WatchSnippetInvalidations: vi.fn(() => Stream.fail(failure)),
+    };
+
+    await expect(
+      Effect.runPromise(
+        watchAuthenticatedInvalidations(rpc, async () => "fresh-token").pipe(Stream.runCollect),
+      ),
+    ).rejects.toBe(failure);
   });
 
   it("resolves the independent product API from an exact configured origin", () => {

@@ -1,9 +1,11 @@
 import { expect, test } from "@playwright/test";
 
+import { CONTROLLED_PRODUCT_ORIGIN } from "./controlled-product/config.ts";
+
 test("complete snapshots, outages, and reconnection stay honest at the Web product seam", async ({
   page,
 }) => {
-  await page.goto("http://127.0.0.1:3001");
+  await page.goto(CONTROLLED_PRODUCT_ORIGIN);
 
   await expect(page.getByText("Initial snapshot.png")).toBeVisible();
   await expect(page.getByText("Live updates connected")).toBeVisible();

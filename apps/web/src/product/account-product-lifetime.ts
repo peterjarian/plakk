@@ -11,6 +11,9 @@ import {
   type AccountProductSnapshot,
 } from "./product-reader.ts";
 
+const INITIAL_RECONNECT_DELAY_MILLIS = 1_000;
+const MAX_RECONNECT_DELAY_MILLIS = 30_000;
+
 export class AccountProductLifetimeInitializationFailure extends Data.TaggedError(
   "AccountProductLifetimeInitializationFailure",
 )<{
@@ -55,6 +58,7 @@ export class AccountProductLifetime extends Context.Service<
     AccountProductLifetime,
     Effect.gen(function* () {
       const reader = yield* AccountProductReader;
+      const refreshFiber = yield* FiberHandle.make<void, never>();
       const synchronizationFiber = yield* FiberHandle.make<void, never>();
       let state: AccountProductState = { kind: "idle" };
       let activeAccountId: string | null = null;
@@ -132,24 +136,35 @@ export class AccountProductLifetime extends Context.Service<
         );
       });
 
+      const startRefresh = (accountId: string, expectedGeneration: number) =>
+        FiberHandle.run(refreshFiber, refresh(accountId, expectedGeneration), {
+          startImmediately: true,
+        }).pipe(Effect.asVoid);
+
       const synchronize = Effect.fn("AccountProductLifetime.synchronize")(function* (
         accountId: string,
         expectedGeneration: number,
       ) {
-        yield* refresh(accountId, expectedGeneration);
+        let reconnectDelayMillis = INITIAL_RECONNECT_DELAY_MILLIS;
+        yield* startRefresh(accountId, expectedGeneration);
         while (isCurrent(accountId, expectedGeneration)) {
+          let observedConnection = false;
           yield* reader.invalidations.pipe(
-            Stream.runForEach(() =>
-              Effect.gen(function* () {
-                publishLiveConnection(accountId, expectedGeneration, "connected");
-                yield* refresh(accountId, expectedGeneration);
-              }),
-            ),
-            Effect.catch(() => Effect.void),
+            Stream.runForEach(() => {
+              observedConnection = true;
+              reconnectDelayMillis = INITIAL_RECONNECT_DELAY_MILLIS;
+              publishLiveConnection(accountId, expectedGeneration, "connected");
+              return startRefresh(accountId, expectedGeneration);
+            }),
+            Effect.ignore,
           );
           publishLiveConnection(accountId, expectedGeneration, "reconnecting");
           if (!isCurrent(accountId, expectedGeneration)) return;
-          yield* Effect.sleep("1 second");
+          const delayMillis = reconnectDelayMillis;
+          if (!observedConnection) {
+            reconnectDelayMillis = Math.min(reconnectDelayMillis * 2, MAX_RECONNECT_DELAY_MILLIS);
+          }
+          yield* Effect.sleep(delayMillis);
         }
       });
 
@@ -174,6 +189,7 @@ export class AccountProductLifetime extends Context.Service<
         liveConnection = "reconnecting";
         publish({ kind: "idle" });
         yield* FiberHandle.clear(synchronizationFiber);
+        yield* FiberHandle.clear(refreshFiber);
       });
 
       return AccountProductLifetime.of({
@@ -182,7 +198,7 @@ export class AccountProductLifetime extends Context.Service<
           Effect.suspend(() => (activeAccountId === accountId ? Effect.void : start(accountId))),
         getSnapshot: () => state,
         retry: Effect.suspend(() =>
-          activeAccountId === null ? Effect.void : refresh(activeAccountId, generation),
+          activeAccountId === null ? Effect.void : startRefresh(activeAccountId, generation),
         ),
         subscribe: (listener) => {
           listeners.add(listener);

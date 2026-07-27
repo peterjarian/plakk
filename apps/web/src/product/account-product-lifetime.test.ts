@@ -23,6 +23,8 @@ const snippet = (id: string): ApiSnippet => ({
   updatedAt: "2026-07-27T00:00:00.000Z",
 });
 
+const INITIAL_AND_CONNECTED_REFRESH_COUNT = 2;
+
 const provideLifetime = (
   read: AccountProductReader["Service"]["read"],
   invalidations: AccountProductReader["Service"]["invalidations"] = Stream.make(undefined).pipe(
@@ -225,7 +227,7 @@ it.effect("replaces the complete collection atomically on an invalidation", () =
     const read = Ref.getAndUpdate(reads, (count) => count + 1).pipe(
       Effect.map((count) => ({
         account,
-        snippets: count < 2 ? [firstSnippet] : [secondSnippet],
+        snippets: count < INITIAL_AND_CONNECTED_REFRESH_COUNT ? [firstSnippet] : [secondSnippet],
       })),
     );
     const invalidations = Stream.make(undefined).pipe(
@@ -284,7 +286,7 @@ it.effect("refreshes the complete snapshot after stream reconnection", () =>
     const read = Ref.getAndUpdate(snapshotReads, (count) => count + 1).pipe(
       Effect.map((count) => ({
         account,
-        snippets: count < 2 ? [firstSnippet] : [secondSnippet],
+        snippets: count < INITIAL_AND_CONNECTED_REFRESH_COUNT ? [firstSnippet] : [secondSnippet],
       })),
     );
 
@@ -314,6 +316,112 @@ it.effect("refreshes the complete snapshot after stream reconnection", () =>
   }),
 );
 
+it.effect("backs off consecutive stream connection failures", () =>
+  Effect.gen(function* () {
+    const connectionAttempts = yield* Ref.make(0);
+    const failure = new RpcError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "stream unavailable",
+    });
+    const invalidations = Stream.unwrap(
+      Ref.updateAndGet(connectionAttempts, (count) => count + 1).pipe(
+        Effect.as(Stream.fail(failure)),
+      ),
+    );
+
+    yield* Effect.gen(function* () {
+      const lifetime = yield* AccountProductLifetime;
+      yield* lifetime.enter("user_1");
+      yield* Effect.yieldNow;
+      expect(yield* Ref.get(connectionAttempts)).toBe(1);
+
+      yield* TestClock.adjust("1 second");
+      yield* Effect.yieldNow;
+      expect(yield* Ref.get(connectionAttempts)).toBe(2);
+
+      yield* TestClock.adjust("1 second");
+      yield* Effect.yieldNow;
+      expect(yield* Ref.get(connectionAttempts)).toBe(2);
+
+      yield* TestClock.adjust("1 second");
+      yield* Effect.yieldNow;
+      expect(yield* Ref.get(connectionAttempts)).toBe(3);
+    }).pipe(
+      Effect.provide(
+        Layer.merge(
+          provideLifetime(Effect.succeed({ account, snippets: [] }), invalidations),
+          TestClock.layer(),
+        ),
+      ),
+    );
+  }),
+);
+
+it.effect("observes a stream disconnect while a snapshot refresh is hung", () =>
+  Effect.gen(function* () {
+    const allowInvalidation = yield* Deferred.make<void>();
+    const connectionAttempts = yield* Ref.make(0);
+    const snapshotReads = yield* Ref.make(0);
+    const firstSnippet = snippet("first");
+    const secondSnippet = snippet("second");
+    const disconnect = new RpcError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "stream disconnected during refresh",
+    });
+    const invalidations = Stream.unwrap(
+      Ref.getAndUpdate(connectionAttempts, (count) => count + 1).pipe(
+        Effect.map((count) =>
+          count === 0
+            ? Stream.fromEffect(Deferred.await(allowInvalidation)).pipe(
+                Stream.concat(Stream.fail(disconnect)),
+              )
+            : Stream.make(undefined).pipe(Stream.concat(Stream.never)),
+        ),
+      ),
+    );
+    const read = Ref.getAndUpdate(snapshotReads, (count) => count + 1).pipe(
+      Effect.flatMap((count) => {
+        if (count === 0) {
+          return Effect.succeed({ account, snippets: [firstSnippet] });
+        }
+        if (count === 1) {
+          return Effect.never;
+        }
+        return Effect.succeed({ account, snippets: [secondSnippet] });
+      }),
+    );
+
+    yield* Effect.gen(function* () {
+      const lifetime = yield* AccountProductLifetime;
+      yield* lifetime.enter("user_1");
+      yield* Effect.yieldNow;
+      expect(lifetime.getSnapshot()).toMatchObject({
+        apiAvailability: "available",
+        snippets: [firstSnippet],
+      });
+
+      yield* Deferred.succeed(allowInvalidation, undefined);
+      yield* Effect.yieldNow;
+      expect(lifetime.getSnapshot()).toMatchObject({
+        liveConnection: "reconnecting",
+        snippets: [firstSnippet],
+      });
+
+      yield* TestClock.adjust("1 second");
+      yield* Effect.yieldNow;
+      expect(yield* Ref.get(connectionAttempts)).toBe(2);
+      expect(lifetime.getSnapshot()).toEqual({
+        account,
+        accountId: "user_1",
+        apiAvailability: "available",
+        kind: "ready",
+        liveConnection: "connected",
+        snippets: [secondSnippet],
+      });
+    }).pipe(Effect.provide(Layer.merge(provideLifetime(read, invalidations), TestClock.layer())));
+  }),
+);
+
 it.effect("preserves the last-confirmed collection when the API becomes unavailable", () =>
   Effect.gen(function* () {
     const nextInvalidation = yield* Deferred.make<void>();
@@ -325,7 +433,9 @@ it.effect("preserves the last-confirmed collection when the API becomes unavaila
     });
     const read = Ref.getAndUpdate(reads, (count) => count + 1).pipe(
       Effect.flatMap((count) =>
-        count < 2 ? Effect.succeed({ account, snippets: [expectedSnippet] }) : Effect.fail(failure),
+        count < INITIAL_AND_CONNECTED_REFRESH_COUNT
+          ? Effect.succeed({ account, snippets: [expectedSnippet] })
+          : Effect.fail(failure),
       ),
     );
     const invalidations = Stream.make(undefined).pipe(
