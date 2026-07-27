@@ -49,7 +49,7 @@ describe("Web Home", () => {
     expect(html).not.toContain("Nothing added yet");
   });
 
-  it("renders a retryable failure inside the product shell", () => {
+  it("renders a retryable product-load failure without assuming an API outage", () => {
     const html = render({
       accountId: user.id,
       cause: new RpcError({
@@ -59,8 +59,10 @@ describe("Web Home", () => {
       kind: "failed",
     });
     expect(html).toContain(">WR<");
+    expect(html).toContain("Product unavailable");
     expect(html).toContain("Plakk couldn’t load your snippets.");
     expect(html).toContain("Try again");
+    expect(html).not.toContain("API unavailable");
     expect(html).not.toContain("Nothing added yet");
   });
 

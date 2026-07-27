@@ -77,7 +77,7 @@ export function HomeView(props: {
             role="alert"
           >
             <span>
-              <strong>API unavailable.</strong> Plakk couldn’t load your snippets.
+              <strong>Product unavailable.</strong> Plakk couldn’t load your snippets.
             </span>
             {onRetry !== null && (
               <Button type="button" variant="ghost" size="sm" onClick={onRetry}>
