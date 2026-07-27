@@ -30,6 +30,7 @@ import { makeBrowserAccountProductMirrorLayer } from "./browser-readable-mirror.
 import type { AccountProductMirror } from "./readable-mirror.ts";
 
 type WebProductContextValue = {
+  readonly refresh: (() => Promise<void>) | null;
   readonly retry: (() => void) | null;
   readonly signOut: (() => Promise<void>) | null;
   readonly state: AccountProductState;
@@ -42,6 +43,7 @@ class WorkOsSignOutFailure extends Data.TaggedError("WorkOsSignOutFailure")<{
 }> {}
 
 const signedOutContext: WebProductContextValue = {
+  refresh: null,
   retry: null,
   signOut: null,
   state: { kind: "idle" },
@@ -63,9 +65,10 @@ function ActiveIdentityProduct(props: {
   const retry = useCallback(() => {
     runtime.runFork(lifetime.retry);
   }, [lifetime, runtime]);
+  const refresh = useCallback(() => runtime.runPromise(lifetime.refresh), [lifetime, runtime]);
 
   return (
-    <WebProductContext.Provider value={{ retry, signOut, state }}>
+    <WebProductContext.Provider value={{ refresh, retry, signOut, state }}>
       {children}
     </WebProductContext.Provider>
   );
@@ -148,6 +151,14 @@ function IdentityProductResource(props: {
       ),
     );
   }, [accountId, delegateSignOut]);
+  const refresh = useCallback(async () => {
+    const resource = resourceRef.current;
+    if (resource === null) {
+      throw new Error("The account product is not initialized.");
+    }
+    const productLifetime = await resource.lifetimePromise;
+    await resource.runtime.runPromise(productLifetime.refresh);
+  }, []);
 
   if (activeResource === null) {
     return (
@@ -157,6 +168,7 @@ function IdentityProductResource(props: {
             initializationFailure === null
               ? null
               : () => setInitializationAttempt((attempt) => attempt + 1),
+          refresh,
           signOut,
           state:
             initializationFailure === null

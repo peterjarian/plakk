@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AuthenticatedStorageRouteImport } from './routes/_authenticated/storage'
 import { Route as AuthenticatedSnippetsRouteImport } from './routes/_authenticated/snippets'
 import { Route as ApiAuthSignInRouteImport } from './routes/api/auth/sign-in'
 import { Route as ApiAuthCallbackRouteImport } from './routes/api/auth/callback'
@@ -23,6 +24,11 @@ const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AuthenticatedStorageRoute = AuthenticatedStorageRouteImport.update({
+  id: '/storage',
+  path: '/storage',
+  getParentRoute: () => AuthenticatedRoute,
 } as any)
 const AuthenticatedSnippetsRoute = AuthenticatedSnippetsRouteImport.update({
   id: '/snippets',
@@ -43,12 +49,14 @@ const ApiAuthCallbackRoute = ApiAuthCallbackRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/snippets': typeof AuthenticatedSnippetsRoute
+  '/storage': typeof AuthenticatedStorageRoute
   '/api/auth/callback': typeof ApiAuthCallbackRoute
   '/api/auth/sign-in': typeof ApiAuthSignInRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/snippets': typeof AuthenticatedSnippetsRoute
+  '/storage': typeof AuthenticatedStorageRoute
   '/api/auth/callback': typeof ApiAuthCallbackRoute
   '/api/auth/sign-in': typeof ApiAuthSignInRoute
 }
@@ -57,19 +65,23 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteWithChildren
   '/_authenticated/snippets': typeof AuthenticatedSnippetsRoute
+  '/_authenticated/storage': typeof AuthenticatedStorageRoute
   '/api/auth/callback': typeof ApiAuthCallbackRoute
   '/api/auth/sign-in': typeof ApiAuthSignInRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/snippets' | '/api/auth/callback' | '/api/auth/sign-in'
+  fullPaths:
+    '/' | '/snippets' | '/storage' | '/api/auth/callback' | '/api/auth/sign-in'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/snippets' | '/api/auth/callback' | '/api/auth/sign-in'
+  to:
+    '/' | '/snippets' | '/storage' | '/api/auth/callback' | '/api/auth/sign-in'
   id:
     | '__root__'
     | '/'
     | '/_authenticated'
     | '/_authenticated/snippets'
+    | '/_authenticated/storage'
     | '/api/auth/callback'
     | '/api/auth/sign-in'
   fileRoutesById: FileRoutesById
@@ -97,6 +109,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authenticated/storage': {
+      id: '/_authenticated/storage'
+      path: '/storage'
+      fullPath: '/storage'
+      preLoaderRoute: typeof AuthenticatedStorageRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/snippets': {
       id: '/_authenticated/snippets'
       path: '/snippets'
@@ -123,10 +142,12 @@ declare module '@tanstack/react-router' {
 
 interface AuthenticatedRouteChildren {
   AuthenticatedSnippetsRoute: typeof AuthenticatedSnippetsRoute
+  AuthenticatedStorageRoute: typeof AuthenticatedStorageRoute
 }
 
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedSnippetsRoute: AuthenticatedSnippetsRoute,
+  AuthenticatedStorageRoute: AuthenticatedStorageRoute,
 }
 
 const AuthenticatedRouteWithChildren = AuthenticatedRoute._addFileChildren(

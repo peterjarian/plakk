@@ -17,6 +17,7 @@ import {
 } from "../../src/product/account-product-lifetime.ts";
 import { makeBrowserAccountProductMirrorLayer } from "../../src/product/browser-readable-mirror.ts";
 import { AccountProductReader } from "../../src/product/product-reader.ts";
+import { StorageOnboardingProof } from "./StorageOnboardingProof.tsx";
 import "../../src/styles.css";
 
 const query = new URLSearchParams(location.search);
@@ -25,6 +26,7 @@ const forceSessionMemory = query.get("force-session-memory") === "true";
 const holdBackendRefresh = query.get("hold-backend-refresh") === "true";
 const startBackendUnavailable = query.get("backend-unavailable") === "true";
 const trialAtExactExpiry = query.get("trial-at-exact-expiry") === "true";
+const storageOnboardingMode = query.get("storage-onboarding");
 
 const account: AccountStatus = {
   accessEntitlement: {
@@ -255,4 +257,12 @@ function Product() {
 const root = document.getElementById("root");
 if (root === null) throw new Error("Controlled product root is missing.");
 
-createRoot(root).render(<Product />);
+createRoot(root).render(
+  storageOnboardingMode === null ? (
+    <Product />
+  ) : (
+    <StorageOnboardingProof
+      mode={storageOnboardingMode as Parameters<typeof StorageOnboardingProof>[0]["mode"]}
+    />
+  ),
+);

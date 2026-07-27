@@ -63,7 +63,7 @@ export class AccountProductReader extends Context.Service<
   }
 >()("@plakk/web/product/product-reader/AccountProductReader") {}
 
-const authenticatedOptions = Effect.fn("WebProductReader.authorize")(function* (
+export const authenticatedRpcOptions = Effect.fn("WebProductReader.authorize")(function* (
   getAccessToken: () => Promise<string | undefined>,
 ) {
   const accessToken = yield* Effect.tryPromise({
@@ -89,7 +89,7 @@ export const readAuthenticatedProduct = Effect.fn("WebProductReader.read")(funct
   rpc: WebProductRpcClient,
   getAccessToken: () => Promise<string | undefined>,
 ): Effect.fn.Return<AccountProductSnapshot, AccountProductReadError> {
-  const options = yield* authenticatedOptions(getAccessToken);
+  const options = yield* authenticatedRpcOptions(getAccessToken);
   const [account, snippets] = yield* Effect.all(
     [rpc.GetAccountStatus(undefined, options), rpc.GetSnippetSnapshot(undefined, options)],
     { concurrency: "unbounded" },
@@ -102,7 +102,7 @@ export const watchAuthenticatedInvalidations = (
   getAccessToken: () => Promise<string | undefined>,
 ): Stream.Stream<void, AccountProductReadError> =>
   Stream.unwrap(
-    authenticatedOptions(getAccessToken).pipe(
+    authenticatedRpcOptions(getAccessToken).pipe(
       Effect.map((options) => rpc.WatchSnippetInvalidations(undefined, options)),
     ),
   ).pipe(

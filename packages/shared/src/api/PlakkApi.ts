@@ -78,6 +78,10 @@ export const StorageProviderStatusSchema = Schema.Union([
 
 export type StorageProviderStatus = typeof StorageProviderStatusSchema.Type;
 
+export const StorageOnboardingOriginSchema = Schema.Literals(["WEB", "DESKTOP"] as const);
+
+export type StorageOnboardingOrigin = typeof StorageOnboardingOriginSchema.Type;
+
 export const accountCanSyncWithConnection = (
   account: AccountStatus,
   connection: StorageProviderStatus | null,
@@ -178,7 +182,10 @@ export const AccountRpcs = RpcGroup.make(
 
 export const StorageRpcs = RpcGroup.make(
   Rpc.make("BeginStorageProviderLink", {
-    payload: { storageProvider: StorageProviderLiteral },
+    payload: {
+      storageProvider: StorageProviderLiteral,
+      origin: StorageOnboardingOriginSchema,
+    },
     success: Schema.Struct({ url: Schema.String }),
     error: RpcError,
   }),

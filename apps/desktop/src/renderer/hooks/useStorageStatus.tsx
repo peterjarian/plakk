@@ -12,7 +12,7 @@ import type { ComponentProps } from "react";
 import type { LocalState } from "../../ipc/contracts.ts";
 import { useLocalState } from "./useLocalState.tsx";
 
-const storageSetupUrl = "https://app.plakk.io/storage";
+export const storageSetupUrl = "https://app.plakk.io/storage?origin=desktop";
 
 export type StorageStatus =
   | { readonly kind: "loading"; readonly canSync: false }

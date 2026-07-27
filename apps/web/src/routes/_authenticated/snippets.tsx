@@ -1,10 +1,11 @@
 import type { User } from "@plakk/shared";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useAuth } from "@workos/authkit-tanstack-react-start/client";
 import * as Schema from "effect/Schema";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { HomeView } from "../../product/HomeView.tsx";
+import { accountNeedsStorageOnboarding } from "../../product/storage-onboarding.ts";
 import { AccountProductMirrorError } from "../../product/readable-mirror.ts";
 import { useWebProduct } from "../../product/WebProductProvider.tsx";
 
@@ -23,6 +24,7 @@ const productUser = (user: NonNullable<ReturnType<typeof useAuth>["user"]>): Use
 
 function Snippets() {
   const auth = useAuth({ ensureSignedIn: true });
+  const navigate = useNavigate();
   const product = useWebProduct();
   const [signOutError, setSignOutError] = useState<"product-purge" | "workos" | null>(null);
   const handleSignOut = useCallback(async () => {
@@ -35,10 +37,31 @@ function Snippets() {
     }
   }, [product.signOut]);
 
+  const storageOnboardingRequired =
+    product.state.kind === "ready" &&
+    product.state.apiAvailability === "available" &&
+    accountNeedsStorageOnboarding(product.state.account);
+  useEffect(() => {
+    if (storageOnboardingRequired) {
+      void navigate({
+        to: "/storage",
+        replace: true,
+        search: { confirmation: undefined, origin: undefined, provider: null },
+      });
+    }
+  }, [navigate, storageOnboardingRequired]);
+
   if (auth.user === null) {
     return (
       <main className="grid min-h-screen place-items-center text-sm text-muted-foreground">
         Loading account
+      </main>
+    );
+  }
+  if (storageOnboardingRequired) {
+    return (
+      <main className="grid min-h-screen place-items-center text-sm text-muted-foreground">
+        Opening storage setup
       </main>
     );
   }
