@@ -1,6 +1,5 @@
 import { parseExactHttpOrigin } from "@plakk/shared/ExactHttpOrigin";
 import {
-  PlakkApi,
   SNIPPETS_CHANGED,
   type AccountStatus,
   type ApiSnippet,
@@ -10,13 +9,10 @@ import { RpcError } from "@plakk/shared/RpcError";
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
-import { FetchHttpClient } from "effect/unstable/http";
-import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 import { RpcClientError } from "effect/unstable/rpc/RpcClientError";
 
-type RpcRequestOptions = {
+export type RpcRequestOptions = {
   readonly headers: Readonly<Record<string, string>>;
 };
 
@@ -127,27 +123,4 @@ export const resolveProductRpcUrl = (
     throw new Error("VITE_PLAKK_API_ORIGIN must use HTTPS outside local development.");
   }
   return `${origin}/api/rpc`;
-};
-
-export const makeAccountProductReaderLayer = (options: {
-  readonly getAccessToken: () => Promise<string | undefined>;
-  readonly rpcUrl: string;
-}): Layer.Layer<AccountProductReader> => {
-  const protocolLayer = RpcClient.layerProtocolHttp({ url: options.rpcUrl }).pipe(
-    Layer.provideMerge(FetchHttpClient.layer),
-    Layer.provideMerge(RpcSerialization.layerNdjson),
-  );
-
-  return Layer.effect(
-    AccountProductReader,
-    RpcClient.make(PlakkApi).pipe(
-      Effect.map((rpc) =>
-        AccountProductReader.of({
-          invalidations: watchAuthenticatedInvalidations(rpc, options.getAccessToken),
-          read: readAuthenticatedProduct(rpc, options.getAccessToken),
-        }),
-      ),
-      Effect.provide(protocolLayer),
-    ),
-  );
 };

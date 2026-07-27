@@ -34,14 +34,6 @@ const snippet = (id: string): ApiSnippet => ({
   updatedAt: "2026-07-27T00:00:00.000Z",
 });
 
-const readerLayer = (id: string) =>
-  Layer.succeed(
-    AccountProductReader,
-    AccountProductReader.of({
-      invalidations: Effect.void.pipe(Stream.fromEffect, Stream.concat(Stream.never)),
-      read: Effect.succeed({ account, snippets: [snippet(id)] }),
-    }),
-  );
 const storageOnboardingLayer = Layer.succeed(
   StorageOnboardingClient,
   StorageOnboardingClient.of({
@@ -49,6 +41,17 @@ const storageOnboardingLayer = Layer.succeed(
     read: () => Effect.succeed({ account, providerStatus: null }),
   }),
 );
+const productClientLayer = (id: string) =>
+  Layer.merge(
+    Layer.succeed(
+      AccountProductReader,
+      AccountProductReader.of({
+        invalidations: Effect.void.pipe(Stream.fromEffect, Stream.concat(Stream.never)),
+        read: Effect.succeed({ account, snippets: [snippet(id)] }),
+      }),
+    ),
+    storageOnboardingLayer,
+  );
 
 function ProductProbe() {
   const { signOut, state } = useWebProduct();
@@ -88,8 +91,7 @@ describe("Web product identity boundary", () => {
         <ProductIdentityBoundary
           accountId={accountId}
           delegateSignOut={delegateSignOut}
-          readerLayer={readerLayer(accountId)}
-          storageOnboardingLayer={storageOnboardingLayer}
+          productClientLayer={productClientLayer(accountId)}
         >
           <ProductProbe />
         </ProductIdentityBoundary>
@@ -128,8 +130,7 @@ describe("Web product identity boundary", () => {
         <ProductIdentityBoundary
           accountId="user_a"
           delegateSignOut={delegateSignOut}
-          readerLayer={readerLayer("user_a")}
-          storageOnboardingLayer={storageOnboardingLayer}
+          productClientLayer={productClientLayer("user_a")}
         >
           <ProductProbe />
         </ProductIdentityBoundary>,

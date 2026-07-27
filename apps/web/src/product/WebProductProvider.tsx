@@ -20,17 +20,11 @@ import {
   clearProductThenSignOut,
   type AccountProductLifetimeShape,
 } from "./account-product-lifetime.ts";
-import {
-  AccountProductReader,
-  makeAccountProductReaderLayer,
-  resolveProductRpcUrl,
-} from "./product-reader.ts";
+import { AccountProductReader, resolveProductRpcUrl } from "./product-reader.ts";
 import { makeBrowserAccountProductMirrorLayer } from "./browser-readable-mirror.ts";
 import type { AccountProductMirror } from "./readable-mirror.ts";
-import {
-  makeStorageOnboardingClientLayer,
-  StorageOnboardingClient,
-} from "./storage-onboarding-client.ts";
+import { StorageOnboardingClient } from "./storage-onboarding-client.ts";
+import { makeWebProductClientLayer } from "./web-product-client-layer.ts";
 import { WebProductContext, type WebProductContextValue } from "./web-product-context.tsx";
 
 class WorkOsSignOutFailure extends Data.TaggedError("WorkOsSignOutFailure")<{
@@ -100,10 +94,9 @@ function IdentityProductResource(props: {
   readonly children: ReactNode;
   readonly delegateSignOut: () => Promise<void>;
   readonly mirrorLayer?: Layer.Layer<AccountProductMirror>;
-  readonly readerLayer: Layer.Layer<AccountProductReader>;
-  readonly storageOnboardingLayer: Layer.Layer<StorageOnboardingClient>;
+  readonly productClientLayer: Layer.Layer<AccountProductReader | StorageOnboardingClient>;
 }) {
-  const { accountId, children, delegateSignOut, readerLayer, storageOnboardingLayer } = props;
+  const { accountId, children, delegateSignOut, productClientLayer } = props;
   // The account-keyed ProductIdentityBoundary remounts this resource; live layer swaps are unsupported.
   const mirrorLayer = useState(
     () => props.mirrorLayer ?? makeBrowserAccountProductMirrorLayer(accountId),
@@ -130,8 +123,10 @@ function IdentityProductResource(props: {
     setInitializationFailure(null);
     const runtime = ManagedRuntime.make(
       Layer.merge(
-        AccountProductLifetime.layer.pipe(Layer.provide(Layer.merge(readerLayer, mirrorLayer))),
-        storageOnboardingLayer,
+        AccountProductLifetime.layer.pipe(
+          Layer.provide(Layer.merge(productClientLayer, mirrorLayer)),
+        ),
+        productClientLayer,
       ),
     );
     const lifetimePromise = runtime.runPromise(AccountProductLifetime);
@@ -153,7 +148,7 @@ function IdentityProductResource(props: {
       if (resourceRef.current === resource) resourceRef.current = null;
       void runtime.dispose();
     };
-  }, [accountId, initializationAttempt, mirrorLayer, readerLayer, storageOnboardingLayer]);
+  }, [accountId, initializationAttempt, mirrorLayer, productClientLayer]);
 
   const signOut = useCallback(async () => {
     const resource = resourceRef.current;
@@ -226,8 +221,7 @@ export function ProductIdentityBoundary(props: {
   readonly children: ReactNode;
   readonly delegateSignOut: () => Promise<void>;
   readonly mirrorLayer?: Layer.Layer<AccountProductMirror>;
-  readonly readerLayer: Layer.Layer<AccountProductReader>;
-  readonly storageOnboardingLayer: Layer.Layer<StorageOnboardingClient>;
+  readonly productClientLayer: Layer.Layer<AccountProductReader | StorageOnboardingClient>;
 }) {
   return <IdentityProductResource key={props.accountId} {...props} />;
 }
@@ -238,18 +232,11 @@ export function WebProductProvider({ children }: Readonly<{ children: ReactNode 
   const getAccessTokenRef = useRef(getAccessToken);
   getAccessTokenRef.current = getAccessToken;
   const rpcUrl = resolveProductRpcUrl(import.meta.env.VITE_PLAKK_API_ORIGIN, import.meta.env.DEV);
-  const [readerLayer, storageOnboardingLayer] = useState(
-    () =>
-      [
-        makeAccountProductReaderLayer({
-          getAccessToken: () => getAccessTokenRef.current(),
-          rpcUrl,
-        }),
-        makeStorageOnboardingClientLayer({
-          getAccessToken: () => getAccessTokenRef.current(),
-          rpcUrl,
-        }),
-      ] as const,
+  const productClientLayer = useState(() =>
+    makeWebProductClientLayer({
+      getAccessToken: () => getAccessTokenRef.current(),
+      rpcUrl,
+    }),
   )[0];
 
   if (auth.user === null) {
@@ -262,8 +249,7 @@ export function WebProductProvider({ children }: Readonly<{ children: ReactNode 
     <ProductIdentityBoundary
       accountId={auth.user.id}
       delegateSignOut={() => auth.signOut({ returnTo: "/" })}
-      readerLayer={readerLayer}
-      storageOnboardingLayer={storageOnboardingLayer}
+      productClientLayer={productClientLayer}
     >
       {children}
     </ProductIdentityBoundary>

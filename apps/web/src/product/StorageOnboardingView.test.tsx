@@ -113,7 +113,7 @@ describe("storage onboarding view", () => {
       "OneDrive",
       "Dropbox",
     ]);
-    expect(new Set(buttons.map((button) => button.className))).toHaveLength(1);
+    expect(new Set(buttons.map((button) => button.className)).size).toBe(1);
   });
 
   it("prevents false success after callback until authoritative state confirms", async () => {

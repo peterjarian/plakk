@@ -29,7 +29,7 @@ const providerStatus = (status: StorageProviderStatus["status"]): StorageProvide
       };
 
 describe("storage onboarding reconstruction", () => {
-  it("treats query values as hints rather than confirmed state", () => {
+  it("returns retry when authoritative provider state is not connected", () => {
     expect(storageOnboardingDestination(account(), providerStatus("NOT_CONNECTED"), "WEB")).toEqual(
       {
         action: "reauthorize",
