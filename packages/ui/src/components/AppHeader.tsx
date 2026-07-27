@@ -27,8 +27,13 @@ export function AppHeader(props: {
   const fallback = user.email || user.id;
 
   return (
-    <header className={cn("drag-region flex h-9 items-center justify-between px-6", className)}>
-      <div className="flex items-center gap-2">
+    <header
+      className={cn(
+        "drag-region flex h-9 items-center justify-between gap-3 px-4 sm:px-6",
+        className,
+      )}
+    >
+      <div className="flex min-w-0 items-center gap-2">
         <span className="text-lg leading-none font-semibold tracking-tight">Plakk</span>
         <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] leading-none font-semibold tracking-wide text-muted-foreground">
           BETA
@@ -36,10 +41,13 @@ export function AppHeader(props: {
         {statusIndicator}
       </div>
 
-      <div className="flex items-center gap-1.5">
+      <div className="flex min-w-0 items-center gap-1.5">
         {storageAction}
         <DropdownMenu>
-          <DropdownMenuTrigger aria-label="Account menu">
+          <DropdownMenuTrigger
+            aria-label="Account menu"
+            className="shrink-0 rounded-full outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+          >
             <Avatar className="size-8">
               <AvatarFallback className="text-xs">{getInitials(name, fallback)}</AvatarFallback>
             </Avatar>

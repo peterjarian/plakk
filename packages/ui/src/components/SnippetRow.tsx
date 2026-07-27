@@ -206,7 +206,10 @@ export function PublishedSnippetRow(props: {
       trailing={
         onDelete === undefined ? undefined : (
           <div className="flex shrink-0 items-center justify-end">
-            <div className="flex items-center gap-0.5 md:invisible md:group-hover:visible md:group-focus-within:visible">
+            <div
+              className="flex items-center gap-0.5 md:invisible md:group-hover:visible md:group-focus-within:visible"
+              data-snippet-actions=""
+            >
               {busy ? (
                 <span
                   className="flex size-7 items-center justify-center"
@@ -240,6 +243,7 @@ export function PublishedSnippetRow(props: {
                     size="icon-sm"
                     aria-label="Delete"
                     className="hidden hover:bg-destructive/10 hover:text-destructive md:inline-flex"
+                    data-snippet-desktop-delete=""
                     disabled={deleteDisabled}
                     onClick={onDelete}
                   >
@@ -248,7 +252,8 @@ export function PublishedSnippetRow(props: {
                   <DropdownMenu>
                     <DropdownMenuTrigger
                       aria-label="More snippet actions"
-                      className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground md:hidden"
+                      className="flex size-7 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 md:hidden"
+                      data-snippet-compact-actions=""
                     >
                       <MoreHorizontal className="size-4" />
                     </DropdownMenuTrigger>

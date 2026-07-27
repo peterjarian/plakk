@@ -133,7 +133,7 @@ export function BillingView(props: {
           </a>
         }
       />
-      <div className="mx-auto grid w-full max-w-2xl gap-6 px-6 py-8">
+      <div className="mx-auto grid w-full max-w-2xl gap-6 px-4 py-6 sm:px-6 sm:py-8">
         <div>
           <Button type="button" variant="ghost" size="sm" className="-ml-2" onClick={onBack}>
             <ArrowLeft />
@@ -250,7 +250,7 @@ export function BillingView(props: {
                 Copy, Download, and Open.
               </p>
             </div>
-            <div className="flex flex-wrap gap-3">
+            <div className="grid gap-3 sm:flex sm:flex-wrap">
               <Button
                 type="button"
                 disabled={billing === null || pendingAction !== null}

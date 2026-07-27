@@ -342,7 +342,7 @@ export function Settings() {
           <SettingsSection>
             <SettingsSectionTitle>Device storage</SettingsSectionTitle>
             <SettingsSectionBody>
-              <SettingsRow className="items-start">
+              <SettingsRow className="items-start sm:items-start">
                 <SettingsRowMain className="flex-1 items-start">
                   <HardDrive
                     className="mt-0.5 size-4 shrink-0 text-muted-foreground"

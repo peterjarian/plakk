@@ -111,7 +111,7 @@ export function SettingsView(props: {
         onSignOutClick={onSignOut}
         storageAction={<span className="text-xs text-muted-foreground">Settings</span>}
       />
-      <div className="mx-auto grid w-full max-w-2xl gap-7 px-6 py-8">
+      <div className="mx-auto grid w-full max-w-2xl gap-7 px-4 py-6 sm:px-6 sm:py-8">
         <Button type="button" variant="ghost" size="sm" className="-ml-2 w-fit" onClick={onBack}>
           <ArrowLeft />
           Back to Home
@@ -154,7 +154,7 @@ export function SettingsView(props: {
         <SettingsSection>
           <SettingsSectionTitle>Billing</SettingsSectionTitle>
           <SettingsSectionBody>
-            <SettingsRow className="items-start">
+            <SettingsRow className="items-start sm:items-start">
               <SettingsRowMain className="items-start">
                 <CreditCard
                   className="mt-0.5 size-4 shrink-0 text-muted-foreground"
@@ -180,7 +180,7 @@ export function SettingsView(props: {
         <SettingsSection>
           <SettingsSectionTitle>Connected storage</SettingsSectionTitle>
           <SettingsSectionBody>
-            <SettingsRow className="items-start">
+            <SettingsRow className="items-start sm:items-start">
               <SettingsRowMain className="items-start">
                 <HardDrive
                   className="mt-0.5 size-4 shrink-0 text-muted-foreground"

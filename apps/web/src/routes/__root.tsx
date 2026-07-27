@@ -9,6 +9,7 @@ import {
   WEB_APPEARANCE_BOOTSTRAP_SCRIPT,
   WebAppearanceProvider,
 } from "../product/web-appearance.tsx";
+import { BrowserSupportBoundary } from "../product/browser-support.tsx";
 import appCss from "../styles.css?url";
 
 export const Route = createRootRoute({
@@ -40,15 +41,17 @@ function RootComponent() {
   const { auth: initialAuth } = Route.useRouteContext();
   return (
     <RootDocument>
-      <AuthKitProvider initialAuth={initialAuth}>
-        <WebAppearanceProvider>
-          <TooltipProvider>
-            <WebProductProvider>
-              <Outlet />
-            </WebProductProvider>
-          </TooltipProvider>
-        </WebAppearanceProvider>
-      </AuthKitProvider>
+      <BrowserSupportBoundary>
+        <AuthKitProvider initialAuth={initialAuth}>
+          <WebAppearanceProvider>
+            <TooltipProvider>
+              <WebProductProvider>
+                <Outlet />
+              </WebProductProvider>
+            </TooltipProvider>
+          </WebAppearanceProvider>
+        </AuthKitProvider>
+      </BrowserSupportBoundary>
     </RootDocument>
   );
 }

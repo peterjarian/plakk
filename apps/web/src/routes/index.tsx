@@ -11,11 +11,11 @@ export const Route = createFileRoute("/")({
 
 function Welcome() {
   return (
-    <main className="grid min-h-screen place-items-center bg-background px-6 text-foreground">
+    <main className="grid min-h-dvh place-items-center bg-background px-4 py-8 text-foreground sm:px-6">
       <section className="grid w-full max-w-lg gap-7 text-center">
         <div className="grid gap-2">
           <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Plakk</p>
-          <h1 className="text-3xl leading-tight font-semibold tracking-tight">
+          <h1 className="text-2xl leading-tight font-semibold tracking-tight sm:text-3xl">
             Move snippets between devices.
           </h1>
           <p className="text-sm text-muted-foreground">
