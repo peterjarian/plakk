@@ -45,8 +45,9 @@ remains unchanged:
 | Evidence layer and scenario                                                                                                                                                              | Classification                 | Actual observation or blocker                                                                                                                                                                                                                                                                              |
 | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Hosted canonical auth entry in a fresh system-Firefox profile                                                                                                                            | **observed as expected**       | `https://app.plakk.io` selected the canonical app callback and reached the WorkOS sign-in surface. No account input was entered.                                                                                                                                                                           |
+| Local signed-out Welcome and WorkOS auth entry                                                                                                                                           | **observed as expected**       | The repository Web task served `http://localhost:3000` in Firefox with the signed-out product and sign-in action. WorkOS auth entry used `http://localhost:3000/api/auth/callback`; no credential or account input was entered.                                                                            |
 | Hosted signed-out Welcome                                                                                                                                                                | **discrepancy observed**       | The hosted root redirected directly to AuthKit instead of showing the Welcome surface exercised by the current local build. The deployed revision could not be established.                                                                                                                                |
-| Full real-account journey: sign-in, automatic trial, linked storage, text/file publication, second-tab convergence, Copy/Download/Open, deletion, sign-out, and second-account isolation | **blocked before observation** | No isolated signed-in Firefox profile or two test-account inputs were supplied. The API production origin also did not resolve. The journey was not represented as passing.                                                                                                                                |
+| Full real-account journey: sign-in, automatic trial, linked storage, text/file publication, second-tab convergence, Copy/Download/Open, deletion, sign-out, and second-account isolation | **blocked before observation** | No isolated signed-in Firefox profile or two test-account inputs were supplied. The local callback was observed, but no account authentication was attempted and the journey was not represented as passing.                                                                                               |
 | Controlled trial, restricted mode, blocked normal actions, preserved rows/Delete/recovery/Settings/help/sign-out, and backend-confirmed recovery presentation                            | **observed as expected**       | Firefox exercised active trial, exact-expiry restriction, billing-only, storage-only, simultaneous blockers, independent recovery ordering, and retained destructive/recovery actions through controlled product states.                                                                                   |
 | Complete lifecycle against one real storage provider                                                                                                                                     | **blocked before observation** | No signed-in account with a configured WorkOS Pipes provider was available. No provider object was created or inspected.                                                                                                                                                                                   |
 | Focused real Google Drive, OneDrive, and Dropbox connection and browser-transfer boundaries                                                                                              | **blocked before observation** | The three provider dashboard connections and test accounts were not available to this Linux profile. Controlled fixtures exercised equal choice, redirect sanitization, direct transfer, cancellation, temporary failure, reauthorization, cleanup, and retry but do not establish real provider behavior. |
@@ -57,10 +58,26 @@ remains unchanged:
 | Controlled canonical auth and storage return sanitization                                                                                                                                | **observed as expected**       | Firefox preserved requested routes, rejected an untrusted nested return, required authoritative storage confirmation, and distinguished Web-origin and Desktop-origin completion.                                                                                                                          |
 | Real canonical storage return                                                                                                                                                            | **blocked before observation** | A real provider authorization could not be started without the provider/dashboard setup and signed-in account.                                                                                                                                                                                             |
 | Controlled API outage, retained mirror, blocked remote work, stream reconnect, and complete refresh                                                                                      | **observed as expected**       | Firefox retained the last-confirmed controlled snapshot, showed a retryable API-unavailable state, did not present an empty account or sign-out, and converged after recovery.                                                                                                                             |
-| Production API availability                                                                                                                                                              | **discrepancy observed**       | `https://api.plakk.io` did not resolve in DNS. This blocks the hosted account journey, backend authorization observation, provider commands, Polar recovery, and joined telemetry.                                                                                                                         |
+| Production API availability                                                                                                                                                              | **discrepancy observed**       | `https://api.plakk.io` did not resolve in DNS. This production-only observation is outside the local Linux gate and does not block local E2E or issue completion.                                                                                                                                          |
 | Backend authorization and sanitization boundaries                                                                                                                                        | **observed as expected**       | Deterministic backend/shared tests exercised bearer-token middleware, account/storage/billing command authorization, exact-origin CORS, telemetry proxy authorization/rate limits, propagation, and protected-field sanitization. This is not a live production request.                                   |
-| Joined sanitized frontend/backend trace visible in Axiom                                                                                                                                 | **blocked before observation** | The production API was unreachable and no Axiom query/dashboard observer was supplied. No trace visibility or deployed release correlation is claimed.                                                                                                                                                     |
-| Canonical marketing origin                                                                                                                                                               | **discrepancy observed**       | `https://plakk.io` returned Vercel `DEPLOYMENT_NOT_FOUND`. This is recorded as a deployment discrepancy; issue #133 did not authorize deployment changes.                                                                                                                                                  |
+| Joined sanitized frontend/backend trace visible in Axiom                                                                                                                                 | **blocked before observation** | No local OTLP/Axiom exporter configuration or Axiom query/dashboard observer was supplied. No joined trace visibility is claimed.                                                                                                                                                                          |
+| Canonical marketing origin                                                                                                                                                               | **discrepancy observed**       | `https://plakk.io` returned Vercel `DEPLOYMENT_NOT_FOUND`. This production-only observation is outside the local Linux gate; issue #133 did not authorize deployment changes.                                                                                                                              |
+
+## Local development reassessment
+
+The root `vp run dev` task invokes Web, backend, and Desktop development tasks in parallel. On this
+host, the aggregate command stopped because the unrelated Desktop native rebuild could not find
+`make`. The repository Web and backend tasks were therefore launched directly with the saved
+development configuration and these documented public local values:
+
+- `WORKOS_REDIRECT_URI=http://localhost:3000/api/auth/callback`
+- `PLAKK_WEB_ORIGIN=http://localhost:3000`
+- `VITE_PLAKK_API_ORIGIN=http://localhost:3100`
+
+Firefox observed the local signed-out product at port 3000 and reached the external WorkOS auth
+entry with the exact local callback. The local backend listened on `127.0.0.1:3100`, then failed
+closed because `POLAR_ACCESS_TOKEN` was absent. No synthetic Polar credential was substituted.
+Production deployment or DNS is not a prerequisite for this local path.
 
 ## Firefox harness discrepancy and correction
 
@@ -99,24 +116,21 @@ The names supplied were `WORKOS_API_KEY`, `WORKOS_CLIENT_ID`, `WORKOS_REDIRECT_U
 `VITE_PLAKK_RELEASE`, and `PLAKK_WEB_ORIGIN`. No backend or Desktop source changed, so no affected
 backend or Desktop build exists for this evidence branch.
 
-## External setup required for live completion
+## Local credentials and configuration required for live completion
 
 The following work remains outside this Linux task and must be completed without copying secrets
 into this evidence record:
 
-1. Restore canonical `api.plakk.io` DNS and deploy the backend at the exact evidence revision.
-2. Supply an isolated Firefox profile/session with two test accounts and an authorized canonical
-   WorkOS callback.
-3. Configure WorkOS Pipes connections and usable test accounts for Google Drive, OneDrive, and
+1. Supply an isolated Firefox profile/session with two test accounts authorized for the observed
+   local WorkOS callback.
+2. Configure WorkOS Pipes connections and usable test accounts for Google Drive, OneDrive, and
    Dropbox.
-4. Configure Polar sandbox values `POLAR_ACCESS_TOKEN`, `POLAR_WEBHOOK_SECRET`,
+3. Configure Polar sandbox values `POLAR_ACCESS_TOKEN`, `POLAR_WEBHOOK_SECRET`,
    `POLAR_MONTHLY_PRODUCT_ID`, `POLAR_ANNUAL_PRODUCT_ID`, `POLAR_PAID_BENEFIT_ID`, and
    `POLAR_SERVER=sandbox`, including the sandbox customer-state webhook and paid benefit.
-5. Provide Axiom deployment/query access. Infrastructure configuration uses `AXIOM_TOKEN` and,
-   when applicable, `AXIOM_ORG_ID`; the deployed backend must expose the configured credential-free
-   OTLP endpoints and headers.
-6. Establish the deployed Web/backend release identity before comparing hosted behavior with this
-   source revision.
+4. Provide local OTLP/Axiom exporter configuration and Axiom query access for the joined sanitized
+   browser/backend trace. Infrastructure configuration uses `AXIOM_TOKEN` and, when applicable,
+   `AXIOM_ORG_ID`.
 
 Until the blocked live scenarios are observed, issue #133 is not a completed launch gate and this
 evidence must not be used to merge or close it.
