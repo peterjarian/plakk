@@ -1,6 +1,6 @@
 import { Button, buttonVariants } from "@plakk/ui/components/primitives/button";
 import { RotateCcw } from "lucide-react";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 type BrowserCapabilities = {
   readonly ReadableStream?: unknown;
@@ -58,17 +58,33 @@ export function UnsupportedBrowserView(props: { readonly onRetry?: () => void })
   );
 }
 
+function BrowserSupportPendingView() {
+  return (
+    <main className="grid min-h-dvh place-items-center bg-background px-4 py-8 text-foreground">
+      <p className="text-sm text-muted-foreground" role="status">
+        Checking browser support…
+      </p>
+    </main>
+  );
+}
+
 export function BrowserSupportBoundary(props: {
   readonly capabilities?: BrowserCapabilities | null;
   readonly children: ReactNode;
 }) {
-  const capabilities =
-    props.capabilities === undefined
-      ? typeof window === "undefined"
-        ? null
-        : window
-      : props.capabilities;
-  return capabilities === null || missingRequiredBrowserCapabilities(capabilities).length === 0 ? (
+  const [capabilities, setCapabilities] = useState<BrowserCapabilities | null>(
+    props.capabilities ?? null,
+  );
+
+  useEffect(() => {
+    setCapabilities(props.capabilities ?? window);
+  }, [props.capabilities]);
+
+  if (capabilities === null) {
+    return <BrowserSupportPendingView />;
+  }
+
+  return missingRequiredBrowserCapabilities(capabilities).length === 0 ? (
     props.children
   ) : (
     <UnsupportedBrowserView />

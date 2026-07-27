@@ -48,4 +48,26 @@ describe("Web browser support", () => {
     expect(markup).toContain("This browser can’t run Plakk");
     expect(markup).not.toContain("Protected product child");
   });
+
+  it("renders a shared pending shell until client capabilities resolve", () => {
+    const markup = renderToStaticMarkup(
+      <BrowserSupportBoundary>
+        <p>Protected product child</p>
+      </BrowserSupportBoundary>,
+    );
+
+    expect(markup).toContain("Checking browser support");
+    expect(markup).not.toContain("Protected product child");
+  });
+
+  it("renders product children after an explicit supported capability check", () => {
+    const markup = renderToStaticMarkup(
+      <BrowserSupportBoundary capabilities={supportedBrowser}>
+        <p>Protected product child</p>
+      </BrowserSupportBoundary>,
+    );
+
+    expect(markup).toContain("Protected product child");
+    expect(markup).not.toContain("Checking browser support");
+  });
 });
