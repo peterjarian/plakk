@@ -1,4 +1,4 @@
-import { StorageProvider } from "../storage/StorageProvider.ts";
+import { StorageCredentialsError, StorageProvider } from "../storage/StorageProvider.ts";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { DateTime, Effect, Layer } from "effect";
 import { TestClock } from "effect/testing";
@@ -163,6 +163,56 @@ describe("account trial capability", () => {
 
     expect(active.blockedReasons).toEqual(["storage"]);
     expect(expired.blockedReasons).toEqual(["billing", "storage"]);
+  });
+
+  it("keeps entitlement status available when linked-storage lookup fails", async () => {
+    const status = await runCapability(
+      (capability) =>
+        Effect.gen(function* () {
+          yield* TestClock.setTime(trialStartMillis);
+          return yield* capability.getStatus("user-1");
+        }),
+      {
+        storage: storageService({
+          getLinkedProvider: () =>
+            Effect.fail(
+              new StorageCredentialsError({
+                cause: null,
+                message: "storage credentials unavailable",
+              }),
+            ),
+        }),
+      },
+    );
+
+    expect(status.accessEntitlement.status).toBe("TRIAL_ACTIVE");
+    expect(status.storageProvider).toBeNull();
+    expect(status.blockedReasons).toEqual(["storage"]);
+  });
+
+  it("preserves the linked provider when its connection assessment fails", async () => {
+    const status = await runCapability(
+      (capability) =>
+        Effect.gen(function* () {
+          yield* TestClock.setTime(trialStartMillis);
+          return yield* capability.getStatus("user-1");
+        }),
+      {
+        storage: storageService({
+          ensureConnected: () =>
+            Effect.fail(
+              new StorageCredentialsError({
+                cause: null,
+                message: "storage credentials unavailable",
+              }),
+            ),
+        }),
+      },
+    );
+
+    expect(status.accessEntitlement.status).toBe("TRIAL_ACTIVE");
+    expect(status.storageProvider).toBe("GOOGLE_DRIVE");
+    expect(status.blockedReasons).toEqual(["storage"]);
   });
 
   it("authorizes only active accounts using their usable linked provider", async () => {

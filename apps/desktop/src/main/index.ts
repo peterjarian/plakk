@@ -260,19 +260,24 @@ const findSnippet = Effect.fn("LocalState.findSnippet")(function* (id: string) {
     );
 });
 
+const loadSnippetContent = Effect.fn("LocalState.loadSnippetContent")(function* (
+  account: { readonly id: string; readonly accessToken: string | null },
+  id: string,
+) {
+  const { snippet } = yield* findSnippetForAccount(account, id);
+  const { bytes } = yield* Effect.scoped(getManagedSnippetBytes(account, id, snippet)).pipe(
+    asIpcFailure("Could not load this snippet."),
+  );
+  const presentation = deriveSnippetPresentation({ fileName: snippet.fileName, content: bytes });
+  return { bytes, presentation, snippet };
+});
+
 handle(ipcMethods.snippetCopy, (id) =>
   Effect.gen(function* () {
     const session = yield* DesktopSession;
     yield* session.withCurrentProductAccess((account) =>
       Effect.gen(function* () {
-        const { snippet } = yield* findSnippetForAccount(account, id);
-        const { bytes } = yield* Effect.scoped(getManagedSnippetBytes(account, id, snippet)).pipe(
-          asIpcFailure("Could not load this snippet."),
-        );
-        const presentation = deriveSnippetPresentation({
-          fileName: snippet.fileName,
-          content: bytes,
-        });
+        const { bytes, presentation, snippet } = yield* loadSnippetContent(account, id);
         if (presentation.type === "text" || presentation.type === "hyperlink") {
           const text = decodeSnippetText(bytes);
           if (text !== null) {
@@ -296,14 +301,7 @@ handle(ipcMethods.snippetOpen, (id) =>
     const session = yield* DesktopSession;
     yield* session.withCurrentProductAccess((account) =>
       Effect.gen(function* () {
-        const { snippet } = yield* findSnippetForAccount(account, id);
-        const { bytes } = yield* Effect.scoped(getManagedSnippetBytes(account, id, snippet)).pipe(
-          asIpcFailure("Could not load this snippet."),
-        );
-        const presentation = deriveSnippetPresentation({
-          fileName: snippet.fileName,
-          content: bytes,
-        });
+        const { presentation } = yield* loadSnippetContent(account, id);
         if (presentation.type !== "hyperlink") {
           return yield* new IpcHandlerError({
             cause: null,

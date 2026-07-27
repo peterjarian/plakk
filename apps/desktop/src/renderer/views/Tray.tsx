@@ -5,6 +5,7 @@ import { useSnippets } from "../hooks/useSnippets.ts";
 import { useLocalState } from "../hooks/useLocalState.tsx";
 import {
   StorageProviderIcon,
+  billingRestrictedFromLocalState,
   storageProviderLabel,
   useLinkedStorageProvider,
   useStorageStatus,
@@ -27,9 +28,7 @@ export function Tray() {
   const storageStatus = useStorageStatus();
   const localState = useLocalState().localState;
   const liveConnection = localState.liveConnection;
-  const billingRestricted =
-    localState.capability.status === "ONLINE" &&
-    localState.capability.account.blockedReasons.includes("billing");
+  const billingRestricted = billingRestrictedFromLocalState(localState);
   const ingestionAllowed = storageStatus.kind === "connected" && storageStatus.canSync;
   const syncStatus: SyncStatus =
     storageStatus.kind === "loading"

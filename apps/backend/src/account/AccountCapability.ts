@@ -138,16 +138,16 @@ export class AccountCapability extends Context.Service<
 
       const assessStorage = Effect.fn("AccountCapability.assessStorage")(function* (
         workosUserId: string,
-      ): Effect.fn.Return<StorageAssessment, RpcError> {
+      ): Effect.fn.Return<StorageAssessment> {
         const storageProvider = yield* storage
           .getLinkedProvider(workosUserId)
-          .pipe(Effect.mapError(mapStorageReadError));
+          .pipe(Effect.orElseSucceed(() => null));
         if (storageProvider === null) return { storageProvider, usable: false };
 
         const usable = yield* storage.ensureConnected({ storageProvider, workosUserId }).pipe(
           Effect.as(true),
           Effect.catchTags({
-            StorageCredentialsError: (error) => Effect.fail(mapStorageReadError(error)),
+            StorageCredentialsError: () => Effect.succeed(false),
             StorageNeedsReauthorizationError: () => Effect.succeed(false),
             StorageNotConnectedError: () => Effect.succeed(false),
           }),

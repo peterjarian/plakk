@@ -1,7 +1,11 @@
 import { DropboxIcon } from "@plakk/ui/icons/DropboxIcon";
 import { GoogleDriveIcon } from "@plakk/ui/icons/GoogleDriveIcon";
 import { OneDriveIcon } from "@plakk/ui/icons/OneDriveIcon";
-import { accountCanSyncWithConnection, type AccountStatus } from "@plakk/shared/PlakkApi";
+import {
+  accountBillingRestricted,
+  accountCanSyncWithConnection,
+  type AccountStatus,
+} from "@plakk/shared/PlakkApi";
 import type { StorageProvider } from "@plakk/shared";
 import type { ComponentProps } from "react";
 
@@ -69,6 +73,10 @@ export const storageStatusFromLocalState = (
   }
   return { kind: "unlinked", canSync: false, actionUrl: storageSetupUrl };
 };
+
+export const billingRestrictedFromLocalState = (localState: LocalState): boolean =>
+  localState.capability.status === "ONLINE" &&
+  accountBillingRestricted(localState.capability.account);
 
 export function useStorageStatus(): StorageStatus {
   const state = useLocalState();

@@ -20,6 +20,7 @@ import { useSnippets } from "../hooks/useSnippets.ts";
 import { useLocalState } from "../hooks/useLocalState.tsx";
 import {
   StorageProviderIcon,
+  billingRestrictedFromLocalState,
   storageProviderLabel,
   openStorageSetup,
   useLinkedStorageProvider,
@@ -39,9 +40,7 @@ export function Home({ active = true }: { active?: boolean }) {
   const storageStatus = useStorageStatus();
   const localState = useLocalState().localState;
   const liveConnection = localState.liveConnection;
-  const billingRestricted =
-    localState.capability.status === "ONLINE" &&
-    localState.capability.account.blockedReasons.includes("billing");
+  const billingRestricted = billingRestrictedFromLocalState(localState);
   const [isDragging, setIsDragging] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copyingId, setCopyingId] = useState<string | null>(null);

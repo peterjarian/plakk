@@ -42,6 +42,7 @@ vi.mock("../hooks/useLocalState.tsx", () => ({
 
 vi.mock("../hooks/useStorageStatus.tsx", () => ({
   StorageProviderIcon: () => null,
+  billingRestrictedFromLocalState: () => false,
   storageProviderLabel: () => "Google Drive",
   useLinkedStorageProvider: () => "GOOGLE_DRIVE",
   useStorageStatus: () => ({

@@ -170,7 +170,9 @@ describe("local state views", () => {
       expect(markup).toContain('aria-label="Download to this device"');
       expect(markup).toContain('aria-label="Open link"');
       expect(markup).toContain('aria-label="Delete"');
-      expect(markup).toContain('disabled=""');
+      expect(markup).toMatch(/disabled=""[^>]+aria-label="Download to this device"/);
+      expect(markup).toMatch(/disabled=""[^>]+aria-label="Open link"/);
+      expect(markup).not.toMatch(/disabled=""[^>]+aria-label="Delete"/);
     }
 
     state.setCapability({ status: "OFFLINE" });

@@ -1,4 +1,5 @@
 import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
@@ -26,6 +27,30 @@ export const AccountStatusSchema = Schema.Struct({
 });
 
 export type AccountStatus = typeof AccountStatusSchema.Type;
+
+export const accountTrialExpiryDelayMillis = (
+  account: AccountStatus,
+  nowMillis: number,
+): number | null =>
+  account.accessEntitlement.status === "TRIAL_ACTIVE"
+    ? Math.max(0, DateTime.toEpochMillis(account.accessEntitlement.trialEndsAt) - nowMillis)
+    : null;
+
+export const accountWithBillingRestriction = (account: AccountStatus): AccountStatus => ({
+  ...account,
+  accessEntitlement: {
+    ...account.accessEntitlement,
+    status: "BILLING_RESTRICTED",
+  },
+  blockedReasons: account.blockedReasons.includes("billing")
+    ? account.blockedReasons
+    : [...account.blockedReasons, "billing"],
+  canSync: false,
+});
+
+export const accountBillingRestricted = (account: AccountStatus): boolean =>
+  account.accessEntitlement.status === "BILLING_RESTRICTED" ||
+  account.blockedReasons.includes("billing");
 
 export const accountCanSync = (account: AccountStatus): boolean =>
   account.canSync && account.blockedReasons.length === 0 && account.storageProvider !== null;
