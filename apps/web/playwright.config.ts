@@ -3,6 +3,7 @@ import { defineConfig, devices } from "@playwright/test";
 import { CONTROLLED_PRODUCT_PORT } from "./e2e/controlled-product/config.ts";
 
 export default defineConfig({
+  globalSetup: "./e2e/global-setup.ts",
   testDir: "./e2e",
   timeout: 30_000,
   projects: [
