@@ -60,6 +60,7 @@ export interface AccountProductLifetimeShape {
   readonly clear: Effect.Effect<void, AccountProductMirrorError>;
   readonly enter: (accountId: string) => Effect.Effect<void>;
   readonly getSnapshot: () => AccountProductState;
+  readonly refresh: Effect.Effect<void>;
   readonly retry: Effect.Effect<void>;
   readonly subscribe: (listener: () => void) => () => void;
 }
@@ -362,6 +363,9 @@ export class AccountProductLifetime extends Context.Service<
         enter: (accountId) =>
           Effect.suspend(() => (activeAccountId === accountId ? Effect.void : start(accountId))),
         getSnapshot: () => state,
+        refresh: Effect.suspend(() =>
+          activeAccountId === null ? Effect.void : refresh(activeAccountId, generation),
+        ),
         retry: Effect.suspend(() =>
           activeAccountId === null ? Effect.void : startRefresh(activeAccountId, generation),
         ),

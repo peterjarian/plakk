@@ -1,12 +1,12 @@
 import { useAccessToken, useAuth } from "@workos/authkit-tanstack-react-start/client";
+import type { StorageProvider } from "@plakk/shared";
+import type { StorageOnboardingOrigin } from "@plakk/shared/PlakkApi";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useRef,
   useState,
@@ -19,38 +19,33 @@ import {
   AccountProductLifetimeInitializationFailure,
   clearProductThenSignOut,
   type AccountProductLifetimeShape,
-  type AccountProductState,
 } from "./account-product-lifetime.ts";
-import {
-  AccountProductReader,
-  makeAccountProductReaderLayer,
-  resolveProductRpcUrl,
-} from "./product-reader.ts";
+import { AccountProductReader, resolveProductRpcUrl } from "./product-reader.ts";
 import { makeBrowserAccountProductMirrorLayer } from "./browser-readable-mirror.ts";
 import type { AccountProductMirror } from "./readable-mirror.ts";
-
-type WebProductContextValue = {
-  readonly retry: (() => void) | null;
-  readonly signOut: (() => Promise<void>) | null;
-  readonly state: AccountProductState;
-};
-
-const WebProductContext = createContext<WebProductContextValue | null>(null);
+import { StorageOnboardingClient } from "./storage-onboarding-client.ts";
+import { makeWebProductClientLayer } from "./web-product-client-layer.ts";
+import { WebProductContext, type WebProductContextValue } from "./web-product-context.tsx";
 
 class WorkOsSignOutFailure extends Data.TaggedError("WorkOsSignOutFailure")<{
   readonly cause: unknown;
 }> {}
 
 const signedOutContext: WebProductContextValue = {
+  refresh: null,
   retry: null,
   signOut: null,
   state: { kind: "idle" },
+  storageOnboarding: null,
 };
 
 function ActiveIdentityProduct(props: {
   readonly children: ReactNode;
   readonly lifetime: AccountProductLifetimeShape;
-  readonly runtime: ManagedRuntime.ManagedRuntime<AccountProductLifetime, never>;
+  readonly runtime: ManagedRuntime.ManagedRuntime<
+    AccountProductLifetime | StorageOnboardingClient,
+    never
+  >;
   readonly signOut: () => Promise<void>;
 }) {
   const { children, lifetime, runtime, signOut } = props;
@@ -63,9 +58,32 @@ function ActiveIdentityProduct(props: {
   const retry = useCallback(() => {
     runtime.runFork(lifetime.retry);
   }, [lifetime, runtime]);
+  const refresh = useCallback(() => runtime.runPromise(lifetime.refresh), [lifetime, runtime]);
+  const begin = useCallback(
+    (provider: StorageProvider, origin: StorageOnboardingOrigin) =>
+      runtime.runPromise(
+        Effect.flatMap(StorageOnboardingClient, (client) => client.begin(provider, origin)),
+      ),
+    [runtime],
+  );
+  const read = useCallback(
+    (providerHint: StorageProvider | null) =>
+      runtime.runPromise(
+        Effect.flatMap(StorageOnboardingClient, (client) => client.read(providerHint)),
+      ),
+    [runtime],
+  );
 
   return (
-    <WebProductContext.Provider value={{ retry, signOut, state }}>
+    <WebProductContext.Provider
+      value={{
+        refresh,
+        retry,
+        signOut,
+        state,
+        storageOnboarding: { begin, read },
+      }}
+    >
       {children}
     </WebProductContext.Provider>
   );
@@ -76,16 +94,19 @@ function IdentityProductResource(props: {
   readonly children: ReactNode;
   readonly delegateSignOut: () => Promise<void>;
   readonly mirrorLayer?: Layer.Layer<AccountProductMirror>;
-  readonly readerLayer: Layer.Layer<AccountProductReader>;
+  readonly productClientLayer: Layer.Layer<AccountProductReader | StorageOnboardingClient>;
 }) {
-  const { accountId, children, delegateSignOut, readerLayer } = props;
+  const { accountId, children, delegateSignOut, productClientLayer } = props;
   // The account-keyed ProductIdentityBoundary remounts this resource; live layer swaps are unsupported.
   const mirrorLayer = useState(
     () => props.mirrorLayer ?? makeBrowserAccountProductMirrorLayer(accountId),
   )[0];
   type IdentityRuntime = {
     readonly lifetimePromise: Promise<AccountProductLifetimeShape>;
-    readonly runtime: ManagedRuntime.ManagedRuntime<AccountProductLifetime, never>;
+    readonly runtime: ManagedRuntime.ManagedRuntime<
+      AccountProductLifetime | StorageOnboardingClient,
+      never
+    >;
   };
   type ActiveIdentityRuntime = IdentityRuntime & {
     readonly lifetime: AccountProductLifetimeShape;
@@ -101,7 +122,12 @@ function IdentityProductResource(props: {
     setActiveResource(null);
     setInitializationFailure(null);
     const runtime = ManagedRuntime.make(
-      AccountProductLifetime.layer.pipe(Layer.provide(Layer.merge(readerLayer, mirrorLayer))),
+      Layer.merge(
+        AccountProductLifetime.layer.pipe(
+          Layer.provide(Layer.merge(productClientLayer, mirrorLayer)),
+        ),
+        productClientLayer,
+      ),
     );
     const lifetimePromise = runtime.runPromise(AccountProductLifetime);
     const resource = { lifetimePromise, runtime };
@@ -122,7 +148,7 @@ function IdentityProductResource(props: {
       if (resourceRef.current === resource) resourceRef.current = null;
       void runtime.dispose();
     };
-  }, [accountId, initializationAttempt, mirrorLayer, readerLayer]);
+  }, [accountId, initializationAttempt, mirrorLayer, productClientLayer]);
 
   const signOut = useCallback(async () => {
     const resource = resourceRef.current;
@@ -148,6 +174,14 @@ function IdentityProductResource(props: {
       ),
     );
   }, [accountId, delegateSignOut]);
+  const refresh = useCallback(async () => {
+    const resource = resourceRef.current;
+    if (resource === null) {
+      throw new Error("The account product is not initialized.");
+    }
+    const productLifetime = await resource.lifetimePromise;
+    await resource.runtime.runPromise(productLifetime.refresh);
+  }, []);
 
   if (activeResource === null) {
     return (
@@ -157,11 +191,13 @@ function IdentityProductResource(props: {
             initializationFailure === null
               ? null
               : () => setInitializationAttempt((attempt) => attempt + 1),
+          refresh,
           signOut,
           state:
             initializationFailure === null
               ? { accountId, kind: "loading" }
               : { accountId, cause: initializationFailure, kind: "failed" },
+          storageOnboarding: null,
         }}
       >
         {children}
@@ -185,7 +221,7 @@ export function ProductIdentityBoundary(props: {
   readonly children: ReactNode;
   readonly delegateSignOut: () => Promise<void>;
   readonly mirrorLayer?: Layer.Layer<AccountProductMirror>;
-  readonly readerLayer: Layer.Layer<AccountProductReader>;
+  readonly productClientLayer: Layer.Layer<AccountProductReader | StorageOnboardingClient>;
 }) {
   return <IdentityProductResource key={props.accountId} {...props} />;
 }
@@ -195,10 +231,11 @@ export function WebProductProvider({ children }: Readonly<{ children: ReactNode 
   const { getAccessToken } = useAccessToken();
   const getAccessTokenRef = useRef(getAccessToken);
   getAccessTokenRef.current = getAccessToken;
-  const readerLayer = useState(() =>
-    makeAccountProductReaderLayer({
+  const rpcUrl = resolveProductRpcUrl(import.meta.env.VITE_PLAKK_API_ORIGIN, import.meta.env.DEV);
+  const productClientLayer = useState(() =>
+    makeWebProductClientLayer({
       getAccessToken: () => getAccessTokenRef.current(),
-      rpcUrl: resolveProductRpcUrl(import.meta.env.VITE_PLAKK_API_ORIGIN, import.meta.env.DEV),
+      rpcUrl,
     }),
   )[0];
 
@@ -212,17 +249,11 @@ export function WebProductProvider({ children }: Readonly<{ children: ReactNode 
     <ProductIdentityBoundary
       accountId={auth.user.id}
       delegateSignOut={() => auth.signOut({ returnTo: "/" })}
-      readerLayer={readerLayer}
+      productClientLayer={productClientLayer}
     >
       {children}
     </ProductIdentityBoundary>
   );
 }
 
-export const useWebProduct = (): WebProductContextValue => {
-  const product = useContext(WebProductContext);
-  if (product === null) {
-    throw new Error("useWebProduct must be used within WebProductProvider.");
-  }
-  return product;
-};
+export { useWebProduct } from "./web-product-context.tsx";

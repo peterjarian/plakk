@@ -2,7 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 import * as DateTime from "effect/DateTime";
 
 import type { LocalState } from "../../ipc/contracts.ts";
-import { storageStatusFromLocalState } from "./useStorageStatus.tsx";
+import { storageStatusFromLocalState, storageSetupUrl } from "./useStorageStatus.tsx";
 
 const localState = (input: Partial<LocalState> = {}): LocalState => ({
   revision: 1,
@@ -16,6 +16,10 @@ const localState = (input: Partial<LocalState> = {}): LocalState => ({
 });
 
 describe("storage status from the local state", () => {
+  it("marks storage setup as a Desktop-originated Web journey", () => {
+    expect(storageSetupUrl).toBe("https://app.plakk.io/storage?origin=desktop");
+  });
+
   it("keeps cached provider display facts out of offline capability status", () => {
     const status = storageStatusFromLocalState(
       localState({ provider: { known: true, value: "GOOGLE_DRIVE" } }),

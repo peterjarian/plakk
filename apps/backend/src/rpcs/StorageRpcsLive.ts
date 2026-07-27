@@ -1,6 +1,16 @@
 import type { StorageProvider as StorageProviderName } from "@plakk/shared";
-import { CurrentUser, StorageRpcs, type StorageProviderStatus } from "@plakk/shared/PlakkApi";
+import { parseExactHttpOrigin } from "@plakk/shared/ExactHttpOrigin";
+import {
+  CurrentUser,
+  StorageRpcs,
+  type StorageOnboardingOrigin,
+  type StorageProviderStatus,
+} from "@plakk/shared/PlakkApi";
 import { RpcError } from "@plakk/shared/RpcError";
+import {
+  storageOnboardingReturnSearch,
+  storageOnboardingRouteSearchParams,
+} from "@plakk/shared/StorageOnboardingReturn";
 import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
 import * as Redacted from "effect/Redacted";
@@ -19,17 +29,51 @@ const WorkosConnectedAccountSchema = Schema.Struct({
 const getConnectedAccountUrl = (provider: StorageProviderName, workosUserId: string) =>
   `${WORKOS_BASE_URL}/user_management/users/${encodeURIComponent(workosUserId)}/connected_accounts/${encodeURIComponent(getProviderSlug(provider))}`;
 
+export const storageProviderReturnUrl = (
+  configuredWebOrigin: string,
+  storageProvider: StorageProviderName,
+  origin: StorageOnboardingOrigin,
+  requireHttps = false,
+): string => {
+  const webOrigin = parseExactHttpOrigin(configuredWebOrigin);
+  if (webOrigin === null || (requireHttps && !webOrigin.startsWith("https://"))) {
+    throw new TypeError(
+      requireHttps
+        ? "PLAKK_WEB_ORIGIN must be an exact HTTPS origin in production."
+        : "PLAKK_WEB_ORIGIN must be an exact HTTP(S) origin.",
+    );
+  }
+
+  const returnUrl = new URL("/storage", webOrigin);
+  returnUrl.search = storageOnboardingRouteSearchParams(
+    storageOnboardingReturnSearch(storageProvider, origin),
+  ).toString();
+  return returnUrl.href;
+};
+
 export const StorageRpcsLive = StorageRpcs.of({
   BeginStorageProviderLink: Effect.fn("rpc.BeginStorageProviderLink")(function* (input) {
     return yield* Effect.gen(function* () {
-      const apiKey = yield* Config.redacted("WORKOS_API_KEY").pipe(Effect.orDie);
+      const { apiKey, configuredWebOrigin, nodeEnv } = yield* Effect.all({
+        apiKey: Config.redacted("WORKOS_API_KEY"),
+        configuredWebOrigin: Config.string("PLAKK_WEB_ORIGIN"),
+        nodeEnv: Config.string("NODE_ENV").pipe(Config.withDefault("development")),
+      }).pipe(Effect.orDie);
       const currentUser = yield* CurrentUser;
+      const returnTo = yield* Effect.sync(() =>
+        storageProviderReturnUrl(
+          configuredWebOrigin,
+          input.storageProvider,
+          input.origin,
+          nodeEnv === "production",
+        ),
+      );
       const request = yield* HttpClientRequest.post(
         `${WORKOS_BASE_URL}/data-integrations/${encodeURIComponent(getProviderSlug(input.storageProvider))}/authorize`,
       ).pipe(
         HttpClientRequest.bearerToken(Redacted.value(apiKey)),
         HttpClientRequest.setHeader("Content-Type", "application/json"),
-        HttpClientRequest.bodyJson({ user_id: currentUser.id }),
+        HttpClientRequest.bodyJson({ user_id: currentUser.id, return_to: returnTo }),
         Effect.orDie,
       );
       const response = yield* HttpClient.execute(request).pipe(Effect.orDie);
