@@ -33,6 +33,7 @@ describe("browser provider transfer", () => {
       expect.objectContaining({
         body: content,
         method: "POST",
+        redirect: "error",
       }),
     );
   });

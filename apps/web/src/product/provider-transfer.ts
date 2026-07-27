@@ -88,6 +88,7 @@ const uploadPart = Effect.fn("WebProviderTransfer.uploadPart")(function* (input:
                   "Content-Range": `bytes ${input.range.start}-${input.range.end}/${input.byteSize}`,
                 },
         body: input.body,
+        redirect: "error",
         signal,
       }),
     catch: (cause) => transferError("Could not reach the upload provider.", cause),
