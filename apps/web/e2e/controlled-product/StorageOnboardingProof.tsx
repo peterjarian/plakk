@@ -81,6 +81,7 @@ function FirstRunRouteProof() {
           snippets: [],
         },
         storageOnboarding: null,
+        snippetActions: null,
         snippetUploads: null,
       }}
     >

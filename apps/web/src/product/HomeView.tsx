@@ -1,14 +1,23 @@
 import { deriveSnippetPresentation, type User } from "@plakk/shared";
-import type { StorageProviderStatus } from "@plakk/shared/PlakkApi";
+import {
+  accountCanSync,
+  type ApiSnippet,
+  type StorageProviderStatus,
+} from "@plakk/shared/PlakkApi";
+import { RpcError } from "@plakk/shared/RpcError";
 import { AppHeader } from "@plakk/ui/components/AppHeader";
+import { ExternalLinkConfirmationDialog } from "@plakk/ui/components/ExternalLinkConfirmationDialog";
 import { SnippetComposer } from "@plakk/ui/components/SnippetComposer";
 import { SnippetList } from "@plakk/ui/components/SnippetList";
 import { LocalUploadSnippetRow, PublishedSnippetRow } from "@plakk/ui/components/SnippetRow";
 import { Button } from "@plakk/ui/components/primitives/button";
 import * as DateTime from "effect/DateTime";
-import { useState, type ClipboardEvent, type DragEvent } from "react";
+import * as Schema from "effect/Schema";
+import { useEffect, useState, type ClipboardEvent, type DragEvent } from "react";
 
 import type { AccountProductState } from "./account-product-lifetime.ts";
+import { WebSnippetActionError, type WebSnippetCopyOutcome } from "./snippet-actions.ts";
+import type { WebProductContextValue } from "./web-product-context.tsx";
 
 const storageProviderLabel = {
   DROPBOX: "Dropbox",
@@ -31,6 +40,7 @@ export function HomeView(props: {
   readonly onAddFiles: (files: ReadonlyArray<File>) => void;
   readonly onAddText: (text: string) => void;
   readonly onDismissUpload: (id: string) => void;
+  readonly snippetActions?: WebProductContextValue["snippetActions"];
   readonly uploadsDisabled: boolean;
 }) {
   const {
@@ -40,13 +50,129 @@ export function HomeView(props: {
     onRetry,
     onSignOut,
     signOutError,
+    snippetActions = null,
     state,
     uploadsDisabled,
     user,
   } = props;
   const [isDragging, setIsDragging] = useState(false);
+  const [pendingExternalLink, setPendingExternalLink] = useState<{
+    readonly snippet: ApiSnippet;
+    readonly url: string;
+  } | null>(null);
+  const [rowActions, setRowActions] = useState<
+    Readonly<
+      Record<
+        string,
+        {
+          readonly message?: string;
+          readonly status: "busy" | "copied" | "idle" | "notice";
+        }
+      >
+    >
+  >({});
   const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
   const storageProvider = state.kind === "ready" ? state.account.storageProvider : null;
+  const remoteActionsAvailable =
+    state.kind === "ready" && state.apiAvailability === "available" && snippetActions !== null;
+  const productActionsDisabled =
+    !remoteActionsAvailable || state.kind !== "ready" || !accountCanSync(state.account);
+  const deleteDisabled = !remoteActionsAvailable;
+
+  useEffect(() => {
+    if (productActionsDisabled) setPendingExternalLink(null);
+  }, [productActionsDisabled]);
+
+  const publishRowAction = (
+    id: string,
+    action: {
+      readonly message?: string;
+      readonly status: "busy" | "copied" | "idle" | "notice";
+    },
+  ) => {
+    setRowActions((current) => ({ ...current, [id]: action }));
+  };
+  const rowActionError = (id: string, cause: unknown, fallback: string) => {
+    const message =
+      cause instanceof WebSnippetActionError
+        ? cause.message
+        : Schema.is(RpcError)(cause)
+          ? cause.code === "FORBIDDEN"
+            ? cause.message
+            : cause.code === "NOT_FOUND"
+              ? "This snippet is no longer available."
+              : fallback
+          : fallback;
+    publishRowAction(id, {
+      message,
+      status: "notice",
+    });
+  };
+  const copySnippet = async (snippet: ApiSnippet) => {
+    if (snippetActions === null || productActionsDisabled) return;
+    publishRowAction(snippet.id, { status: "busy" });
+    try {
+      const outcome: WebSnippetCopyOutcome = await snippetActions.copy(snippet);
+      publishRowAction(
+        snippet.id,
+        outcome.kind === "COPIED"
+          ? { message: "Copied", status: "copied" }
+          : outcome.kind === "DOWNLOADED_IMAGE_FALLBACK"
+            ? {
+                message: "Image Copy is unavailable in this browser. Downloaded instead.",
+                status: "notice",
+              }
+            : {
+                message: "This content is not decodable text. Downloaded instead.",
+                status: "notice",
+              },
+      );
+    } catch (cause) {
+      rowActionError(snippet.id, cause, "Plakk couldn’t fetch this snippet. Try again.");
+    }
+  };
+  const downloadSnippet = async (snippet: ApiSnippet) => {
+    if (snippetActions === null || productActionsDisabled) return;
+    publishRowAction(snippet.id, { status: "busy" });
+    try {
+      await snippetActions.download(snippet);
+      publishRowAction(snippet.id, { message: "Downloaded", status: "notice" });
+    } catch (cause) {
+      rowActionError(snippet.id, cause, "Plakk couldn’t fetch this snippet. Try again.");
+    }
+  };
+  const prepareOpenSnippet = async (snippet: ApiSnippet) => {
+    if (snippetActions === null || productActionsDisabled) return;
+    publishRowAction(snippet.id, { status: "busy" });
+    try {
+      const { url } = await snippetActions.prepareOpen(snippet);
+      publishRowAction(snippet.id, { status: "idle" });
+      setPendingExternalLink({ snippet, url });
+    } catch (cause) {
+      rowActionError(snippet.id, cause, "Plakk couldn’t fetch this snippet. Try again.");
+    }
+  };
+  const confirmExternalLink = async () => {
+    const pending = pendingExternalLink;
+    if (pending === null || snippetActions === null || productActionsDisabled) return;
+    setPendingExternalLink(null);
+    publishRowAction(pending.snippet.id, { status: "busy" });
+    try {
+      await snippetActions.open(pending.url);
+      publishRowAction(pending.snippet.id, { status: "idle" });
+    } catch (cause) {
+      rowActionError(pending.snippet.id, cause, "Plakk couldn’t open this link. Try again.");
+    }
+  };
+  const deleteSnippet = async (snippet: ApiSnippet) => {
+    if (snippetActions === null || deleteDisabled) return;
+    publishRowAction(snippet.id, { status: "busy" });
+    try {
+      await snippetActions.delete(snippet.id);
+    } catch (cause) {
+      rowActionError(snippet.id, cause, "Plakk couldn’t delete this snippet. Try again.");
+    }
+  };
 
   const addDroppedFiles = (event: DragEvent<HTMLElement>) => {
     event.preventDefault();
@@ -173,6 +299,16 @@ export function HomeView(props: {
             </div>
           ))}
 
+        {state.kind === "ready" && state.account.blockedReasons.includes("storage") && (
+          <div
+            className="mb-4 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+            role="alert"
+          >
+            <strong>Storage access required.</strong> Your snippets remain visible. Reconnect
+            storage to resume Copy, Download, and Open. Delete remains available.
+          </div>
+        )}
+
         {signOutError !== null && (
           <div
             className="mb-4 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive"
@@ -247,6 +383,24 @@ export function HomeView(props: {
                         fileName: record.snippet.fileName,
                       })}
                       now={now}
+                      deleteDisabled={deleteDisabled}
+                      productActionsDisabled={productActionsDisabled}
+                      {...(rowActions[record.snippet.id] === undefined
+                        ? {}
+                        : {
+                            actionStatus: rowActions[record.snippet.id].status,
+                            ...(rowActions[record.snippet.id].message === undefined
+                              ? {}
+                              : { actionMessage: rowActions[record.snippet.id].message }),
+                          })}
+                      {...(snippetActions === null
+                        ? {}
+                        : {
+                            onCopy: () => void copySnippet(record.snippet),
+                            onDelete: () => void deleteSnippet(record.snippet),
+                            onDownload: () => void downloadSnippet(record.snippet),
+                            onOpenLink: () => void prepareOpenSnippet(record.snippet),
+                          })}
                     />
                   );
                 }
@@ -264,6 +418,16 @@ export function HomeView(props: {
           </>
         )}
       </div>
+
+      <ExternalLinkConfirmationDialog
+        description="This link will open in a new browser tab."
+        open={pendingExternalLink !== null}
+        url={pendingExternalLink?.url ?? null}
+        onCancel={() => {
+          setPendingExternalLink(null);
+        }}
+        onConfirm={() => void confirmExternalLink()}
+      />
     </main>
   );
 }

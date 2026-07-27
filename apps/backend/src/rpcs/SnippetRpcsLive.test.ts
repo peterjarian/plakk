@@ -577,9 +577,66 @@ describe("stored snippet download preparation", () => {
   });
 });
 
+describe("on-demand stored Snippet content", () => {
+  it("authorizes the owner and returns only completely validated content", async () => {
+    const stored = snippet();
+    const content = new TextEncoder().encode("note");
+    const downloadObject = vi.fn(() => Effect.succeed(content));
+    const authorizeProductCommand = vi.fn(() => Effect.void);
+
+    const result = await runSnippetEffect(
+      (rpcs) => rpcs.GetSnippetContent({ id: stored.id }),
+      downloadDatabase([stored]),
+      storageService({ downloadObject }),
+      currentUser,
+      accountCapabilityService({ authorizeProductCommand }),
+    );
+
+    expect(result).toEqual({
+      storageProvider: stored.storageProvider,
+      fileName: stored.fileName,
+      byteSize: stored.byteSize,
+      content,
+    });
+    expect(authorizeProductCommand).toHaveBeenCalledWith(currentUser.id, stored.storageProvider);
+    expect(downloadObject).toHaveBeenCalledWith({
+      storageProvider: stored.storageProvider,
+      storageObjectId: stored.storageObjectId,
+      expectedByteSize: stored.byteSize,
+      workosUserId: currentUser.id,
+    });
+  });
+
+  it("rejects incomplete provider content even when an adapter violates its size contract", async () => {
+    await expect(
+      runSnippetEffect(
+        (rpcs) => rpcs.GetSnippetContent({ id: publication.id }),
+        downloadDatabase([snippet()]),
+        storageService({ downloadObject: () => Effect.succeed(new Uint8Array([1, 2, 3])) }),
+      ),
+    ).rejects.toMatchObject({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "Stored object size does not match snippet metadata.",
+    });
+  });
+
+  it("does not access a provider object owned by another account", async () => {
+    const downloadObject = vi.fn(storageService().downloadObject);
+
+    await expect(
+      runSnippetEffect(
+        (rpcs) => rpcs.GetSnippetContent({ id: publication.id }),
+        downloadDatabase([]),
+        storageService({ downloadObject }),
+      ),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(downloadObject).not.toHaveBeenCalled();
+  });
+});
+
 describe("account capability enforcement", () => {
   it.each(["Restore billing access to use this action.", "Reconnect storage to use this action."])(
-    "rejects upload preparation, publication, and download preparation before side effects: %s",
+    "rejects upload preparation, publication, and content reads before side effects: %s",
     async (message) => {
       const denied = new RpcError({
         code: "FORBIDDEN",
@@ -590,7 +647,8 @@ describe("account capability enforcement", () => {
       const store = publicationDatabase({ inserted: [snippet()] });
       const prepareUpload = vi.fn(storageService().prepareUpload);
       const getDownloadTarget = vi.fn(storageService().getDownloadTarget);
-      const storage = storageService({ getDownloadTarget, prepareUpload });
+      const downloadObject = vi.fn(storageService().downloadObject);
+      const storage = storageService({ downloadObject, getDownloadTarget, prepareUpload });
 
       await expect(
         runSnippetEffect(
@@ -626,11 +684,21 @@ describe("account capability enforcement", () => {
           capability,
         ),
       ).rejects.toMatchObject({ code: "FORBIDDEN" });
+      await expect(
+        runSnippetEffect(
+          (rpcs) => rpcs.GetSnippetContent({ id: publication.id }),
+          downloadDatabase([snippet()]),
+          storage,
+          currentUser,
+          capability,
+        ),
+      ).rejects.toMatchObject({ code: "FORBIDDEN" });
 
-      expect(authorizeProductCommand).toHaveBeenCalledTimes(3);
+      expect(authorizeProductCommand).toHaveBeenCalledTimes(4);
       expect(prepareUpload).not.toHaveBeenCalled();
       expect(store.insertedValues).toEqual([]);
       expect(getDownloadTarget).not.toHaveBeenCalled();
+      expect(downloadObject).not.toHaveBeenCalled();
     },
   );
 
@@ -660,7 +728,7 @@ describe("account capability enforcement", () => {
 });
 
 describe("completed Snippet deletion", () => {
-  it("commits removal and notification before deleting the provider object once", async () => {
+  it("commits removal and notification before starting provider cleanup once", async () => {
     const stored = snippet();
     const store = deletionDatabase([stored]);
     const deleteObject = vi.fn(() =>
@@ -675,7 +743,7 @@ describe("completed Snippet deletion", () => {
       storageService({ deleteObject }),
     );
 
-    expect(store.events).toEqual(["remove", "notify", "commit", "provider-delete"]);
+    expect(store.events.slice(0, 3)).toEqual(["remove", "notify", "commit"]);
     expect(deleteObject).toHaveBeenCalledOnce();
     expect(deleteObject).toHaveBeenCalledWith({
       storageProvider: stored.storageProvider,
@@ -710,7 +778,24 @@ describe("completed Snippet deletion", () => {
       ),
     ).resolves.toBeUndefined();
 
-    expect(store.events).toEqual(["remove", "notify", "commit", "provider-delete"]);
+    expect(store.events.slice(0, 3)).toEqual(["remove", "notify", "commit"]);
+    expect(deleteObject).toHaveBeenCalledOnce();
+  });
+
+  it("returns authoritative success without waiting for provider cleanup", async () => {
+    const stored = snippet();
+    const store = deletionDatabase([stored]);
+    const deleteObject = vi.fn(() => Effect.never);
+
+    await expect(
+      runSnippetEffect(
+        (rpcs) => rpcs.DeleteSnippet({ id: stored.id }),
+        store.db,
+        storageService({ deleteObject }),
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(store.events).toEqual(["remove", "notify", "commit"]);
     expect(deleteObject).toHaveBeenCalledOnce();
   });
 

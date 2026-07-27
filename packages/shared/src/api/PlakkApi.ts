@@ -237,6 +237,16 @@ export const SnippetRpcs = RpcGroup.make(
     }),
     error: RpcError,
   }),
+  Rpc.make("GetSnippetContent", {
+    payload: { id: SnippetIdSchema },
+    success: Schema.Struct({
+      storageProvider: StorageProviderLiteral,
+      fileName: Schema.String,
+      byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+      content: Schema.Uint8Array,
+    }),
+    error: RpcError,
+  }),
   Rpc.make("DeleteSnippet", {
     payload: { id: SnippetIdSchema },
     success: Schema.Void,

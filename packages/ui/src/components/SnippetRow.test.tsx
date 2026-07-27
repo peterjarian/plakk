@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 import * as DateTime from "effect/DateTime";
 
-import { formatSnippetDate, SnippetRow } from "./SnippetRow.tsx";
+import { formatSnippetDate, PublishedSnippetRow, SnippetRow } from "./SnippetRow.tsx";
 
 const snippet = {
   id: "8c72d6f6-9a25-4633-b72f-d8f83cf1c8e0",
@@ -252,6 +252,53 @@ describe("SnippetRow", () => {
     expect(markup).toContain('aria-label="Open link"');
     expect(markup).toContain('aria-label="Delete"');
     expect(markup).toMatch(/disabled=""[^>]+aria-label="Download to this device"/);
+    expect(markup).toMatch(/disabled=""[^>]+aria-label="Open link"/);
+    expect(markup).not.toMatch(/disabled=""[^>]+aria-label="Delete"/);
+  });
+});
+
+describe("PublishedSnippetRow browser actions", () => {
+  const renderPublished = (
+    fileName: string,
+    presentation: Parameters<typeof PublishedSnippetRow>[0]["presentation"],
+    productActionsDisabled = false,
+  ) =>
+    renderToStaticMarkup(
+      <PublishedSnippetRow
+        snippet={{ ...snippet, fileName, storageObjectId: "drive-object" }}
+        presentation={presentation}
+        now={now}
+        onCopy={() => undefined}
+        onDelete={() => undefined}
+        onDownload={() => undefined}
+        onOpenLink={() => undefined}
+        productActionsDisabled={productActionsDisabled}
+      />,
+    );
+
+  it("offers Copy and verified-link preparation for text candidates", () => {
+    const markup = renderPublished("note.txt", { type: "file", title: "Text snippet" });
+
+    expect(markup).toContain('aria-label="Copy"');
+    expect(markup).toContain('aria-label="Open link"');
+    expect(markup).toContain('aria-label="Delete"');
+    expect(markup).not.toContain('aria-label="Download"');
+  });
+
+  it("offers image Copy and general-file Download without file clipboard pretense", () => {
+    const image = renderPublished("photo.png", { type: "image", title: "photo.png" });
+    const file = renderPublished("report.pdf", { type: "file", title: "report.pdf" });
+
+    expect(image).toContain('aria-label="Copy"');
+    expect(image).not.toContain('aria-label="Download"');
+    expect(file).toContain('aria-label="Download"');
+    expect(file).not.toContain('aria-label="Copy"');
+  });
+
+  it("disables content actions while preserving authoritative Delete", () => {
+    const markup = renderPublished("note.txt", { type: "file", title: "Text snippet" }, true);
+
+    expect(markup).toMatch(/disabled=""[^>]+aria-label="Copy"/);
     expect(markup).toMatch(/disabled=""[^>]+aria-label="Open link"/);
     expect(markup).not.toMatch(/disabled=""[^>]+aria-label="Delete"/);
   });

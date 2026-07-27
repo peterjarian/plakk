@@ -17,6 +17,12 @@ import {
 } from "../../src/product/account-product-lifetime.ts";
 import { makeBrowserAccountProductMirrorLayer } from "../../src/product/browser-readable-mirror.ts";
 import { AccountProductReader } from "../../src/product/product-reader.ts";
+import {
+  webSnippetActionBrowserLayer,
+  WebSnippetActionRemote,
+  WebSnippetActions,
+  type WebSnippetActions as WebSnippetActionsShape,
+} from "../../src/product/snippet-actions.ts";
 import { StorageOnboardingProof } from "./StorageOnboardingProof.tsx";
 import {
   WebProviderTransfer,
@@ -34,6 +40,7 @@ const holdBackendRefresh = query.get("hold-backend-refresh") === "true";
 const startBackendUnavailable = query.get("backend-unavailable") === "true";
 const trialAtExactExpiry = query.get("trial-at-exact-expiry") === "true";
 const storageOnboardingMode = query.get("storage-onboarding");
+const snippetActionsProof = query.get("snippet-actions") === "true";
 
 const account: AccountStatus = {
   accessEntitlement: {
@@ -55,19 +62,63 @@ const user: User = {
   updatedAt: "2026-07-27T00:00:00.000Z",
 };
 
-const snippet = (id: string, fileName: string): ApiSnippet => ({
+const snippet = (id: string, fileName: string, byteSize = 128): ApiSnippet => ({
   id,
   fileName,
-  byteSize: 128,
+  byteSize,
   storageProvider: "GOOGLE_DRIVE",
   storageObjectId: `object-${id}`,
   createdAt: "2026-07-27T00:00:00.000Z",
   updatedAt: "2026-07-27T00:00:00.000Z",
 });
 
-let snapshot: ReadonlyArray<ApiSnippet> = [
-  snippet("0d1e2f3a-4567-4890-8abc-def012345678", "Initial snapshot.png"),
-];
+const actionContent = new Map<string, Uint8Array>();
+const actionSnippet = (id: string, fileName: string, content: Uint8Array) => {
+  actionContent.set(id, content);
+  return snippet(id, fileName, content.byteLength);
+};
+const textBytes = (value: string) => new TextEncoder().encode(value);
+const pngBytes = Uint8Array.from(
+  atob(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+  ),
+  (character) => character.charCodeAt(0),
+);
+let snapshot: ReadonlyArray<ApiSnippet> = snippetActionsProof
+  ? [
+      actionSnippet(
+        "10d1e2f3-a456-4890-8abc-def012345678",
+        "Clipboard text.txt",
+        textBytes("browser clipboard text"),
+      ),
+      actionSnippet(
+        "11d1e2f3-a456-4890-8abc-def012345678",
+        "External link.txt",
+        textBytes("https://example.com/browser-proof"),
+      ),
+      actionSnippet("12d1e2f3-a456-4890-8abc-def012345678", "Copy image.png", pngBytes),
+      actionSnippet(
+        "13d1e2f3-a456-4890-8abc-def012345678",
+        "Named download.pdf",
+        textBytes("named download bytes"),
+      ),
+      actionSnippet(
+        "14d1e2f3-a456-4890-8abc-def012345678",
+        "Retry content.txt",
+        textBytes("retry succeeded"),
+      ),
+      actionSnippet(
+        "15d1e2f3-a456-4890-8abc-def012345678",
+        "Integrity failure.pdf",
+        textBytes("integrity bytes"),
+      ),
+      actionSnippet(
+        "16d1e2f3-a456-4890-8abc-def012345678",
+        "Undecodable image.png",
+        new Uint8Array([0, 1, 2, 3]),
+      ),
+    ]
+  : [snippet("0d1e2f3a-4567-4890-8abc-def012345678", "Initial snapshot.png")];
 let apiUnavailable = startBackendUnavailable;
 let nextBackendReadDelayMillis = 0;
 let activeController: ReadableStreamDefaultController<void> | null = null;
@@ -210,6 +261,59 @@ const snippetUploadsLayer = WebSnippetUploads.layer.pipe(
     ),
   ),
 );
+const actionReadAttempts = new Map<string, number>();
+const snippetActionRemoteLayer = Layer.succeed(
+  WebSnippetActionRemote,
+  WebSnippetActionRemote.of({
+    delete: (id) =>
+      Effect.suspend(() => {
+        snapshot = snapshot.filter((candidate) => candidate.id !== id);
+        document.documentElement.dataset.providerCleanupFailure = "observed-after-authority";
+        return Effect.void;
+      }),
+    read: (id) =>
+      Effect.suspend(() => {
+        const target = snapshot.find((candidate) => candidate.id === id);
+        if (target === undefined) {
+          return Effect.fail(
+            new RpcError({ code: "NOT_FOUND", message: "Controlled Snippet is gone." }),
+          );
+        }
+        if (!accountCanSync(controlledAccount)) {
+          return Effect.fail(
+            new RpcError({
+              code: "FORBIDDEN",
+              message: "Controlled account restriction blocked this action.",
+            }),
+          );
+        }
+        const attempts = (actionReadAttempts.get(id) ?? 0) + 1;
+        actionReadAttempts.set(id, attempts);
+        document.documentElement.dataset.actionReadCount = String(
+          Number(document.documentElement.dataset.actionReadCount ?? "0") + 1,
+        );
+        if (id === "14d1e2f3-a456-4890-8abc-def012345678" && attempts === 1) {
+          return Effect.fail(
+            new RpcError({
+              code: "INTERNAL_SERVER_ERROR",
+              message: "Controlled provider interruption.",
+            }),
+          );
+        }
+        const content = actionContent.get(id) ?? new Uint8Array(target.byteSize);
+        return Effect.succeed({
+          storageProvider: target.storageProvider,
+          fileName: target.fileName,
+          byteSize:
+            id === "15d1e2f3-a456-4890-8abc-def012345678" ? target.byteSize + 1 : target.byteSize,
+          content,
+        });
+      }),
+  }),
+);
+const snippetActionsLayer = WebSnippetActions.layer.pipe(
+  Layer.provide(Layer.merge(snippetActionRemoteLayer, webSnippetActionBrowserLayer)),
+);
 let delayNextMirrorWrite: () => void = () => undefined;
 const mirrorLayer = makeBrowserAccountProductMirrorLayer(accountId, {
   forceSessionMemory,
@@ -221,14 +325,16 @@ const mirrorLayer = makeBrowserAccountProductMirrorLayer(accountId, {
   },
 });
 const runtime = ManagedRuntime.make(
-  Layer.merge(
+  Layer.mergeAll(
     AccountProductLifetime.layer.pipe(
       Layer.provide(Layer.mergeAll(readerLayer, mirrorLayer, snippetUploadsLayer)),
     ),
+    snippetActionsLayer,
     snippetUploadsLayer,
   ),
 );
 const lifetimePromise = runtime.runPromise(AccountProductLifetime);
+const actionsPromise = runtime.runPromise(WebSnippetActions);
 const uploadsPromise = runtime.runPromise(WebSnippetUploads);
 
 const invalidate = () => activeController?.enqueue(undefined);
@@ -371,10 +477,11 @@ function Controls() {
 }
 
 function ActiveProduct(props: {
+  readonly actions: WebSnippetActionsShape["Service"];
   readonly lifetime: AccountProductLifetimeShape;
   readonly uploads: WebSnippetUploadsShape;
 }) {
-  const { lifetime, uploads } = props;
+  const { actions, lifetime, uploads } = props;
   const state = useSyncExternalStore(
     lifetime.subscribe,
     lifetime.getSnapshot,
@@ -425,6 +532,14 @@ function ActiveProduct(props: {
           );
         }}
         onDismissUpload={(id) => void runtime.runPromise(uploads.dismiss(id))}
+        snippetActions={{
+          copy: (target) => runtime.runPromise(actions.copy(target)),
+          delete: (id) =>
+            runtime.runPromise(actions.delete(id).pipe(Effect.andThen(lifetime.refresh))),
+          download: (target) => runtime.runPromise(actions.download(target)),
+          open: (url) => runtime.runPromise(actions.open(url)),
+          prepareOpen: (target) => runtime.runPromise(actions.prepareOpen(target)),
+        }}
         uploadsDisabled={uploadProvider === null}
       />
       <Controls />
@@ -434,13 +549,15 @@ function ActiveProduct(props: {
 
 function Product() {
   const [lifetime, setLifetime] = useState<AccountProductLifetimeShape | null>(null);
+  const [actions, setActions] = useState<WebSnippetActionsShape["Service"] | null>(null);
   const [uploads, setUploads] = useState<WebSnippetUploadsShape | null>(null);
   useEffect(() => {
     let mounted = true;
-    void Promise.all([lifetimePromise, uploadsPromise]).then(
-      ([productLifetime, snippetUploads]) => {
+    void Promise.all([actionsPromise, lifetimePromise, uploadsPromise]).then(
+      ([snippetActions, productLifetime, snippetUploads]) => {
         if (!mounted) return;
         runtime.runFork(productLifetime.enter(accountId));
+        setActions(snippetActions);
         setLifetime(productLifetime);
         setUploads(snippetUploads);
       },
@@ -449,10 +566,10 @@ function Product() {
       mounted = false;
     };
   }, []);
-  return lifetime === null || uploads === null ? (
+  return actions === null || lifetime === null || uploads === null ? (
     <span>Loading controlled product</span>
   ) : (
-    <ActiveProduct lifetime={lifetime} uploads={uploads} />
+    <ActiveProduct actions={actions} lifetime={lifetime} uploads={uploads} />
   );
 }
 

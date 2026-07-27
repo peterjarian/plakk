@@ -25,6 +25,12 @@ import { makeBrowserAccountProductMirrorLayer } from "./browser-readable-mirror.
 import type { AccountProductMirror } from "./readable-mirror.ts";
 import { StorageOnboardingClient } from "./storage-onboarding-client.ts";
 import {
+  webSnippetActionBrowserLayer,
+  WebSnippetActionRemote,
+  WebSnippetActions,
+  type WebSnippetActions as WebSnippetActionsService,
+} from "./snippet-actions.ts";
+import {
   makeWebProviderTransferLayer,
   WebSnippetUploadRemote,
   WebSnippetUploads,
@@ -43,6 +49,7 @@ const signedOutContext: WebProductContextValue = {
   signOut: null,
   state: { kind: "idle" },
   storageOnboarding: null,
+  snippetActions: null,
   snippetUploads: null,
 };
 
@@ -50,13 +57,14 @@ function ActiveIdentityProduct(props: {
   readonly children: ReactNode;
   readonly lifetime: AccountProductLifetimeShape;
   readonly runtime: ManagedRuntime.ManagedRuntime<
-    AccountProductLifetime | StorageOnboardingClient | WebSnippetUploads,
+    AccountProductLifetime | StorageOnboardingClient | WebSnippetActions | WebSnippetUploads,
     never
   >;
   readonly signOut: () => Promise<void>;
   readonly uploads: WebSnippetUploadsShape;
+  readonly actions: WebSnippetActionsService["Service"];
 }) {
-  const { children, lifetime, runtime, signOut, uploads } = props;
+  const { actions, children, lifetime, runtime, signOut, uploads } = props;
   const state = useSyncExternalStore(
     lifetime.subscribe,
     lifetime.getSnapshot,
@@ -90,6 +98,14 @@ function ActiveIdentityProduct(props: {
         signOut,
         state,
         storageOnboarding: { begin, read },
+        snippetActions: {
+          copy: (snippet) => runtime.runPromise(actions.copy(snippet)),
+          delete: (snippetId) =>
+            runtime.runPromise(actions.delete(snippetId).pipe(Effect.andThen(lifetime.refresh))),
+          download: (snippet) => runtime.runPromise(actions.download(snippet)),
+          open: (confirmedUrl) => runtime.runPromise(actions.open(confirmedUrl)),
+          prepareOpen: (snippet) => runtime.runPromise(actions.prepareOpen(snippet)),
+        },
         snippetUploads: {
           dismiss: (id) => runtime.runPromise(uploads.dismiss(id)),
           upload: (input) => runtime.runPromise(uploads.upload(input)),
@@ -107,7 +123,7 @@ function IdentityProductResource(props: {
   readonly delegateSignOut: () => Promise<void>;
   readonly mirrorLayer?: Layer.Layer<AccountProductMirror>;
   readonly productClientLayer: Layer.Layer<
-    AccountProductReader | StorageOnboardingClient | WebSnippetUploadRemote
+    AccountProductReader | StorageOnboardingClient | WebSnippetActionRemote | WebSnippetUploadRemote
   >;
 }) {
   const { accountId, children, delegateSignOut, productClientLayer } = props;
@@ -117,15 +133,17 @@ function IdentityProductResource(props: {
   )[0];
   type IdentityRuntime = {
     readonly productPromise: Promise<{
+      readonly actions: WebSnippetActionsService["Service"];
       readonly lifetime: AccountProductLifetimeShape;
       readonly uploads: WebSnippetUploadsShape;
     }>;
     readonly runtime: ManagedRuntime.ManagedRuntime<
-      AccountProductLifetime | StorageOnboardingClient | WebSnippetUploads,
+      AccountProductLifetime | StorageOnboardingClient | WebSnippetActions | WebSnippetUploads,
       never
     >;
   };
   type ActiveIdentityRuntime = IdentityRuntime & {
+    readonly actions: WebSnippetActionsService["Service"];
     readonly lifetime: AccountProductLifetimeShape;
     readonly uploads: WebSnippetUploadsShape;
   };
@@ -140,6 +158,9 @@ function IdentityProductResource(props: {
     setActiveResource(null);
     setInitializationFailure(null);
     const providerTransferLayer = makeWebProviderTransferLayer();
+    const snippetActionsLayer = WebSnippetActions.layer.pipe(
+      Layer.provide(Layer.merge(productClientLayer, webSnippetActionBrowserLayer)),
+    );
     const snippetUploadsLayer = WebSnippetUploads.layer.pipe(
       Layer.provide(Layer.merge(productClientLayer, providerTransferLayer)),
     );
@@ -149,19 +170,24 @@ function IdentityProductResource(props: {
           Layer.provide(Layer.mergeAll(productClientLayer, mirrorLayer, snippetUploadsLayer)),
         ),
         productClientLayer,
+        snippetActionsLayer,
         snippetUploadsLayer,
       ),
     );
     const productPromise = runtime.runPromise(
-      Effect.all({ lifetime: AccountProductLifetime, uploads: WebSnippetUploads }),
+      Effect.all({
+        actions: WebSnippetActions,
+        lifetime: AccountProductLifetime,
+        uploads: WebSnippetUploads,
+      }),
     );
     const resource = { productPromise, runtime };
     resourceRef.current = resource;
     void productPromise.then(
-      ({ lifetime, uploads }) => {
+      ({ actions, lifetime, uploads }) => {
         if (!mounted) return;
         runtime.runFork(lifetime.enter(accountId));
-        setActiveResource({ ...resource, lifetime, uploads });
+        setActiveResource({ ...resource, actions, lifetime, uploads });
       },
       (cause) => {
         if (!mounted) return;
@@ -223,6 +249,7 @@ function IdentityProductResource(props: {
               ? { accountId, kind: "loading" }
               : { accountId, cause: initializationFailure, kind: "failed" },
           storageOnboarding: null,
+          snippetActions: null,
           snippetUploads: null,
         }}
       >
@@ -234,6 +261,7 @@ function IdentityProductResource(props: {
   return (
     <ActiveIdentityProduct
       lifetime={activeResource.lifetime}
+      actions={activeResource.actions}
       runtime={activeResource.runtime}
       signOut={signOut}
       uploads={activeResource.uploads}
@@ -249,7 +277,7 @@ export function ProductIdentityBoundary(props: {
   readonly delegateSignOut: () => Promise<void>;
   readonly mirrorLayer?: Layer.Layer<AccountProductMirror>;
   readonly productClientLayer: Layer.Layer<
-    AccountProductReader | StorageOnboardingClient | WebSnippetUploadRemote
+    AccountProductReader | StorageOnboardingClient | WebSnippetActionRemote | WebSnippetUploadRemote
   >;
 }) {
   return <IdentityProductResource key={props.accountId} {...props} />;

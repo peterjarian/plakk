@@ -47,7 +47,8 @@ export function AuthenticatedHome(props: {
   const storageOnboardingRequired =
     product.state.kind === "ready" &&
     product.state.apiAvailability === "available" &&
-    accountNeedsStorageOnboarding(product.state.account);
+    accountNeedsStorageOnboarding(product.state.account) &&
+    !product.state.snippets.some((record) => record.kind === "PUBLISHED");
   const uploadProvider =
     product.state.kind === "ready" &&
     product.state.apiAvailability === "available" &&
@@ -89,6 +90,7 @@ export function AuthenticatedHome(props: {
         );
       }}
       onDismissUpload={(id) => void product.snippetUploads?.dismiss(id)}
+      snippetActions={product.snippetActions}
       uploadsDisabled={uploadProvider === null || product.snippetUploads === null}
     />
   );

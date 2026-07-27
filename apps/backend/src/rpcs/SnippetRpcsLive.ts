@@ -249,6 +249,50 @@ const prepareSnippetDownload = Effect.fn("SnippetRpcs.prepareDownload")(function
   };
 });
 
+const getSnippetContent = Effect.fn("SnippetRpcs.getContent")(function* (
+  drizzle: DrizzleService,
+  capability: AccountCapability["Service"],
+  storage: StorageProvider["Service"],
+  ownerWorkosUserId: string,
+  snippetId: string,
+) {
+  const [snippet] = yield* drizzle.db
+    .select()
+    .from(snippets)
+    .where(and(eq(snippets.id, snippetId), eq(snippets.ownerWorkosUserId, ownerWorkosUserId)))
+    .limit(1)
+    .pipe(Effect.orDie);
+
+  if (snippet === undefined) {
+    return yield* new RpcError({
+      code: "NOT_FOUND",
+      message: "Uploaded snippet was not found.",
+    });
+  }
+
+  yield* capability.authorizeProductCommand(ownerWorkosUserId, snippet.storageProvider);
+  const content = yield* storage
+    .downloadObject({
+      storageProvider: snippet.storageProvider,
+      storageObjectId: snippet.storageObjectId,
+      expectedByteSize: snippet.byteSize,
+      workosUserId: ownerWorkosUserId,
+    })
+    .pipe(mapStorageErrorsToRpc);
+  if (content.byteLength !== snippet.byteSize) {
+    return yield* new RpcError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "Stored object size does not match snippet metadata.",
+    });
+  }
+  return {
+    storageProvider: snippet.storageProvider,
+    fileName: snippet.fileName,
+    byteSize: snippet.byteSize,
+    content,
+  };
+});
+
 const deleteSnippet = Effect.fn("SnippetRpcs.delete")(function* (
   drizzle: DrizzleService,
   storage: StorageProvider["Service"],
@@ -283,6 +327,7 @@ const deleteSnippet = Effect.fn("SnippetRpcs.delete")(function* (
           storageProvider: deleted.storageProvider,
         }),
       ),
+      Effect.forkDetach({ startImmediately: true }),
     );
 });
 
@@ -378,6 +423,15 @@ export const SnippetRpcsLive = Effect.gen(function* () {
         currentUser.id,
         input.id,
       ).pipe(Effect.annotateSpans({ id: input.id }));
+    }),
+    GetSnippetContent: Effect.fn("rpc.GetSnippetContent")(function* (input) {
+      const capability = yield* AccountCapability;
+      const drizzle = yield* Drizzle;
+      const storage = yield* StorageProvider;
+      const currentUser = yield* CurrentUser;
+      return yield* getSnippetContent(drizzle, capability, storage, currentUser.id, input.id).pipe(
+        Effect.annotateSpans({ id: input.id }),
+      );
     }),
     DeleteSnippet: Effect.fn("rpc.DeleteSnippet")(function* (input) {
       const drizzle = yield* Drizzle;

@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { HomeView } from "./HomeView.tsx";
+import type { WebProductContextValue } from "./web-product-context.tsx";
 
 const user: User = {
   id: "user_1",
@@ -49,7 +50,18 @@ const localUpload = (id: string, status: LocalUploadRecord["status"]): LocalUplo
   updatedAt: "2026-07-27T01:00:00.000Z",
 });
 
-const render = (state: Parameters<typeof HomeView>[0]["state"]) =>
+const snippetActions = {
+  copy: vi.fn().mockResolvedValue({ kind: "COPIED" as const }),
+  delete: vi.fn().mockResolvedValue(undefined),
+  download: vi.fn().mockResolvedValue(undefined),
+  open: vi.fn().mockResolvedValue(undefined),
+  prepareOpen: vi.fn().mockResolvedValue({ url: "https://example.com" }),
+} satisfies NonNullable<WebProductContextValue["snippetActions"]>;
+
+const render = (
+  state: Parameters<typeof HomeView>[0]["state"],
+  actions: WebProductContextValue["snippetActions"] = null,
+) =>
   renderToStaticMarkup(
     <HomeView
       user={user}
@@ -60,6 +72,7 @@ const render = (state: Parameters<typeof HomeView>[0]["state"]) =>
       onAddFiles={vi.fn()}
       onAddText={vi.fn()}
       onDismissUpload={vi.fn()}
+      snippetActions={actions}
       uploadsDisabled={false}
     />,
   );
@@ -135,6 +148,25 @@ describe("Web Home", () => {
     expect(html).not.toContain('aria-label="Delete"');
   });
 
+  it("renders browser-appropriate content actions and authoritative Delete", () => {
+    const html = render(
+      {
+        account,
+        accountId: user.id,
+        apiAvailability: "available",
+        kind: "ready",
+        liveConnection: "connected",
+        localReadPerformance: "accelerated",
+        snippets: [photoRecord],
+      },
+      snippetActions,
+    );
+
+    expect(html).toContain('aria-label="Copy"');
+    expect(html).toContain('aria-label="Delete"');
+    expect(html).not.toContain('aria-label="Download"');
+  });
+
   it("renders uploading and dismissible failed page-lifetime records honestly", () => {
     const html = render({
       account,
@@ -172,29 +204,58 @@ describe("Web Home", () => {
   });
 
   it("keeps Snippets visible and gives honest recovery direction when billing is restricted", () => {
-    const html = render({
-      account: {
-        ...account,
-        accessEntitlement: {
-          ...account.accessEntitlement,
-          status: "BILLING_RESTRICTED",
+    const html = render(
+      {
+        account: {
+          ...account,
+          accessEntitlement: {
+            ...account.accessEntitlement,
+            status: "BILLING_RESTRICTED",
+          },
+          blockedReasons: ["billing"],
+          canSync: false,
         },
-        blockedReasons: ["billing"],
-        canSync: false,
+        accountId: user.id,
+        apiAvailability: "available",
+        kind: "ready",
+        liveConnection: "connected",
+        localReadPerformance: "accelerated",
+        snippets: [photoRecord],
       },
-      accountId: user.id,
-      apiAvailability: "available",
-      kind: "ready",
-      liveConnection: "connected",
-      localReadPerformance: "accelerated",
-      snippets: [photoRecord],
-    });
+      snippetActions,
+    );
 
     expect(html).toContain("Billing access required");
     expect(html).toContain("Summer photo.png");
     expect(html).toContain("Your snippets are preserved");
     expect(html).toContain("Restore billing access");
     expect(html).toContain("Add, Copy, Download, and Open remain unavailable");
+    expect(html).toMatch(/disabled=""[^>]+aria-label="Copy"/);
+    expect(html).not.toMatch(/disabled=""[^>]+aria-label="Delete"/);
+  });
+
+  it("gates content actions during storage restriction while keeping Delete available", () => {
+    const html = render(
+      {
+        account: {
+          ...account,
+          blockedReasons: ["storage"],
+          canSync: false,
+        },
+        accountId: user.id,
+        apiAvailability: "available",
+        kind: "ready",
+        liveConnection: "connected",
+        localReadPerformance: "accelerated",
+        snippets: [photoRecord],
+      },
+      snippetActions,
+    );
+
+    expect(html).toContain("Storage access required");
+    expect(html).toContain("Delete remains available");
+    expect(html).toMatch(/disabled=""[^>]+aria-label="Copy"/);
+    expect(html).not.toMatch(/disabled=""[^>]+aria-label="Delete"/);
   });
 
   it("keeps last-confirmed snippets visible while live updates reconnect", () => {
