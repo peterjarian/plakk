@@ -207,7 +207,6 @@ export class AccountProductLifetime extends Context.Service<
           refreshSequence += 1;
           publish({ accountId, kind: "loading" });
           if (change === "purge") {
-            generation += 1;
             yield* FiberHandle.clear(synchronizationFiber);
             yield* FiberHandle.clear(refreshFiber);
             return;

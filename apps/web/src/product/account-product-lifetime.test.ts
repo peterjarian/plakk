@@ -1,7 +1,7 @@
 import type { AccountStatus, ApiSnippet } from "@plakk/shared/PlakkApi";
 import { RpcError } from "@plakk/shared/RpcError";
 import { describe, expect, it } from "@effect/vitest";
-import { Data, Deferred, Effect, Fiber, Layer, Ref, Stream } from "effect";
+import { Data, Deferred, Effect, Fiber, Layer, Queue, Ref, Stream } from "effect";
 import { TestClock } from "effect/testing";
 
 import { AccountProductLifetime, clearProductThenSignOut } from "./account-product-lifetime.ts";
@@ -101,9 +101,9 @@ describe("account product lifetime", () => {
     ),
   );
 
-  it.effect("removes stale facts when another tab purges the readable mirror", () =>
+  it.effect("removes purged facts and accepts a later peer replacement", () =>
     Effect.gen(function* () {
-      const mirrorChanged = yield* Deferred.make<void>();
+      const mirrorChanges = yield* Queue.unbounded<"purge" | "replace">();
       let mirrored: AccountProductSnapshot | null = {
         account,
         snippets: [snippet("mirrored")],
@@ -111,9 +111,7 @@ describe("account product lifetime", () => {
       const mirrorLayer = Layer.succeed(
         AccountProductMirror,
         AccountProductMirror.of({
-          changes: Stream.fromEffect(
-            Deferred.await(mirrorChanged).pipe(Effect.as("purge" as const)),
-          ).pipe(Stream.concat(Stream.never)),
+          changes: Stream.fromQueue(mirrorChanges),
           purge: Effect.sync(() => {
             mirrored = null;
           }),
@@ -136,10 +134,19 @@ describe("account product lifetime", () => {
         });
 
         mirrored = null;
-        yield* Deferred.succeed(mirrorChanged, undefined);
+        yield* Queue.offer(mirrorChanges, "purge");
         yield* Effect.yieldNow;
 
         expect(lifetime.getSnapshot()).toEqual({ accountId: "user_1", kind: "loading" });
+
+        mirrored = { account, snippets: [snippet("restored")] };
+        yield* Queue.offer(mirrorChanges, "replace");
+        yield* Effect.yieldNow;
+
+        expect(lifetime.getSnapshot()).toMatchObject({
+          kind: "ready",
+          snippets: [snippet("restored")],
+        });
       }).pipe(Effect.provide(provideLifetime(Effect.never, Stream.never, mirrorLayer)));
     }),
   );
