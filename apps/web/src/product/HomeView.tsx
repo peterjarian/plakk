@@ -403,8 +403,13 @@ export function HomeView(props: {
             className="mb-4 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive"
             role="alert"
           >
-            <strong>Storage access required.</strong> Your snippets remain visible and Delete stays
-            available. Reconnect storage to resume Add, Copy, Download, and Open.
+            <strong>Storage access required.</strong> Your snippets remain visible.{" "}
+            {state.apiAvailability === "available"
+              ? "Delete stays available. "
+              : "Delete is paused until the API is reachable. "}
+            {state.account.blockedReasons.includes("billing")
+              ? "Restore billing and reconnect storage before Add, Copy, Download, and Open can resume."
+              : "Reconnect storage to resume Add, Copy, Download, and Open."}
             {state.account.blockedReasons.includes("billing") &&
               " Resolving billing will not clear this storage restriction."}
             {onStorageReconnect !== undefined && (

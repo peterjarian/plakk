@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { SettingsView } from "./SettingsView.tsx";
 import { AccountProductLifetimeInitializationFailure } from "./account-product-lifetime.ts";
 import type { WebAppearancePreference } from "./web-appearance.tsx";
+import { WEB_SETTINGS_OMITTED_DESKTOP_CONTROLS } from "./web-settings-content-contract.ts";
 
 const user: User = {
   id: "user_1",
@@ -69,16 +70,7 @@ describe("Web Settings", () => {
     expect(html).toContain("Contact Plakk help");
     expect(html).toContain(">Sign out</button>");
 
-    for (const desktopOnly of [
-      "Toolbar widget",
-      "Device storage",
-      "Free up space",
-      "Auto update",
-      "Plakk Desktop",
-      "Logs",
-      "diagnostic",
-      "managed content",
-    ]) {
+    for (const desktopOnly of WEB_SETTINGS_OMITTED_DESKTOP_CONTROLS) {
       expect(html).not.toContain(desktopOnly);
     }
   });

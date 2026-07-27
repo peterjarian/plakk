@@ -291,6 +291,9 @@ describe("Web Home", () => {
 
     expect(html).toContain("Billing access required");
     expect(html).toContain("Storage access required");
+    expect(html).toContain(
+      "Restore billing and reconnect storage before Add, Copy, Download, and Open can resume",
+    );
     expect(html).toContain("Resolving billing will not clear this storage restriction");
     expect(html).toContain(">Restore billing</button>");
     expect(html).toContain(">Reconnect storage</button>");
@@ -335,6 +338,34 @@ describe("Web Home", () => {
     expect(html).toContain("Remote actions are paused");
     expect(html).toContain("Try again");
     expect(html).not.toContain("Nothing added yet");
+  });
+
+  it("does not promise Delete while remote actions are paused during a storage restriction", () => {
+    const html = render(
+      {
+        account: {
+          ...account,
+          blockedReasons: ["storage"],
+          canSync: false,
+        },
+        accountId: user.id,
+        apiAvailability: "unavailable",
+        cause: new RpcError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "backend unavailable",
+        }),
+        kind: "ready",
+        liveConnection: "connected",
+        localReadPerformance: "accelerated",
+        snippets: [photoRecord],
+      },
+      snippetActions,
+      { onStorageReconnect: vi.fn() },
+    );
+
+    expect(html).toContain("Delete is paused until the API is reachable");
+    expect(html).not.toContain("Delete stays available");
+    expect(actionTag(html, "Delete")).toContain('disabled=""');
   });
 
   it("keeps a delegated sign-out failure visible and retryable", () => {

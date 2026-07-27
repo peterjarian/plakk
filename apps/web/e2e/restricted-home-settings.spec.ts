@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { WEB_SETTINGS_OMITTED_DESKTOP_CONTROLS } from "../src/product/web-settings-content-contract.ts";
 import { CONTROLLED_PRODUCT_ORIGIN } from "./controlled-product/config.ts";
 
 const expectRetainedRows = async (page: Page) => {
@@ -50,14 +51,7 @@ test("preserves normal Home hierarchy and Web-only Settings with persistent appe
     "href",
     "mailto:help@plakk.io",
   );
-  for (const desktopOnly of [
-    "Toolbar widget",
-    "Device storage",
-    "Free up space",
-    "Auto update",
-    "Plakk Desktop",
-    "Logs",
-  ]) {
+  for (const desktopOnly of WEB_SETTINGS_OMITTED_DESKTOP_CONTROLS) {
     await expect(page.getByText(desktopOnly, { exact: false })).toHaveCount(0);
   }
 
@@ -126,6 +120,12 @@ test("simultaneous blockers recover billing first without falsely clearing stora
 
   await expect(page.getByText("Billing access required", { exact: false })).toBeVisible();
   await expect(page.getByText("Storage access required", { exact: false })).toBeVisible();
+  await expect(
+    page.getByText(
+      "Restore billing and reconnect storage before Add, Copy, Download, and Open can resume",
+      { exact: false },
+    ),
+  ).toBeVisible();
   await expect(
     page.getByText("Resolving billing will not clear this storage restriction", { exact: false }),
   ).toBeVisible();
