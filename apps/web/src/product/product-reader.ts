@@ -1,5 +1,7 @@
+import { parseExactHttpOrigin } from "@plakk/shared/ExactHttpOrigin";
 import { PlakkApi, type AccountStatus, type ApiSnippet } from "@plakk/shared/PlakkApi";
 import { RpcError } from "@plakk/shared/RpcError";
+import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -7,10 +9,13 @@ import { FetchHttpClient } from "effect/unstable/http";
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 import { RpcClientError } from "effect/unstable/rpc/RpcClientError";
 
-import type { AccountProductReader, AccountProductSnapshot } from "./account-product-lifetime.ts";
-
 type RpcRequestOptions = {
   readonly headers: Readonly<Record<string, string>>;
+};
+
+export type AccountProductSnapshot = {
+  readonly account: AccountStatus;
+  readonly snippets: ReadonlyArray<ApiSnippet>;
 };
 
 export interface WebProductRpcClient {
@@ -32,6 +37,19 @@ export class AccessTokenFailure extends Data.TaggedError("AccessTokenFailure")<{
   readonly cause: unknown;
   readonly message: string;
 }> {}
+
+export type AccountProductReadError =
+  | MissingAccessToken
+  | AccessTokenFailure
+  | RpcError
+  | RpcClientError;
+
+export class AccountProductReader extends Context.Service<
+  AccountProductReader,
+  {
+    readonly read: Effect.Effect<AccountProductSnapshot, AccountProductReadError>;
+  }
+>()("@plakk/web/product/product-reader/AccountProductReader") {}
 
 export const readAuthenticatedProduct = Effect.fn("WebProductReader.read")(function* (
   rpc: WebProductRpcClient,
@@ -66,39 +84,31 @@ export const readAuthenticatedProduct = Effect.fn("WebProductReader.read")(funct
 
 export const resolveProductRpcUrl = (configuredOrigin: string | undefined): string => {
   const rawOrigin = configuredOrigin ?? "http://localhost:3100";
-  const url = new URL(rawOrigin);
-  if (
-    !["http:", "https:"].includes(url.protocol) ||
-    url.username !== "" ||
-    url.password !== "" ||
-    url.pathname !== "/" ||
-    url.search !== "" ||
-    url.hash !== ""
-  ) {
+  const origin = parseExactHttpOrigin(rawOrigin);
+  if (origin === null) {
     throw new Error("VITE_PLAKK_API_ORIGIN must be an exact HTTP(S) origin.");
   }
-  return `${url.origin}/api/rpc`;
+  return `${origin}/api/rpc`;
 };
 
-export const makeWebProductReader = (options: {
+export const makeAccountProductReaderLayer = (options: {
   readonly getAccessToken: () => Promise<string | undefined>;
   readonly rpcUrl: string;
-}): AccountProductReader => {
+}): Layer.Layer<AccountProductReader> => {
   const protocolLayer = RpcClient.layerProtocolHttp({ url: options.rpcUrl }).pipe(
     Layer.provideMerge(FetchHttpClient.layer),
     Layer.provideMerge(RpcSerialization.layerNdjson),
   );
 
-  return {
-    read: (_accountId, signal) =>
-      Effect.runPromise(
-        Effect.scoped(
-          RpcClient.make(PlakkApi).pipe(
-            Effect.flatMap((rpc) => readAuthenticatedProduct(rpc, options.getAccessToken)),
-            Effect.provide(protocolLayer),
-          ),
+  return Layer.succeed(
+    AccountProductReader,
+    AccountProductReader.of({
+      read: Effect.scoped(
+        RpcClient.make(PlakkApi).pipe(
+          Effect.flatMap((rpc) => readAuthenticatedProduct(rpc, options.getAccessToken)),
+          Effect.provide(protocolLayer),
         ),
-        { signal },
       ),
-  };
+    }),
+  );
 };

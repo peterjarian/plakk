@@ -1,9 +1,13 @@
-import type { AccountStatus, ApiSnippet } from "@plakk/shared/PlakkApi";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as FiberHandle from "effect/FiberHandle";
+import * as Layer from "effect/Layer";
 
-export type AccountProductSnapshot = {
-  readonly account: AccountStatus;
-  readonly snippets: ReadonlyArray<ApiSnippet>;
-};
+import {
+  AccountProductReader,
+  type AccountProductReadError,
+  type AccountProductSnapshot,
+} from "./product-reader.ts";
 
 export type AccountProductState =
   | { readonly kind: "idle" }
@@ -11,89 +15,92 @@ export type AccountProductState =
   | {
       readonly kind: "failed";
       readonly accountId: string;
-      readonly message: string;
+      readonly cause: AccountProductReadError;
     }
   | ({
       readonly kind: "ready";
       readonly accountId: string;
     } & AccountProductSnapshot);
 
-export interface AccountProductReader {
-  readonly read: (accountId: string, signal: AbortSignal) => Promise<AccountProductSnapshot>;
+export interface AccountProductLifetimeShape {
+  readonly clear: Effect.Effect<void>;
+  readonly enter: (accountId: string) => Effect.Effect<void>;
+  readonly getSnapshot: () => AccountProductState;
+  readonly retry: Effect.Effect<void>;
+  readonly subscribe: (listener: () => void) => () => void;
 }
 
-export const clearProductThenSignOut = async (
-  clear: () => Promise<void>,
-  signOut: () => Promise<void>,
-): Promise<void> => {
-  await clear();
-  await signOut();
-};
+export class AccountProductLifetime extends Context.Service<
+  AccountProductLifetime,
+  AccountProductLifetimeShape
+>()("@plakk/web/product/account-product-lifetime/AccountProductLifetime") {
+  static readonly layer = Layer.effect(
+    AccountProductLifetime,
+    Effect.gen(function* () {
+      const reader = yield* AccountProductReader;
+      const readFiber = yield* FiberHandle.make<void, never>();
+      let state: AccountProductState = { kind: "idle" };
+      let activeAccountId: string | null = null;
+      let generation = 0;
+      const listeners = new Set<() => void>();
 
-export const createAccountProductLifetime = (reader: AccountProductReader) => {
-  let state: AccountProductState = { kind: "idle" };
-  let activeAccountId: string | null = null;
-  let generation = 0;
-  let controller: AbortController | null = null;
-  const listeners = new Set<() => void>();
+      const publish = (next: AccountProductState) => {
+        state = next;
+        for (const listener of listeners) listener();
+      };
 
-  const publish = (next: AccountProductState) => {
-    state = next;
-    for (const listener of listeners) listener();
-  };
+      const load = Effect.fn("AccountProductLifetime.load")(function* (accountId: string) {
+        generation += 1;
+        const loadGeneration = generation;
+        activeAccountId = accountId;
+        publish({ accountId, kind: "loading" });
 
-  const revoke = () => {
-    generation += 1;
-    controller?.abort();
-    controller = null;
-  };
+        const work = reader.read.pipe(
+          Effect.match({
+            onFailure: (cause) => {
+              if (generation === loadGeneration && activeAccountId === accountId) {
+                publish({ accountId, cause, kind: "failed" });
+              }
+            },
+            onSuccess: (snapshot) => {
+              if (generation === loadGeneration && activeAccountId === accountId) {
+                publish({ ...snapshot, accountId, kind: "ready" });
+              }
+            },
+          }),
+        );
+        yield* FiberHandle.run(readFiber, work, { startImmediately: true });
+      });
 
-  const load = (accountId: string) => {
-    revoke();
-    activeAccountId = accountId;
-    controller = new AbortController();
-    const loadGeneration = generation;
-    const signal = controller.signal;
-    publish({ accountId, kind: "loading" });
+      const clear = Effect.gen(function* () {
+        generation += 1;
+        activeAccountId = null;
+        publish({ kind: "idle" });
+        yield* FiberHandle.clear(readFiber);
+      });
 
-    void reader.read(accountId, signal).then(
-      (snapshot) => {
-        if (signal.aborted || generation !== loadGeneration || activeAccountId !== accountId) {
-          return;
-        }
-        publish({ ...snapshot, accountId, kind: "ready" });
-      },
-      () => {
-        if (signal.aborted || generation !== loadGeneration || activeAccountId !== accountId) {
-          return;
-        }
-        publish({
-          accountId,
-          kind: "failed",
-          message: "Plakk couldn’t load your snippets.",
-        });
-      },
-    );
-  };
+      return AccountProductLifetime.of({
+        clear,
+        enter: (accountId) => (activeAccountId === accountId ? Effect.void : load(accountId)),
+        getSnapshot: () => state,
+        retry: Effect.suspend(() =>
+          activeAccountId === null ? Effect.void : load(activeAccountId),
+        ),
+        subscribe: (listener) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+      });
+    }),
+  );
+}
 
-  return {
-    clear: (): Promise<void> => {
-      revoke();
-      activeAccountId = null;
-      publish({ kind: "idle" });
-      return Promise.resolve();
-    },
-    enter: (accountId: string): void => {
-      if (activeAccountId === accountId) return;
-      load(accountId);
-    },
-    getSnapshot: (): AccountProductState => state,
-    retry: (): void => {
-      if (activeAccountId !== null) load(activeAccountId);
-    },
-    subscribe: (listener: () => void): (() => void) => {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
-  };
-};
+export const clearProductThenSignOut = Effect.fn("AccountProductLifetime.signOut")(function* <
+  ClearE,
+  ClearR,
+  SignOutE,
+  SignOutR,
+>(clear: Effect.Effect<void, ClearE, ClearR>, signOut: Effect.Effect<void, SignOutE, SignOutR>) {
+  yield* clear;
+  yield* signOut;
+});

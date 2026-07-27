@@ -1,8 +1,8 @@
 import { deriveSnippetPresentation, type User } from "@plakk/shared";
-import type { ApiSnippet, StorageProviderStatus } from "@plakk/shared/PlakkApi";
+import type { StorageProviderStatus } from "@plakk/shared/PlakkApi";
 import { AppHeader } from "@plakk/ui/components/AppHeader";
 import { SnippetList } from "@plakk/ui/components/SnippetList";
-import { SnippetRow, type SnippetRowItem } from "@plakk/ui/components/SnippetRow";
+import { PublishedSnippetRow } from "@plakk/ui/components/SnippetRow";
 import { Button } from "@plakk/ui/components/primitives/button";
 import * as DateTime from "effect/DateTime";
 
@@ -13,20 +13,6 @@ const storageProviderLabel = {
   GOOGLE_DRIVE: "Google Drive",
   ONE_DRIVE: "OneDrive",
 } as const satisfies Record<StorageProviderStatus["storageProvider"], string>;
-
-const publishedRow = (snippet: ApiSnippet): SnippetRowItem => ({
-  id: snippet.id,
-  fileName: snippet.fileName,
-  byteSize: snippet.byteSize,
-  storageProvider: snippet.storageProvider,
-  createdAt: snippet.createdAt,
-  updatedAt: snippet.updatedAt,
-  kind: "PUBLISHED",
-  localState: null,
-  localContentAvailability: { status: "NOT_AVAILABLE" },
-});
-
-const noAction = () => undefined;
 
 export function HomeView(props: {
   readonly user: User;
@@ -72,7 +58,7 @@ export function HomeView(props: {
             className="flex items-center justify-between gap-4 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive"
             role="alert"
           >
-            <span>{state.message}</span>
+            <span>Plakk couldn’t load your snippets.</span>
             <Button type="button" variant="ghost" size="sm" onClick={onRetry}>
               Try again
             </Button>
@@ -80,15 +66,11 @@ export function HomeView(props: {
         ) : (
           <SnippetList empty={state.snippets.length === 0}>
             {state.snippets.map((snippet) => (
-              <SnippetRow
+              <PublishedSnippetRow
                 key={snippet.id}
-                snippet={publishedRow(snippet)}
+                snippet={snippet}
                 presentation={deriveSnippetPresentation({ fileName: snippet.fileName })}
                 now={now}
-                copied={false}
-                onCopy={noAction}
-                onDelete={noAction}
-                showActions={false}
               />
             ))}
           </SnippetList>

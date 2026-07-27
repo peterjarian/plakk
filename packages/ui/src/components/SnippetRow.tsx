@@ -16,6 +16,7 @@ import {
   Type,
   X,
 } from "lucide-react";
+import type { ReactNode } from "react";
 import { Button } from "./primitives/button.tsx";
 
 export type SnippetRowItem = Omit<ApiSnippet, "storageObjectId"> & {
@@ -76,6 +77,72 @@ export function formatSnippetDate(
   return createdAt.slice(0, 10);
 }
 
+const snippetMetadata = (
+  snippet: Pick<ApiSnippet, "byteSize" | "createdAt" | "fileName">,
+  presentation: SnippetPresentation,
+  now: number,
+) => {
+  const time = formatSnippetDate(snippet.createdAt, now);
+  return presentation.type === "file" || presentation.type === "image"
+    ? `${fileSubtitle(snippet)} · ${time}`
+    : `${formatFileSize(snippet.byteSize)} · ${time}`;
+};
+
+function SnippetRowLayout(props: {
+  readonly presentation: SnippetPresentation;
+  readonly statusMessage?: string;
+  readonly subtitle: string;
+  readonly thumbnailUrl?: string | null;
+  readonly trailing?: ReactNode;
+}) {
+  const { presentation, statusMessage, subtitle, thumbnailUrl, trailing } = props;
+  const { Icon } = presentationMeta[presentation.type];
+
+  return (
+    <li>
+      <div
+        data-snippet-row=""
+        tabIndex={0}
+        className="group relative flex items-center gap-2.5 rounded-lg px-2 py-2 transition-colors outline-none select-none hover:bg-muted/60 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-offset-1 focus-visible:ring-offset-background focus-visible:outline-none focus-within:bg-muted/60"
+      >
+        <span className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted text-muted-foreground">
+          {presentation.type === "image" && thumbnailUrl !== null && thumbnailUrl !== undefined ? (
+            <img src={thumbnailUrl} alt="" className="size-full object-cover" />
+          ) : (
+            <Icon className="size-4" />
+          )}
+        </span>
+
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium">{presentation.title}</p>
+          <p className="truncate text-xs text-muted-foreground">{subtitle}</p>
+        </div>
+
+        {trailing}
+        {statusMessage && (
+          <span className="sr-only" role="status">
+            {statusMessage}
+          </span>
+        )}
+      </div>
+    </li>
+  );
+}
+
+export function PublishedSnippetRow(props: {
+  readonly snippet: ApiSnippet;
+  readonly presentation: SnippetPresentation;
+  readonly now: number;
+}) {
+  const { now, presentation, snippet } = props;
+  return (
+    <SnippetRowLayout
+      presentation={presentation}
+      subtitle={snippetMetadata(snippet, presentation, now)}
+    />
+  );
+}
+
 export function SnippetRow(props: {
   snippet: SnippetRowItem;
   presentation: SnippetPresentation;
@@ -106,7 +173,6 @@ export function SnippetRow(props: {
     copyError,
     showActions = true,
   } = props;
-  const { Icon } = presentationMeta[presentation.type];
   const localState = snippet.localState;
   const isUploading = localState?.status === "UPLOADING";
   const isFailed = localState?.status === "FAILED";
@@ -115,12 +181,7 @@ export function SnippetRow(props: {
     snippet.kind === "PUBLISHED" &&
     (snippet.localContentAvailability.status === "NOT_AVAILABLE" ||
       snippet.localContentAvailability.status === "FAILED");
-  const title = presentation.title;
-  const time = formatSnippetDate(snippet.createdAt, now);
-  const metadata =
-    presentation.type === "file" || presentation.type === "image"
-      ? `${fileSubtitle(snippet)} · ${time}`
-      : `${formatFileSize(snippet.byteSize)} · ${time}`;
+  const metadata = snippetMetadata(snippet, presentation, now);
   const subtitle =
     copyError !== undefined
       ? copyError
@@ -131,25 +192,12 @@ export function SnippetRow(props: {
           : metadata;
 
   return (
-    <li>
-      <div
-        data-snippet-row=""
-        tabIndex={0}
-        className="group relative flex items-center gap-2.5 rounded-lg px-2 py-2 transition-colors outline-none select-none hover:bg-muted/60 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-offset-1 focus-visible:ring-offset-background focus-visible:outline-none focus-within:bg-muted/60"
-      >
-        <span className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted text-muted-foreground">
-          {presentation.type === "image" && thumbnailUrl !== null && thumbnailUrl !== undefined ? (
-            <img src={thumbnailUrl} alt="" className="size-full object-cover" />
-          ) : (
-            <Icon className="size-4" />
-          )}
-        </span>
-
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium">{title}</p>
-          {subtitle && <p className="truncate text-xs text-muted-foreground">{subtitle}</p>}
-        </div>
-
+    <SnippetRowLayout
+      presentation={presentation}
+      subtitle={subtitle}
+      {...(copyError === undefined ? {} : { statusMessage: copyError })}
+      {...(thumbnailUrl === undefined ? {} : { thumbnailUrl })}
+      trailing={
         <div className="flex shrink-0 items-center justify-end">
           {(isUploading || isDownloading) && (
             <span
@@ -238,12 +286,7 @@ export function SnippetRow(props: {
             </div>
           )}
         </div>
-        {copyError && (
-          <span className="sr-only" role="status">
-            {copyError}
-          </span>
-        )}
-      </div>
-    </li>
+      }
+    />
   );
 }

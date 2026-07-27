@@ -1,5 +1,6 @@
 import type { User } from "@plakk/shared";
 import type { AccountStatus, ApiSnippet } from "@plakk/shared/PlakkApi";
+import { RpcError } from "@plakk/shared/RpcError";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -45,8 +46,11 @@ describe("Web Home", () => {
   it("renders a retryable failure inside the product shell", () => {
     const html = render({
       accountId: user.id,
+      cause: new RpcError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "backend unavailable",
+      }),
       kind: "failed",
-      message: "Plakk couldn’t load your snippets.",
     });
     expect(html).toContain(">WR<");
     expect(html).toContain("Plakk couldn’t load your snippets.");

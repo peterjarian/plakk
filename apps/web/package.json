@@ -26,12 +26,14 @@
     "tailwindcss": "^4.1.18"
   },
   "devDependencies": {
+    "@effect/vitest": "4.0.0-beta.92",
     "@playwright/test": "^1.55.0",
     "@tanstack/router-cli": "^1.132.0",
     "@types/node": "catalog:",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^6.0.1",
+    "happy-dom": "^20.11.1",
     "nitro": "3.0.260610-beta",
     "typescript": "catalog:",
     "vite": "catalog:",
