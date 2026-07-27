@@ -1,5 +1,5 @@
 import type { StorageProvider } from "@plakk/shared";
-import type { ApiSnippet, StorageOnboardingOrigin } from "@plakk/shared/PlakkApi";
+import type { ApiSnippet, BillingPlan, StorageOnboardingOrigin } from "@plakk/shared/PlakkApi";
 import { createContext, useContext } from "react";
 
 import type { AccountProductState } from "./account-product-lifetime.ts";
@@ -16,6 +16,10 @@ export type StorageOnboardingActions = {
 };
 
 export type WebProductContextValue = {
+  readonly billing: {
+    readonly beginCheckout: (plan: BillingPlan) => Promise<{ readonly url: string }>;
+    readonly openPortal: () => Promise<{ readonly url: string }>;
+  } | null;
   readonly refresh: (() => Promise<void>) | null;
   readonly retry: (() => void) | null;
   readonly signOut: (() => Promise<void>) | null;

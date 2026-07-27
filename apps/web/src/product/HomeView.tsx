@@ -29,6 +29,7 @@ const trialEndDate = (trialEndsAt: DateTime.Utc) =>
   DateTime.formatUtc(trialEndsAt, {
     dateStyle: "long",
     locale: "en",
+    timeStyle: "short",
   });
 
 export function HomeView(props: {
@@ -40,6 +41,8 @@ export function HomeView(props: {
   readonly onAddFiles: (files: ReadonlyArray<File>) => void;
   readonly onAddText: (text: string) => void;
   readonly onDismissUpload: (id: string) => void;
+  readonly onBilling?: () => void;
+  readonly onSettings?: () => void;
   readonly onStorageReconnect?: () => void;
   readonly snippetActions?: WebProductContextValue["snippetActions"];
   readonly uploadsDisabled: boolean;
@@ -48,7 +51,9 @@ export function HomeView(props: {
     onAddFiles,
     onAddText,
     onDismissUpload,
+    onBilling,
     onRetry,
+    onSettings,
     onSignOut,
     onStorageReconnect,
     signOutError,
@@ -270,6 +275,7 @@ export function HomeView(props: {
         className="h-14 border-b border-border"
         user={user}
         onSignOutClick={onSignOut}
+        {...(onSettings === undefined ? {} : { onSettingsClick: onSettings })}
         storageAction={
           <span className="text-xs text-muted-foreground">
             {storageProvider === null ? "Web · Read only" : storageProviderLabel[storageProvider]}
@@ -321,20 +327,73 @@ export function HomeView(props: {
 
         {state.kind === "ready" &&
           (state.account.accessEntitlement.status === "TRIAL_ACTIVE" ? (
-            <p
-              className="mb-4 rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground"
+            <div
+              className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm"
               role="status"
             >
-              <strong className="font-medium text-foreground">Trial active.</strong> Your account
-              trial ends {trialEndDate(state.account.accessEntitlement.trialEndsAt)}.
-            </p>
-          ) : (
+              <p className="text-muted-foreground">
+                <strong className="font-medium text-foreground">Trial active.</strong> Your account
+                trial ends exactly {trialEndDate(state.account.accessEntitlement.trialEndsAt)}.{" "}
+                <strong className="text-foreground">Billing starts immediately.</strong> Subscribing
+                permanently ends any unused trial time.
+              </p>
+              {onBilling !== undefined && (
+                <Button type="button" size="sm" onClick={onBilling}>
+                  Upgrade
+                </Button>
+              )}
+            </div>
+          ) : state.account.accessEntitlement.status === "PAID_ACTIVE" ? (
             <div
-              className="mb-4 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+              className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground"
+              role="status"
+            >
+              <p>
+                <strong className="font-medium text-foreground">
+                  {state.account.accessEntitlement.cancelAtPeriodEnd
+                    ? "Subscription canceled."
+                    : "Paid access active."}
+                </strong>{" "}
+                Access continues through {trialEndDate(state.account.accessEntitlement.paidThrough)}
+                .
+              </p>
+              {onBilling !== undefined && (
+                <Button type="button" variant="outline" size="sm" onClick={onBilling}>
+                  Manage billing
+                </Button>
+              )}
+            </div>
+          ) : state.account.accessEntitlement.status === "GRACE_ACTIVE" ? (
+            <div
+              className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive"
               role="alert"
             >
-              <strong>Billing access required.</strong> Your snippets are preserved. Restore billing
-              access to resume normal use. Add, Copy, Download, and Open remain unavailable.
+              <p>
+                <strong>Payment needs attention.</strong> Normal use continues through{" "}
+                {trialEndDate(state.account.accessEntitlement.graceEndsAt)}. Recover billing before
+                grace expires.
+              </p>
+              {onBilling !== undefined && (
+                <Button type="button" size="sm" onClick={onBilling}>
+                  Recover billing
+                </Button>
+              )}
+            </div>
+          ) : (
+            <div
+              className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+              role="alert"
+            >
+              <p>
+                <strong>Billing access required.</strong> Your snippets are preserved. Restore
+                billing access to resume normal use. Add, Copy, Download, and Open remain
+                unavailable.
+              </p>
+              {onBilling !== undefined && (
+                <Button type="button" size="sm" onClick={onBilling}>
+                  Restore billing
+                </Button>
+              )}
             </div>
           ))}
 

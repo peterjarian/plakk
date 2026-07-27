@@ -15,10 +15,24 @@ export const AccountBlockedReasonSchema = Schema.Literals(["billing", "storage"]
 
 export type AccountBlockedReason = typeof AccountBlockedReasonSchema.Type;
 
-export const AccountAccessEntitlementSchema = Schema.Struct({
-  status: Schema.Literals(["TRIAL_ACTIVE", "BILLING_RESTRICTED"] as const),
-  trialEndsAt: Schema.DateTimeUtcFromString,
-});
+export const AccountAccessEntitlementSchema = Schema.Union([
+  Schema.Struct({
+    status: Schema.Literal("TRIAL_ACTIVE"),
+    trialEndsAt: Schema.DateTimeUtcFromString,
+  }),
+  Schema.Struct({
+    status: Schema.Literal("PAID_ACTIVE"),
+    paidThrough: Schema.DateTimeUtcFromString,
+    cancelAtPeriodEnd: Schema.Boolean,
+  }),
+  Schema.Struct({
+    status: Schema.Literal("GRACE_ACTIVE"),
+    graceEndsAt: Schema.DateTimeUtcFromString,
+  }),
+  Schema.Struct({
+    status: Schema.Literal("BILLING_RESTRICTED"),
+  }),
+]);
 
 export type AccountAccessEntitlement = typeof AccountAccessEntitlementSchema.Type;
 
@@ -31,20 +45,32 @@ export const AccountStatusSchema = Schema.Struct({
 
 export type AccountStatus = typeof AccountStatusSchema.Type;
 
-export const accountTrialExpiryDelayMillis = (
+export const accountEntitlementEndsAtMillis = (
+  entitlement: AccountAccessEntitlement,
+): number | null => {
+  switch (entitlement.status) {
+    case "TRIAL_ACTIVE":
+      return DateTime.toEpochMillis(entitlement.trialEndsAt);
+    case "PAID_ACTIVE":
+      return DateTime.toEpochMillis(entitlement.paidThrough);
+    case "GRACE_ACTIVE":
+      return DateTime.toEpochMillis(entitlement.graceEndsAt);
+    case "BILLING_RESTRICTED":
+      return null;
+  }
+};
+
+export const accountEntitlementExpiryDelayMillis = (
   account: AccountStatus,
   nowMillis: number,
-): number | null =>
-  account.accessEntitlement.status === "TRIAL_ACTIVE"
-    ? Math.max(0, DateTime.toEpochMillis(account.accessEntitlement.trialEndsAt) - nowMillis)
-    : null;
+): number | null => {
+  const endsAtMillis = accountEntitlementEndsAtMillis(account.accessEntitlement);
+  return endsAtMillis === null ? null : Math.max(0, endsAtMillis - nowMillis);
+};
 
 export const accountWithBillingRestriction = (account: AccountStatus): AccountStatus => ({
   ...account,
-  accessEntitlement: {
-    ...account.accessEntitlement,
-    status: "BILLING_RESTRICTED",
-  },
+  accessEntitlement: { status: "BILLING_RESTRICTED" },
   blockedReasons: account.blockedReasons.includes("billing")
     ? account.blockedReasons
     : [...account.blockedReasons, "billing"],
@@ -206,6 +232,22 @@ export const AccountRpcs = RpcGroup.make(
   }),
 );
 
+export const BillingPlanSchema = Schema.Literals(["MONTHLY", "ANNUAL"] as const);
+
+export type BillingPlan = typeof BillingPlanSchema.Type;
+
+export const BillingRpcs = RpcGroup.make(
+  Rpc.make("BeginBillingCheckout", {
+    payload: { plan: BillingPlanSchema },
+    success: Schema.Struct({ url: Schema.String }),
+    error: RpcError,
+  }),
+  Rpc.make("OpenBillingPortal", {
+    success: Schema.Struct({ url: Schema.String }),
+    error: RpcError,
+  }),
+);
+
 export const StorageRpcs = RpcGroup.make(
   Rpc.make("BeginStorageProviderLink", {
     payload: {
@@ -264,6 +306,8 @@ export const SnippetRpcs = RpcGroup.make(
   }),
 );
 
-const ProtectedRpcs = AccountRpcs.merge(StorageRpcs, SnippetRpcs).middleware(AuthMiddleware);
+const ProtectedRpcs = AccountRpcs.merge(BillingRpcs, StorageRpcs, SnippetRpcs).middleware(
+  AuthMiddleware,
+);
 
 export const PlakkApi = HealthRpcs.merge(ProtectedRpcs).middleware(InternalServerErrorMiddleware);

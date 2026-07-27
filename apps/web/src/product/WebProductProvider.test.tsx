@@ -11,6 +11,7 @@ import { flushSync } from "react-dom";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { AccountProductReader } from "./product-reader.ts";
+import { BillingClient } from "./billing-client.ts";
 import { StorageOnboardingClient } from "./storage-onboarding-client.ts";
 import { WebSnippetActionRemote } from "./snippet-actions.ts";
 import { WebSnippetUploadRemote } from "./snippet-upload.ts";
@@ -56,6 +57,13 @@ const productClientLayer = (
       AccountProductReader.of({
         invalidations: Effect.void.pipe(Stream.fromEffect, Stream.concat(Stream.never)),
         read: overrides.read ?? Effect.succeed({ account, snippets: [snippet(id)] }),
+      }),
+    ),
+    Layer.succeed(
+      BillingClient,
+      BillingClient.of({
+        beginCheckout: () => Effect.succeed({ url: "https://checkout.example" }),
+        openPortal: Effect.succeed({ url: "https://portal.example" }),
       }),
     ),
     storageOnboardingLayer,

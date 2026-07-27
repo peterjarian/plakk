@@ -68,6 +68,7 @@ function FirstRunRouteProof() {
   return (
     <WebProductContext.Provider
       value={{
+        billing: null,
         refresh: null,
         retry: null,
         signOut: null,
@@ -85,7 +86,12 @@ function FirstRunRouteProof() {
         snippetUploads: null,
       }}
     >
-      <AuthenticatedHome onStorageOnboardingRequired={openStorage} user={user} />
+      <AuthenticatedHome
+        onBilling={() => undefined}
+        onSettings={() => undefined}
+        onStorageOnboardingRequired={openStorage}
+        user={user}
+      />
     </WebProductContext.Provider>
   );
 }

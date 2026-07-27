@@ -69,7 +69,6 @@ describe("storage status from the local state", () => {
           account: {
             accessEntitlement: {
               status: "BILLING_RESTRICTED",
-              trialEndsAt: DateTime.makeUnsafe("2026-08-10T00:00:00.000Z"),
             },
             canSync: false,
             storageProvider: "GOOGLE_DRIVE",
@@ -90,7 +89,6 @@ describe("storage status from the local state", () => {
       account: {
         accessEntitlement: {
           status: "BILLING_RESTRICTED",
-          trialEndsAt: DateTime.makeUnsafe("2026-08-10T00:00:00.000Z"),
         },
         blockedReasons: ["billing"],
       },

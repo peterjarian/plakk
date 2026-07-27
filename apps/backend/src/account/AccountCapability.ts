@@ -12,6 +12,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
+import { AccountBilling } from "../billing/AccountBilling.ts";
 import {
   StorageCredentialsError,
   StorageNeedsReauthorizationError,
@@ -91,13 +92,13 @@ const mapStorageAuthorizationError = (
     ? internalStorageError(error.message)
     : forbiddenStorageError(error.message);
 
-const entitlementFromTrial = (
-  trial: AccountTrial,
-  nowMillis: number,
-): AccountAccessEntitlement => ({
-  status: nowMillis < trial.endsAt.getTime() ? "TRIAL_ACTIVE" : "BILLING_RESTRICTED",
-  trialEndsAt: DateTime.makeUnsafe(trial.endsAt),
-});
+const entitlementFromTrial = (trial: AccountTrial, nowMillis: number): AccountAccessEntitlement =>
+  nowMillis < trial.endsAt.getTime()
+    ? {
+        status: "TRIAL_ACTIVE",
+        trialEndsAt: DateTime.makeUnsafe(trial.endsAt),
+      }
+    : { status: "BILLING_RESTRICTED" };
 
 export class AccountCapability extends Context.Service<
   AccountCapability,
@@ -114,6 +115,7 @@ export class AccountCapability extends Context.Service<
     AccountCapability,
     Effect.gen(function* () {
       const trials = yield* AccountTrialRepository;
+      const billing = yield* AccountBilling;
       const storage = yield* StorageProvider;
 
       const startTrial = Effect.fn("AccountCapability.startTrial")(function* (
@@ -133,7 +135,7 @@ export class AccountCapability extends Context.Service<
       ) {
         const existing = yield* trials.find(workosUserId);
         if (existing === null) return yield* startTrial(workosUserId);
-        return entitlementFromTrial(existing, DateTime.toEpochMillis(yield* DateTime.now));
+        return yield* billing.getEntitlement(workosUserId, existing);
       });
 
       const assessStorage = Effect.fn("AccountCapability.assessStorage")(function* (

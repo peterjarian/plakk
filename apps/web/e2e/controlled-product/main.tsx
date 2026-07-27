@@ -29,6 +29,7 @@ import {
   type WebSnippetActions as WebSnippetActionsShape,
 } from "../../src/product/snippet-actions.ts";
 import { StorageOnboardingProof } from "./StorageOnboardingProof.tsx";
+import { BillingProof } from "./BillingProof.tsx";
 import {
   WebProviderTransfer,
   WebSnippetUploadRemote,
@@ -46,12 +47,21 @@ const startBackendUnavailable = query.get("backend-unavailable") === "true";
 const trialAtExactExpiry = query.get("trial-at-exact-expiry") === "true";
 const storageOnboardingMode = query.get("storage-onboarding");
 const snippetActionsProof = query.get("snippet-actions") === "true";
+const billingMode = query.get("billing") as
+  | "grace"
+  | "recovered"
+  | "restricted"
+  | "returned"
+  | "trial"
+  | null;
 
 const account: AccountStatus = {
-  accessEntitlement: {
-    status: trialAtExactExpiry ? "BILLING_RESTRICTED" : "TRIAL_ACTIVE",
-    trialEndsAt: DateTime.makeUnsafe("2026-08-10T10:15:30.000Z"),
-  },
+  accessEntitlement: trialAtExactExpiry
+    ? { status: "BILLING_RESTRICTED" }
+    : {
+        status: "TRIAL_ACTIVE",
+        trialEndsAt: DateTime.makeUnsafe("2026-08-10T10:15:30.000Z"),
+      },
   canSync: !trialAtExactExpiry,
   storageProvider: "GOOGLE_DRIVE",
   blockedReasons: trialAtExactExpiry ? ["billing"] : [],
@@ -381,7 +391,7 @@ function Controls() {
   return (
     <aside
       aria-label="Controlled transport"
-      className="fixed inset-x-3 bottom-3 z-50 grid max-h-[calc(100vh-1.5rem)] grid-cols-4 gap-2 overflow-y-auto rounded-lg border bg-background p-2 shadow"
+      className="pointer-events-none fixed bottom-3 left-3 z-50 grid max-h-[calc(100vh-1.5rem)] w-[min(32rem,calc(100vw-1.5rem))] grid-cols-2 gap-2 overflow-y-auto rounded-lg border bg-background p-2 shadow sm:grid-cols-4 [&_button]:pointer-events-auto"
     >
       <Button
         type="button"
@@ -474,10 +484,7 @@ function Controls() {
         onClick={() => {
           controlledAccount = {
             ...account,
-            accessEntitlement: {
-              ...account.accessEntitlement,
-              status: "BILLING_RESTRICTED",
-            },
+            accessEntitlement: { status: "BILLING_RESTRICTED" },
             blockedReasons: ["billing"],
             canSync: false,
           };
@@ -570,6 +577,12 @@ function ActiveProduct(props: {
           );
         }}
         onDismissUpload={(id) => void runtime.runPromise(uploads.dismiss(id))}
+        onBilling={() => {
+          document.documentElement.dataset.billingRequested = "true";
+        }}
+        onSettings={() => {
+          document.documentElement.dataset.settingsRequested = "true";
+        }}
         onStorageReconnect={() => {
           document.documentElement.dataset.storageReconnectRequested = "true";
         }}
@@ -618,7 +631,12 @@ const root = document.getElementById("root");
 if (root === null) throw new Error("Controlled product root is missing.");
 
 createRoot(root).render(
-  storageOnboardingMode === null ? (
+  billingMode !== null ? (
+    <BillingProof
+      mode={billingMode}
+      storageRestricted={query.get("storage-restricted") === "true"}
+    />
+  ) : storageOnboardingMode === null ? (
     <Product />
   ) : (
     <StorageOnboardingProof

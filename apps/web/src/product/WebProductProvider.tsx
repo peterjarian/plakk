@@ -20,6 +20,7 @@ import {
   clearProductThenSignOut,
   type AccountProductLifetimeShape,
 } from "./account-product-lifetime.ts";
+import { BillingClient } from "./billing-client.ts";
 import { AccountProductReader, resolveProductRpcUrl } from "./product-reader.ts";
 import { makeBrowserAccountProductMirrorLayer } from "./browser-readable-mirror.ts";
 import type { AccountProductMirror } from "./readable-mirror.ts";
@@ -44,6 +45,7 @@ class WorkOsSignOutFailure extends Data.TaggedError("WorkOsSignOutFailure")<{
 }> {}
 
 const signedOutContext: WebProductContextValue = {
+  billing: null,
   refresh: null,
   retry: null,
   signOut: null,
@@ -57,14 +59,19 @@ function ActiveIdentityProduct(props: {
   readonly children: ReactNode;
   readonly lifetime: AccountProductLifetimeShape;
   readonly runtime: ManagedRuntime.ManagedRuntime<
-    AccountProductLifetime | StorageOnboardingClient | WebSnippetActions | WebSnippetUploads,
+    | AccountProductLifetime
+    | BillingClient
+    | StorageOnboardingClient
+    | WebSnippetActions
+    | WebSnippetUploads,
     never
   >;
+  readonly billing: BillingClient["Service"];
   readonly signOut: () => Promise<void>;
   readonly uploads: WebSnippetUploadsShape;
   readonly actions: WebSnippetActionsService["Service"];
 }) {
-  const { actions, children, lifetime, runtime, signOut, uploads } = props;
+  const { actions, billing, children, lifetime, runtime, signOut, uploads } = props;
   const state = useSyncExternalStore(
     lifetime.subscribe,
     lifetime.getSnapshot,
@@ -93,6 +100,10 @@ function ActiveIdentityProduct(props: {
   return (
     <WebProductContext.Provider
       value={{
+        billing: {
+          beginCheckout: (plan) => runtime.runPromise(billing.beginCheckout(plan)),
+          openPortal: () => runtime.runPromise(billing.openPortal),
+        },
         refresh,
         retry,
         signOut,
@@ -123,7 +134,11 @@ function IdentityProductResource(props: {
   readonly delegateSignOut: () => Promise<void>;
   readonly mirrorLayer?: Layer.Layer<AccountProductMirror>;
   readonly productClientLayer: Layer.Layer<
-    AccountProductReader | StorageOnboardingClient | WebSnippetActionRemote | WebSnippetUploadRemote
+    | AccountProductReader
+    | BillingClient
+    | StorageOnboardingClient
+    | WebSnippetActionRemote
+    | WebSnippetUploadRemote
   >;
 }) {
   const { accountId, children, delegateSignOut, productClientLayer } = props;
@@ -134,16 +149,22 @@ function IdentityProductResource(props: {
   type IdentityRuntime = {
     readonly productPromise: Promise<{
       readonly actions: WebSnippetActionsService["Service"];
+      readonly billing: BillingClient["Service"];
       readonly lifetime: AccountProductLifetimeShape;
       readonly uploads: WebSnippetUploadsShape;
     }>;
     readonly runtime: ManagedRuntime.ManagedRuntime<
-      AccountProductLifetime | StorageOnboardingClient | WebSnippetActions | WebSnippetUploads,
+      | AccountProductLifetime
+      | BillingClient
+      | StorageOnboardingClient
+      | WebSnippetActions
+      | WebSnippetUploads,
       never
     >;
   };
   type ActiveIdentityRuntime = IdentityRuntime & {
     readonly actions: WebSnippetActionsService["Service"];
+    readonly billing: BillingClient["Service"];
     readonly lifetime: AccountProductLifetimeShape;
     readonly uploads: WebSnippetUploadsShape;
   };
@@ -177,6 +198,7 @@ function IdentityProductResource(props: {
     const productPromise = runtime.runPromise(
       Effect.all({
         actions: WebSnippetActions,
+        billing: BillingClient,
         lifetime: AccountProductLifetime,
         uploads: WebSnippetUploads,
       }),
@@ -184,10 +206,10 @@ function IdentityProductResource(props: {
     const resource = { productPromise, runtime };
     resourceRef.current = resource;
     void productPromise.then(
-      ({ actions, lifetime, uploads }) => {
+      ({ actions, billing, lifetime, uploads }) => {
         if (!mounted) return;
         runtime.runFork(lifetime.enter(accountId));
-        setActiveResource({ ...resource, actions, lifetime, uploads });
+        setActiveResource({ ...resource, actions, billing, lifetime, uploads });
       },
       (cause) => {
         if (!mounted) return;
@@ -238,6 +260,7 @@ function IdentityProductResource(props: {
     return (
       <WebProductContext.Provider
         value={{
+          billing: null,
           retry:
             initializationFailure === null
               ? null
@@ -262,6 +285,7 @@ function IdentityProductResource(props: {
     <ActiveIdentityProduct
       lifetime={activeResource.lifetime}
       actions={activeResource.actions}
+      billing={activeResource.billing}
       runtime={activeResource.runtime}
       signOut={signOut}
       uploads={activeResource.uploads}
@@ -277,7 +301,11 @@ export function ProductIdentityBoundary(props: {
   readonly delegateSignOut: () => Promise<void>;
   readonly mirrorLayer?: Layer.Layer<AccountProductMirror>;
   readonly productClientLayer: Layer.Layer<
-    AccountProductReader | StorageOnboardingClient | WebSnippetActionRemote | WebSnippetUploadRemote
+    | AccountProductReader
+    | BillingClient
+    | StorageOnboardingClient
+    | WebSnippetActionRemote
+    | WebSnippetUploadRemote
   >;
 }) {
   return <IdentityProductResource key={props.accountId} {...props} />;

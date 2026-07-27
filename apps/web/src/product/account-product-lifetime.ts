@@ -8,7 +8,8 @@ import * as Stream from "effect/Stream";
 
 import type { DeviceSnippetRecord } from "@plakk/shared";
 import {
-  accountTrialExpiryDelayMillis,
+  accountEntitlementEndsAtMillis,
+  accountEntitlementExpiryDelayMillis,
   accountWithBillingRestriction,
   type AccountStatus,
 } from "@plakk/shared/PlakkApi";
@@ -80,7 +81,7 @@ export class AccountProductLifetime extends Context.Service<
       const mirror = yield* AccountProductMirror;
       const snippetUploads = yield* WebSnippetUploads;
       const mirrorFiber = yield* FiberHandle.make<void, never>();
-      const trialExpiryFiber = yield* FiberHandle.make<void, never>();
+      const entitlementExpiryFiber = yield* FiberHandle.make<void, never>();
       const refreshFiber = yield* FiberHandle.make<void, never>();
       const synchronizationFiber = yield* FiberHandle.make<void, never>();
       let state: AccountProductState = { kind: "idle" };
@@ -105,41 +106,44 @@ export class AccountProductLifetime extends Context.Service<
       const isCurrent = (accountId: string, expectedGeneration: number) =>
         generation === expectedGeneration && activeAccountId === accountId;
 
-      const scheduleTrialExpiry = Effect.fn("AccountProductLifetime.scheduleTrialExpiry")(
-        function* (accountId: string, expectedGeneration: number, account: AccountStatus) {
-          const now = yield* DateTime.now;
-          const delayMillis = accountTrialExpiryDelayMillis(account, DateTime.toEpochMillis(now));
-          if (delayMillis === null) {
-            yield* FiberHandle.clear(trialExpiryFiber);
-            return;
-          }
-          const expectedEndsAt = DateTime.toEpochMillis(account.accessEntitlement.trialEndsAt);
-          yield* FiberHandle.run(
-            trialExpiryFiber,
-            Effect.sleep(delayMillis).pipe(
-              Effect.andThen(
-                Effect.sync(() => {
-                  if (
-                    !isCurrent(accountId, expectedGeneration) ||
-                    state.kind !== "ready" ||
-                    state.accountId !== accountId ||
-                    state.account.accessEntitlement.status !== "TRIAL_ACTIVE" ||
-                    DateTime.toEpochMillis(state.account.accessEntitlement.trialEndsAt) !==
-                      expectedEndsAt
-                  ) {
-                    return;
-                  }
-                  publish({
-                    ...state,
-                    account: accountWithBillingRestriction(state.account),
-                  });
-                }),
-              ),
+      const scheduleEntitlementExpiry = Effect.fn(
+        "AccountProductLifetime.scheduleEntitlementExpiry",
+      )(function* (accountId: string, expectedGeneration: number, account: AccountStatus) {
+        const now = yield* DateTime.now;
+        const delayMillis = accountEntitlementExpiryDelayMillis(
+          account,
+          DateTime.toEpochMillis(now),
+        );
+        if (delayMillis === null) {
+          yield* FiberHandle.clear(entitlementExpiryFiber);
+          return;
+        }
+        const expectedStatus = account.accessEntitlement.status;
+        const expectedEndsAt = accountEntitlementEndsAtMillis(account.accessEntitlement);
+        yield* FiberHandle.run(
+          entitlementExpiryFiber,
+          Effect.sleep(delayMillis).pipe(
+            Effect.andThen(
+              Effect.sync(() => {
+                if (
+                  !isCurrent(accountId, expectedGeneration) ||
+                  state.kind !== "ready" ||
+                  state.accountId !== accountId ||
+                  state.account.accessEntitlement.status !== expectedStatus ||
+                  accountEntitlementEndsAtMillis(state.account.accessEntitlement) !== expectedEndsAt
+                ) {
+                  return;
+                }
+                publish({
+                  ...state,
+                  account: accountWithBillingRestriction(state.account),
+                });
+              }),
             ),
-            { startImmediately: true },
-          );
-        },
-      );
+          ),
+          { startImmediately: true },
+        );
+      });
 
       const publishLiveConnection = (
         accountId: string,
@@ -213,7 +217,11 @@ export class AccountProductLifetime extends Context.Service<
                       localReadPerformance,
                       snippets: snippetUploads.getSnapshot(),
                     });
-                    yield* scheduleTrialExpiry(accountId, expectedGeneration, snapshot.account);
+                    yield* scheduleEntitlementExpiry(
+                      accountId,
+                      expectedGeneration,
+                      snapshot.account,
+                    );
                   }),
               }),
             ),
@@ -289,14 +297,14 @@ export class AccountProductLifetime extends Context.Service<
             apiAvailability: "unavailable",
             cause: current.cause,
           });
-          yield* scheduleTrialExpiry(accountId, expectedGeneration, mirrored.success.account);
+          yield* scheduleEntitlementExpiry(accountId, expectedGeneration, mirrored.success.account);
           return;
         }
         publish({
           ...common,
           apiAvailability: current.kind === "ready" ? current.apiAvailability : "checking",
         });
-        yield* scheduleTrialExpiry(accountId, expectedGeneration, mirrored.success.account);
+        yield* scheduleEntitlementExpiry(accountId, expectedGeneration, mirrored.success.account);
       });
 
       const synchronize = Effect.fn("AccountProductLifetime.synchronize")(function* (
@@ -334,7 +342,7 @@ export class AccountProductLifetime extends Context.Service<
         liveConnection = "reconnecting";
         localReadPerformance = mirror.readPerformance();
         publish({ accountId, kind: "loading" });
-        yield* FiberHandle.clear(trialExpiryFiber);
+        yield* FiberHandle.clear(entitlementExpiryFiber);
         yield* FiberHandle.run(
           mirrorFiber,
           mirror.changes.pipe(
@@ -360,7 +368,7 @@ export class AccountProductLifetime extends Context.Service<
         liveConnection = "reconnecting";
         yield* FiberHandle.clear(synchronizationFiber);
         yield* FiberHandle.clear(mirrorFiber);
-        yield* FiberHandle.clear(trialExpiryFiber);
+        yield* FiberHandle.clear(entitlementExpiryFiber);
         yield* FiberHandle.clear(refreshFiber);
         yield* snippetUploads.clear;
         const purgeResult = yield* mirror.purge.pipe(Effect.result);

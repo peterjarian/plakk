@@ -1,7 +1,8 @@
 import type { User } from "@plakk/shared";
 import {
   accountCanSyncWithConnection,
-  accountTrialExpiryDelayMillis,
+  accountEntitlementEndsAtMillis,
+  accountEntitlementExpiryDelayMillis,
   accountWithBillingRestriction,
 } from "@plakk/shared/PlakkApi";
 import { RpcError } from "@plakk/shared/RpcError";
@@ -76,7 +77,7 @@ const makeDesktopSession = Effect.gen(function* () {
   const syncFiber = yield* Ref.make<Fiber.Fiber<void, unknown> | null>(null);
   const syncConnectionStatus = yield* Ref.make<"CONNECTED" | "RECONNECTING" | null>(null);
   const capabilityFiber = yield* Ref.make<Fiber.Fiber<void, never> | null>(null);
-  const trialExpiryFiber = yield* Ref.make<Fiber.Fiber<void, never> | null>(null);
+  const entitlementExpiryFiber = yield* Ref.make<Fiber.Fiber<void, never> | null>(null);
   const capabilityOnline = yield* Ref.make(false);
   const connectionRefresh = yield* Ref.make<Effect.Effect<void, DesktopSessionTransitionError>>(
     Effect.void,
@@ -88,8 +89,8 @@ const makeDesktopSession = Effect.gen(function* () {
   const publishIssue = Effect.fn("DesktopSession.publishIssue")(function* (message: string) {
     yield* PubSub.publish(issues, message);
   });
-  const clearTrialExpiry = Effect.gen(function* () {
-    const fiber = yield* Ref.getAndSet(trialExpiryFiber, null);
+  const clearEntitlementExpiry = Effect.gen(function* () {
+    const fiber = yield* Ref.getAndSet(entitlementExpiryFiber, null);
     if (fiber !== null) yield* Fiber.interrupt(fiber);
   });
   const clearFileSources = Effect.suspend(() =>
@@ -199,7 +200,7 @@ const makeDesktopSession = Effect.gen(function* () {
     if (accountChanged) {
       yield* Ref.update(generation, (value) => value + 1);
       yield* Ref.set(capabilityOnline, false);
-      yield* clearTrialExpiry;
+      yield* clearEntitlementExpiry;
       yield* Ref.set(status, {
         ...previous,
         accessToken: null,
@@ -270,56 +271,58 @@ const makeDesktopSession = Effect.gen(function* () {
       );
   });
 
-  const scheduleTrialExpiry = Effect.fn("DesktopSession.scheduleTrialExpiry")(function* (
-    account: Parameters<typeof accountTrialExpiryDelayMillis>[0],
-    connection: Parameters<typeof accountCanSyncWithConnection>[1],
-    accountUser: User,
-    checkedGeneration: number,
-    accessToken: string,
-  ) {
-    yield* clearTrialExpiry;
-    const now = yield* DateTime.now;
-    const delayMillis = accountTrialExpiryDelayMillis(account, DateTime.toEpochMillis(now));
-    if (delayMillis === null) return;
-    const expectedEndsAt = DateTime.toEpochMillis(account.accessEntitlement.trialEndsAt);
-    const fiber = yield* Effect.gen(function* () {
-      yield* Effect.sleep(delayMillis);
-      const latest = yield* Ref.get(status);
-      if (
-        checkedGeneration !== (yield* Ref.get(generation)) ||
-        latest.user?.id !== accountUser.id ||
-        latest.accessToken !== accessToken ||
-        !(yield* Ref.get(capabilityOnline))
-      ) {
-        return;
-      }
-      const currentLocalState = yield* localState.current;
-      if (
-        currentLocalState.account?.id !== accountUser.id ||
-        currentLocalState.capability.status !== "ONLINE" ||
-        currentLocalState.capability.account.accessEntitlement.status !== "TRIAL_ACTIVE" ||
-        DateTime.toEpochMillis(
-          currentLocalState.capability.account.accessEntitlement.trialEndsAt,
-        ) !== expectedEndsAt
-      ) {
-        return;
-      }
-      yield* stopSync;
-      yield* hydration.pause;
-      yield* localState.update({
-        kind: "online",
-        account: accountUser,
-        accountStatus: accountWithBillingRestriction(currentLocalState.capability.account),
-        connection,
-      });
-    }).pipe(
-      Effect.catchCause((cause) =>
-        Effect.logError("Could not publish expired desktop trial capability", { cause }),
-      ),
-      Effect.forkDetach,
-    );
-    yield* Ref.set(trialExpiryFiber, fiber);
-  });
+  const scheduleEntitlementExpiry = Effect.fn("DesktopSession.scheduleEntitlementExpiry")(
+    function* (
+      account: Parameters<typeof accountEntitlementExpiryDelayMillis>[0],
+      connection: Parameters<typeof accountCanSyncWithConnection>[1],
+      accountUser: User,
+      checkedGeneration: number,
+      accessToken: string,
+    ) {
+      yield* clearEntitlementExpiry;
+      const now = yield* DateTime.now;
+      const delayMillis = accountEntitlementExpiryDelayMillis(account, DateTime.toEpochMillis(now));
+      if (delayMillis === null) return;
+      const expectedStatus = account.accessEntitlement.status;
+      const expectedEndsAt = accountEntitlementEndsAtMillis(account.accessEntitlement);
+      const fiber = yield* Effect.gen(function* () {
+        yield* Effect.sleep(delayMillis);
+        const latest = yield* Ref.get(status);
+        if (
+          checkedGeneration !== (yield* Ref.get(generation)) ||
+          latest.user?.id !== accountUser.id ||
+          latest.accessToken !== accessToken ||
+          !(yield* Ref.get(capabilityOnline))
+        ) {
+          return;
+        }
+        const currentLocalState = yield* localState.current;
+        if (
+          currentLocalState.account?.id !== accountUser.id ||
+          currentLocalState.capability.status !== "ONLINE" ||
+          currentLocalState.capability.account.accessEntitlement.status !== expectedStatus ||
+          accountEntitlementEndsAtMillis(currentLocalState.capability.account.accessEntitlement) !==
+            expectedEndsAt
+        ) {
+          return;
+        }
+        yield* stopSync;
+        yield* hydration.pause;
+        yield* localState.update({
+          kind: "online",
+          account: accountUser,
+          accountStatus: accountWithBillingRestriction(currentLocalState.capability.account),
+          connection,
+        });
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logError("Could not publish expired desktop entitlement capability", { cause }),
+        ),
+        Effect.forkDetach,
+      );
+      yield* Ref.set(entitlementExpiryFiber, fiber);
+    },
+  );
 
   const refreshCapability = Effect.fn("DesktopSession.refreshCapability")(function* () {
     const current = yield* Ref.get(status);
@@ -382,7 +385,7 @@ const makeDesktopSession = Effect.gen(function* () {
         ),
       );
     yield* Ref.set(capabilityOnline, true);
-    yield* scheduleTrialExpiry(
+    yield* scheduleEntitlementExpiry(
       account,
       connection,
       current.user,
@@ -474,7 +477,7 @@ const makeDesktopSession = Effect.gen(function* () {
   const signOut = Effect.gen(function* () {
     yield* Ref.update(generation, (value) => value + 1);
     yield* Ref.set(capabilityOnline, false);
-    yield* clearTrialExpiry;
+    yield* clearEntitlementExpiry;
     yield* Ref.update(status, (current) => ({
       ...current,
       accessToken: null,
@@ -623,7 +626,7 @@ const makeDesktopSession = Effect.gen(function* () {
         Ref.get(capabilityFiber).pipe(
           Effect.flatMap((fiber) => (fiber === null ? Effect.void : Fiber.interrupt(fiber))),
         ),
-        clearTrialExpiry,
+        clearEntitlementExpiry,
       ],
       { discard: true },
     ),

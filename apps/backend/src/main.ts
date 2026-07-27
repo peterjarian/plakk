@@ -7,11 +7,21 @@ import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import { FetchHttpClient, HttpRouter, HttpServerResponse } from "effect/unstable/http";
+import {
+  FetchHttpClient,
+  HttpRouter,
+  HttpServerRequest,
+  HttpServerResponse,
+} from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 import { createServer } from "node:http";
 
 import { AccountCapability, AccountTrialRepository } from "./account/AccountCapability.ts";
+import {
+  AccountBilling,
+  AccountBillingStateRepository,
+  BillingAuthority,
+} from "./billing/AccountBilling.ts";
 import { allowedBackendOrigins, InvalidCorsConfiguration } from "./cors.ts";
 import { AuthMiddlewareLive } from "./middleware/AuthMiddlewareLive.ts";
 import { InternalServerErrorMiddlewareLive } from "./middleware/InternalServerErrorMiddlewareLive.ts";
@@ -26,8 +36,14 @@ const InfrastructureLive = Layer.mergeAll(
   StorageProviderLive,
 ).pipe(Layer.provideMerge(FetchHttpClient.layer));
 
+const BillingDomainLive = AccountBilling.layer.pipe(
+  Layer.provideMerge(AccountBillingStateRepository.layer),
+  Layer.provideMerge(BillingAuthority.layer),
+);
+
 const AccountDomainLive = AccountCapability.layer.pipe(
   Layer.provideMerge(AccountTrialRepository.layer),
+  Layer.provideMerge(BillingDomainLive),
 );
 
 const RpcRoutes = RpcServer.layerHttp({
@@ -50,6 +66,25 @@ const HealthRoute = HttpRouter.add(
   "/health",
   Effect.succeed(HttpServerResponse.text("ok")),
 ).pipe(HttpRouter.serve);
+
+const PolarWebhookRoute = HttpRouter.add(
+  "POST",
+  "/api/webhooks/polar",
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const body = yield* request.text;
+    const billing = yield* AccountBilling;
+    return yield* billing.handleWebhook(body, request.headers).pipe(
+      Effect.match({
+        onFailure: (error) =>
+          HttpServerResponse.empty({
+            status: error._tag === "BillingWebhookVerificationError" ? 403 : 503,
+          }),
+        onSuccess: () => HttpServerResponse.empty({ status: 202 }),
+      }),
+    );
+  }),
+).pipe(HttpRouter.serve, Layer.provide(BillingDomainLive), Layer.provide(InfrastructureLive));
 
 const CorsLive = Layer.unwrap(
   Effect.all({
@@ -82,7 +117,7 @@ const CorsLive = Layer.unwrap(
   ),
 );
 
-const BackendRoutes = Layer.mergeAll(HealthRoute, RpcRoutes, CorsLive);
+const BackendRoutes = Layer.mergeAll(HealthRoute, PolarWebhookRoute, RpcRoutes, CorsLive);
 
 const NodeServerLive = NodeHttpServer.layerConfig(createServer, {
   host: Config.string("PLAKK_BACKEND_HOST").pipe(Config.withDefault("127.0.0.1")),

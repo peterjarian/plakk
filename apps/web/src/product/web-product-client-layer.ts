@@ -11,6 +11,7 @@ import {
   readAuthenticatedProduct,
   watchAuthenticatedInvalidations,
 } from "./product-reader.ts";
+import { beginBillingCheckout, BillingClient, openBillingPortal } from "./billing-client.ts";
 import {
   beginStorageProviderLink,
   readStorageOnboarding,
@@ -23,7 +24,11 @@ export const makeWebProductClientLayer = (options: {
   readonly getAccessToken: () => Promise<string | undefined>;
   readonly rpcUrl: string;
 }): Layer.Layer<
-  AccountProductReader | StorageOnboardingClient | WebSnippetActionRemote | WebSnippetUploadRemote
+  | AccountProductReader
+  | BillingClient
+  | StorageOnboardingClient
+  | WebSnippetActionRemote
+  | WebSnippetUploadRemote
 > => {
   const protocolLayer = RpcClient.layerProtocolHttp({ url: options.rpcUrl }).pipe(
     Layer.provideMerge(FetchHttpClient.layer),
@@ -40,6 +45,13 @@ export const makeWebProductClientLayer = (options: {
             read: readAuthenticatedProduct(rpc, options.getAccessToken),
           }),
         ).pipe(
+          Context.add(
+            BillingClient,
+            BillingClient.of({
+              beginCheckout: (plan) => beginBillingCheckout(rpc, options.getAccessToken, plan),
+              openPortal: openBillingPortal(rpc, options.getAccessToken),
+            }),
+          ),
           Context.add(
             StorageOnboardingClient,
             StorageOnboardingClient.of({

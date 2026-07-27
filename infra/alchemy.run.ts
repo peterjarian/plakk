@@ -31,6 +31,11 @@ export default Alchemy.Stack(
     const stack = yield* Stack;
     const workosApiKey = yield* Config.redacted("WORKOS_API_KEY");
     const workosClientId = yield* Config.string("WORKOS_CLIENT_ID");
+    const polarAccessToken = yield* Config.redacted("POLAR_ACCESS_TOKEN");
+    const polarWebhookSecret = yield* Config.redacted("POLAR_WEBHOOK_SECRET");
+    const polarMonthlyProductId = yield* Config.string("POLAR_MONTHLY_PRODUCT_ID");
+    const polarAnnualProductId = yield* Config.string("POLAR_ANNUAL_PRODUCT_ID");
+    const polarPaidBenefitId = yield* Config.string("POLAR_PAID_BENEFIT_ID");
     const webOrigin = yield* Config.string("PLAKK_WEB_ORIGIN").pipe(
       Config.withDefault("https://app.plakk.io"),
     );
@@ -95,6 +100,12 @@ export default Alchemy.Stack(
         PLAKK_WEB_ORIGIN: webOrigin,
         WORKOS_API_KEY: workosApiKey,
         WORKOS_CLIENT_ID: workosClientId,
+        POLAR_ACCESS_TOKEN: polarAccessToken,
+        POLAR_WEBHOOK_SECRET: polarWebhookSecret,
+        POLAR_MONTHLY_PRODUCT_ID: polarMonthlyProductId,
+        POLAR_ANNUAL_PRODUCT_ID: polarAnnualProductId,
+        POLAR_PAID_BENEFIT_ID: polarPaidBenefitId,
+        POLAR_SERVER: "production",
         OTEL_SERVICE_NAME: "plakk-backend",
         OTEL_RESOURCE_ATTRIBUTES: `deployment.environment.name=${stack.stage}`,
         OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: telemetry.otelTracesEndpoint,
