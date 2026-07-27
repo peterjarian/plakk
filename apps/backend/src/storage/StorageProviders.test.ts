@@ -32,11 +32,13 @@ const fetchRequest = (index: number) => {
 
 const StorageProviderTestLive = StorageProviderLive.pipe(Layer.provide(FetchHttpClient.layer));
 
-const linkedProvider = (workosUserId: string) =>
+const useStorageProvider = <A, E>(
+  use: (storage: StorageProvider["Service"]) => Effect.Effect<A, E>,
+) =>
   Effect.runPromise(
     Effect.gen(function* () {
       const storage = yield* StorageProvider;
-      return yield* storage.getLinkedProvider(workosUserId);
+      return yield* use(storage);
     }).pipe(
       Effect.provide(StorageProviderTestLive),
       Effect.provideService(
@@ -50,6 +52,9 @@ const linkedProvider = (workosUserId: string) =>
       ),
     ),
   );
+
+const linkedProvider = (workosUserId: string) =>
+  useStorageProvider((storage) => storage.getLinkedProvider(workosUserId));
 
 describe("linked storage provider", () => {
   it("resolves the connected provider separately for each WorkOS user", async () => {
@@ -106,6 +111,59 @@ describe("linked storage provider", () => {
       _tag: "StorageCredentialsError",
       message: "More than one storage provider is linked.",
     });
+  });
+});
+
+describe("WorkOS-connected storage authority", () => {
+  it("requests account-bound authorization without exposing credentials", async () => {
+    fetchMock.mockResolvedValue(Response.json({ url: "https://api.workos.com/provider-redirect" }));
+
+    await expect(
+      useStorageProvider((storage) =>
+        storage.beginAuthorization({
+          returnTo: "https://app.plakk.io/storage?confirmation=provider",
+          storageProvider: "GOOGLE_DRIVE",
+          workosUserId: "bound-user",
+        }),
+      ),
+    ).resolves.toEqual({ url: "https://api.workos.com/provider-redirect" });
+
+    const request = fetchRequest(0);
+    expect(request.url).toBe("https://api.workos.com/data-integrations/google-drive/authorize");
+    expect(await request.json()).toEqual({
+      return_to: "https://app.plakk.io/storage?confirmation=provider",
+      user_id: "bound-user",
+    });
+  });
+
+  it("reports reauthorization and disconnects the same connected account", async () => {
+    fetchMock
+      .mockResolvedValueOnce(Response.json({ state: "needs_reauthorization" }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    await expect(
+      useStorageProvider((storage) =>
+        storage.getStatus({
+          storageProvider: "DROPBOX",
+          workosUserId: "bound-user",
+        }),
+      ),
+    ).resolves.toEqual({
+      externalDestinationUrl: null,
+      status: "NEEDS_REAUTHORIZATION",
+      storageProvider: "DROPBOX",
+    });
+    await expect(
+      useStorageProvider((storage) =>
+        storage.disconnect({
+          storageProvider: "DROPBOX",
+          workosUserId: "bound-user",
+        }),
+      ),
+    ).resolves.toBeUndefined();
+    expect(fetchRequest(1).url).toBe(
+      "https://api.workos.com/user_management/users/bound-user/connected_accounts/dropbox",
+    );
   });
 });
 
@@ -290,6 +348,41 @@ describe("storage deletion providers", () => {
     expect(request.headers.get("authorization")).toBe("Bearer secret-token");
     expect(await request.json()).toEqual({ path: "/snippet/file.txt" });
     expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("treats an already-missing Dropbox object as completed cleanup", async () => {
+    fetchMock.mockResolvedValue(
+      Response.json({ error_summary: "path_lookup/not_found/..." }, { status: 409 }),
+    );
+
+    await expect(
+      Effect.runPromise(
+        DropboxStorageProvider.deleteObject({
+          accessToken: "secret-token",
+          storageProvider: "DROPBOX",
+          storageObjectId: "/snippet/missing.txt",
+        }).pipe(Effect.provide(FetchHttpClient.layer)),
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it("does not suppress unrelated Dropbox conflict responses", async () => {
+    fetchMock.mockResolvedValue(
+      Response.json({ error_summary: "path_lookup/malformed_path/..." }, { status: 409 }),
+    );
+
+    await expect(
+      Effect.runPromise(
+        DropboxStorageProvider.deleteObject({
+          accessToken: "secret-token",
+          storageProvider: "DROPBOX",
+          storageObjectId: "/snippet/malformed.txt",
+        }).pipe(Effect.provide(FetchHttpClient.layer)),
+      ),
+    ).rejects.toMatchObject({
+      _tag: "StorageProviderError",
+      message: "Stored object deletion failed: 409",
+    });
   });
 
   it("reports provider deletion failure without retrying", async () => {

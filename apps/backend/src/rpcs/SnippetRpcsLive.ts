@@ -6,7 +6,6 @@ import {
   eq,
   PostgresNotifications,
   type PostgresNotificationEvent,
-  sql,
   type DrizzleService,
 } from "@plakk/db";
 import { snippets, type SnippetRow } from "@plakk/db/schema";
@@ -30,17 +29,13 @@ import * as Schedule from "effect/Schedule";
 import * as Stream from "effect/Stream";
 
 import { AccountCapability } from "../account/AccountCapability.ts";
+import {
+  notifySnippetChanges,
+  SNIPPET_INVALIDATION_CHANNEL,
+} from "../snippets/SnippetInvalidation.ts";
+import { lockStorageLifecycleState } from "../storage/StorageLifecycle.ts";
 import { type StorageDownloadError, StorageProvider } from "../storage/StorageProvider.ts";
 import { configuredWebOrigin as validateConfiguredWebOrigin } from "../WebOrigin.ts";
-
-const SNIPPET_INVALIDATION_CHANNEL = "plakk_snippet_invalidations";
-
-const notifySnippetChanges = Effect.fn("notifySnippetChanges")(function* (
-  db: Pick<DrizzleService["db"], "execute">,
-  ownerWorkosUserId: string,
-) {
-  yield* db.execute(sql`select pg_notify(${SNIPPET_INVALIDATION_CHANNEL}, ${ownerWorkosUserId})`);
-});
 
 const reconnectSnippetNotifications = <E>(
   listen: () => Stream.Stream<PostgresNotificationEvent, E>,
@@ -159,6 +154,9 @@ const publishSnippet = Effect.fn("SnippetRpcs.publish")(function* (
   const result = yield* drizzle.db
     .transaction((tx) =>
       Effect.gen(function* () {
+        if ((yield* lockStorageLifecycleState(tx, ownerWorkosUserId)) !== null) {
+          return { type: "cleanup" as const };
+        }
         const [inserted] = yield* tx
           .insert(snippets)
           .values({
@@ -191,6 +189,12 @@ const publishSnippet = Effect.fn("SnippetRpcs.publish")(function* (
     return yield* new RpcError({
       code: "CONFLICT",
       message: "Snippet identifier is already used by different content.",
+    });
+  }
+  if (result.type === "cleanup") {
+    return yield* new RpcError({
+      code: "CONFLICT",
+      message: "Storage cleanup is in progress. Publishing this Snippet was rejected.",
     });
   }
   return toApiSnippet(result.snippet);
@@ -308,29 +312,38 @@ const deleteSnippet = Effect.fn("SnippetRpcs.delete")(function* (
   const deleted = yield* drizzle.db
     .transaction((tx) =>
       Effect.gen(function* () {
+        if ((yield* lockStorageLifecycleState(tx, ownerWorkosUserId)) !== null) {
+          return { type: "cleanup" as const };
+        }
         const [removed] = yield* tx
           .delete(snippets)
           .where(and(eq(snippets.id, snippetId), eq(snippets.ownerWorkosUserId, ownerWorkosUserId)))
           .returning();
         if (removed !== undefined) yield* notifySnippetChanges(tx, ownerWorkosUserId);
-        return removed;
+        return { type: "deleted" as const, snippet: removed };
       }),
     )
     .pipe(Effect.orDie);
-  if (deleted === undefined) return;
+  if (deleted.type === "cleanup") {
+    return yield* new RpcError({
+      code: "CONFLICT",
+      message: "Storage cleanup is in progress. Deleting this Snippet was rejected.",
+    });
+  }
+  if (deleted.snippet === undefined) return;
 
   yield* storage
     .deleteObject({
-      storageProvider: deleted.storageProvider,
-      storageObjectId: deleted.storageObjectId,
-      workosUserId: deleted.ownerWorkosUserId,
+      storageProvider: deleted.snippet.storageProvider,
+      storageObjectId: deleted.snippet.storageObjectId,
+      workosUserId: deleted.snippet.ownerWorkosUserId,
     })
     .pipe(
       Effect.catchCause((cause) =>
         Effect.logWarning("Could not delete orphaned provider content", {
           cause,
-          snippetId: deleted.id,
-          storageProvider: deleted.storageProvider,
+          snippetId: deleted.snippet.id,
+          storageProvider: deleted.snippet.storageProvider,
         }),
       ),
       Effect.forkDetach({ startImmediately: true }),
@@ -440,11 +453,13 @@ export const SnippetRpcsLive = Effect.gen(function* () {
       );
     }),
     DeleteSnippet: Effect.fn("rpc.DeleteSnippet")(function* (input) {
+      const capability = yield* AccountCapability;
       const drizzle = yield* Drizzle;
       const storage = yield* StorageProvider;
       const currentUser = yield* CurrentUser;
 
       yield* Effect.logInfo("Deleting snippet", { id: input.id });
+      yield* capability.authorizeSnippetDeletion(currentUser.id);
       return yield* deleteSnippet(drizzle, storage, currentUser.id, input.id).pipe(
         Effect.annotateSpans({ id: input.id }),
       );

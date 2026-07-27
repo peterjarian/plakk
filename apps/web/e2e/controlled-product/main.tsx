@@ -29,6 +29,7 @@ import {
   type WebSnippetActions as WebSnippetActionsShape,
 } from "../../src/product/snippet-actions.ts";
 import { StorageOnboardingProof } from "./StorageOnboardingProof.tsx";
+import { StorageManagementProof } from "./StorageManagementProof.tsx";
 import { BillingProof } from "./BillingProof.tsx";
 import {
   WebProviderTransfer,
@@ -46,6 +47,8 @@ const holdBackendRefresh = query.get("hold-backend-refresh") === "true";
 const startBackendUnavailable = query.get("backend-unavailable") === "true";
 const trialAtExactExpiry = query.get("trial-at-exact-expiry") === "true";
 const storageOnboardingMode = query.get("storage-onboarding");
+const storageManagementMode = query.get("storage-management");
+const storageManagementSession = query.get("storage-session") ?? "default";
 const snippetActionsProof = query.get("snippet-actions") === "true";
 const billingModeValue = query.get("billing");
 const billingMode =
@@ -55,6 +58,13 @@ const billingMode =
   billingModeValue === "returned" ||
   billingModeValue === "trial"
     ? billingModeValue
+    : null;
+
+const controlledStorageManagementMode =
+  storageManagementMode === "connected" ||
+  storageManagementMode === "partial" ||
+  storageManagementMode === "reauthorization"
+    ? storageManagementMode
     : null;
 
 const account: AccountStatus = {
@@ -633,7 +643,12 @@ const root = document.getElementById("root");
 if (root === null) throw new Error("Controlled product root is missing.");
 
 createRoot(root).render(
-  billingMode !== null ? (
+  controlledStorageManagementMode !== null ? (
+    <StorageManagementProof
+      mode={controlledStorageManagementMode}
+      session={storageManagementSession}
+    />
+  ) : billingMode !== null ? (
     <BillingProof
       mode={billingMode}
       storageRestricted={query.get("storage-restricted") === "true"}

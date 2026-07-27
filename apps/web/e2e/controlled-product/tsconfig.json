@@ -1,4 +1,10 @@
 {
   "extends": "../../tsconfig.json",
-  "include": ["config.ts", "main.tsx", "StorageOnboardingProof.tsx", "vite.config.ts"]
+  "include": [
+    "config.ts",
+    "main.tsx",
+    "StorageManagementProof.tsx",
+    "StorageOnboardingProof.tsx",
+    "vite.config.ts"
+  ]
 }

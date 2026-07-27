@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { AccountProductReader } from "./product-reader.ts";
 import { BillingClient } from "./billing-client.ts";
+import { StorageManagementClient } from "./storage-management-client.ts";
 import { StorageOnboardingClient } from "./storage-onboarding-client.ts";
 import { WebSnippetActionRemote } from "./snippet-actions.ts";
 import { WebSnippetUploadRemote } from "./snippet-upload.ts";
@@ -67,6 +68,15 @@ const productClientLayer = (
       }),
     ),
     storageOnboardingLayer,
+    Layer.succeed(
+      StorageManagementClient,
+      StorageManagementClient.of({
+        beginCleanup: () => Effect.die("Storage cleanup is not used in this identity test."),
+        read: Effect.die("Storage management is not used in this identity test."),
+        reauthorize: () => Effect.die("Storage reauthorization is not used in this identity test."),
+        retryCleanup: () => Effect.die("Storage cleanup is not used in this identity test."),
+      }),
+    ),
     Layer.succeed(
       WebSnippetActionRemote,
       WebSnippetActionRemote.of({

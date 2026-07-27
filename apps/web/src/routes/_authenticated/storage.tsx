@@ -6,6 +6,7 @@ import {
   StorageOnboardingInitialization,
   StorageOnboardingView,
 } from "../../product/StorageOnboardingView.tsx";
+import { StorageManagementView } from "../../product/StorageManagementView.tsx";
 import { storageOnboardingOrigin } from "../../product/storage-onboarding.ts";
 import { useWebProduct } from "../../product/WebProductProvider.tsx";
 
@@ -19,6 +20,19 @@ function Storage() {
   const navigate = useNavigate();
   const search = Route.useSearch();
   const product = useWebProduct();
+  const chooseReplacement = useCallback(async () => {
+    if (product.refresh !== null) await product.refresh();
+    await navigate({
+      to: "/storage",
+      search: {
+        confirmation: undefined,
+        mode: undefined,
+        origin: "web",
+        provider: null,
+      },
+      replace: true,
+    });
+  }, [navigate, product.refresh]);
   const continueWeb = useCallback(async () => {
     if (product.refresh === null) {
       throw new Error("The authenticated product cannot be refreshed.");
@@ -26,11 +40,26 @@ function Storage() {
     await product.refresh();
     await navigate({ to: "/snippets", replace: true });
   }, [navigate, product.refresh]);
-  if (product.storageOnboarding === null) {
+  if (
+    product.storageOnboarding === null ||
+    (search.mode === "manage" && product.storageManagement === null)
+  ) {
     return (
       <StorageOnboardingInitialization
         failed={product.state.kind === "failed"}
         onRetry={product.retry}
+      />
+    );
+  }
+
+  if (search.mode === "manage" && product.storageManagement !== null) {
+    return (
+      <StorageManagementView
+        beginCleanup={product.storageManagement.beginCleanup}
+        onCompleted={chooseReplacement}
+        read={product.storageManagement.read}
+        reauthorize={product.storageManagement.reauthorize}
+        retryCleanup={product.storageManagement.retryCleanup}
       />
     );
   }

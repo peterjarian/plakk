@@ -1,4 +1,9 @@
-import { StorageCredentialsError, StorageProvider } from "../storage/StorageProvider.ts";
+import {
+  StorageCredentialsError,
+  StorageNeedsReauthorizationError,
+  StorageProvider,
+} from "../storage/StorageProvider.ts";
+import { RpcError } from "@plakk/shared/RpcError";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { DateTime, Effect, Layer } from "effect";
 import { TestClock } from "effect/testing";
@@ -10,6 +15,32 @@ import {
   TRIAL_DURATION_MILLIS,
   type AccountTrial,
 } from "./AccountCapability.ts";
+import { StorageLifecycle } from "../storage/StorageLifecycle.ts";
+
+const storageLifecycleService = (
+  overrides: Partial<StorageLifecycle["Service"]> = {},
+): StorageLifecycle["Service"] =>
+  StorageLifecycle.of({
+    assertCommandsAllowed: () => Effect.void,
+    beginAuthorization: () => Effect.succeed({ url: "https://workos.example/authorize" }),
+    beginCleanup: (input) => Effect.succeed({ action: input.action, outcome: "COMPLETED" }),
+    getManagementState: () =>
+      Effect.succeed({
+        affectedSnippetCount: 0,
+        cleanup: null,
+        connectionStatus: "CONNECTED",
+        externalDestinationUrl: "https://drive.example/folder",
+        storageProvider: "GOOGLE_DRIVE",
+      }),
+    getProviderStatus: (_, storageProvider) =>
+      Effect.succeed({
+        externalDestinationUrl: "https://drive.example/folder",
+        status: "CONNECTED",
+        storageProvider,
+      }),
+    retryCleanup: () => Effect.succeed({ action: "UNLINK", outcome: "COMPLETED" }),
+    ...overrides,
+  });
 
 const trialStartMillis = Date.parse("2026-07-27T10:15:30.000Z");
 const trialEndsMillis = trialStartMillis + TRIAL_DURATION_MILLIS;
@@ -35,11 +66,19 @@ const storageService = (
   overrides: Partial<StorageProvider["Service"]> = {},
 ): StorageProvider["Service"] =>
   StorageProvider.of({
+    beginAuthorization: () => Effect.succeed({ url: "https://workos.example/authorize" }),
     deleteObject: () => Effect.void,
+    disconnect: () => Effect.void,
     downloadObject: () => Effect.succeed(new Uint8Array()),
     ensureConnected: () => Effect.void,
     getDestinationUrl: () => Effect.succeed("https://drive.example/folder"),
     getLinkedProvider: () => Effect.succeed("GOOGLE_DRIVE"),
+    getStatus: () =>
+      Effect.succeed({
+        externalDestinationUrl: "https://drive.example/folder",
+        status: "CONNECTED",
+        storageProvider: "GOOGLE_DRIVE",
+      }),
     getDownloadTarget: () => Effect.succeed({ url: "https://download.example", headers: [] }),
     getDownloadUrl: () => Effect.succeed("https://download.example"),
     prepareUpload: () =>
@@ -77,6 +116,7 @@ const runCapability = <A, E>(
     readonly repository?: ReturnType<typeof makeTrialRepository>;
     readonly storage?: StorageProvider["Service"];
     readonly billing?: AccountBilling["Service"];
+    readonly storageLifecycle?: StorageLifecycle["Service"];
   },
 ) => {
   const repository = options?.repository ?? makeTrialRepository();
@@ -84,6 +124,9 @@ const runCapability = <A, E>(
     Layer.provide(repository.layer),
     Layer.provide(Layer.succeed(StorageProvider, options?.storage ?? storageService())),
     Layer.provide(Layer.succeed(AccountBilling, options?.billing ?? billingService())),
+    Layer.provide(
+      Layer.succeed(StorageLifecycle, options?.storageLifecycle ?? storageLifecycleService()),
+    ),
   );
   return Effect.runPromise(
     Effect.gen(function* () {
@@ -333,5 +376,84 @@ describe("account trial capability", () => {
       failure: { code: "FORBIDDEN" },
     });
     expect(ensureConnected).not.toHaveBeenCalled();
+  });
+
+  it("marks storage unavailable and rejects late commands while cleanup is active", async () => {
+    const repository = makeTrialRepository();
+    const ensureConnected = vi.fn(() => Effect.void);
+    const storage = storageService({ ensureConnected });
+    const storageLifecycle = storageLifecycleService({
+      assertCommandsAllowed: () =>
+        Effect.fail(
+          new RpcError({
+            code: "CONFLICT",
+            message: "Storage cleanup is in progress.",
+          }),
+        ),
+    });
+
+    const result = await runCapability(
+      (capability) =>
+        Effect.gen(function* () {
+          yield* TestClock.setTime(trialStartMillis);
+          yield* capability.startTrial("user-1");
+          const status = yield* capability.getStatus("user-1");
+          const command = yield* capability
+            .authorizeProductCommand("user-1", "GOOGLE_DRIVE")
+            .pipe(Effect.result);
+          const deletion = yield* capability.authorizeSnippetDeletion("user-1").pipe(Effect.result);
+          return { command, deletion, status };
+        }),
+      { repository, storage, storageLifecycle },
+    );
+
+    expect(result.status.storageProvider).toBe("GOOGLE_DRIVE");
+    expect(result.status.blockedReasons).toContain("storage");
+    expect(result.command).toMatchObject({
+      _tag: "Failure",
+      failure: { code: "CONFLICT" },
+    });
+    expect(result.deletion).toMatchObject({
+      _tag: "Failure",
+      failure: { code: "CONFLICT" },
+    });
+    expect(ensureConnected).not.toHaveBeenCalled();
+  });
+
+  it("rejects Snippet deletion while the linked provider needs reauthorization", async () => {
+    const result = await runCapability(
+      (capability) => capability.authorizeSnippetDeletion("user-1").pipe(Effect.result),
+      {
+        storage: storageService({
+          ensureConnected: () =>
+            Effect.fail(
+              new StorageNeedsReauthorizationError({
+                message: "Reconnect storage before deleting Snippets.",
+              }),
+            ),
+        }),
+      },
+    );
+
+    expect(result).toMatchObject({
+      _tag: "Failure",
+      failure: { code: "FORBIDDEN" },
+    });
+  });
+
+  it("rejects Snippet deletion when no provider is linked", async () => {
+    const result = await runCapability(
+      (capability) => capability.authorizeSnippetDeletion("user-1").pipe(Effect.result),
+      {
+        storage: storageService({
+          getLinkedProvider: () => Effect.succeed(null),
+        }),
+      },
+    );
+
+    expect(result).toMatchObject({
+      _tag: "Failure",
+      failure: { code: "FORBIDDEN" },
+    });
   });
 });

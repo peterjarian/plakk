@@ -24,6 +24,7 @@ import { BillingClient } from "./billing-client.ts";
 import { AccountProductReader, resolveProductRpcUrl } from "./product-reader.ts";
 import { makeBrowserAccountProductMirrorLayer } from "./browser-readable-mirror.ts";
 import type { AccountProductMirror } from "./readable-mirror.ts";
+import { StorageManagementClient } from "./storage-management-client.ts";
 import { StorageOnboardingClient } from "./storage-onboarding-client.ts";
 import {
   webSnippetActionBrowserLayer,
@@ -50,6 +51,7 @@ const signedOutContext: WebProductContextValue = {
   retry: null,
   signOut: null,
   state: { kind: "idle" },
+  storageManagement: null,
   storageOnboarding: null,
   snippetActions: null,
   snippetUploads: null,
@@ -61,17 +63,20 @@ function ActiveIdentityProduct(props: {
   readonly runtime: ManagedRuntime.ManagedRuntime<
     | AccountProductLifetime
     | BillingClient
+    | StorageManagementClient
     | StorageOnboardingClient
     | WebSnippetActions
     | WebSnippetUploads,
     never
   >;
   readonly billing: BillingClient["Service"];
+  readonly storageManagement: StorageManagementClient["Service"];
   readonly signOut: () => Promise<void>;
   readonly uploads: WebSnippetUploadsShape;
   readonly actions: WebSnippetActionsService["Service"];
 }) {
-  const { actions, billing, children, lifetime, runtime, signOut, uploads } = props;
+  const { actions, billing, children, lifetime, runtime, signOut, storageManagement, uploads } =
+    props;
   const state = useSyncExternalStore(
     lifetime.subscribe,
     lifetime.getSnapshot,
@@ -90,9 +95,11 @@ function ActiveIdentityProduct(props: {
     [runtime],
   );
   const read = useCallback(
-    (providerHint: StorageProvider | null) =>
+    (providerHint: StorageProvider | null, consumeAuthorization: boolean) =>
       runtime.runPromise(
-        Effect.flatMap(StorageOnboardingClient, (client) => client.read(providerHint)),
+        Effect.flatMap(StorageOnboardingClient, (client) =>
+          client.read(providerHint, consumeAuthorization),
+        ),
       ),
     [runtime],
   );
@@ -108,6 +115,17 @@ function ActiveIdentityProduct(props: {
         retry,
         signOut,
         state,
+        storageManagement: {
+          beginCleanup: (action, storageProvider, expectedSnippetCount) =>
+            runtime.runPromise(
+              storageManagement.beginCleanup(action, storageProvider, expectedSnippetCount),
+            ),
+          read: () => runtime.runPromise(storageManagement.read),
+          reauthorize: (storageProvider) =>
+            runtime.runPromise(storageManagement.reauthorize(storageProvider)),
+          retryCleanup: (storageProvider) =>
+            runtime.runPromise(storageManagement.retryCleanup(storageProvider)),
+        },
         storageOnboarding: { begin, read },
         snippetActions: {
           copy: (snippet) => runtime.runPromise(actions.copy(snippet)),
@@ -136,6 +154,7 @@ function IdentityProductResource(props: {
   readonly productClientLayer: Layer.Layer<
     | AccountProductReader
     | BillingClient
+    | StorageManagementClient
     | StorageOnboardingClient
     | WebSnippetActionRemote
     | WebSnippetUploadRemote
@@ -151,11 +170,13 @@ function IdentityProductResource(props: {
       readonly actions: WebSnippetActionsService["Service"];
       readonly billing: BillingClient["Service"];
       readonly lifetime: AccountProductLifetimeShape;
+      readonly storageManagement: StorageManagementClient["Service"];
       readonly uploads: WebSnippetUploadsShape;
     }>;
     readonly runtime: ManagedRuntime.ManagedRuntime<
       | AccountProductLifetime
       | BillingClient
+      | StorageManagementClient
       | StorageOnboardingClient
       | WebSnippetActions
       | WebSnippetUploads,
@@ -166,6 +187,7 @@ function IdentityProductResource(props: {
     readonly actions: WebSnippetActionsService["Service"];
     readonly billing: BillingClient["Service"];
     readonly lifetime: AccountProductLifetimeShape;
+    readonly storageManagement: StorageManagementClient["Service"];
     readonly uploads: WebSnippetUploadsShape;
   };
   const resourceRef = useRef<IdentityRuntime | null>(null);
@@ -200,16 +222,24 @@ function IdentityProductResource(props: {
         actions: WebSnippetActions,
         billing: BillingClient,
         lifetime: AccountProductLifetime,
+        storageManagement: StorageManagementClient,
         uploads: WebSnippetUploads,
       }),
     );
     const resource = { productPromise, runtime };
     resourceRef.current = resource;
     void productPromise.then(
-      ({ actions, billing, lifetime, uploads }) => {
+      ({ actions, billing, lifetime, storageManagement, uploads }) => {
         if (!mounted) return;
         runtime.runFork(lifetime.enter(accountId));
-        setActiveResource({ ...resource, actions, billing, lifetime, uploads });
+        setActiveResource({
+          ...resource,
+          actions,
+          billing,
+          lifetime,
+          storageManagement,
+          uploads,
+        });
       },
       (cause) => {
         if (!mounted) return;
@@ -272,6 +302,7 @@ function IdentityProductResource(props: {
               ? { accountId, kind: "loading" }
               : { accountId, cause: initializationFailure, kind: "failed" },
           storageOnboarding: null,
+          storageManagement: null,
           snippetActions: null,
           snippetUploads: null,
         }}
@@ -288,6 +319,7 @@ function IdentityProductResource(props: {
       billing={activeResource.billing}
       runtime={activeResource.runtime}
       signOut={signOut}
+      storageManagement={activeResource.storageManagement}
       uploads={activeResource.uploads}
     >
       {children}
@@ -303,6 +335,7 @@ export function ProductIdentityBoundary(props: {
   readonly productClientLayer: Layer.Layer<
     | AccountProductReader
     | BillingClient
+    | StorageManagementClient
     | StorageOnboardingClient
     | WebSnippetActionRemote
     | WebSnippetUploadRemote

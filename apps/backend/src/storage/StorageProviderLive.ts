@@ -5,12 +5,13 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
-import { HttpClient, HttpClientResponse } from "effect/unstable/http";
+import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 
 import { DropboxStorageProvider } from "./providers/DropboxStorageProvider.ts";
 import { GoogleDriveStorageProvider } from "./providers/GoogleDriveStorageProvider.ts";
 import { OneDriveStorageProvider } from "./providers/OneDriveStorageProvider.ts";
 import {
+  type BeginStorageAuthorizationInput,
   type ConnectedStorageInput,
   type DeleteStorageObjectInput,
   type DownloadStorageObjectInput,
@@ -29,6 +30,9 @@ import {
   type StorageProviderAdapter,
   type StorageUploadError,
 } from "./StorageProvider.ts";
+
+const WORKOS_BASE_URL = "https://api.workos.com";
+const WORKOS_REQUEST_TIMEOUT = "15 seconds";
 
 type ConnectedStorageToken = {
   readonly accessToken: string;
@@ -54,6 +58,16 @@ const WorkosUserDataProvidersSchema = Schema.Struct({
     }),
   ),
 });
+const WorkosAuthorizeResponseSchema = Schema.Struct({ url: Schema.String });
+const WorkosConnectedAccountSchema = Schema.Struct({
+  state: Schema.Literals(["connected", "needs_reauthorization"] as const),
+});
+
+const getConnectedAccountUrl = (
+  provider: PrepareStorageUploadInput["storageProvider"],
+  userId: string,
+) =>
+  `${WORKOS_BASE_URL}/user_management/users/${encodeURIComponent(userId)}/connected_accounts/${encodeURIComponent(getProviderSlug(provider))}`;
 
 export const StorageProviderLive = Layer.effect(
   StorageProvider,
@@ -64,6 +78,52 @@ export const StorageProviderLive = Layer.effect(
     }).pipe(Effect.orDie);
     const workos = new WorkOS({ apiKey: Redacted.value(apiKey), clientId });
     const httpClient = yield* HttpClient.HttpClient;
+
+    const beginAuthorization = Effect.fn("StorageProvider.beginAuthorization")(function* (
+      input: BeginStorageAuthorizationInput,
+    ) {
+      const request = yield* HttpClientRequest.post(
+        `${WORKOS_BASE_URL}/data-integrations/${encodeURIComponent(getProviderSlug(input.storageProvider))}/authorize`,
+      ).pipe(
+        HttpClientRequest.bearerToken(Redacted.value(apiKey)),
+        HttpClientRequest.bodyJson({
+          return_to: input.returnTo,
+          user_id: input.workosUserId,
+        }),
+        Effect.mapError(
+          (cause) =>
+            new StorageCredentialsError({
+              cause,
+              message: "Could not prepare storage authorization.",
+            }),
+        ),
+      );
+      const response = yield* httpClient.execute(request).pipe(
+        Effect.timeout(WORKOS_REQUEST_TIMEOUT),
+        Effect.mapError(
+          (cause) =>
+            new StorageCredentialsError({
+              cause,
+              message: "Could not prepare storage authorization.",
+            }),
+        ),
+      );
+      if (response.status < 200 || response.status >= 300) {
+        return yield* new StorageCredentialsError({
+          cause: new Error(`WorkOS Pipes returned ${response.status}.`),
+          message: "Could not prepare storage authorization.",
+        });
+      }
+      return yield* HttpClientResponse.schemaBodyJson(WorkosAuthorizeResponseSchema)(response).pipe(
+        Effect.mapError(
+          (cause) =>
+            new StorageCredentialsError({
+              cause,
+              message: "Could not prepare storage authorization.",
+            }),
+        ),
+      );
+    });
 
     const getConnectedToken = Effect.fn("StorageProvider.getConnectedToken")(function* (
       input: ConnectedStorageInput,
@@ -82,7 +142,16 @@ export const StorageProviderLive = Layer.effect(
             message: "Could not get storage credentials.",
             cause,
           }),
-      });
+      }).pipe(
+        Effect.timeout(WORKOS_REQUEST_TIMEOUT),
+        Effect.mapError(
+          (cause) =>
+            new StorageCredentialsError({
+              message: "Could not get storage credentials.",
+              cause,
+            }),
+        ),
+      );
 
       if (!token.active) {
         if (token.error === "needs_reauthorization") {
@@ -110,12 +179,13 @@ export const StorageProviderLive = Layer.effect(
     ) {
       const response = yield* httpClient
         .get(
-          `https://api.workos.com/user_management/users/${encodeURIComponent(workosUserId)}/data_providers`,
+          `${WORKOS_BASE_URL}/user_management/users/${encodeURIComponent(workosUserId)}/data_providers`,
           {
             headers: { Authorization: `Bearer ${Redacted.value(apiKey)}` },
           },
         )
         .pipe(
+          Effect.timeout(WORKOS_REQUEST_TIMEOUT),
           Effect.mapError(
             (cause) =>
               new StorageCredentialsError({
@@ -157,6 +227,101 @@ export const StorageProviderLive = Layer.effect(
         });
       }
       return linkedProviders.values().next().value ?? null;
+    });
+
+    const getStatus = Effect.fn("StorageProvider.getStatus")(function* (
+      input: ConnectedStorageInput,
+    ) {
+      const response = yield* httpClient
+        .get(getConnectedAccountUrl(input.storageProvider, input.workosUserId), {
+          headers: { Authorization: `Bearer ${Redacted.value(apiKey)}` },
+        })
+        .pipe(
+          Effect.timeout(WORKOS_REQUEST_TIMEOUT),
+          Effect.mapError(
+            (cause) =>
+              new StorageCredentialsError({
+                cause,
+                message: "Could not read storage connection.",
+              }),
+          ),
+        );
+      if (response.status === 404) {
+        return {
+          externalDestinationUrl: null,
+          status: "NOT_CONNECTED",
+          storageProvider: input.storageProvider,
+        } as const;
+      }
+      if (response.status < 200 || response.status >= 300) {
+        return yield* new StorageCredentialsError({
+          cause: new Error(`WorkOS Pipes returned ${response.status}.`),
+          message: "Could not read storage connection.",
+        });
+      }
+      const account = yield* HttpClientResponse.schemaBodyJson(WorkosConnectedAccountSchema)(
+        response,
+      ).pipe(
+        Effect.mapError(
+          (cause) =>
+            new StorageCredentialsError({
+              cause,
+              message: "Could not read storage connection.",
+            }),
+        ),
+      );
+      if (account.state === "needs_reauthorization") {
+        return {
+          externalDestinationUrl: null,
+          status: "NEEDS_REAUTHORIZATION",
+          storageProvider: input.storageProvider,
+        } as const;
+      }
+      return yield* getDestinationUrl(input).pipe(
+        Effect.map((externalDestinationUrl) => ({
+          externalDestinationUrl,
+          status: "CONNECTED" as const,
+          storageProvider: input.storageProvider,
+        })),
+        Effect.catchTags({
+          StorageNeedsReauthorizationError: () =>
+            Effect.succeed({
+              externalDestinationUrl: null,
+              status: "NEEDS_REAUTHORIZATION" as const,
+              storageProvider: input.storageProvider,
+            }),
+          StorageNotConnectedError: () =>
+            Effect.succeed({
+              externalDestinationUrl: null,
+              status: "NOT_CONNECTED" as const,
+              storageProvider: input.storageProvider,
+            }),
+        }),
+      );
+    });
+
+    const disconnect = Effect.fn("StorageProvider.disconnect")(function* (
+      input: ConnectedStorageInput,
+    ) {
+      const response = yield* httpClient
+        .del(getConnectedAccountUrl(input.storageProvider, input.workosUserId), {
+          headers: { Authorization: `Bearer ${Redacted.value(apiKey)}` },
+        })
+        .pipe(
+          Effect.timeout(WORKOS_REQUEST_TIMEOUT),
+          Effect.mapError(
+            (cause) =>
+              new StorageCredentialsError({
+                cause,
+                message: "Could not disconnect storage credentials.",
+              }),
+          ),
+        );
+      if (response.status === 404 || (response.status >= 200 && response.status < 300)) return;
+      return yield* new StorageCredentialsError({
+        cause: new Error(`WorkOS Pipes returned ${response.status}.`),
+        message: "Could not disconnect storage credentials.",
+      });
     });
 
     const prepareUpload = Effect.fn("StorageProvider.prepareUpload")(function* (
@@ -234,9 +399,12 @@ export const StorageProviderLive = Layer.effect(
     });
 
     return StorageProvider.of({
+      beginAuthorization,
       deleteObject,
+      disconnect,
       ensureConnected,
       getLinkedProvider,
+      getStatus,
       prepareUpload,
       getDestinationUrl,
       downloadObject,

@@ -1,20 +1,51 @@
 import { CurrentUser } from "@plakk/shared/PlakkApi";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
-import { FetchHttpClient, HttpClient } from "effect/unstable/http";
 
+import { StorageLifecycle } from "../storage/StorageLifecycle.ts";
 import { StorageProvider } from "../storage/StorageProvider.ts";
 import { StorageRpcsLive, storageProviderReturnUrl } from "./StorageRpcsLive.ts";
 
+const lifecycle = (overrides: Partial<StorageLifecycle["Service"]> = {}) =>
+  StorageLifecycle.of({
+    assertCommandsAllowed: () => Effect.void,
+    beginAuthorization: () => Effect.succeed({ url: "https://api.workos.com/provider-redirect" }),
+    beginCleanup: (input) => Effect.succeed({ action: input.action, outcome: "COMPLETED" }),
+    getManagementState: () =>
+      Effect.succeed({
+        affectedSnippetCount: 2,
+        cleanup: null,
+        connectionStatus: "CONNECTED",
+        externalDestinationUrl: "https://drive.example/folder",
+        storageProvider: "GOOGLE_DRIVE",
+      }),
+    getProviderStatus: (_, storageProvider) =>
+      Effect.succeed({
+        externalDestinationUrl: "https://drive.example/folder",
+        status: "CONNECTED",
+        storageProvider,
+      }),
+    retryCleanup: () => Effect.succeed({ action: "UNLINK", outcome: "COMPLETED" }),
+    ...overrides,
+  });
+
 const storage = StorageProvider.of({
+  beginAuthorization: () => Effect.succeed({ url: "https://workos.example/authorize" }),
   deleteObject: () => Effect.void,
+  disconnect: () => Effect.void,
   downloadObject: () => Effect.succeed(new Uint8Array()),
   ensureConnected: () => Effect.void,
   getDestinationUrl: () => Effect.succeed("https://drive.example/folder"),
-  getLinkedProvider: () => Effect.succeed(null),
   getDownloadTarget: () => Effect.succeed({ url: "https://download.example", headers: [] }),
   getDownloadUrl: () => Effect.succeed("https://download.example"),
+  getLinkedProvider: () => Effect.succeed("GOOGLE_DRIVE"),
+  getStatus: (input) =>
+    Effect.succeed({
+      externalDestinationUrl: "https://drive.example/folder",
+      status: "CONNECTED",
+      storageProvider: input.storageProvider,
+    }),
   prepareUpload: () =>
     Effect.succeed({
       storageProvider: "GOOGLE_DRIVE",
@@ -29,33 +60,20 @@ const storage = StorageProvider.of({
     }),
 });
 
-const fetchMock = vi.fn<typeof fetch>();
-
-beforeEach(() => {
-  fetchMock.mockReset();
-  vi.stubGlobal("fetch", fetchMock);
-});
-
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
-
 const run = <A, E>(
-  effect: Effect.Effect<A, E, CurrentUser | StorageProvider | HttpClient.HttpClient>,
+  effect: Effect.Effect<A, E, CurrentUser | StorageLifecycle | StorageProvider>,
+  lifecycleService = lifecycle(),
 ) =>
   Effect.runPromise(
     effect.pipe(
-      Effect.provideService(CurrentUser, {
-        id: "user-account-bound",
-      }),
+      Effect.provideService(CurrentUser, { id: "user-account-bound" }),
+      Effect.provideService(StorageLifecycle, lifecycleService),
       Effect.provideService(StorageProvider, storage),
-      Effect.provide(FetchHttpClient.layer),
       Effect.provideService(
         ConfigProvider.ConfigProvider,
         ConfigProvider.fromEnv({
           env: {
             PLAKK_WEB_ORIGIN: "https://app.plakk.io",
-            WORKOS_API_KEY: "workos-server-secret",
           },
         }),
       ),
@@ -75,7 +93,9 @@ describe("storage authorization", () => {
         "https://app.plakk.io/storage?provider=GOOGLE_DRIVE&origin=desktop&confirmation=provider",
     },
   ])("binds a $origin authorization request to the account and trusted return", async (example) => {
-    fetchMock.mockResolvedValue(Response.json({ url: "https://api.workos.com/provider-redirect" }));
+    const beginAuthorization = vi.fn(() =>
+      Effect.succeed({ url: "https://api.workos.com/provider-redirect" }),
+    );
 
     await expect(
       run(
@@ -83,19 +103,15 @@ describe("storage authorization", () => {
           storageProvider: "GOOGLE_DRIVE",
           origin: example.origin,
         }),
+        lifecycle({ beginAuthorization }),
       ),
     ).resolves.toEqual({ url: "https://api.workos.com/provider-redirect" });
 
-    const [request, init] = fetchMock.mock.calls[0] ?? [];
-    const workosRequest = new Request(request as RequestInfo, init);
-    expect(workosRequest.url).toBe(
-      "https://api.workos.com/data-integrations/google-drive/authorize",
+    expect(beginAuthorization).toHaveBeenCalledWith(
+      "user-account-bound",
+      "GOOGLE_DRIVE",
+      example.returnTo,
     );
-    expect(workosRequest.headers.get("authorization")).toBe("Bearer workos-server-secret");
-    expect(await workosRequest.json()).toEqual({
-      user_id: "user-account-bound",
-      return_to: example.returnTo,
-    });
   });
 
   it("derives only an exact same-origin Web return", () => {
@@ -116,74 +132,71 @@ describe("storage authorization", () => {
     expect(() =>
       storageProviderReturnUrl("http://app.plakk.io", "GOOGLE_DRIVE", "WEB", true),
     ).toThrow("exact HTTPS origin in production");
-    expect(storageProviderReturnUrl("https://app.plakk.io", "GOOGLE_DRIVE", "WEB", true)).toBe(
-      "https://app.plakk.io/storage?provider=GOOGLE_DRIVE&origin=web&confirmation=provider",
-    );
   });
 });
 
-describe("authoritative storage status", () => {
-  it("reads the connected account for the authenticated WorkOS user", async () => {
-    fetchMock.mockResolvedValue(Response.json({ state: "connected" }));
-
+describe("authoritative storage management", () => {
+  it("reads provider status through the backend provider owner", async () => {
+    const getProviderStatus = vi.fn(
+      (_: string, storageProvider: "DROPBOX" | "GOOGLE_DRIVE" | "ONE_DRIVE") =>
+        Effect.succeed({
+          externalDestinationUrl: "https://drive.example/folder",
+          status: "CONNECTED" as const,
+          storageProvider,
+        }),
+    );
     await expect(
       run(
         StorageRpcsLive.GetStorageProviderStatus({
+          consumeAuthorization: true,
           storageProvider: "ONE_DRIVE",
         }),
+        lifecycle({ getProviderStatus }),
       ),
     ).resolves.toEqual({
-      storageProvider: "ONE_DRIVE",
-      status: "CONNECTED",
       externalDestinationUrl: "https://drive.example/folder",
+      status: "CONNECTED",
+      storageProvider: "ONE_DRIVE",
     });
+    expect(getProviderStatus).toHaveBeenCalledWith("user-account-bound", "ONE_DRIVE", true);
+  });
 
-    const [request, init] = fetchMock.mock.calls[0] ?? [];
-    const workosRequest = new Request(request as RequestInfo, init);
-    expect(workosRequest.url).toBe(
-      "https://api.workos.com/user_management/users/user-account-bound/connected_accounts/microsoft-onedrive",
+  it("delegates exact-count cleanup and retry to the lifecycle owner", async () => {
+    const beginCleanup = vi.fn(
+      (input: Parameters<StorageLifecycle["Service"]["beginCleanup"]>[0]) =>
+        Effect.succeed({ action: input.action, outcome: "COMPLETED" as const }),
     );
-    expect(workosRequest.headers.get("authorization")).toBe("Bearer workos-server-secret");
-  });
-
-  it("treats missing and reauthorization-required accounts as unconfirmed", async () => {
-    fetchMock
-      .mockResolvedValueOnce(new Response(null, { status: 404 }))
-      .mockResolvedValueOnce(Response.json({ state: "needs_reauthorization" }));
+    const retryCleanup = vi.fn(() =>
+      Effect.succeed({ action: "SWITCH" as const, outcome: "COMPLETED" as const }),
+    );
+    const service = lifecycle({ beginCleanup, retryCleanup });
 
     await expect(
       run(
-        StorageRpcsLive.GetStorageProviderStatus({
-          storageProvider: "DROPBOX",
-        }),
-      ),
-    ).resolves.toEqual({
-      storageProvider: "DROPBOX",
-      status: "NOT_CONNECTED",
-      externalDestinationUrl: null,
-    });
-    await expect(
-      run(
-        StorageRpcsLive.GetStorageProviderStatus({
-          storageProvider: "DROPBOX",
-        }),
-      ),
-    ).resolves.toEqual({
-      storageProvider: "DROPBOX",
-      status: "NEEDS_REAUTHORIZATION",
-      externalDestinationUrl: null,
-    });
-  });
-
-  it("fails closed when WorkOS status cannot be read", async () => {
-    fetchMock.mockResolvedValue(new Response(null, { status: 503 }));
-
-    await expect(
-      run(
-        StorageRpcsLive.GetStorageProviderStatus({
+        StorageRpcsLive.BeginStorageCleanup({
+          action: "SWITCH",
+          confirmation: "DELETE",
+          expectedSnippetCount: 2,
           storageProvider: "GOOGLE_DRIVE",
         }),
+        service,
       ),
-    ).rejects.toThrow();
+    ).resolves.toEqual({ action: "SWITCH", outcome: "COMPLETED" });
+    expect(beginCleanup).toHaveBeenCalledWith({
+      action: "SWITCH",
+      expectedSnippetCount: 2,
+      storageProvider: "GOOGLE_DRIVE",
+      workosUserId: "user-account-bound",
+    });
+
+    await expect(
+      run(
+        StorageRpcsLive.RetryStorageCleanup({
+          storageProvider: "GOOGLE_DRIVE",
+        }),
+        service,
+      ),
+    ).resolves.toEqual({ action: "SWITCH", outcome: "COMPLETED" });
+    expect(retryCleanup).toHaveBeenCalledWith("user-account-bound", "GOOGLE_DRIVE");
   });
 });

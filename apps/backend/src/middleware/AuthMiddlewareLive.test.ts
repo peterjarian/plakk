@@ -15,6 +15,7 @@ const capabilityService = (
 ): AccountCapability["Service"] =>
   AccountCapability.of({
     authorizeProductCommand: () => Effect.void,
+    authorizeSnippetDeletion: () => Effect.void,
     getStatus: () =>
       Effect.succeed({
         accessEntitlement: activeTrial,

@@ -231,7 +231,7 @@ describe("Web Home interactions", () => {
     expect(open).toHaveBeenCalledWith("https://example.com/path");
   });
 
-  it("keeps Delete enabled while storage restrictions disable content actions", async () => {
+  it("disables Delete with other provider-dependent actions during storage restriction", async () => {
     const deleteSnippet = vi.fn().mockResolvedValue(undefined);
     const onStorageReconnect = vi.fn();
     const container = document.createElement("div");
@@ -264,7 +264,7 @@ describe("Web Home interactions", () => {
     );
     expect(
       container.querySelector<HTMLButtonElement>('button[aria-label="Delete"]')?.disabled,
-    ).toBe(false);
+    ).toBe(true);
     await act(async () => {
       Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
         .find((button) => button.textContent?.trim() === "Reconnect storage")
@@ -274,7 +274,7 @@ describe("Web Home interactions", () => {
     await act(async () => {
       container.querySelector<HTMLButtonElement>('button[aria-label="Delete"]')?.click();
     });
-    expect(deleteSnippet).toHaveBeenCalledWith(textSnippet.id);
+    expect(deleteSnippet).not.toHaveBeenCalled();
     expect(container.querySelector('[aria-label="Working on snippet"]')).toBeNull();
   });
 });

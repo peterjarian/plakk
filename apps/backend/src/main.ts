@@ -28,6 +28,7 @@ import { allowedBackendOrigins, InvalidCorsConfiguration } from "./cors.ts";
 import { AuthMiddlewareLive } from "./middleware/AuthMiddlewareLive.ts";
 import { InternalServerErrorMiddlewareLive } from "./middleware/InternalServerErrorMiddlewareLive.ts";
 import { PlakkApiLive } from "./rpcs/PlakkApiLive.ts";
+import { StorageLifecycle, StorageLifecycleStore } from "./storage/StorageLifecycle.ts";
 import { StorageProviderLive } from "./storage/StorageProviderLive.ts";
 import { TelemetryLive } from "./TelemetryLive.ts";
 
@@ -43,9 +44,14 @@ const BillingDomainLive = AccountBilling.layer.pipe(
   Layer.provideMerge(BillingAuthority.layer),
 );
 
+const StorageDomainLive = StorageLifecycle.layer.pipe(
+  Layer.provideMerge(StorageLifecycleStore.layer),
+);
+
 const AccountDomainLive = AccountCapability.layer.pipe(
   Layer.provideMerge(AccountTrialRepository.layer),
   Layer.provideMerge(BillingDomainLive),
+  Layer.provideMerge(StorageDomainLive),
 );
 
 const RpcRoutes = RpcServer.layerHttp({

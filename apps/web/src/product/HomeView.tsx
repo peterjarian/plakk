@@ -1,9 +1,5 @@
 import { deriveSnippetPresentation, type User } from "@plakk/shared";
-import {
-  accountCanSync,
-  type ApiSnippet,
-  type StorageProviderStatus,
-} from "@plakk/shared/PlakkApi";
+import { accountCanSync, type ApiSnippet } from "@plakk/shared/PlakkApi";
 import { RpcError } from "@plakk/shared/RpcError";
 import { AppHeader } from "@plakk/ui/components/AppHeader";
 import { ExternalLinkConfirmationDialog } from "@plakk/ui/components/ExternalLinkConfirmationDialog";
@@ -17,13 +13,8 @@ import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent } from
 
 import type { AccountProductState } from "./account-product-lifetime.ts";
 import { WebSnippetActionError, type WebSnippetCopyOutcome } from "./snippet-actions.ts";
+import { storageProviderLabel } from "./storage-provider-presentation.ts";
 import type { WebProductContextValue } from "./web-product-context.tsx";
-
-const storageProviderLabel = {
-  DROPBOX: "Dropbox",
-  GOOGLE_DRIVE: "Google Drive",
-  ONE_DRIVE: "OneDrive",
-} as const satisfies Record<StorageProviderStatus["storageProvider"], string>;
 
 const trialEndDate = (trialEndsAt: DateTime.Utc) =>
   DateTime.formatUtc(trialEndsAt, {
@@ -85,7 +76,9 @@ export function HomeView(props: {
     state.kind === "ready" && state.apiAvailability === "available" && snippetActions !== null;
   const productActionsDisabled =
     !remoteActionsAvailable || state.kind !== "ready" || !accountCanSync(state.account);
-  const deleteDisabled = !remoteActionsAvailable;
+  const deleteDisabled =
+    !remoteActionsAvailable ||
+    (state.kind === "ready" && state.account.blockedReasons.includes("storage"));
 
   useEffect(() => {
     if (productActionsDisabled) setPendingExternalLink(null);
@@ -278,7 +271,7 @@ export function HomeView(props: {
         {...(onSettings === undefined ? {} : { onSettingsClick: onSettings })}
         storageAction={
           <span className="text-xs text-muted-foreground">
-            {storageProvider === null ? "Web · Read only" : storageProviderLabel[storageProvider]}
+            {storageProvider === null ? "Web · Read only" : storageProviderLabel(storageProvider)}
           </span>
         }
       />
@@ -403,7 +396,7 @@ export function HomeView(props: {
             role="alert"
           >
             <strong>Storage access required.</strong> Your snippets remain visible. Reconnect
-            storage to resume Copy, Download, and Open. Delete remains available.
+            storage to resume Copy, Download, Open, and Delete.
             {onStorageReconnect !== undefined && (
               <Button
                 type="button"

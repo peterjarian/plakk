@@ -34,7 +34,10 @@ export interface StorageOnboardingRpcClient {
     options: RpcRequestOptions,
   ) => Effect.Effect<AccountStatus, RpcError | RpcClientError>;
   readonly GetStorageProviderStatus: (
-    payload: { readonly storageProvider: StorageProvider },
+    payload: {
+      readonly consumeAuthorization: boolean;
+      readonly storageProvider: StorageProvider;
+    },
     options: RpcRequestOptions,
   ) => Effect.Effect<StorageProviderStatus, RpcError | RpcClientError>;
 }
@@ -54,6 +57,7 @@ export class StorageOnboardingClient extends Context.Service<
     ) => Effect.Effect<{ readonly url: string }, StorageOnboardingClientError>;
     readonly read: (
       providerHint: StorageProvider | null,
+      consumeAuthorization: boolean,
     ) => Effect.Effect<StorageOnboardingRead, StorageOnboardingClientError>;
   }
 >()("@plakk/web/product/storage-onboarding-client/StorageOnboardingClient") {}
@@ -62,6 +66,7 @@ export const readStorageOnboarding = Effect.fn("StorageOnboardingClient.read")(f
   rpc: StorageOnboardingRpcClient,
   getAccessToken: () => Promise<string | undefined>,
   providerHint: StorageProvider | null,
+  consumeAuthorization: boolean,
 ): Effect.fn.Return<StorageOnboardingRead, StorageOnboardingClientError> {
   const options = yield* authenticatedRpcOptions(getAccessToken);
   const initialAccount = yield* rpc.GetAccountStatus(undefined, options);
@@ -69,7 +74,7 @@ export const readStorageOnboarding = Effect.fn("StorageOnboardingClient.read")(f
   if (provider === null) return { account: initialAccount, providerStatus: null };
 
   const providerStatus = yield* rpc.GetStorageProviderStatus(
-    { storageProvider: provider },
+    { consumeAuthorization, storageProvider: provider },
     options,
   );
   const account =

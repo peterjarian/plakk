@@ -4,7 +4,7 @@ import {
   PostgresNotifications,
   type DrizzleService,
 } from "@plakk/db";
-import { snippets, type SnippetRow } from "@plakk/db/schema";
+import { snippets, storageCleanupIntents, type SnippetRow } from "@plakk/db/schema";
 import {
   AuthenticatedRpcRequest,
   CurrentUser,
@@ -59,11 +59,19 @@ const storageService = (
   overrides: Partial<StorageProvider["Service"]> = {},
 ): StorageProvider["Service"] =>
   StorageProvider.of({
+    beginAuthorization: () => Effect.succeed({ url: "https://workos.example/authorize" }),
     deleteObject: () => Effect.void,
+    disconnect: () => Effect.void,
     downloadObject: () => Effect.succeed(new Uint8Array()),
     ensureConnected: () => Effect.void,
     getDestinationUrl: () => Effect.succeed("https://drive.example/folder"),
     getLinkedProvider: () => Effect.succeed("GOOGLE_DRIVE"),
+    getStatus: () =>
+      Effect.succeed({
+        externalDestinationUrl: "https://drive.example/folder",
+        status: "CONNECTED",
+        storageProvider: "GOOGLE_DRIVE",
+      }),
     getDownloadTarget: () => Effect.succeed({ url: "https://download.example", headers: [] }),
     getDownloadUrl: () => Effect.succeed("https://download.example"),
     prepareUpload: () =>
@@ -86,6 +94,7 @@ const accountCapabilityService = (
 ): AccountCapability["Service"] =>
   AccountCapability.of({
     authorizeProductCommand: () => Effect.void,
+    authorizeSnippetDeletion: () => Effect.void,
     getStatus: () =>
       Effect.succeed({
         accessEntitlement: {
@@ -160,8 +169,22 @@ const queryValues = (condition: unknown): ReadonlyArray<unknown> => {
   return [];
 };
 
+const queryText = (statement: unknown): string => {
+  if (typeof statement === "string") return statement;
+  if (Array.isArray(statement)) return statement.map(queryText).join("");
+  if (statement === null || typeof statement !== "object") return "";
+  if (statement.constructor.name === "StringChunk" && "value" in statement) {
+    return queryText(statement.value);
+  }
+  if ("queryChunks" in statement && Array.isArray(statement.queryChunks)) {
+    return statement.queryChunks.map(queryText).join("");
+  }
+  return "";
+};
+
 const publicationDatabase = (
   options: {
+    cleanupActive?: boolean;
     inserted?: ReadonlyArray<SnippetRow>;
     selected?: ReadonlyArray<SnippetRow>;
   } = {},
@@ -192,6 +215,14 @@ const publicationDatabase = (
     },
     select: () => ({
       from: (table: unknown) => {
+        if (table === storageCleanupIntents) {
+          return {
+            where: () => ({
+              limit: () =>
+                Effect.succeed(options.cleanupActive ? [{ workosUserId: currentUser.id }] : []),
+            }),
+          };
+        }
         if (table !== snippets) throw new Error("Unexpected select table.");
         return {
           where: () => ({
@@ -200,15 +231,18 @@ const publicationDatabase = (
         };
       },
     }),
-    execute: () =>
+    execute: (statement: unknown) =>
       Effect.sync(() => {
-        events.push("notify");
+        if (queryText(statement).includes("pg_notify")) events.push("notify");
       }),
   } as unknown as DrizzleService["db"];
   return { db, events, insertedValues };
 };
 
-const deletionDatabase = (rows: ReadonlyArray<SnippetRow>) => {
+const deletionDatabase = (
+  rows: ReadonlyArray<SnippetRow>,
+  options: { readonly cleanupActive?: boolean } = {},
+) => {
   const events: Array<string> = [];
   const db = {
     transaction: <A, E, R>(body: (tx: DrizzleService["db"]) => Effect.Effect<A, E, R>) =>
@@ -234,9 +268,20 @@ const deletionDatabase = (rows: ReadonlyArray<SnippetRow>) => {
         }),
       };
     },
-    execute: () =>
+    select: () => ({
+      from: (table: unknown) => {
+        if (table !== storageCleanupIntents) throw new Error("Unexpected select table.");
+        return {
+          where: () => ({
+            limit: () =>
+              Effect.succeed(options.cleanupActive ? [{ workosUserId: currentUser.id }] : []),
+          }),
+        };
+      },
+    }),
+    execute: (statement: unknown) =>
       Effect.sync(() => {
-        events.push("notify");
+        if (queryText(statement).includes("pg_notify")) events.push("notify");
       }),
   } as unknown as DrizzleService["db"];
   return { db, events };
@@ -472,6 +517,19 @@ describe("completed Snippet publication", () => {
         { ...currentUser, id: "user-2" },
       ),
     ).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
+  it("rejects a late publication after cleanup wins the account lock", async () => {
+    const store = publicationDatabase({ cleanupActive: true });
+
+    await expect(
+      runSnippetEffect((rpcs) => rpcs.PublishSnippet(publication), store.db),
+    ).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: expect.stringContaining("cleanup"),
+    });
+    expect(store.insertedValues).toEqual([]);
+    expect(store.events).toEqual(["commit"]);
   });
 });
 
@@ -745,6 +803,25 @@ describe("account capability enforcement", () => {
 });
 
 describe("completed Snippet deletion", () => {
+  it("rejects a late deletion after cleanup wins the account lock", async () => {
+    const stored = snippet();
+    const store = deletionDatabase([stored], { cleanupActive: true });
+    const deleteObject = vi.fn(storageService().deleteObject);
+
+    await expect(
+      runSnippetEffect(
+        (rpcs) => rpcs.DeleteSnippet({ id: stored.id }),
+        store.db,
+        storageService({ deleteObject }),
+      ),
+    ).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: expect.stringContaining("cleanup"),
+    });
+    expect(store.events).toEqual(["commit"]);
+    expect(deleteObject).not.toHaveBeenCalled();
+  });
+
   it("commits removal and notification before starting provider cleanup once", async () => {
     const stored = snippet();
     const store = deletionDatabase([stored]);

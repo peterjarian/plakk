@@ -19,6 +19,7 @@ import {
   StorageNotConnectedError,
   StorageProvider,
 } from "../storage/StorageProvider.ts";
+import { StorageLifecycle } from "../storage/StorageLifecycle.ts";
 
 export const TRIAL_DURATION_MILLIS = 14 * 24 * 60 * 60 * 1_000;
 
@@ -107,6 +108,7 @@ export class AccountCapability extends Context.Service<
       workosUserId: string,
       storageProvider: StorageProviderName,
     ) => Effect.Effect<void, RpcError>;
+    readonly authorizeSnippetDeletion: (workosUserId: string) => Effect.Effect<void, RpcError>;
     readonly getStatus: (workosUserId: string) => Effect.Effect<AccountStatus, RpcError>;
     readonly startTrial: (workosUserId: string) => Effect.Effect<AccountAccessEntitlement>;
   }
@@ -117,6 +119,7 @@ export class AccountCapability extends Context.Service<
       const trials = yield* AccountTrialRepository;
       const billing = yield* AccountBilling;
       const storage = yield* StorageProvider;
+      const storageLifecycle = yield* StorageLifecycle;
 
       const ensureTrial = Effect.fn("AccountCapability.ensureTrial")(function* (
         workosUserId: string,
@@ -150,6 +153,9 @@ export class AccountCapability extends Context.Service<
           .getLinkedProvider(workosUserId)
           .pipe(Effect.orElseSucceed(() => null));
         if (storageProvider === null) return { storageProvider, usable: false };
+        if (yield* storageLifecycle.assertCommandsAllowed(workosUserId).pipe(Effect.isFailure)) {
+          return { storageProvider, usable: false };
+        }
 
         const usable = yield* storage.ensureConnected({ storageProvider, workosUserId }).pipe(
           Effect.as(true),
@@ -183,6 +189,7 @@ export class AccountCapability extends Context.Service<
 
       const authorizeProductCommand = Effect.fn("AccountCapability.authorizeProductCommand")(
         function* (workosUserId: string, storageProvider: StorageProviderName) {
+          yield* storageLifecycle.assertCommandsAllowed(workosUserId);
           const entitlement = yield* getEntitlement(workosUserId);
           if (entitlement.status === "BILLING_RESTRICTED") {
             return yield* new RpcError({
@@ -205,8 +212,24 @@ export class AccountCapability extends Context.Service<
         },
       );
 
+      const authorizeSnippetDeletion = Effect.fn("AccountCapability.authorizeSnippetDeletion")(
+        function* (workosUserId: string) {
+          yield* storageLifecycle.assertCommandsAllowed(workosUserId);
+          const linkedProvider = yield* storage
+            .getLinkedProvider(workosUserId)
+            .pipe(Effect.mapError(mapStorageReadError));
+          if (linkedProvider === null) {
+            return yield* forbiddenStorageError("Reconnect storage before deleting Snippets.");
+          }
+          yield* storage
+            .ensureConnected({ storageProvider: linkedProvider, workosUserId })
+            .pipe(Effect.mapError(mapStorageAuthorizationError));
+        },
+      );
+
       return AccountCapability.of({
         authorizeProductCommand,
+        authorizeSnippetDeletion,
         getStatus,
         startTrial,
       });

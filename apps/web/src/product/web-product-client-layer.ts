@@ -17,6 +17,13 @@ import {
   readStorageOnboarding,
   StorageOnboardingClient,
 } from "./storage-onboarding-client.ts";
+import {
+  beginStorageCleanup,
+  readStorageManagement,
+  reauthorizeStorageProvider,
+  retryStorageCleanup,
+  StorageManagementClient,
+} from "./storage-management-client.ts";
 import { WebSnippetActionRemote } from "./snippet-actions.ts";
 import { WebSnippetUploadRemote } from "./snippet-upload.ts";
 
@@ -26,6 +33,7 @@ export const makeWebProductClientLayer = (options: {
 }): Layer.Layer<
   | AccountProductReader
   | BillingClient
+  | StorageManagementClient
   | StorageOnboardingClient
   | WebSnippetActionRemote
   | WebSnippetUploadRemote
@@ -53,12 +61,35 @@ export const makeWebProductClientLayer = (options: {
             }),
           ),
           Context.add(
+            StorageManagementClient,
+            StorageManagementClient.of({
+              beginCleanup: (action, storageProvider, expectedSnippetCount) =>
+                beginStorageCleanup(
+                  rpc,
+                  options.getAccessToken,
+                  action,
+                  storageProvider,
+                  expectedSnippetCount,
+                ),
+              read: readStorageManagement(rpc, options.getAccessToken),
+              reauthorize: (storageProvider) =>
+                reauthorizeStorageProvider(rpc, options.getAccessToken, storageProvider),
+              retryCleanup: (storageProvider) =>
+                retryStorageCleanup(rpc, options.getAccessToken, storageProvider),
+            }),
+          ),
+          Context.add(
             StorageOnboardingClient,
             StorageOnboardingClient.of({
               begin: (storageProvider, origin) =>
                 beginStorageProviderLink(rpc, options.getAccessToken, storageProvider, origin),
-              read: (providerHint) =>
-                readStorageOnboarding(rpc, options.getAccessToken, providerHint),
+              read: (providerHint, consumeAuthorization) =>
+                readStorageOnboarding(
+                  rpc,
+                  options.getAccessToken,
+                  providerHint,
+                  consumeAuthorization,
+                ),
             }),
           ),
           Context.add(
