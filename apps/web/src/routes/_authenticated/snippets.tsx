@@ -16,7 +16,7 @@ function Snippets() {
     void navigate({
       to: "/storage",
       replace: true,
-      search: { confirmation: undefined, origin: undefined, provider: null },
+      search: { confirmation: undefined, mode: undefined, origin: undefined, provider: null },
     });
   }, [navigate]);
   const openBilling = useCallback(() => {

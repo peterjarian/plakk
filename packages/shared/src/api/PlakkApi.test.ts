@@ -1,10 +1,12 @@
 import * as DateTime from "effect/DateTime";
+import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   accountEntitlementExpiryDelayMillis,
   accountWithBillingRestriction,
   type AccountStatus,
+  StorageManagementStateSchema,
 } from "./PlakkApi.ts";
 
 const status = (accessEntitlement: AccountStatus["accessEntitlement"]): AccountStatus => ({
@@ -12,6 +14,46 @@ const status = (accessEntitlement: AccountStatus["accessEntitlement"]): AccountS
   blockedReasons: ["storage"],
   canSync: false,
   storageProvider: null,
+});
+
+describe("storage management contract", () => {
+  it("accepts authoritative cleanup progress without provider credentials", () => {
+    expect(
+      Schema.is(StorageManagementStateSchema)({
+        affectedSnippetCount: 2,
+        cleanup: {
+          action: "SWITCH",
+          lastFailure: "Two snippets still need cleanup.",
+          remainingSnippetCount: 2,
+          totalSnippetCount: 5,
+        },
+        connectionStatus: "CONNECTED",
+        externalDestinationUrl: "https://drive.example/folder",
+        storageProvider: "GOOGLE_DRIVE",
+      }),
+    ).toBe(true);
+  });
+
+  it("rejects invalid counts and strips credential-shaped excess data", () => {
+    expect(
+      Schema.is(StorageManagementStateSchema)({
+        affectedSnippetCount: -1,
+        cleanup: null,
+        connectionStatus: "CONNECTED",
+        externalDestinationUrl: "https://drive.example/folder",
+        storageProvider: "GOOGLE_DRIVE",
+      }),
+    ).toBe(false);
+    const decoded = Schema.decodeUnknownSync(StorageManagementStateSchema)({
+      accessToken: "must-never-cross-the-rpc-boundary",
+      affectedSnippetCount: 0,
+      cleanup: null,
+      connectionStatus: "NOT_CONNECTED",
+      externalDestinationUrl: null,
+      storageProvider: null,
+    });
+    expect(decoded).not.toHaveProperty("accessToken");
+  });
 });
 
 describe("account billing capability", () => {

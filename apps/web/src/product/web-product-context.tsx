@@ -1,5 +1,12 @@
 import type { StorageProvider } from "@plakk/shared";
-import type { ApiSnippet, BillingPlan, StorageOnboardingOrigin } from "@plakk/shared/PlakkApi";
+import type {
+  ApiSnippet,
+  BillingPlan,
+  StorageCleanupAction,
+  StorageCleanupRunResult,
+  StorageManagementState,
+  StorageOnboardingOrigin,
+} from "@plakk/shared/PlakkApi";
 import { createContext, useContext } from "react";
 
 import type { AccountProductState } from "./account-product-lifetime.ts";
@@ -15,6 +22,17 @@ export type StorageOnboardingActions = {
   readonly read: (providerHint: StorageProvider | null) => Promise<StorageOnboardingRead>;
 };
 
+export type StorageManagementActions = {
+  readonly beginCleanup: (
+    action: StorageCleanupAction,
+    storageProvider: StorageProvider,
+    expectedSnippetCount: number,
+  ) => Promise<StorageCleanupRunResult>;
+  readonly read: () => Promise<StorageManagementState>;
+  readonly reauthorize: (storageProvider: StorageProvider) => Promise<{ readonly url: string }>;
+  readonly retryCleanup: (storageProvider: StorageProvider) => Promise<StorageCleanupRunResult>;
+};
+
 export type WebProductContextValue = {
   readonly billing: {
     readonly beginCheckout: (plan: BillingPlan) => Promise<{ readonly url: string }>;
@@ -24,6 +42,7 @@ export type WebProductContextValue = {
   readonly retry: (() => void) | null;
   readonly signOut: (() => Promise<void>) | null;
   readonly state: AccountProductState;
+  readonly storageManagement: StorageManagementActions | null;
   readonly storageOnboarding: StorageOnboardingActions | null;
   readonly snippetActions: {
     readonly copy: (snippet: ApiSnippet) => Promise<WebSnippetCopyOutcome>;

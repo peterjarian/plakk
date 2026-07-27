@@ -2,7 +2,7 @@ import { AppHeader } from "@plakk/ui/components/AppHeader";
 import { Button } from "@plakk/ui/components/primitives/button";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useAuth } from "@workos/authkit-tanstack-react-start/client";
-import { ArrowLeft, CircleHelp, CreditCard } from "lucide-react";
+import { ArrowLeft, CircleHelp, CreditCard, HardDrive } from "lucide-react";
 
 import { useWebProduct } from "../../product/WebProductProvider.tsx";
 import { productUserFromAuth } from "../../product/product-user.ts";
@@ -63,6 +63,31 @@ function Settings() {
           >
             <CreditCard />
             Manage billing
+          </Button>
+        </section>
+        <section className="grid gap-3 rounded-xl border border-border p-5">
+          <h2 className="font-medium">Storage</h2>
+          <p className="text-sm text-muted-foreground">
+            Reconnect, unlink, or switch your linked provider using its authoritative account state.
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            className="w-fit"
+            onClick={() =>
+              void navigate({
+                to: "/storage",
+                search: {
+                  confirmation: undefined,
+                  mode: "manage",
+                  origin: "web",
+                  provider: null,
+                },
+              })
+            }
+          >
+            <HardDrive />
+            Manage storage
           </Button>
         </section>
         <section className="grid gap-3 rounded-xl border border-border p-5">

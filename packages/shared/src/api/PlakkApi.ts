@@ -118,6 +118,44 @@ export const StorageOnboardingOriginSchema = Schema.Literals(["WEB", "DESKTOP"] 
 
 export type StorageOnboardingOrigin = typeof StorageOnboardingOriginSchema.Type;
 
+export const StorageCleanupActionSchema = Schema.Literals(["UNLINK", "SWITCH"] as const);
+
+export type StorageCleanupAction = typeof StorageCleanupActionSchema.Type;
+
+const StorageSnippetCountSchema = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+
+export const StorageCleanupProgressSchema = Schema.Struct({
+  action: StorageCleanupActionSchema,
+  totalSnippetCount: StorageSnippetCountSchema,
+  remainingSnippetCount: StorageSnippetCountSchema,
+  lastFailure: Schema.NullOr(Schema.String),
+});
+
+export type StorageCleanupProgress = typeof StorageCleanupProgressSchema.Type;
+
+export const StorageManagementStateSchema = Schema.Struct({
+  storageProvider: Schema.NullOr(StorageProviderLiteral),
+  connectionStatus: StorageProviderConnectionStatusSchema,
+  externalDestinationUrl: Schema.NullOr(Schema.String),
+  affectedSnippetCount: StorageSnippetCountSchema,
+  cleanup: Schema.NullOr(StorageCleanupProgressSchema),
+});
+
+export type StorageManagementState = typeof StorageManagementStateSchema.Type;
+
+export const StorageCleanupRunResultSchema = Schema.Union([
+  Schema.Struct({
+    outcome: Schema.Literal("COMPLETED"),
+    action: StorageCleanupActionSchema,
+  }),
+  Schema.Struct({
+    outcome: Schema.Literal("PARTIAL"),
+    progress: StorageCleanupProgressSchema,
+  }),
+]);
+
+export type StorageCleanupRunResult = typeof StorageCleanupRunResultSchema.Type;
+
 export const accountCanSyncWithConnection = (
   account: AccountStatus,
   connection: StorageProviderStatus | null,
@@ -269,9 +307,23 @@ export const StorageRpcs = RpcGroup.make(
     success: StorageProviderStatusSchema,
     error: RpcError,
   }),
-  Rpc.make("UnlinkStorageProvider", {
+  Rpc.make("GetStorageManagementState", {
+    success: StorageManagementStateSchema,
+    error: RpcError,
+  }),
+  Rpc.make("BeginStorageCleanup", {
+    payload: {
+      action: StorageCleanupActionSchema,
+      confirmation: Schema.Literal("DELETE"),
+      expectedSnippetCount: StorageSnippetCountSchema,
+      storageProvider: StorageProviderLiteral,
+    },
+    success: StorageCleanupRunResultSchema,
+    error: RpcError,
+  }),
+  Rpc.make("RetryStorageCleanup", {
     payload: { storageProvider: StorageProviderLiteral },
-    success: Schema.Void,
+    success: StorageCleanupRunResultSchema,
     error: RpcError,
   }),
 );

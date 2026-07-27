@@ -19,6 +19,7 @@ export const billingAuthorityStatus = pgEnum("billing_authority_status", [
   "PAID",
   "PAST_DUE",
 ]);
+export const storageCleanupAction = pgEnum("storage_cleanup_action", ["UNLINK", "SWITCH"]);
 
 const timestamps = {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -74,6 +75,29 @@ export const accountBillingStates = pgTable(
 );
 
 export type AccountBillingStateRow = typeof accountBillingStates.$inferSelect;
+
+export const storageCleanupIntents = pgTable(
+  "storage_cleanup_intents",
+  {
+    workosUserId: text("workos_user_id").primaryKey(),
+    storageProvider: storageProvider("storage_provider").notNull(),
+    action: storageCleanupAction("action").notNull(),
+    totalSnippetCount: bigint("total_snippet_count", { mode: "number" }).notNull(),
+    attemptId: uuid("attempt_id"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    lastFailure: text("last_failure"),
+    ...timestamps,
+  },
+  (table) => [
+    check("storage_cleanup_total_nonnegative", sql`${table.totalSnippetCount} >= 0`),
+    check(
+      "storage_cleanup_lease_is_complete",
+      sql`(${table.attemptId} IS NULL) = (${table.leaseExpiresAt} IS NULL)`,
+    ),
+  ],
+);
+
+export type StorageCleanupIntentRow = typeof storageCleanupIntents.$inferSelect;
 
 export const snippets = pgTable(
   "snippets",

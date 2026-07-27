@@ -81,6 +81,7 @@ function FirstRunRouteProof() {
           localReadPerformance: "accelerated",
           snippets: [],
         },
+        storageManagement: null,
         storageOnboarding: null,
         snippetActions: null,
         snippetUploads: null,

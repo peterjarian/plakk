@@ -1,5 +1,5 @@
 import { StorageProviderLiteral, type StorageProvider as StorageProviderName } from "@plakk/shared";
-import type { PreparedStorageUpload } from "@plakk/shared/PlakkApi";
+import type { PreparedStorageUpload, StorageProviderStatus } from "@plakk/shared/PlakkApi";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -58,6 +58,10 @@ export type StorageDownloadTarget = {
 export type ConnectedStorageInput = {
   readonly storageProvider: PrepareStorageUploadInput["storageProvider"];
   readonly workosUserId: string;
+};
+
+export type BeginStorageAuthorizationInput = ConnectedStorageInput & {
+  readonly returnTo: string;
 };
 
 export class StorageNotConnectedError extends Schema.TaggedErrorClass<StorageNotConnectedError>()(
@@ -187,6 +191,12 @@ export const readStorageObjectBytes = Effect.fn("readStorageObjectBytes")(functi
 export class StorageProvider extends Context.Service<
   StorageProvider,
   {
+    readonly beginAuthorization: (
+      input: BeginStorageAuthorizationInput,
+    ) => Effect.Effect<{ readonly url: string }, StorageCredentialsError>;
+    readonly disconnect: (
+      input: ConnectedStorageInput,
+    ) => Effect.Effect<void, StorageCredentialsError>;
     readonly ensureConnected: (
       input: ConnectedStorageInput,
     ) => Effect.Effect<
@@ -202,6 +212,9 @@ export class StorageProvider extends Context.Service<
     readonly getLinkedProvider: (
       workosUserId: string,
     ) => Effect.Effect<StorageProviderName | null, StorageCredentialsError>;
+    readonly getStatus: (
+      input: ConnectedStorageInput,
+    ) => Effect.Effect<StorageProviderStatus, StorageUploadError>;
     readonly downloadObject: (
       input: Omit<DownloadStorageObjectInput, "accessToken"> & { readonly workosUserId: string },
     ) => Effect.Effect<Uint8Array, StorageDownloadError>;

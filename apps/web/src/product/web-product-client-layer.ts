@@ -17,6 +17,13 @@ import {
   readStorageOnboarding,
   StorageOnboardingClient,
 } from "./storage-onboarding-client.ts";
+import {
+  beginStorageCleanup,
+  readStorageManagement,
+  reauthorizeStorageProvider,
+  retryStorageCleanup,
+  StorageManagementClient,
+} from "./storage-management-client.ts";
 import { WebSnippetActionRemote } from "./snippet-actions.ts";
 import { WebSnippetUploadRemote } from "./snippet-upload.ts";
 
@@ -26,6 +33,7 @@ export const makeWebProductClientLayer = (options: {
 }): Layer.Layer<
   | AccountProductReader
   | BillingClient
+  | StorageManagementClient
   | StorageOnboardingClient
   | WebSnippetActionRemote
   | WebSnippetUploadRemote
@@ -50,6 +58,24 @@ export const makeWebProductClientLayer = (options: {
             BillingClient.of({
               beginCheckout: (plan) => beginBillingCheckout(rpc, options.getAccessToken, plan),
               openPortal: openBillingPortal(rpc, options.getAccessToken),
+            }),
+          ),
+          Context.add(
+            StorageManagementClient,
+            StorageManagementClient.of({
+              beginCleanup: (action, storageProvider, expectedSnippetCount) =>
+                beginStorageCleanup(
+                  rpc,
+                  options.getAccessToken,
+                  action,
+                  storageProvider,
+                  expectedSnippetCount,
+                ),
+              read: readStorageManagement(rpc, options.getAccessToken),
+              reauthorize: (storageProvider) =>
+                reauthorizeStorageProvider(rpc, options.getAccessToken, storageProvider),
+              retryCleanup: (storageProvider) =>
+                retryStorageCleanup(rpc, options.getAccessToken, storageProvider),
             }),
           ),
           Context.add(
