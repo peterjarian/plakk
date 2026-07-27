@@ -19,7 +19,7 @@ export function HomeView(props: {
   readonly state: AccountProductState;
   readonly onRetry: (() => void) | null;
   readonly onSignOut: () => void;
-  readonly signOutError: { readonly cause: unknown } | null;
+  readonly signOutError: "product-purge" | "workos" | null;
 }) {
   const { onRetry, onSignOut, signOutError, state, user } = props;
   const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
@@ -54,13 +54,24 @@ export function HomeView(props: {
             )}
         </div>
 
+        {state.kind === "ready" && state.localReadPerformance === "degraded" && (
+          <p
+            className="mb-4 rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground"
+            role="status"
+          >
+            Fast local reads are unavailable in this browser session. Plakk will keep using the
+            online service normally.
+          </p>
+        )}
+
         {signOutError !== null && (
           <div
             className="mb-4 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive"
             role="alert"
           >
-            Plakk cleared this account’s product data, but WorkOS could not sign you out. Try
-            signing out again.
+            {signOutError === "product-purge"
+              ? "Plakk could not confirm that this account’s local product data was cleared, so sign-out was stopped. Try signing out again."
+              : "Plakk cleared this account’s product data, but WorkOS could not sign you out. Try signing out again."}
           </div>
         )}
 

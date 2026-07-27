@@ -73,12 +73,28 @@ describe("Web Home", () => {
       apiAvailability: "available",
       kind: "ready",
       liveConnection: "connected",
+      localReadPerformance: "accelerated",
       snippets: [],
     });
     expect(html).toContain("Nothing added yet");
     expect(html).toContain("Published snippets from your Plakk account will appear here.");
     expect(html).not.toContain("Add something above");
     expect(html).toContain("Live updates connected");
+    expect(html).not.toContain("Fast local reads are unavailable");
+  });
+
+  it("reports session-memory fallback without hiding confirmed snippets", () => {
+    const html = render({
+      account,
+      accountId: user.id,
+      apiAvailability: "available",
+      kind: "ready",
+      liveConnection: "connected",
+      localReadPerformance: "degraded",
+      snippets: [photo],
+    });
+    expect(html).toContain("Fast local reads are unavailable");
+    expect(html).toContain("Summer photo.png");
   });
 
   it("renders account-owned published Snippets without mutation actions", () => {
@@ -88,6 +104,7 @@ describe("Web Home", () => {
       apiAvailability: "available",
       kind: "ready",
       liveConnection: "connected",
+      localReadPerformance: "accelerated",
       snippets: [photo],
     });
     expect(html).toContain("Summer photo.png");
@@ -103,6 +120,7 @@ describe("Web Home", () => {
       apiAvailability: "available",
       kind: "ready",
       liveConnection: "reconnecting",
+      localReadPerformance: "accelerated",
       snippets: [photo],
     });
     expect(html).toContain("Summer photo.png");
@@ -122,6 +140,7 @@ describe("Web Home", () => {
       }),
       kind: "ready",
       liveConnection: "connected",
+      localReadPerformance: "accelerated",
       snippets: [photo],
     });
     expect(html).toContain("Summer photo.png");
@@ -139,10 +158,25 @@ describe("Web Home", () => {
         state={{ kind: "idle" }}
         onRetry={null}
         onSignOut={vi.fn()}
-        signOutError={{ cause: new Error("WorkOS unavailable") }}
+        signOutError="workos"
       />,
     );
     expect(html).toContain("WorkOS could not sign you out");
     expect(html).toContain("Try signing out again");
+  });
+
+  it("distinguishes a fail-closed product purge from a WorkOS failure", () => {
+    const html = renderToStaticMarkup(
+      <HomeView
+        user={user}
+        state={{ kind: "idle" }}
+        onRetry={null}
+        onSignOut={vi.fn()}
+        signOutError="product-purge"
+      />,
+    );
+    expect(html).toContain("could not confirm");
+    expect(html).toContain("sign-out was stopped");
+    expect(html).not.toContain("WorkOS could not sign you out");
   });
 });

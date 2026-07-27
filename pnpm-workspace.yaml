@@ -9,12 +9,14 @@ catalog:
   "@effect/tsgo": 0.15.0
   "@types/node": 24.13.2
   "@typescript/native-preview": 7.0.0-dev.20260701.1
-  effect: 4.0.0-beta.92
+  effect: 4.0.0-beta.99
   typescript: 6.0.3
   vite: npm:@voidzero-dev/vite-plus-core@latest
   vitest: 4.1.9
   vite-plus: latest
 overrides:
+  "@effect/platform-bun@4.0.0-beta.59>@effect/platform-node-shared": 4.0.0-beta.59
+  "@effect/platform-node@4.0.0-beta.99>@effect/platform-node-shared": 4.0.0-beta.99
   vite: "catalog:"
   vitest: "catalog:"
 peerDependencyRules:

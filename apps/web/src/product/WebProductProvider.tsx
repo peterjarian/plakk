@@ -26,6 +26,8 @@ import {
   makeAccountProductReaderLayer,
   resolveProductRpcUrl,
 } from "./product-reader.ts";
+import { makeBrowserAccountProductMirrorLayer } from "./browser-readable-mirror.ts";
+import type { AccountProductMirror } from "./readable-mirror.ts";
 
 type WebProductContextValue = {
   readonly retry: (() => void) | null;
@@ -73,9 +75,14 @@ function IdentityProductResource(props: {
   readonly accountId: string;
   readonly children: ReactNode;
   readonly delegateSignOut: () => Promise<void>;
+  readonly mirrorLayer?: Layer.Layer<AccountProductMirror>;
   readonly readerLayer: Layer.Layer<AccountProductReader>;
 }) {
   const { accountId, children, delegateSignOut, readerLayer } = props;
+  // The account-keyed ProductIdentityBoundary remounts this resource; live layer swaps are unsupported.
+  const mirrorLayer = useState(
+    () => props.mirrorLayer ?? makeBrowserAccountProductMirrorLayer(accountId),
+  )[0];
   type IdentityRuntime = {
     readonly lifetimePromise: Promise<AccountProductLifetimeShape>;
     readonly runtime: ManagedRuntime.ManagedRuntime<AccountProductLifetime, never>;
@@ -94,7 +101,7 @@ function IdentityProductResource(props: {
     setActiveResource(null);
     setInitializationFailure(null);
     const runtime = ManagedRuntime.make(
-      AccountProductLifetime.layer.pipe(Layer.provide(readerLayer)),
+      AccountProductLifetime.layer.pipe(Layer.provide(Layer.merge(readerLayer, mirrorLayer))),
     );
     const lifetimePromise = runtime.runPromise(AccountProductLifetime);
     const resource = { lifetimePromise, runtime };
@@ -115,7 +122,7 @@ function IdentityProductResource(props: {
       if (resourceRef.current === resource) resourceRef.current = null;
       void runtime.dispose();
     };
-  }, [accountId, initializationAttempt, readerLayer]);
+  }, [accountId, initializationAttempt, mirrorLayer, readerLayer]);
 
   const signOut = useCallback(async () => {
     const resource = resourceRef.current;
@@ -177,6 +184,7 @@ export function ProductIdentityBoundary(props: {
   readonly accountId: string;
   readonly children: ReactNode;
   readonly delegateSignOut: () => Promise<void>;
+  readonly mirrorLayer?: Layer.Layer<AccountProductMirror>;
   readonly readerLayer: Layer.Layer<AccountProductReader>;
 }) {
   return <IdentityProductResource key={props.accountId} {...props} />;

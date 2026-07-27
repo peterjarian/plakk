@@ -10,8 +10,8 @@
     "preview": "node scripts/with-electron-native.mjs electron-vite preview"
   },
   "dependencies": {
-    "@effect/platform-node": "4.0.0-beta.92",
-    "@effect/sql-sqlite-node": "4.0.0-beta.92",
+    "@effect/platform-node": "4.0.0-beta.99",
+    "@effect/sql-sqlite-node": "4.0.0-beta.99",
     "@plakk/shared": "workspace:*",
     "@plakk/ui": "workspace:*",
     "@workos-inc/node": "^10.7.0",
@@ -23,7 +23,7 @@
     "react-dom": "^19.2.7"
   },
   "devDependencies": {
-    "@effect/vitest": "4.0.0-beta.92",
+    "@effect/vitest": "4.0.0-beta.99",
     "@electron/rebuild": "4.2.0",
     "@tailwindcss/vite": "^4.3.2",
     "@types/node": "catalog:",

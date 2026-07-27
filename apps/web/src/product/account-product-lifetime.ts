@@ -10,6 +10,11 @@ import {
   type AccountProductReadError,
   type AccountProductSnapshot,
 } from "./product-reader.ts";
+import {
+  AccountProductMirror,
+  type AccountProductMirrorError,
+  type LocalReadPerformance,
+} from "./readable-mirror.ts";
 
 const INITIAL_RECONNECT_DELAY_MILLIS = 1_000;
 const MAX_RECONNECT_DELAY_MILLIS = 30_000;
@@ -31,8 +36,9 @@ export type AccountProductState =
   | (AccountProductSnapshot & {
       readonly kind: "ready";
       readonly accountId: string;
-      readonly apiAvailability: "available";
+      readonly apiAvailability: "available" | "checking";
       readonly liveConnection: "connected" | "reconnecting";
+      readonly localReadPerformance: LocalReadPerformance;
     })
   | (AccountProductSnapshot & {
       readonly kind: "ready";
@@ -40,10 +46,11 @@ export type AccountProductState =
       readonly apiAvailability: "unavailable";
       readonly cause: AccountProductReadError;
       readonly liveConnection: "connected" | "reconnecting";
+      readonly localReadPerformance: LocalReadPerformance;
     });
 
 export interface AccountProductLifetimeShape {
-  readonly clear: Effect.Effect<void>;
+  readonly clear: Effect.Effect<void, AccountProductMirrorError>;
   readonly enter: (accountId: string) => Effect.Effect<void>;
   readonly getSnapshot: () => AccountProductState;
   readonly retry: Effect.Effect<void>;
@@ -58,13 +65,17 @@ export class AccountProductLifetime extends Context.Service<
     AccountProductLifetime,
     Effect.gen(function* () {
       const reader = yield* AccountProductReader;
+      const mirror = yield* AccountProductMirror;
+      const mirrorFiber = yield* FiberHandle.make<void, never>();
       const refreshFiber = yield* FiberHandle.make<void, never>();
       const synchronizationFiber = yield* FiberHandle.make<void, never>();
       let state: AccountProductState = { kind: "idle" };
       let activeAccountId: string | null = null;
       let generation = 0;
       let refreshSequence = 0;
+      let mirrorReadSequence = 0;
       let liveConnection: "connected" | "reconnecting" = "reconnecting";
+      let localReadPerformance = mirror.readPerformance();
       const listeners = new Set<() => void>();
 
       const publish = (next: AccountProductState) => {
@@ -94,52 +105,137 @@ export class AccountProductLifetime extends Context.Service<
       ) {
         refreshSequence += 1;
         const expectedRefreshSequence = refreshSequence;
-        yield* reader.read.pipe(
-          Effect.match({
-            onFailure: (cause) => {
-              if (
-                !isCurrent(accountId, expectedGeneration) ||
-                refreshSequence !== expectedRefreshSequence
-              ) {
-                return;
-              }
-              if (state.kind === "ready" && state.accountId === accountId) {
-                publish({
-                  account: state.account,
-                  accountId,
-                  apiAvailability: "unavailable",
-                  cause,
-                  kind: "ready",
-                  liveConnection,
-                  snippets: state.snippets,
-                });
-                return;
-              }
-              publish({ accountId, cause, kind: "failed" });
-            },
-            onSuccess: (snapshot) => {
-              if (
-                !isCurrent(accountId, expectedGeneration) ||
-                refreshSequence !== expectedRefreshSequence
-              ) {
-                return;
-              }
-              publish({
-                ...snapshot,
-                accountId,
-                apiAvailability: "available",
-                kind: "ready",
-                liveConnection,
-              });
-            },
-          }),
-        );
+        yield* mirror
+          .synchronize(
+            reader.read.pipe(
+              Effect.matchEffect({
+                onFailure: (cause) =>
+                  Effect.sync(() => {
+                    if (
+                      !isCurrent(accountId, expectedGeneration) ||
+                      refreshSequence !== expectedRefreshSequence
+                    ) {
+                      return;
+                    }
+                    if (state.kind === "ready" && state.accountId === accountId) {
+                      publish({
+                        account: state.account,
+                        accountId,
+                        apiAvailability: "unavailable",
+                        cause,
+                        kind: "ready",
+                        liveConnection,
+                        localReadPerformance,
+                        snippets: state.snippets,
+                      });
+                      return;
+                    }
+                    publish({ accountId, cause, kind: "failed" });
+                  }),
+                onSuccess: (snapshot) =>
+                  Effect.gen(function* () {
+                    if (
+                      !isCurrent(accountId, expectedGeneration) ||
+                      refreshSequence !== expectedRefreshSequence
+                    ) {
+                      return;
+                    }
+                    yield* mirror.replace(snapshot).pipe(Effect.result);
+                    localReadPerformance = mirror.readPerformance();
+                    if (
+                      !isCurrent(accountId, expectedGeneration) ||
+                      refreshSequence !== expectedRefreshSequence
+                    ) {
+                      return;
+                    }
+                    publish({
+                      ...snapshot,
+                      accountId,
+                      apiAvailability: "available",
+                      kind: "ready",
+                      liveConnection,
+                      localReadPerformance,
+                    });
+                  }),
+              }),
+            ),
+          )
+          .pipe(
+            Effect.catch(() =>
+              Effect.sync(() => {
+                localReadPerformance = mirror.readPerformance();
+                if (
+                  isCurrent(accountId, expectedGeneration) &&
+                  state.kind === "ready" &&
+                  state.accountId === accountId
+                ) {
+                  publish({ ...state, localReadPerformance });
+                }
+              }),
+            ),
+          );
       });
 
       const startRefresh = (accountId: string, expectedGeneration: number) =>
         FiberHandle.run(refreshFiber, refresh(accountId, expectedGeneration), {
           startImmediately: true,
         }).pipe(Effect.asVoid);
+
+      const readMirror = Effect.fn("AccountProductLifetime.readMirror")(function* (
+        accountId: string,
+        expectedGeneration: number,
+        change: "initial" | "purge" | "rebuild" | "replace",
+      ) {
+        mirrorReadSequence += 1;
+        const expectedMirrorReadSequence = mirrorReadSequence;
+        const mirrored = yield* mirror.read.pipe(Effect.result);
+        if (
+          !isCurrent(accountId, expectedGeneration) ||
+          mirrorReadSequence !== expectedMirrorReadSequence
+        ) {
+          return;
+        }
+        localReadPerformance = mirror.readPerformance();
+        if (mirrored._tag === "Failure") {
+          if (state.kind === "ready" && state.accountId === accountId) {
+            publish({ ...state, localReadPerformance });
+          }
+          return;
+        }
+        if (mirrored.success === null) {
+          if (change === "initial") return;
+          refreshSequence += 1;
+          publish({ accountId, kind: "loading" });
+          if (change === "purge") {
+            yield* FiberHandle.clear(synchronizationFiber);
+            yield* FiberHandle.clear(refreshFiber);
+            return;
+          }
+          yield* startRefresh(accountId, expectedGeneration);
+          return;
+        }
+
+        const current = state;
+        const common = {
+          ...mirrored.success,
+          accountId,
+          kind: "ready" as const,
+          liveConnection,
+          localReadPerformance,
+        };
+        if (current.kind === "ready" && current.apiAvailability === "unavailable") {
+          publish({
+            ...common,
+            apiAvailability: "unavailable",
+            cause: current.cause,
+          });
+          return;
+        }
+        publish({
+          ...common,
+          apiAvailability: current.kind === "ready" ? current.apiAvailability : "checking",
+        });
+      });
 
       const synchronize = Effect.fn("AccountProductLifetime.synchronize")(function* (
         accountId: string,
@@ -174,7 +270,18 @@ export class AccountProductLifetime extends Context.Service<
         refreshSequence += 1;
         activeAccountId = accountId;
         liveConnection = "reconnecting";
+        localReadPerformance = mirror.readPerformance();
         publish({ accountId, kind: "loading" });
+        yield* FiberHandle.run(
+          mirrorFiber,
+          mirror.changes.pipe(
+            Stream.runForEach((change) => readMirror(accountId, synchronizationGeneration, change)),
+            Effect.ignore,
+          ),
+          { startImmediately: true },
+        );
+        yield* Effect.yieldNow;
+        yield* readMirror(accountId, synchronizationGeneration, "initial");
         yield* FiberHandle.run(
           synchronizationFiber,
           synchronize(accountId, synchronizationGeneration),
@@ -183,13 +290,22 @@ export class AccountProductLifetime extends Context.Service<
       });
 
       const clear = Effect.gen(function* () {
+        const previousAccountId = activeAccountId;
         generation += 1;
         refreshSequence += 1;
         activeAccountId = null;
         liveConnection = "reconnecting";
-        publish({ kind: "idle" });
         yield* FiberHandle.clear(synchronizationFiber);
+        yield* FiberHandle.clear(mirrorFiber);
         yield* FiberHandle.clear(refreshFiber);
+        const purgeResult = yield* mirror.purge.pipe(Effect.result);
+        if (purgeResult._tag === "Failure") {
+          if (previousAccountId !== null) {
+            yield* start(previousAccountId);
+          }
+          return yield* purgeResult.failure;
+        }
+        publish({ kind: "idle" });
       });
 
       return AccountProductLifetime.of({

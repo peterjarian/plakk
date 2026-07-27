@@ -14,8 +14,15 @@ import {
   AccountProductLifetime,
   type AccountProductLifetimeShape,
 } from "../../src/product/account-product-lifetime.ts";
+import { makeBrowserAccountProductMirrorLayer } from "../../src/product/browser-readable-mirror.ts";
 import { AccountProductReader } from "../../src/product/product-reader.ts";
 import "../../src/styles.css";
+
+const query = new URLSearchParams(location.search);
+const accountId = query.get("account") ?? "controlled-user";
+const forceSessionMemory = query.get("force-session-memory") === "true";
+const holdBackendRefresh = query.get("hold-backend-refresh") === "true";
+const startBackendUnavailable = query.get("backend-unavailable") === "true";
 
 const account: AccountStatus = {
   canSync: true,
@@ -24,7 +31,7 @@ const account: AccountStatus = {
 };
 
 const user: User = {
-  id: "controlled-user",
+  id: accountId,
   email: "browser-proof@example.com",
   firstName: "Browser",
   lastName: "Proof",
@@ -45,7 +52,8 @@ const snippet = (id: string, fileName: string): ApiSnippet => ({
 let snapshot: ReadonlyArray<ApiSnippet> = [
   snippet("0d1e2f3a-4567-4890-8abc-def012345678", "Initial snapshot.png"),
 ];
-let apiUnavailable = false;
+let apiUnavailable = startBackendUnavailable;
+let nextBackendReadDelayMillis = 0;
 let activeController: ReadableStreamDefaultController<void> | null = null;
 
 const invalidations = Stream.fromReadableStream({
@@ -70,19 +78,38 @@ const readerLayer = Layer.succeed(
   AccountProductReader,
   AccountProductReader.of({
     invalidations,
-    read: Effect.suspend(() =>
-      apiUnavailable
-        ? Effect.fail(
-            new RpcError({
-              code: "INTERNAL_SERVER_ERROR",
-              message: "controlled API outage",
-            }),
-          )
-        : Effect.succeed({ account, snippets: snapshot }),
-    ),
+    read: Effect.suspend(() => {
+      if (holdBackendRefresh) return Effect.never;
+      if (apiUnavailable) {
+        return Effect.fail(
+          new RpcError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "controlled API outage",
+          }),
+        );
+      }
+      const response = { account, snippets: snapshot };
+      if (nextBackendReadDelayMillis === 0) return Effect.succeed(response);
+      const delayMillis = nextBackendReadDelayMillis;
+      nextBackendReadDelayMillis = 0;
+      document.documentElement.dataset.backendReadStarted = "true";
+      return Effect.sleep(`${delayMillis} millis`).pipe(Effect.as(response));
+    }),
   }),
 );
-const runtime = ManagedRuntime.make(AccountProductLifetime.layer.pipe(Layer.provide(readerLayer)));
+let delayNextMirrorWrite: () => void = () => undefined;
+const mirrorLayer = makeBrowserAccountProductMirrorLayer(accountId, {
+  forceSessionMemory,
+  installTestWriteDelay: (setDelay) => {
+    delayNextMirrorWrite = () => setDelay(10_000);
+  },
+  onTestWriteStarted: () => {
+    document.documentElement.dataset.mirrorWriteStarted = "true";
+  },
+});
+const runtime = ManagedRuntime.make(
+  AccountProductLifetime.layer.pipe(Layer.provide(Layer.merge(readerLayer, mirrorLayer))),
+);
 const lifetimePromise = runtime.runPromise(AccountProductLifetime);
 
 const invalidate = () => activeController?.enqueue(undefined);
@@ -97,11 +124,52 @@ function Controls() {
         type="button"
         size="sm"
         onClick={() => {
+          snapshot = [snippet("4d1e2f3a-4567-4890-8abc-def012345672", "Stale snapshot.png")];
+          nextBackendReadDelayMillis = 3_000;
+          invalidate();
+        }}
+      >
+        Start stale delayed refresh
+      </Button>
+      <Button
+        type="button"
+        size="sm"
+        onClick={() => {
           snapshot = [snippet("1d1e2f3a-4567-4890-8abc-def012345679", "Replacement snapshot.png")];
           invalidate();
         }}
       >
         Replace snapshot
+      </Button>
+      <Button
+        type="button"
+        size="sm"
+        onClick={() => {
+          snapshot = [snippet("2d1e2f3a-4567-4890-8abc-def012345670", "After close.png")];
+          invalidate();
+        }}
+      >
+        Replace after close
+      </Button>
+      <Button
+        type="button"
+        size="sm"
+        onClick={() => {
+          delayNextMirrorWrite();
+          snapshot = [snippet("3d1e2f3a-4567-4890-8abc-def012345671", "Interrupted candidate.png")];
+          invalidate();
+        }}
+      >
+        Start interruptible replacement
+      </Button>
+      <Button
+        type="button"
+        size="sm"
+        onClick={() => {
+          void lifetimePromise.then((lifetime) => runtime.runPromise(lifetime.clear));
+        }}
+      >
+        Purge account facts
       </Button>
       <Button
         type="button"
@@ -164,7 +232,7 @@ function Product() {
     let mounted = true;
     void lifetimePromise.then((productLifetime) => {
       if (!mounted) return;
-      runtime.runFork(productLifetime.enter(user.id));
+      runtime.runFork(productLifetime.enter(accountId));
       setLifetime(productLifetime);
     });
     return () => {
