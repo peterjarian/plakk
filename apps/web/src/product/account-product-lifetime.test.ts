@@ -100,6 +100,48 @@ describe("account product lifetime", () => {
     ),
   );
 
+  it.effect("removes stale facts when another tab purges the readable mirror", () =>
+    Effect.gen(function* () {
+      const mirrorChanged = yield* Deferred.make<void>();
+      let mirrored: AccountProductSnapshot | null = {
+        account,
+        snippets: [snippet("mirrored")],
+      };
+      const mirrorLayer = Layer.succeed(
+        AccountProductMirror,
+        AccountProductMirror.of({
+          changes: Stream.fromEffect(Deferred.await(mirrorChanged)).pipe(
+            Stream.concat(Stream.never),
+          ),
+          purge: Effect.sync(() => {
+            mirrored = null;
+          }),
+          read: Effect.sync(() => mirrored),
+          readPerformance: "accelerated",
+          replace: (snapshot) =>
+            Effect.sync(() => {
+              mirrored = snapshot;
+            }),
+        }),
+      );
+
+      yield* Effect.gen(function* () {
+        const lifetime = yield* AccountProductLifetime;
+        yield* lifetime.enter("user_1");
+        expect(lifetime.getSnapshot()).toMatchObject({
+          kind: "ready",
+          snippets: [snippet("mirrored")],
+        });
+
+        mirrored = null;
+        yield* Deferred.succeed(mirrorChanged, undefined);
+        yield* Effect.yieldNow;
+
+        expect(lifetime.getSnapshot()).toEqual({ accountId: "user_1", kind: "loading" });
+      }).pipe(Effect.provide(provideLifetime(Effect.never, Stream.never, mirrorLayer)));
+    }),
+  );
+
   it.effect("loads one authoritative account snapshot for the active identity", () => {
     const expectedSnippet = snippet(crypto.randomUUID());
     return Effect.gen(function* () {

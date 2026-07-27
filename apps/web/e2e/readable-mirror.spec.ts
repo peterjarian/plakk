@@ -29,10 +29,11 @@ test("an account mirror converges across tabs, survives handoff, reopens, and pu
   const first = await context.newPage();
   const second = await context.newPage();
 
-  await first.goto(url);
-  await expect(first.getByText("Initial snapshot.png")).toBeVisible({ timeout: 20_000 });
-  await second.goto(url);
-  await expect(second.getByText("Initial snapshot.png")).toBeVisible();
+  await Promise.all([first.goto(url), second.goto(url)]);
+  await Promise.all([
+    expect(first.getByText("Initial snapshot.png")).toBeVisible({ timeout: 20_000 }),
+    expect(second.getByText("Initial snapshot.png")).toBeVisible({ timeout: 20_000 }),
+  ]);
   await expect(first.getByText("Fast local reads are unavailable")).toHaveCount(0);
   await expect(second.getByText("Fast local reads are unavailable")).toHaveCount(0);
 
@@ -41,6 +42,7 @@ test("an account mirror converges across tabs, survives handoff, reopens, and pu
   await expect(second.getByText("Replacement snapshot.png")).toBeVisible({ timeout: 25_000 });
 
   await first.getByRole("button", { name: "Start interruptible replacement" }).click();
+  await expect(first.locator("html")).toHaveAttribute("data-mirror-write-started", "true");
   await first.close();
 
   await second.getByRole("button", { name: "Replace after close" }).click();
@@ -51,10 +53,12 @@ test("an account mirror converges across tabs, survives handoff, reopens, and pu
   await expect(reopened.getByText("After close.png")).toBeVisible({ timeout: 20_000 });
   await expect(reopened.getByText("Fast local reads are unavailable")).toHaveCount(0);
 
-  await second.close();
   await reopened.getByRole("button", { name: "Purge account facts" }).click();
   await expect(reopened.getByText("After close.png")).toHaveCount(0);
+  await expect(second.getByText("After close.png")).toHaveCount(0);
+  await expect(second.getByText("Loading snippets")).toBeVisible();
 
+  await second.close();
   const afterPurge = await context.newPage();
   await afterPurge.goto(controlledUrl(accountId, { holdBackendRefresh: true }));
   await expect(afterPurge.getByText("Loading snippets")).toBeVisible();

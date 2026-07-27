@@ -90,7 +90,16 @@ const readerLayer = Layer.succeed(
     ),
   }),
 );
-const mirrorLayer = makeBrowserAccountProductMirrorLayer(accountId, { forceSessionMemory });
+let delayNextMirrorWrite: () => void = () => undefined;
+const mirrorLayer = makeBrowserAccountProductMirrorLayer(accountId, {
+  forceSessionMemory,
+  installTestWriteDelay: (setDelay) => {
+    delayNextMirrorWrite = () => setDelay(10_000);
+  },
+  onTestWriteStarted: () => {
+    document.documentElement.dataset.mirrorWriteStarted = "true";
+  },
+});
 const runtime = ManagedRuntime.make(
   AccountProductLifetime.layer.pipe(Layer.provide(Layer.merge(readerLayer, mirrorLayer))),
 );
@@ -128,6 +137,7 @@ function Controls() {
         type="button"
         size="sm"
         onClick={() => {
+          delayNextMirrorWrite();
           snapshot = [snippet("3d1e2f3a-4567-4890-8abc-def012345671", "Interrupted candidate.png")];
           invalidate();
         }}

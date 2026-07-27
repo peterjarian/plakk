@@ -31,6 +31,61 @@ export class AccountProductMirror extends Context.Service<
   AccountProductMirrorShape
 >()("@plakk/web/product/readable-mirror/AccountProductMirror") {}
 
+export const makeRuntimeFallbackAccountProductMirror = (
+  primary: AccountProductMirrorShape,
+): AccountProductMirrorShape => {
+  let sessionSnapshot: AccountProductSnapshot | null = null;
+  let useSessionMemory = false;
+
+  const read = Effect.suspend(() => {
+    if (useSessionMemory) return Effect.succeed(sessionSnapshot);
+    return primary.read.pipe(
+      Effect.catch((error) =>
+        Effect.sync(() => {
+          useSessionMemory = true;
+        }).pipe(Effect.andThen(Effect.fail(error))),
+      ),
+    );
+  });
+
+  const replace = Effect.fn("AccountProductMirror.runtimeFallbackReplace")(function* (
+    snapshot: AccountProductSnapshot,
+  ) {
+    if (useSessionMemory) {
+      sessionSnapshot = snapshot;
+      return;
+    }
+    yield* primary.replace(snapshot).pipe(
+      Effect.catch((error) =>
+        Effect.sync(() => {
+          sessionSnapshot = snapshot;
+          useSessionMemory = true;
+        }).pipe(Effect.andThen(Effect.fail(error))),
+      ),
+    );
+  });
+
+  const purge = Effect.suspend(() => {
+    sessionSnapshot = null;
+    if (useSessionMemory) return Effect.void;
+    return primary.purge.pipe(
+      Effect.catch((error) =>
+        Effect.sync(() => {
+          useSessionMemory = true;
+        }).pipe(Effect.andThen(Effect.fail(error))),
+      ),
+    );
+  });
+
+  return AccountProductMirror.of({
+    changes: primary.changes,
+    purge,
+    read,
+    readPerformance: primary.readPerformance,
+    replace,
+  });
+};
+
 export const makeSessionMemoryAccountProductMirrorLayer = (options?: {
   readonly initial?: AccountProductSnapshot | null;
   readonly readPerformance?: LocalReadPerformance;

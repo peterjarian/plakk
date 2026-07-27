@@ -12,6 +12,7 @@ import type { AccountProductSnapshot } from "./product-reader.ts";
 import {
   AccountProductMirror,
   AccountProductMirrorError,
+  makeRuntimeFallbackAccountProductMirror,
   makeSessionMemoryAccountProductMirrorLayer,
 } from "./readable-mirror.ts";
 
@@ -72,11 +73,11 @@ const isTransientLock = (error: unknown): boolean =>
       description.includes("SerializationError"),
   );
 
-const retryTransientLock = <A, E, R>(
+const retryTransientLock = Effect.fn("WebReadableMirror.retryTransientLock")(function* <A, E, R>(
   operation: Effect.Effect<A, E, R>,
   remaining = MAX_LOCK_RETRIES,
-): Effect.Effect<A, E, R> =>
-  operation.pipe(
+): Effect.fn.Return<A, E, R> {
+  return yield* operation.pipe(
     Effect.catch((error) =>
       remaining > 0 && isTransientLock(error)
         ? Effect.sleep(LOCK_RETRY_DELAY).pipe(
@@ -85,15 +86,16 @@ const retryTransientLock = <A, E, R>(
         : Effect.fail(error),
     ),
   );
+});
 
 const mapMirrorError = (reason: string) => (cause: unknown) =>
   new AccountProductMirrorError({ cause, reason });
 
-const withMigrationLock = <A, E>(
+const withMigrationLock = Effect.fn("WebReadableMirror.withMigrationLock")(function* <A, E>(
   lockName: string,
   migration: Effect.Effect<A, E>,
-): Effect.Effect<A, AccountProductMirrorError> =>
-  Effect.tryPromise({
+): Effect.fn.Return<A, AccountProductMirrorError> {
+  return yield* Effect.tryPromise({
     try: (signal) =>
       navigator.locks.request(lockName, { signal }, () =>
         Effect.runPromise(retryTransientLock(migration)),
@@ -103,6 +105,7 @@ const withMigrationLock = <A, E>(
     Effect.timeout(`${MIGRATION_LOCK_TIMEOUT_MILLIS} millis`),
     Effect.mapError(mapMirrorError("Could not serialize readable mirror migrations.")),
   );
+});
 
 const makeSqlAccountProductMirrorLayer = (
   channelName: string,
@@ -183,13 +186,15 @@ const makeSqlAccountProductMirrorLayer = (
         yield* Effect.sync(() => channel.postMessage(undefined));
       });
 
-      return AccountProductMirror.of({
-        changes: Stream.fromPubSub(notifications),
-        purge: purgeSql.pipe(Effect.tap(() => Effect.sync(() => channel.postMessage(undefined)))),
-        read,
-        readPerformance: "accelerated",
-        replace,
-      });
+      return makeRuntimeFallbackAccountProductMirror(
+        AccountProductMirror.of({
+          changes: Stream.fromPubSub(notifications),
+          purge: purgeSql.pipe(Effect.tap(() => Effect.sync(() => channel.postMessage(undefined)))),
+          read,
+          readPerformance: "accelerated",
+          replace,
+        }),
+      );
     }),
   );
 
@@ -208,27 +213,38 @@ export const supportsDurableReadableMirror = (browser: BrowserCapabilities = glo
   typeof browser.navigator?.locks?.request === "function" &&
   typeof browser.navigator?.storage?.getDirectory === "function";
 
-const accountDatabaseId = (accountId: string): string =>
-  `plakk-readable-mirror-${encodeURIComponent(accountId)}`;
-
 export const makeBrowserAccountProductMirrorLayer = (
   accountId: string,
-  options?: { readonly forceSessionMemory?: boolean },
+  options?: {
+    readonly forceSessionMemory?: boolean;
+    readonly installTestWriteDelay?: (setDelay: (milliseconds: number) => void) => void;
+    readonly onTestWriteStarted?: () => void;
+  },
 ): Layer.Layer<AccountProductMirror> => {
   if (options?.forceSessionMemory === true || !supportsDurableReadableMirror()) {
     return makeSessionMemoryAccountProductMirrorLayer();
   }
 
-  const databaseId = accountDatabaseId(accountId);
+  const databaseId = `plakk-readable-mirror-${encodeURIComponent(accountId)}`;
   const sqliteLayer = SqliteClient.layer({
     worker: Effect.acquireRelease(
-      Effect.sync(
-        () =>
-          new Worker(new URL("./readable-mirror-worker.ts", import.meta.url), {
-            name: databaseId,
-            type: "module",
-          }),
-      ),
+      Effect.sync(() => {
+        const worker = new Worker(new URL("./readable-mirror-worker.ts", import.meta.url), {
+          name: databaseId,
+          type: "module",
+        });
+        if (options?.onTestWriteStarted !== undefined) {
+          worker.addEventListener("message", (event) => {
+            if (event.data?.[0] === "plakk_test_write_started") {
+              options.onTestWriteStarted?.();
+            }
+          });
+        }
+        options?.installTestWriteDelay?.((milliseconds) => {
+          worker.postMessage(["plakk_test_write_delay", milliseconds]);
+        });
+        return worker;
+      }),
       (worker) => Effect.sync(() => worker.terminate()),
     ),
   });

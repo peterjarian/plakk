@@ -11,6 +11,7 @@ type WorkerMessage =
   | ["import", id: number, data: Uint8Array]
   | ["export", id: number]
   | ["update_hook"]
+  | ["plakk_test_write_delay", milliseconds: number]
   | ["close"];
 
 interface RetryableModule {
@@ -34,9 +35,6 @@ const withOwnershipHandoff = async <A>(module: RetryableModule, operation: () =>
   }
 };
 
-const classifyError = (cause: unknown, message: string, operation: string) =>
-  classifySqliteError(cause, { message, operation });
-
 const run = Effect.gen(function* () {
   const factory = yield* Effect.promise(() => SQLiteESMFactory());
   const sqlite3 = WaSqlite.Factory(factory);
@@ -51,13 +49,17 @@ const run = Effect.gen(function* () {
         ),
       catch: (cause) =>
         new SqlError({
-          reason: classifyError(cause, "Failed to open readable mirror", "openDatabase"),
+          reason: classifySqliteError(cause, {
+            message: "Failed to open readable mirror",
+            operation: "openDatabase",
+          }),
         }),
     }),
     (handle) => Effect.sync(() => sqlite3.close(handle)),
   );
 
   return yield* Effect.callback<void>((resume) => {
+    let testWriteDelayMillis = 0;
     const onMessage = async (event: MessageEvent<WorkerMessage>) => {
       let messageId = -1;
       try {
@@ -89,9 +91,24 @@ const run = Effect.gen(function* () {
             });
             return;
           }
+          case "plakk_test_write_delay": {
+            testWriteDelayMillis = message[1];
+            return;
+          }
           default: {
             const [id, sql, params] = message;
             messageId = id;
+            const isTestDelayedWrite =
+              testWriteDelayMillis > 0 && sql.includes("INSERT INTO readable_mirror");
+            if (isTestDelayedWrite) {
+              await withOwnershipHandoff(factory as RetryableModule, () => {
+                for (const statement of sqlite3.statements(database, "BEGIN IMMEDIATE")) {
+                  sqlite3.step(statement);
+                }
+              });
+              workerScope.postMessage(["plakk_test_write_started", undefined, undefined]);
+              await Effect.runPromise(Effect.sleep(`${testWriteDelayMillis} millis`));
+            }
             const [columns, rows] = await withOwnershipHandoff(factory as RetryableModule, () => {
               const rows: Array<Array<unknown>> = [];
               let columns: Array<string> | undefined;
@@ -104,6 +121,13 @@ const run = Effect.gen(function* () {
               }
               return [columns, rows] as const;
             });
+            if (isTestDelayedWrite) {
+              await withOwnershipHandoff(factory as RetryableModule, () => {
+                for (const statement of sqlite3.statements(database, "COMMIT")) {
+                  sqlite3.step(statement);
+                }
+              });
+            }
             workerScope.postMessage([id, undefined, [columns, rows]]);
           }
         }
@@ -122,6 +146,22 @@ const run = Effect.gen(function* () {
   });
 }).pipe(Effect.scoped);
 
+const activateUnavailableProtocol = () => {
+  const onMessage = (event: MessageEvent<WorkerMessage>) => {
+    const message = event.data;
+    if (message[0] === "close") {
+      workerScope.close();
+      return;
+    }
+    const messageId = typeof message[0] === "number" ? message[0] : message[1];
+    if (typeof messageId === "number") {
+      workerScope.postMessage([messageId, "Readable mirror is unavailable.", undefined]);
+    }
+  };
+  workerScope.addEventListener("message", onMessage);
+  workerScope.postMessage(["ready", undefined, undefined]);
+};
+
 void Effect.runPromise(
   run.pipe(Effect.tapCause((cause) => Effect.logError("Readable mirror worker failed", cause))),
-);
+).catch(activateUnavailableProtocol);

@@ -223,7 +223,12 @@ export class AccountProductLifetime extends Context.Service<
                     localReadPerformance = "degraded";
                   },
                   onSuccess: (snapshot) => {
-                    if (snapshot === null || !isCurrent(accountId, synchronizationGeneration)) {
+                    if (!isCurrent(accountId, synchronizationGeneration)) {
+                      return;
+                    }
+                    if (snapshot === null) {
+                      refreshSequence += 1;
+                      publish({ accountId, kind: "loading" });
                       return;
                     }
                     const current = state;
