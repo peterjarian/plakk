@@ -7,6 +7,7 @@ import { SnippetList } from "@plakk/ui/components/SnippetList";
 import { SnippetRow } from "@plakk/ui/components/SnippetRow";
 import { Button } from "@plakk/ui/components/primitives/button";
 import { Checkbox } from "@plakk/ui/components/primitives/checkbox";
+import * as DateTime from "effect/DateTime";
 import { SyncStatusIndicator, type SyncStatus } from "../components/SyncStatusIndicator.tsx";
 import { signOut, useAuth } from "../hooks/useAuth.ts";
 import { useSnippets } from "../hooks/useSnippets.ts";
@@ -24,6 +25,7 @@ import { ipcActionErrorMessage } from "../lib/ipcActionErrorMessage.ts";
 import { ingestFileSnippet, ingestTextSnippet } from "../lib/snippetIngestion.ts";
 
 const accountSetupUrl = "https://app.plakk.io/account/setup";
+const billingUrl = "https://app.plakk.io/billing";
 export const STORAGE_WARNING_BYTES = 30 * 1024 * 1024 * 1024;
 export const shouldWarnForStorageUsage = (bytes: number) => bytes > STORAGE_WARNING_BYTES;
 
@@ -34,6 +36,10 @@ export function Home({ active = true }: { active?: boolean }) {
   const localState = useLocalState().localState;
   const liveConnection = localState.liveConnection;
   const billingRestricted = billingRestrictedFromLocalState(localState);
+  const entitlement =
+    localState.capability.status === "ONLINE"
+      ? localState.capability.account.accessEntitlement
+      : null;
   const [isDragging, setIsDragging] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copyingId, setCopyingId] = useState<string | null>(null);
@@ -81,8 +87,9 @@ export function Home({ active = true }: { active?: boolean }) {
           : storageStatus.kind === "needs-reauthorization"
             ? `Sync paused. Reconnect ${storageProviderLabel(storageStatus.provider)} to add snippets.`
             : "Sync paused. Finish storage setup to add snippets.";
-  const syncSetupUrl =
-    storageStatus.kind === "unlinked" || storageStatus.kind === "needs-reauthorization"
+  const syncSetupUrl = billingRestricted
+    ? billingUrl
+    : storageStatus.kind === "unlinked" || storageStatus.kind === "needs-reauthorization"
       ? storageStatus.actionUrl
       : accountSetupUrl;
 
@@ -362,6 +369,32 @@ export function Home({ active = true }: { active?: boolean }) {
               <span className="min-w-0 flex-1 truncate">{auth.issue.message}</span>
             </div>
           )}
+          {entitlement?.status === "GRACE_ACTIVE" && (
+            <div
+              className="mb-2 flex items-center gap-2 rounded-md bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive"
+              role="alert"
+            >
+              <TriangleAlert className="size-3.5 shrink-0" aria-hidden="true" />
+              <span className="min-w-0 flex-1">
+                Payment needs attention. Normal use continues through{" "}
+                {DateTime.formatUtc(entitlement.graceEndsAt, {
+                  dateStyle: "long",
+                  locale: "en",
+                  timeStyle: "short",
+                })}
+                .
+              </span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                onClick={() => openStorageSetup(billingUrl)}
+              >
+                Recover billing
+                <ArrowUpRight />
+              </Button>
+            </div>
+          )}
           {accountBlocked &&
             storageStatus.kind !== "loading" &&
             storageStatus.kind !== "offline" &&
@@ -375,7 +408,7 @@ export function Home({ active = true }: { active?: boolean }) {
                   size="xs"
                   onClick={() => openStorageSetup(syncSetupUrl)}
                 >
-                  Finish on web
+                  {billingRestricted ? "Recover billing" : "Finish on web"}
                   <ArrowUpRight />
                 </Button>
               </div>

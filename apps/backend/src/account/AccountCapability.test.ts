@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { DateTime, Effect, Layer } from "effect";
 import { TestClock } from "effect/testing";
 
+import { AccountBilling, entitlementFromBillingState } from "../billing/AccountBilling.ts";
 import {
   AccountCapability,
   AccountTrialRepository,
@@ -56,17 +57,33 @@ const storageService = (
     ...overrides,
   });
 
+const billingService = (
+  overrides: Partial<AccountBilling["Service"]> = {},
+): AccountBilling["Service"] =>
+  AccountBilling.of({
+    beginCheckout: () => Effect.succeed({ url: "https://checkout.example" }),
+    getEntitlement: (_workosUserId, trial) =>
+      DateTime.now.pipe(
+        Effect.map((now) => entitlementFromBillingState(trial, null, DateTime.toEpochMillis(now))),
+      ),
+    handleWebhook: () => Effect.void,
+    openPortal: () => Effect.succeed({ url: "https://portal.example" }),
+    ...overrides,
+  });
+
 const runCapability = <A, E>(
   use: (capability: AccountCapability["Service"]) => Effect.Effect<A, E>,
   options?: {
     readonly repository?: ReturnType<typeof makeTrialRepository>;
     readonly storage?: StorageProvider["Service"];
+    readonly billing?: AccountBilling["Service"];
   },
 ) => {
   const repository = options?.repository ?? makeTrialRepository();
   const capabilityLayer = AccountCapability.layer.pipe(
     Layer.provide(repository.layer),
     Layer.provide(Layer.succeed(StorageProvider, options?.storage ?? storageService())),
+    Layer.provide(Layer.succeed(AccountBilling, options?.billing ?? billingService())),
   );
   return Effect.runPromise(
     Effect.gen(function* () {
@@ -77,6 +94,30 @@ const runCapability = <A, E>(
 };
 
 describe("account trial capability", () => {
+  it("consults billing authority on the first status read after creating the trial", async () => {
+    const getEntitlement = vi.fn(() =>
+      Effect.succeed({
+        status: "BILLING_RESTRICTED" as const,
+      }),
+    );
+
+    const status = await runCapability(
+      (capability) =>
+        Effect.gen(function* () {
+          yield* TestClock.setTime(trialStartMillis);
+          return yield* capability.getStatus("user-1");
+        }),
+      { billing: billingService({ getEntitlement }) },
+    );
+
+    expect(getEntitlement).toHaveBeenCalledTimes(1);
+    expect(getEntitlement).toHaveBeenCalledWith(
+      "user-1",
+      expect.objectContaining({ workosUserId: "user-1" }),
+    );
+    expect(status.accessEntitlement).toEqual({ status: "BILLING_RESTRICTED" });
+  });
+
   it("creates one immutable 14-day trial under concurrent first sign-ins", async () => {
     const repository = makeTrialRepository();
 
@@ -96,9 +137,15 @@ describe("account trial capability", () => {
     expect(repository.trials.get("user-1")?.startedAt.toISOString()).toBe(
       "2026-07-27T10:15:30.000Z",
     );
-    expect(new Set(entitlements.map(({ trialEndsAt }) => DateTime.formatIso(trialEndsAt)))).toEqual(
-      new Set(["2026-08-10T10:15:30.000Z"]),
-    );
+    expect(
+      new Set(
+        entitlements.map((entitlement) =>
+          entitlement.status === "TRIAL_ACTIVE"
+            ? DateTime.formatIso(entitlement.trialEndsAt)
+            : entitlement.status,
+        ),
+      ),
+    ).toEqual(new Set(["2026-08-10T10:15:30.000Z"]));
   });
 
   it("never restarts a trial from a later browser or client", async () => {
@@ -163,6 +210,33 @@ describe("account trial capability", () => {
 
     expect(active.blockedReasons).toEqual(["storage"]);
     expect(expired.blockedReasons).toEqual(["billing", "storage"]);
+  });
+
+  it("preserves storage restriction when backend-confirmed paid recovery clears billing", async () => {
+    const repository = makeTrialRepository();
+    const noStorage = storageService({ getLinkedProvider: () => Effect.succeed(null) });
+    const billing = billingService({
+      getEntitlement: () =>
+        Effect.succeed({
+          status: "PAID_ACTIVE",
+          paidThrough: DateTime.makeUnsafe("2026-09-10T00:00:00.000Z"),
+          cancelAtPeriodEnd: false,
+        }),
+    });
+
+    const recovered = await runCapability(
+      (capability) =>
+        Effect.gen(function* () {
+          yield* TestClock.setTime(trialStartMillis);
+          yield* capability.startTrial("user-1");
+          return yield* capability.getStatus("user-1");
+        }),
+      { billing, repository, storage: noStorage },
+    );
+
+    expect(recovered.accessEntitlement.status).toBe("PAID_ACTIVE");
+    expect(recovered.blockedReasons).toEqual(["storage"]);
+    expect(recovered.canSync).toBe(false);
   });
 
   it("keeps entitlement status available when linked-storage lookup fails", async () => {

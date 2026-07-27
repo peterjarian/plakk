@@ -144,7 +144,6 @@ describe("local state views", () => {
       account: {
         accessEntitlement: {
           status: "BILLING_RESTRICTED",
-          trialEndsAt: DateTime.makeUnsafe("2026-08-10T00:00:00.000Z"),
         },
         canSync: false,
         storageProvider: "GOOGLE_DRIVE",
@@ -174,6 +173,7 @@ describe("local state views", () => {
       expect(markup).toMatch(/disabled=""[^>]+aria-label="Open link"/);
       expect(markup).not.toMatch(/disabled=""[^>]+aria-label="Delete"/);
     }
+    expect(home).toContain("Recover billing");
 
     state.setCapability({ status: "OFFLINE" });
     state.setSnippet({
@@ -182,6 +182,57 @@ describe("local state views", () => {
       localTextPreview: "same",
       localContentAvailability: { status: "AVAILABLE" },
     });
+  });
+
+  it("presents exact trial upgrades and prominent grace recovery from backend state", () => {
+    state.setCapability({
+      status: "ONLINE",
+      account: {
+        accessEntitlement: {
+          status: "TRIAL_ACTIVE",
+          trialEndsAt: DateTime.makeUnsafe("2026-08-10T10:15:30.000Z"),
+        },
+        canSync: true,
+        storageProvider: "GOOGLE_DRIVE",
+        blockedReasons: [],
+      },
+      connection: {
+        storageProvider: "GOOGLE_DRIVE",
+        status: "CONNECTED",
+        externalDestinationUrl: "https://drive.google.com/drive/folders/plakk",
+      },
+    });
+
+    const trialSettings = renderToStaticMarkup(<Settings />);
+    expect(trialSettings).toContain("Billing starts immediately.");
+    expect(trialSettings).toContain("permanently ends unused trial time");
+    expect(trialSettings).toContain("August 10, 2026 at 10:15 AM");
+    expect(trialSettings).toContain(">Upgrade<");
+
+    state.setCapability({
+      status: "ONLINE",
+      account: {
+        accessEntitlement: {
+          status: "GRACE_ACTIVE",
+          graceEndsAt: DateTime.makeUnsafe("2026-08-17T10:15:30.000Z"),
+        },
+        canSync: true,
+        storageProvider: "GOOGLE_DRIVE",
+        blockedReasons: [],
+      },
+      connection: {
+        storageProvider: "GOOGLE_DRIVE",
+        status: "CONNECTED",
+        externalDestinationUrl: "https://drive.google.com/drive/folders/plakk",
+      },
+    });
+
+    const graceHome = renderToStaticMarkup(<Home />);
+    expect(graceHome).toContain("Payment needs attention.");
+    expect(graceHome).toContain("August 17, 2026 at 10:15 AM");
+    expect(graceHome).toContain("Recover billing");
+
+    state.setCapability({ status: "OFFLINE" });
   });
 
   it("warns above 30 GiB and links Home to the Settings storage controls", () => {

@@ -73,7 +73,6 @@ describe("storage onboarding reconstruction", () => {
         account({
           accessEntitlement: {
             status: "BILLING_RESTRICTED",
-            trialEndsAt: DateTime.makeUnsafe("2026-08-10T00:00:00.000Z"),
           },
           blockedReasons: ["billing"],
           canSync: false,

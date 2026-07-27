@@ -9,10 +9,12 @@ import { accountNeedsStorageOnboarding } from "./storage-onboarding.ts";
 import { useWebProduct } from "./web-product-context.tsx";
 
 export function AuthenticatedHome(props: {
+  readonly onBilling: () => void;
+  readonly onSettings: () => void;
   readonly onStorageOnboardingRequired: () => void;
   readonly user: User;
 }) {
-  const { onStorageOnboardingRequired, user } = props;
+  const { onBilling, onSettings, onStorageOnboardingRequired, user } = props;
   const product = useWebProduct();
   const upload = useCallback(
     (
@@ -90,6 +92,8 @@ export function AuthenticatedHome(props: {
         );
       }}
       onDismissUpload={(id) => void product.snippetUploads?.dismiss(id)}
+      onBilling={onBilling}
+      onSettings={onSettings}
       onStorageReconnect={onStorageOnboardingRequired}
       snippetActions={product.snippetActions}
       uploadsDisabled={uploadProvider === null || product.snippetUploads === null}

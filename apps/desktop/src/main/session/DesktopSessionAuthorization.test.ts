@@ -230,7 +230,6 @@ describe("DesktopSession command authority", () => {
             Effect.succeed({
               accessEntitlement: {
                 status: "BILLING_RESTRICTED",
-                trialEndsAt: DateTime.makeUnsafe("2026-08-10T00:00:00.000Z"),
               },
               canSync: false,
               storageProvider: "GOOGLE_DRIVE",
@@ -352,6 +351,93 @@ describe("DesktopSession command authority", () => {
         Effect.provide(TestClock.layer()),
       );
     }),
+  );
+
+  it.effect(
+    "refreshes renewable paid authority at paid-through instead of inferring restriction",
+    () =>
+      Effect.gen(function* () {
+        let accountReads = 0;
+        let currentLocalState: LocalStateValue = {
+          revision: 1,
+          account: firstAccount,
+          provider: { known: true, value: "GOOGLE_DRIVE" },
+          capability: { status: "OFFLINE" },
+          liveConnection: null,
+          storageUsageBytes: 0,
+          snippets: [],
+        };
+        const layer = dependencies({
+          getSession: () => Effect.succeed({ accessToken: "token", user: firstAccount }),
+          currentLocalState: Effect.sync(() => currentLocalState),
+          localStateUpdates: [],
+          purge: () => Effect.void,
+          updateLocalState: (update) =>
+            Effect.sync(() => {
+              if (update.kind === "online") {
+                currentLocalState = {
+                  ...currentLocalState,
+                  account: update.account,
+                  capability: {
+                    status: "ONLINE",
+                    account: update.accountStatus,
+                    connection: update.connection,
+                  },
+                  revision: currentLocalState.revision + 1,
+                };
+              }
+            }),
+          rpc: PlakkRpcClient.of({
+            GetAccountStatus: () =>
+              Effect.sync(() => {
+                accountReads += 1;
+                return {
+                  accessEntitlement: {
+                    status: "PAID_ACTIVE" as const,
+                    paidThrough: DateTime.makeUnsafe(accountReads === 1 ? 1_000 : 2_000),
+                    cancelAtPeriodEnd: false,
+                  },
+                  canSync: true,
+                  storageProvider: "GOOGLE_DRIVE" as const,
+                  blockedReasons: [],
+                };
+              }),
+            GetStorageProviderStatus: () =>
+              Effect.succeed({
+                storageProvider: "GOOGLE_DRIVE",
+                status: "CONNECTED",
+                externalDestinationUrl: "https://drive.google.com/drive/folders/plakk",
+              }),
+          } as never),
+        });
+
+        yield* Effect.gen(function* () {
+          const session = yield* DesktopSession;
+          yield* session.start;
+          yield* session.refresh;
+          expect(accountReads).toBe(1);
+
+          yield* TestClock.adjust("1 second");
+          yield* Effect.yieldNow;
+
+          expect(accountReads).toBe(2);
+          expect(currentLocalState.capability).toMatchObject({
+            account: {
+              accessEntitlement: {
+                status: "PAID_ACTIVE",
+                cancelAtPeriodEnd: false,
+              },
+              blockedReasons: [],
+            },
+            status: "ONLINE",
+          });
+        }).pipe(
+          Effect.provide(
+            DesktopSessionLive.pipe(Layer.provide(Layer.merge(layer, NodeFileSystem.layer))),
+          ),
+          Effect.provide(TestClock.layer()),
+        );
+      }),
   );
 
   it.effect(

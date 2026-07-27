@@ -25,12 +25,20 @@ Copy `.env.example` to `.env` and fill in:
   tokens.
 - `WORKOS_API_KEY` and `WORKOS_CLIENT_ID`: runtime credentials injected into
   the backend service.
+- `POLAR_ACCESS_TOKEN` and `POLAR_WEBHOOK_SECRET`: server-only Polar
+  credentials. Configure the webhook for `customer.state_changed` at
+  `/api/webhooks/polar`.
+- `POLAR_MONTHLY_PRODUCT_ID`, `POLAR_ANNUAL_PRODUCT_ID`, and
+  `POLAR_PAID_BENEFIT_ID`: the two recurring products and the dedicated
+  paid-access benefit attached to both products.
 
 `RAILWAY_WORKSPACE_ID` is optional. Without it, Railway creates the project in
 the token owner's personal workspace. `RAILWAY_REPOSITORY` and
 `RAILWAY_BRANCH` default to `peterjarian/plakk` and `main`.
 `PLAKK_WEB_ORIGIN` defaults to the canonical `https://app.plakk.io` Web origin
-and is injected into the backend's exact CORS allowlist.
+and is injected into the backend's exact CORS allowlist. Production deployment
+pins `POLAR_SERVER=production`; local backend development defaults to Polar's
+sandbox.
 
 Before the first deployment, link the Railway account to GitHub and grant the
 Railway GitHub App access to the configured repository. For a private

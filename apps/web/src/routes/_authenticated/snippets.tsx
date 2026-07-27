@@ -1,21 +1,12 @@
-import type { User } from "@plakk/shared";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useAuth } from "@workos/authkit-tanstack-react-start/client";
 import { useCallback } from "react";
 
 import { AuthenticatedHome } from "../../product/AuthenticatedHome.tsx";
+import { productUserFromAuth } from "../../product/product-user.ts";
 
 export const Route = createFileRoute("/_authenticated/snippets")({
   component: Snippets,
-});
-
-const productUser = (user: NonNullable<ReturnType<typeof useAuth>["user"]>): User => ({
-  id: user.id,
-  email: user.email,
-  firstName: user.firstName,
-  lastName: user.lastName,
-  createdAt: user.createdAt,
-  updatedAt: user.updatedAt,
 });
 
 function Snippets() {
@@ -28,6 +19,12 @@ function Snippets() {
       search: { confirmation: undefined, origin: undefined, provider: null },
     });
   }, [navigate]);
+  const openBilling = useCallback(() => {
+    void navigate({ to: "/billing", search: { checkout: undefined } });
+  }, [navigate]);
+  const openSettings = useCallback(() => {
+    void navigate({ to: "/settings" });
+  }, [navigate]);
 
   if (auth.user === null) {
     return (
@@ -38,8 +35,10 @@ function Snippets() {
   }
   return (
     <AuthenticatedHome
+      onBilling={openBilling}
+      onSettings={openSettings}
       onStorageOnboardingRequired={openStorageOnboarding}
-      user={productUser(auth.user)}
+      user={productUserFromAuth(auth.user)}
     />
   );
 }
