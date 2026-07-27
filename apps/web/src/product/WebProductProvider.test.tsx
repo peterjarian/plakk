@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 
 import type { AccountStatus, ApiSnippet } from "@plakk/shared/PlakkApi";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
@@ -13,6 +14,10 @@ import { AccountProductReader } from "./product-reader.ts";
 import { ProductIdentityBoundary, useWebProduct } from "./WebProductProvider.tsx";
 
 const account: AccountStatus = {
+  accessEntitlement: {
+    status: "TRIAL_ACTIVE",
+    trialEndsAt: DateTime.makeUnsafe("2026-08-10T00:00:00.000Z"),
+  },
   canSync: true,
   storageProvider: "GOOGLE_DRIVE",
   blockedReasons: [],

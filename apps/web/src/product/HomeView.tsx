@@ -14,6 +14,12 @@ const storageProviderLabel = {
   ONE_DRIVE: "OneDrive",
 } as const satisfies Record<StorageProviderStatus["storageProvider"], string>;
 
+const trialEndDate = (trialEndsAt: DateTime.Utc) =>
+  DateTime.formatUtc(trialEndsAt, {
+    dateStyle: "long",
+    locale: "en",
+  });
+
 export function HomeView(props: {
   readonly user: User;
   readonly state: AccountProductState;
@@ -63,6 +69,25 @@ export function HomeView(props: {
             online service normally.
           </p>
         )}
+
+        {state.kind === "ready" &&
+          (state.account.accessEntitlement.status === "TRIAL_ACTIVE" ? (
+            <p
+              className="mb-4 rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground"
+              role="status"
+            >
+              <strong className="font-medium text-foreground">Trial active.</strong> Your account
+              trial ends {trialEndDate(state.account.accessEntitlement.trialEndsAt)}.
+            </p>
+          ) : (
+            <div
+              className="mb-4 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+              role="alert"
+            >
+              <strong>Billing access required.</strong> Your snippets are preserved. Restore billing
+              access to resume normal use. Add, Copy, Download, and Open remain unavailable.
+            </div>
+          ))}
 
         {signOutError !== null && (
           <div

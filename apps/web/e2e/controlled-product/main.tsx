@@ -2,6 +2,7 @@ import type { User } from "@plakk/shared";
 import type { AccountStatus, ApiSnippet } from "@plakk/shared/PlakkApi";
 import { RpcError } from "@plakk/shared/RpcError";
 import { Button } from "@plakk/ui/components/primitives/button";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
@@ -23,11 +24,16 @@ const accountId = query.get("account") ?? "controlled-user";
 const forceSessionMemory = query.get("force-session-memory") === "true";
 const holdBackendRefresh = query.get("hold-backend-refresh") === "true";
 const startBackendUnavailable = query.get("backend-unavailable") === "true";
+const trialAtExactExpiry = query.get("trial-at-exact-expiry") === "true";
 
 const account: AccountStatus = {
-  canSync: true,
+  accessEntitlement: {
+    status: trialAtExactExpiry ? "BILLING_RESTRICTED" : "TRIAL_ACTIVE",
+    trialEndsAt: DateTime.makeUnsafe("2026-08-10T10:15:30.000Z"),
+  },
+  canSync: !trialAtExactExpiry,
   storageProvider: "GOOGLE_DRIVE",
-  blockedReasons: [],
+  blockedReasons: trialAtExactExpiry ? ["billing"] : [],
 };
 
 const user: User = {

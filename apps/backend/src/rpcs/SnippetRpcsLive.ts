@@ -25,6 +25,7 @@ import * as Effect from "effect/Effect";
 import * as Schedule from "effect/Schedule";
 import * as Stream from "effect/Stream";
 
+import { AccountCapability } from "../account/AccountCapability.ts";
 import { type StorageDownloadError, StorageProvider } from "../storage/StorageProvider.ts";
 
 const SNIPPET_INVALIDATION_CHANNEL = "plakk_snippet_invalidations";
@@ -186,6 +187,7 @@ const getSnippetSnapshot = Effect.fn("SnippetRpcs.getSnapshot")(function* (
 
 const prepareSnippetDownload = Effect.fn("SnippetRpcs.prepareDownload")(function* (
   drizzle: DrizzleService,
+  capability: AccountCapability["Service"],
   storage: StorageProvider["Service"],
   ownerWorkosUserId: string,
   snippetId: string,
@@ -204,6 +206,7 @@ const prepareSnippetDownload = Effect.fn("SnippetRpcs.prepareDownload")(function
     });
   }
 
+  yield* capability.authorizeProductCommand(ownerWorkosUserId, snippet.storageProvider);
   const download = yield* storage
     .getDownloadTarget({
       storageProvider: snippet.storageProvider,
@@ -273,15 +276,19 @@ export const SnippetRpcsLive = Effect.gen(function* () {
 
   return SnippetRpcs.of({
     PrepareSnippetUpload: Effect.fn("rpc.PrepareSnippetUpload")(function* (input) {
+      const capability = yield* AccountCapability;
       const storage = yield* StorageProvider;
       const currentUser = yield* CurrentUser;
+      yield* capability.authorizeProductCommand(currentUser.id, input.storageProvider);
       return yield* prepareSnippetUpload(storage, currentUser.id, input).pipe(
         Effect.annotateSpans({ id: input.id }),
       );
     }),
     PublishSnippet: Effect.fn("rpc.PublishSnippet")(function* (input) {
+      const capability = yield* AccountCapability;
       const drizzle = yield* Drizzle;
       const currentUser = yield* CurrentUser;
+      yield* capability.authorizeProductCommand(currentUser.id, input.storageProvider);
       return yield* publishSnippet(drizzle, currentUser.id, input).pipe(
         Effect.annotateSpans({ id: input.id }),
       );
@@ -318,12 +325,17 @@ export const SnippetRpcsLive = Effect.gen(function* () {
         }),
       ),
     PrepareSnippetDownload: Effect.fn("rpc.PrepareSnippetDownload")(function* (input) {
+      const capability = yield* AccountCapability;
       const drizzle = yield* Drizzle;
       const storage = yield* StorageProvider;
       const currentUser = yield* CurrentUser;
-      return yield* prepareSnippetDownload(drizzle, storage, currentUser.id, input.id).pipe(
-        Effect.annotateSpans({ id: input.id }),
-      );
+      return yield* prepareSnippetDownload(
+        drizzle,
+        capability,
+        storage,
+        currentUser.id,
+        input.id,
+      ).pipe(Effect.annotateSpans({ id: input.id }));
     }),
     DeleteSnippet: Effect.fn("rpc.DeleteSnippet")(function* (input) {
       const drizzle = yield* Drizzle;

@@ -1,4 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
+import * as DateTime from "effect/DateTime";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import type { LocalState } from "../../ipc/contracts.ts";
@@ -10,6 +11,18 @@ const state = vi.hoisted(() => {
   let liveConnection: { readonly status: "CONNECTED" | "RECONNECTING" } | null = null;
   let storageUsageBytes = 0;
   let capability: LocalState["capability"] = { status: "OFFLINE" };
+  let snippet: LocalState["snippets"][number] = {
+    id: "0d1e2f3a-4567-4890-8abc-def012345678",
+    fileName: "same-local-state.txt",
+    byteSize: 4,
+    storageProvider: "GOOGLE_DRIVE",
+    kind: "PUBLISHED",
+    createdAt: "2026-07-16T00:00:00.000Z",
+    updatedAt: "2026-07-16T00:00:00.000Z",
+    localState: null,
+    localTextPreview: "same",
+    localContentAvailability: { status: "AVAILABLE" },
+  };
   const account = {
     id: "user_1",
     email: "reader@example.com",
@@ -31,20 +44,9 @@ const state = vi.hoisted(() => {
     get storageUsageBytes() {
       return storageUsageBytes;
     },
-    snippets: [
-      {
-        id: "0d1e2f3a-4567-4890-8abc-def012345678",
-        fileName: "same-local-state.txt",
-        byteSize: 4,
-        storageProvider: "GOOGLE_DRIVE",
-        kind: "PUBLISHED",
-        createdAt: "2026-07-16T00:00:00.000Z",
-        updatedAt: "2026-07-16T00:00:00.000Z",
-        localState: null,
-        localTextPreview: "same",
-        localContentAvailability: { status: "AVAILABLE" },
-      },
-    ],
+    get snippets() {
+      return [snippet];
+    },
   } as const;
   return {
     account,
@@ -57,6 +59,9 @@ const state = vi.hoisted(() => {
     },
     setStorageUsageBytes: (next: number) => {
       storageUsageBytes = next;
+    },
+    setSnippet: (next: typeof snippet) => {
+      snippet = next;
     },
   };
 });
@@ -96,6 +101,10 @@ describe("local state views", () => {
     state.setCapability({
       status: "ONLINE",
       account: {
+        accessEntitlement: {
+          status: "TRIAL_ACTIVE",
+          trialEndsAt: DateTime.makeUnsafe("2026-08-10T00:00:00.000Z"),
+        },
         canSync: true,
         storageProvider: "GOOGLE_DRIVE",
         blockedReasons: [],
@@ -127,6 +136,52 @@ describe("local state views", () => {
 
     state.setLiveConnection(null);
     state.setCapability({ status: "OFFLINE" });
+  });
+
+  it("keeps Home and Tray rows visible but disables product actions when billing is restricted", () => {
+    state.setCapability({
+      status: "ONLINE",
+      account: {
+        accessEntitlement: {
+          status: "BILLING_RESTRICTED",
+          trialEndsAt: DateTime.makeUnsafe("2026-08-10T00:00:00.000Z"),
+        },
+        canSync: false,
+        storageProvider: "GOOGLE_DRIVE",
+        blockedReasons: ["billing"],
+      },
+      connection: {
+        storageProvider: "GOOGLE_DRIVE",
+        status: "CONNECTED",
+        externalDestinationUrl: "https://drive.google.com/drive/folders/plakk",
+      },
+    });
+    state.setSnippet({
+      ...state.localState.snippets[0],
+      fileName: "https://example.com.txt",
+      localTextPreview: "https://example.com",
+      localContentAvailability: { status: "NOT_AVAILABLE" },
+    });
+
+    const home = renderToStaticMarkup(<Home />);
+    const tray = renderToStaticMarkup(<Tray />);
+
+    for (const markup of [home, tray]) {
+      expect(markup).toContain('aria-label="Download to this device"');
+      expect(markup).toContain('aria-label="Open link"');
+      expect(markup).toContain('aria-label="Delete"');
+      expect(markup).toMatch(/disabled=""[^>]+aria-label="Download to this device"/);
+      expect(markup).toMatch(/disabled=""[^>]+aria-label="Open link"/);
+      expect(markup).not.toMatch(/disabled=""[^>]+aria-label="Delete"/);
+    }
+
+    state.setCapability({ status: "OFFLINE" });
+    state.setSnippet({
+      ...state.localState.snippets[0],
+      fileName: "same-local-state.txt",
+      localTextPreview: "same",
+      localContentAvailability: { status: "AVAILABLE" },
+    });
   });
 
   it("warns above 30 GiB and links Home to the Settings storage controls", () => {

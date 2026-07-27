@@ -35,11 +35,14 @@ vi.mock("../hooks/useAuth.ts", () => ({
 }));
 
 vi.mock("../hooks/useLocalState.tsx", () => ({
-  useLocalState: () => ({ localState: { liveConnection: null } }),
+  useLocalState: () => ({
+    localState: { capability: { status: "OFFLINE" }, liveConnection: null },
+  }),
 }));
 
 vi.mock("../hooks/useStorageStatus.tsx", () => ({
   StorageProviderIcon: () => null,
+  billingRestrictedFromLocalState: () => false,
   storageProviderLabel: () => "Google Drive",
   useLinkedStorageProvider: () => "GOOGLE_DRIVE",
   useStorageStatus: () => ({

@@ -2,9 +2,10 @@ import { NodeFileSystem } from "@effect/platform-node";
 import type { User } from "@plakk/shared";
 import { RpcError } from "@plakk/shared/RpcError";
 import { describe, expect, it } from "@effect/vitest";
-import { Deferred, Effect, Fiber, Layer, Stream } from "effect";
+import { DateTime, Deferred, Effect, Fiber, Layer, Stream } from "effect";
 import { TestClock } from "effect/testing";
 
+import type { LocalState as LocalStateValue } from "../../ipc/contracts.ts";
 import { AuthService } from "../auth/AuthService.ts";
 import { LocalState, LocalStateError, type LocalStateUpdate } from "../local-state/LocalState.ts";
 import { PlakkRpcClient } from "../PlakkRpcClient.ts";
@@ -49,6 +50,7 @@ const dependencies = (options: {
   } | null>;
   readonly purge: (accountId: string) => Effect.Effect<void, DesktopAccountPurgeError>;
   readonly localStateUpdates: Array<LocalStateUpdate>;
+  readonly currentLocalState?: Effect.Effect<LocalStateValue>;
   readonly localStateOwner?: { readonly account: User; readonly cleanupPending: boolean };
   readonly updateLocalState?: (update: LocalStateUpdate) => Effect.Effect<void, LocalStateError>;
   readonly rpc?: PlakkRpcClient["Service"];
@@ -72,15 +74,17 @@ const dependencies = (options: {
       LocalState,
       LocalState.of({
         changes: Stream.empty,
-        current: Effect.succeed({
-          revision: 1,
-          account: firstAccount,
-          provider: { known: true, value: "GOOGLE_DRIVE" },
-          capability: { status: "OFFLINE" },
-          liveConnection: null,
-          storageUsageBytes: 0,
-          snippets: [],
-        }),
+        current:
+          options.currentLocalState ??
+          Effect.succeed({
+            revision: 1,
+            account: firstAccount,
+            provider: { known: true, value: "GOOGLE_DRIVE" },
+            capability: { status: "OFFLINE" },
+            liveConnection: null,
+            storageUsageBytes: 0,
+            snippets: [],
+          }),
         owner: Effect.succeed(
           options.localStateOwner ?? { account: firstAccount, cleanupPending: false },
         ),
@@ -156,12 +160,200 @@ const dependencies = (options: {
       options.rpc ??
         PlakkRpcClient.of({
           GetAccountStatus: () =>
-            Effect.succeed({ canSync: false, storageProvider: null, blockedReasons: [] }),
+            Effect.succeed({
+              accessEntitlement: {
+                status: "TRIAL_ACTIVE",
+                trialEndsAt: DateTime.makeUnsafe("2026-08-10T00:00:00.000Z"),
+              },
+              canSync: false,
+              storageProvider: null,
+              blockedReasons: ["storage"],
+            }),
         } as never),
     ),
   );
 
 describe("DesktopSession command authority", () => {
+  it.effect("runs a local product command only after the backend confirms active access", () =>
+    Effect.gen(function* () {
+      const localStateUpdates: Array<LocalStateUpdate> = [];
+      let commandRan = false;
+      const layer = dependencies({
+        getSession: () => Effect.succeed({ accessToken: "token", user: firstAccount }),
+        localStateUpdates,
+        purge: () => Effect.void,
+        rpc: PlakkRpcClient.of({
+          GetAccountStatus: () =>
+            Effect.succeed({
+              accessEntitlement: {
+                status: "TRIAL_ACTIVE",
+                trialEndsAt: DateTime.makeUnsafe("2026-08-10T00:00:00.000Z"),
+              },
+              canSync: false,
+              storageProvider: null,
+              blockedReasons: ["storage"],
+            }),
+        } as never),
+      });
+
+      const result = yield* Effect.gen(function* () {
+        const session = yield* DesktopSession;
+        yield* session.start;
+        yield* session.refresh;
+        return yield* session.withCurrentProductAccess(() =>
+          Effect.sync(() => {
+            commandRan = true;
+            return "ran" as const;
+          }),
+        );
+      }).pipe(
+        Effect.provide(
+          DesktopSessionLive.pipe(Layer.provide(Layer.merge(layer, NodeFileSystem.layer))),
+        ),
+      );
+
+      expect(result).toBe("ran");
+      expect(commandRan).toBe(true);
+    }),
+  );
+
+  it.effect("rejects a local product command when billing is restricted", () =>
+    Effect.gen(function* () {
+      const localStateUpdates: Array<LocalStateUpdate> = [];
+      let commandRan = false;
+      const layer = dependencies({
+        getSession: () => Effect.succeed({ accessToken: "token", user: firstAccount }),
+        localStateUpdates,
+        purge: () => Effect.void,
+        rpc: PlakkRpcClient.of({
+          GetAccountStatus: () =>
+            Effect.succeed({
+              accessEntitlement: {
+                status: "BILLING_RESTRICTED",
+                trialEndsAt: DateTime.makeUnsafe("2026-08-10T00:00:00.000Z"),
+              },
+              canSync: false,
+              storageProvider: "GOOGLE_DRIVE",
+              blockedReasons: ["billing"],
+            }),
+          GetStorageProviderStatus: () =>
+            Effect.succeed({
+              storageProvider: "GOOGLE_DRIVE",
+              status: "CONNECTED",
+              externalDestinationUrl: "https://drive.google.com/drive/folders/plakk",
+            }),
+        } as never),
+      });
+
+      const failure = yield* Effect.gen(function* () {
+        const session = yield* DesktopSession;
+        yield* session.start;
+        yield* session.refresh;
+        return yield* session
+          .withCurrentProductAccess(() =>
+            Effect.sync(() => {
+              commandRan = true;
+            }),
+          )
+          .pipe(Effect.flip);
+      }).pipe(
+        Effect.provide(
+          DesktopSessionLive.pipe(Layer.provide(Layer.merge(layer, NodeFileSystem.layer))),
+        ),
+      );
+
+      expect(failure).toBeInstanceOf(DesktopSessionCommandError);
+      expect(failure.reason).toBe("Restore billing access to use this action.");
+      expect(commandRan).toBe(false);
+    }),
+  );
+
+  it.effect("publishes billing restriction at the exact trial end without another refresh", () =>
+    Effect.gen(function* () {
+      const localStateUpdates: Array<LocalStateUpdate> = [];
+      let currentLocalState: LocalStateValue = {
+        revision: 1,
+        account: firstAccount,
+        provider: { known: true, value: "GOOGLE_DRIVE" },
+        capability: { status: "OFFLINE" },
+        liveConnection: null,
+        storageUsageBytes: 0,
+        snippets: [],
+      };
+      const layer = dependencies({
+        getSession: () => Effect.succeed({ accessToken: "token", user: firstAccount }),
+        currentLocalState: Effect.sync(() => currentLocalState),
+        localStateUpdates,
+        purge: () => Effect.void,
+        updateLocalState: (update) =>
+          Effect.sync(() => {
+            if (update.kind === "online") {
+              currentLocalState = {
+                ...currentLocalState,
+                account: update.account,
+                capability: {
+                  status: "ONLINE",
+                  account: update.accountStatus,
+                  connection: update.connection,
+                },
+                revision: currentLocalState.revision + 1,
+              };
+            }
+          }),
+        rpc: PlakkRpcClient.of({
+          GetAccountStatus: () =>
+            Effect.succeed({
+              accessEntitlement: {
+                status: "TRIAL_ACTIVE",
+                trialEndsAt: DateTime.makeUnsafe(1_000),
+              },
+              canSync: true,
+              storageProvider: "GOOGLE_DRIVE",
+              blockedReasons: [],
+            }),
+          GetStorageProviderStatus: () =>
+            Effect.succeed({
+              storageProvider: "GOOGLE_DRIVE",
+              status: "CONNECTED",
+              externalDestinationUrl: "https://drive.google.com/drive/folders/plakk",
+            }),
+        } as never),
+      });
+
+      yield* Effect.gen(function* () {
+        const session = yield* DesktopSession;
+        yield* session.start;
+        yield* session.refresh;
+        expect(currentLocalState.capability).toMatchObject({
+          account: { accessEntitlement: { status: "TRIAL_ACTIVE" } },
+          status: "ONLINE",
+        });
+
+        yield* TestClock.adjust("999 millis");
+        yield* Effect.yieldNow;
+        expect(currentLocalState.capability).toMatchObject({
+          account: { accessEntitlement: { status: "TRIAL_ACTIVE" } },
+        });
+
+        yield* TestClock.adjust("1 millis");
+        yield* Effect.yieldNow;
+        expect(currentLocalState.capability).toMatchObject({
+          account: {
+            accessEntitlement: { status: "BILLING_RESTRICTED" },
+            blockedReasons: ["billing"],
+            canSync: false,
+          },
+          status: "ONLINE",
+        });
+      }).pipe(
+        Effect.provide(
+          DesktopSessionLive.pipe(Layer.provide(Layer.merge(layer, NodeFileSystem.layer))),
+        ),
+        Effect.provide(TestClock.layer()),
+      );
+    }),
+  );
+
   it.effect(
     "refreshes credentials and restarts live invalidations after authentication failure",
     () =>
@@ -201,6 +393,10 @@ describe("DesktopSession command authority", () => {
           rpc: PlakkRpcClient.of({
             GetAccountStatus: () =>
               Effect.succeed({
+                accessEntitlement: {
+                  status: "TRIAL_ACTIVE",
+                  trialEndsAt: DateTime.makeUnsafe("2026-08-10T00:00:00.000Z"),
+                },
                 canSync: true,
                 storageProvider: "GOOGLE_DRIVE",
                 blockedReasons: [],
@@ -257,6 +453,10 @@ describe("DesktopSession command authority", () => {
         rpc: PlakkRpcClient.of({
           GetAccountStatus: () =>
             Effect.succeed({
+              accessEntitlement: {
+                status: "TRIAL_ACTIVE",
+                trialEndsAt: DateTime.makeUnsafe("2026-08-10T00:00:00.000Z"),
+              },
               canSync: true,
               storageProvider: "GOOGLE_DRIVE",
               blockedReasons: [],
@@ -291,6 +491,10 @@ describe("DesktopSession command authority", () => {
         kind: "online",
         account: firstAccount,
         accountStatus: {
+          accessEntitlement: {
+            status: "TRIAL_ACTIVE",
+            trialEndsAt: DateTime.makeUnsafe("2026-08-10T00:00:00.000Z"),
+          },
           canSync: true,
           storageProvider: "GOOGLE_DRIVE",
           blockedReasons: [],
@@ -346,6 +550,10 @@ describe("DesktopSession command authority", () => {
                 yield* Deferred.succeed(backgroundRefreshCompleted, undefined);
               }
               return {
+                accessEntitlement: {
+                  status: "TRIAL_ACTIVE",
+                  trialEndsAt: DateTime.makeUnsafe("2026-08-10T00:00:00.000Z"),
+                },
                 canSync: true,
                 storageProvider: "GOOGLE_DRIVE",
                 blockedReasons: [],
@@ -667,6 +875,10 @@ describe("DesktopSession command authority", () => {
         rpc: PlakkRpcClient.of({
           GetAccountStatus: () =>
             Effect.succeed({
+              accessEntitlement: {
+                status: "TRIAL_ACTIVE",
+                trialEndsAt: DateTime.makeUnsafe("2026-08-10T00:00:00.000Z"),
+              },
               canSync: true,
               storageProvider: "GOOGLE_DRIVE",
               blockedReasons: [],

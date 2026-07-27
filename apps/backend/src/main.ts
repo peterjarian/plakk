@@ -11,6 +11,7 @@ import { FetchHttpClient, HttpRouter, HttpServerResponse } from "effect/unstable
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 import { createServer } from "node:http";
 
+import { AccountCapability, AccountTrialRepository } from "./account/AccountCapability.ts";
 import { allowedBackendOrigins, InvalidCorsConfiguration } from "./cors.ts";
 import { AuthMiddlewareLive } from "./middleware/AuthMiddlewareLive.ts";
 import { InternalServerErrorMiddlewareLive } from "./middleware/InternalServerErrorMiddlewareLive.ts";
@@ -25,6 +26,10 @@ const InfrastructureLive = Layer.mergeAll(
   StorageProviderLive,
 ).pipe(Layer.provideMerge(FetchHttpClient.layer));
 
+const AccountDomainLive = AccountCapability.layer.pipe(
+  Layer.provideMerge(AccountTrialRepository.layer),
+);
+
 const RpcRoutes = RpcServer.layerHttp({
   group: PlakkApi,
   path: "/api/rpc",
@@ -34,6 +39,7 @@ const RpcRoutes = RpcServer.layerHttp({
   Layer.provide(PlakkApiLive),
   Layer.provide(AuthMiddlewareLive),
   Layer.provide(InternalServerErrorMiddlewareLive),
+  Layer.provide(AccountDomainLive),
   Layer.provide(FetchHttpClient.layer),
   Layer.provide(RpcSerialization.layerNdjson),
   Layer.provide(InfrastructureLive),

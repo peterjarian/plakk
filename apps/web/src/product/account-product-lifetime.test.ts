@@ -1,7 +1,7 @@
 import type { AccountStatus, ApiSnippet } from "@plakk/shared/PlakkApi";
 import { RpcError } from "@plakk/shared/RpcError";
 import { describe, expect, it } from "@effect/vitest";
-import { Data, Deferred, Effect, Fiber, Layer, Queue, Ref, Stream } from "effect";
+import { Data, DateTime, Deferred, Effect, Fiber, Layer, Queue, Ref, Stream } from "effect";
 import { TestClock } from "effect/testing";
 
 import { AccountProductLifetime, clearProductThenSignOut } from "./account-product-lifetime.ts";
@@ -13,9 +13,21 @@ import {
 } from "./readable-mirror.ts";
 
 const account: AccountStatus = {
+  accessEntitlement: {
+    status: "TRIAL_ACTIVE",
+    trialEndsAt: DateTime.makeUnsafe("2026-08-10T00:00:00.000Z"),
+  },
   canSync: true,
   storageProvider: "GOOGLE_DRIVE",
   blockedReasons: [],
+};
+
+const expiringAccount: AccountStatus = {
+  ...account,
+  accessEntitlement: {
+    status: "TRIAL_ACTIVE",
+    trialEndsAt: DateTime.makeUnsafe(1_000),
+  },
 };
 
 const snippet = (id: string): ApiSnippet => ({
@@ -49,6 +61,49 @@ const provideLifetime = (
 class PurgeFailure extends Data.TaggedError("PurgeFailure") {}
 
 describe("account product lifetime", () => {
+  it.effect(
+    "transitions the visible account at the exact trial expiry without an invalidation",
+    () =>
+      Effect.gen(function* () {
+        const lifetime = yield* AccountProductLifetime;
+        yield* lifetime.enter("user_1");
+        yield* Effect.yieldNow;
+
+        expect(lifetime.getSnapshot()).toMatchObject({
+          account: {
+            accessEntitlement: { status: "TRIAL_ACTIVE" },
+            blockedReasons: [],
+            canSync: true,
+          },
+          kind: "ready",
+        });
+
+        yield* TestClock.adjust("999 millis");
+        yield* Effect.yieldNow;
+        expect(lifetime.getSnapshot()).toMatchObject({
+          account: { accessEntitlement: { status: "TRIAL_ACTIVE" } },
+        });
+
+        yield* TestClock.adjust("1 millis");
+        yield* Effect.yieldNow;
+        expect(lifetime.getSnapshot()).toMatchObject({
+          account: {
+            accessEntitlement: { status: "BILLING_RESTRICTED" },
+            blockedReasons: ["billing"],
+            canSync: false,
+          },
+          kind: "ready",
+        });
+      }).pipe(
+        Effect.provide(
+          Layer.merge(
+            provideLifetime(Effect.succeed({ account: expiringAccount, snippets: [] })),
+            TestClock.layer(),
+          ),
+        ),
+      ),
+  );
+
   it.effect("presents the last-confirmed mirror while the backend refresh remains pending", () =>
     Effect.gen(function* () {
       const pending = yield* Deferred.make<AccountProductSnapshot>();
