@@ -10,7 +10,7 @@ billing, deployment, or telemetry evidence.
 
 - Product revision under validation: `ac5ad9673719a6c6975ad542a208420903d1794c`, the exact
   `origin/main` commit containing the squash-merged #132 work.
-- Tested Firefox harness revision: `1576264d5bb748fee889f4db7e40099f661649a7`. The later
+- Tested Firefox harness revision: `12ac8f9363ed1734f1535e372a566670bcaa8ad4`. The later
   evidence-only commit does not change the tested Web or Playwright source.
 - Evidence branch: `codex/issue-133-firefox-launch-gate`.
 - Date: 2026-07-27, Europe/Amsterdam.
@@ -29,8 +29,9 @@ billing, deployment, or telemetry evidence.
 ## Ownership audit
 
 Issue #133 validates the existing product and records evidence. The only code change found
-necessary is owned by the Web Playwright harness: it waits for the controlled Vite application to
-finish a Firefox warm-up before parallel scenarios begin. Product ownership remains unchanged:
+necessary is owned by the Web Playwright harness: a Firefox setup-project dependency waits for the
+controlled Vite application to warm before parallel Firefox scenarios begin. Product ownership
+remains unchanged:
 
 - Web orchestration and browser persistence stay in `apps/web`.
 - Backend and shared contracts remain authoritative for authentication, account entitlement,
@@ -69,10 +70,11 @@ development server was still replacing its cold dependency graph. Firefox reject
 responses, so the application and mirror never initialized. This was a harness readiness defect,
 not an OPFS or product failure.
 
-The Playwright global setup now opens the controlled product once in Firefox and waits for its Home
-heading before parallel tests begin. The simultaneous two-tab mirror navigation remains unchanged.
-After moving the generated Vite cache aside, the targeted mirror/fallback file completed 2 of 2
-tests. The settled full Firefox project then completed 50 of 50 tests.
+The Playwright Firefox setup-project dependency now opens the controlled product once and waits up
+to 30 seconds for its Home heading before parallel Firefox tests begin. Chromium-only runs do not
+execute this Firefox setup. The simultaneous two-tab mirror navigation remains unchanged. After
+moving the generated Vite cache aside, the final targeted setup/mirror/fallback graph completed 3
+of 3 tests. The final full Firefox dependency graph completed 51 of 51 tests.
 
 An earlier mixed-browser diagnostic invocation completed 99 of 100 tests and had one Chromium-only
 controlled billing presentation miss while the equivalent Firefox scenario completed. Chromium is
@@ -83,10 +85,11 @@ result is retained here rather than hidden.
 
 | Command                                                                                                              | Result                                                                                                                                                    |
 | -------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `./node_modules/.bin/playwright test e2e/readable-mirror.spec.ts --project=firefox` from a cold controlled-app cache | 2 tests passed                                                                                                                                            |
-| `./node_modules/.bin/playwright test --project=firefox`                                                              | 50 tests passed                                                                                                                                           |
+| `./node_modules/.bin/playwright test e2e/readable-mirror.spec.ts --project=firefox` from a cold controlled-app cache | 3 tests passed, including the Firefox setup dependency                                                                                                    |
+| `./node_modules/.bin/playwright test --project=firefox`                                                              | 51 tests passed, including the Firefox setup dependency                                                                                                   |
+| `./node_modules/.bin/playwright test e2e/auth-routing.spec.ts --project=chromium`                                    | 3 tests passed without executing the Firefox setup                                                                                                        |
 | `vp test`                                                                                                            | 95 files and 559 tests passed                                                                                                                             |
-| `vp check`                                                                                                           | 448 files formatted; 310 files checked with no warnings, lint errors, or type errors                                                                      |
+| `vp check`                                                                                                           | 449 files formatted; 310 files checked with no warnings, lint errors, or type errors                                                                      |
 | `vp run typecheck`                                                                                                   | All seven workspace tasks completed with no type errors; the Effect language service emitted one non-failing pre-existing suggestion in the mirror worker |
 | Production `@plakk/web` build with synthetic non-secret values for the documented required environment names         | Client, SSR, and Nitro production builds completed                                                                                                        |
 
