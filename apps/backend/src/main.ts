@@ -10,6 +10,7 @@ import { FetchHttpClient, HttpRouter, HttpServerResponse } from "effect/unstable
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 import { createServer } from "node:http";
 
+import { allowedBackendOrigins, InvalidCorsConfiguration } from "./cors.ts";
 import { AuthMiddlewareLive } from "./middleware/AuthMiddlewareLive.ts";
 import { InternalServerErrorMiddlewareLive } from "./middleware/InternalServerErrorMiddlewareLive.ts";
 import { PlakkApiLive } from "./rpcs/PlakkApiLive.ts";
@@ -43,16 +44,34 @@ const HealthRoute = HttpRouter.add(
   Effect.succeed(HttpServerResponse.text("ok")),
 ).pipe(HttpRouter.serve);
 
-const BackendRoutes = Layer.mergeAll(
-  HealthRoute,
-  RpcRoutes,
-  HttpRouter.cors({
-    allowedOrigins: ["plakk-app://renderer"],
-    allowedMethods: ["GET", "POST", "OPTIONS"],
-    allowedHeaders: ["authorization", "content-type"],
-    maxAge: 86_400,
-  }),
+const CorsLive = Layer.unwrap(
+  Config.string("PLAKK_WEB_ORIGIN").pipe(
+    Config.withDefault("http://localhost:3000"),
+    Effect.flatMap((configuredWebOrigin) =>
+      Effect.try({
+        try: () => allowedBackendOrigins(configuredWebOrigin),
+        catch: (cause) =>
+          cause instanceof InvalidCorsConfiguration
+            ? cause
+            : new InvalidCorsConfiguration({
+                cause,
+                message: "Invalid backend CORS configuration.",
+              }),
+      }),
+    ),
+    Effect.orDie,
+    Effect.map((allowedOrigins) =>
+      HttpRouter.cors({
+        allowedOrigins,
+        allowedMethods: ["GET", "POST", "OPTIONS"],
+        allowedHeaders: ["authorization", "content-type"],
+        maxAge: 86_400,
+      }),
+    ),
+  ),
 );
+
+const BackendRoutes = Layer.mergeAll(HealthRoute, RpcRoutes, CorsLive);
 
 const NodeServerLive = NodeHttpServer.layerConfig(createServer, {
   host: Config.string("PLAKK_BACKEND_HOST").pipe(Config.withDefault("127.0.0.1")),
