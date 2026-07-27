@@ -10,6 +10,7 @@ import * as Effect from "effect/Effect";
 
 import { AccountCapability } from "../account/AccountCapability.ts";
 import { AccountBilling } from "../billing/AccountBilling.ts";
+import { telemetryErrorAttributes } from "../telemetry/TelemetrySanitization.ts";
 import { RpcError } from "@plakk/shared/RpcError";
 import { SnippetRpcsLive } from "./SnippetRpcsLive.ts";
 import { StorageRpcsLive } from "./StorageRpcsLive.ts";
@@ -38,7 +39,9 @@ const BillingRpcsLive = BillingRpcs.of({
     const currentUser = yield* CurrentUser;
     const billing = yield* AccountBilling;
     return yield* billing.beginCheckout(currentUser.id, plan).pipe(
-      Effect.tapError((error) => Effect.logError("Could not begin Polar checkout", { error })),
+      Effect.tapError((error) =>
+        Effect.logError("Could not begin Polar checkout", telemetryErrorAttributes(error)),
+      ),
       Effect.mapError(
         () =>
           new RpcError({
@@ -52,7 +55,9 @@ const BillingRpcsLive = BillingRpcs.of({
     const currentUser = yield* CurrentUser;
     const billing = yield* AccountBilling;
     return yield* billing.openPortal(currentUser.id).pipe(
-      Effect.tapError((error) => Effect.logError("Could not open Polar billing portal", { error })),
+      Effect.tapError((error) =>
+        Effect.logError("Could not open Polar billing portal", telemetryErrorAttributes(error)),
+      ),
       Effect.mapError(
         () =>
           new RpcError({

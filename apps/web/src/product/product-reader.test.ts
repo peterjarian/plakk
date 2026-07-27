@@ -148,5 +148,8 @@ describe("authenticated product reader", () => {
     expect(() => resolveProductRpcUrl("http://api.plakk.io")).toThrow(
       "VITE_PLAKK_API_ORIGIN must use HTTPS outside local development.",
     );
+    expect(() => resolveProductRpcUrl("https://preview-api.plakk.io")).toThrow(
+      "VITE_PLAKK_API_ORIGIN must be https://api.plakk.io in production.",
+    );
   });
 });

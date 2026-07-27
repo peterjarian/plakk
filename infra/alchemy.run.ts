@@ -3,6 +3,7 @@ import * as Axiom from "alchemy/Axiom";
 import * as Neon from "alchemy/Neon";
 import * as Output from "alchemy/Output";
 import { Stack } from "alchemy/Stack";
+import { PLAKK_PRODUCTION_IDENTITIES } from "@plakk/shared/ProductionIdentities";
 import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -36,6 +37,7 @@ export default Alchemy.Stack(
     const polarMonthlyProductId = yield* Config.nonEmptyString("POLAR_MONTHLY_PRODUCT_ID");
     const polarAnnualProductId = yield* Config.nonEmptyString("POLAR_ANNUAL_PRODUCT_ID");
     const polarPaidBenefitId = yield* Config.nonEmptyString("POLAR_PAID_BENEFIT_ID");
+    const release = yield* Config.nonEmptyString("PLAKK_RELEASE");
     const webOrigin = yield* Config.string("PLAKK_WEB_ORIGIN").pipe(
       Config.withDefault("https://app.plakk.io"),
     );
@@ -96,7 +98,10 @@ export default Alchemy.Stack(
       variables: {
         DATABASE_URL: database.pooledConnectionUri,
         NODE_ENV: "production",
+        PLAKK_API_ORIGIN: PLAKK_PRODUCTION_IDENTITIES.api,
         PLAKK_BACKEND_HOST: "0.0.0.0",
+        PLAKK_ENVIRONMENT: stack.stage,
+        PLAKK_RELEASE: release,
         PLAKK_WEB_ORIGIN: webOrigin,
         WORKOS_API_KEY: workosApiKey,
         WORKOS_CLIENT_ID: workosClientId,

@@ -38,7 +38,10 @@ import {
   WebSnippetUploads,
   type WebSnippetUploadsShape,
 } from "./snippet-upload.ts";
-import { makeWebProductClientLayer } from "./web-product-client-layer.ts";
+import {
+  makeWebProductClientLayer,
+  resolveBrowserTelemetryRelease,
+} from "./web-product-client-layer.ts";
 import { WebProductContext, type WebProductContextValue } from "./web-product-context.tsx";
 
 class WorkOsSignOutFailure extends Data.TaggedError("WorkOsSignOutFailure")<{
@@ -353,6 +356,10 @@ export function WebProductProvider({ children }: Readonly<{ children: ReactNode 
   const productClientLayer = useState(() =>
     makeWebProductClientLayer({
       getAccessToken: () => getAccessTokenRef.current(),
+      release: resolveBrowserTelemetryRelease(
+        import.meta.env.VITE_PLAKK_RELEASE,
+        import.meta.env.DEV,
+      ),
       rpcUrl,
     }),
   )[0];

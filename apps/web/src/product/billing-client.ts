@@ -10,6 +10,7 @@ import {
   type MissingAccessToken,
   type RpcRequestOptions,
 } from "./product-reader.ts";
+import { observeBrowserRpc, type BrowserTelemetry } from "./browser-telemetry.ts";
 
 export interface BillingRpcClient {
   readonly BeginBillingCheckout: (
@@ -42,15 +43,19 @@ export const beginBillingCheckout = Effect.fn("BillingClient.beginCheckout")(fun
   rpc: BillingRpcClient,
   getAccessToken: () => Promise<string | undefined>,
   plan: BillingPlan,
+  telemetry?: BrowserTelemetry,
 ) {
   const requestOptions = yield* authenticatedRpcOptions(getAccessToken);
-  return yield* rpc.BeginBillingCheckout({ plan }, requestOptions);
+  const invoke = (options: RpcRequestOptions) => rpc.BeginBillingCheckout({ plan }, options);
+  return yield* observeBrowserRpc(telemetry, "billing.checkout", requestOptions, invoke);
 });
 
 export const openBillingPortal = Effect.fn("BillingClient.openPortal")(function* (
   rpc: BillingRpcClient,
   getAccessToken: () => Promise<string | undefined>,
+  telemetry?: BrowserTelemetry,
 ) {
   const requestOptions = yield* authenticatedRpcOptions(getAccessToken);
-  return yield* rpc.OpenBillingPortal(undefined, requestOptions);
+  const invoke = (options: RpcRequestOptions) => rpc.OpenBillingPortal(undefined, options);
+  return yield* observeBrowserRpc(telemetry, "billing.portal", requestOptions, invoke);
 });

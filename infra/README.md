@@ -35,6 +35,9 @@ Copy `.env.example` to `.env` and fill in:
 `RAILWAY_WORKSPACE_ID` is optional. Without it, Railway creates the project in
 the token owner's personal workspace. `RAILWAY_REPOSITORY` and
 `RAILWAY_BRANCH` default to `peterjarian/plakk` and `main`.
+`PLAKK_RELEASE` is required and must identify the immutable source release
+being deployed (normally its full Git commit SHA); it is attached to every
+backend and browser-proxy telemetry resource.
 `PLAKK_WEB_ORIGIN` defaults to the canonical `https://app.plakk.io` Web origin
 and is injected into the backend's exact CORS allowlist. Production deployment
 pins `POLAR_SERVER=production`; local backend development defaults to Polar's
@@ -91,3 +94,6 @@ traces, logs, and metrics over OTLP/HTTP into one Axiom dataset. Metrics use
 Axiom's required `X-Axiom-Metrics-Dataset` header while naming that same
 dataset. Reconciliation waits for Railway to finish the triggered deployment
 and fails when its build or health-checked rollout does not reach `SUCCESS`.
+The stack injects the canonical API origin, the Alchemy stage as environment,
+and the required immutable `PLAKK_RELEASE`; these do not rely on Railway
+runtime fallbacks.

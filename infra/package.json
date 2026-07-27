@@ -9,6 +9,7 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
+    "@plakk/shared": "workspace:*",
     "alchemy": "2.0.0-beta.56",
     "effect": "catalog:"
   },
