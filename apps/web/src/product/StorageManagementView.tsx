@@ -159,7 +159,7 @@ export function StorageManagementView(props: {
   );
 
   return (
-    <main className="grid min-h-screen place-items-center bg-background px-6 py-10 text-foreground">
+    <main className="grid min-h-dvh place-items-center bg-background px-4 py-8 text-foreground sm:px-6 sm:py-10">
       <section className="grid w-full max-w-xl gap-6" aria-labelledby="storage-management-title">
         <header className="grid gap-2 text-center">
           <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
@@ -167,7 +167,7 @@ export function StorageManagementView(props: {
           </p>
           <h1
             id="storage-management-title"
-            className="text-3xl leading-tight font-semibold tracking-tight"
+            className="text-2xl leading-tight font-semibold tracking-tight sm:text-3xl"
           >
             Manage storage
           </h1>
@@ -196,7 +196,7 @@ export function StorageManagementView(props: {
           </div>
         ) : state.kind === "failed" ? (
           <div
-            className="grid gap-4 rounded-xl border border-destructive/20 bg-destructive/10 p-6"
+            className="grid gap-4 rounded-xl border border-destructive/20 bg-destructive/10 p-5 sm:p-6"
             role="alert"
           >
             <div>
@@ -211,7 +211,7 @@ export function StorageManagementView(props: {
             </Button>
           </div>
         ) : state.kind === "confirming" ? (
-          <div className="grid gap-5 rounded-xl border border-destructive/30 bg-card p-6">
+          <div className="grid gap-5 rounded-xl border border-destructive/30 bg-card p-5 sm:p-6">
             <div className="grid gap-2">
               <h2 className="text-lg font-semibold">
                 {actionLabel(state.action)} {storageProviderLabel(state.storageProvider)}?
@@ -237,7 +237,7 @@ export function StorageManagementView(props: {
                 }
               />
             </label>
-            <div className="flex flex-wrap justify-end gap-2">
+            <div className="grid gap-2 sm:flex sm:flex-wrap sm:justify-end">
               <Button
                 type="button"
                 variant="outline"
@@ -256,7 +256,7 @@ export function StorageManagementView(props: {
             </div>
           </div>
         ) : state.snapshot.storageProvider === null ? (
-          <div className="grid gap-4 rounded-xl border border-border bg-card p-6 text-center">
+          <div className="grid gap-4 rounded-xl border border-border bg-card p-5 text-center sm:p-6">
             <h2 className="font-semibold">No storage provider is linked</h2>
             <p className="text-sm text-muted-foreground">
               Choose a provider to resume storing Snippets.
@@ -267,7 +267,7 @@ export function StorageManagementView(props: {
           </div>
         ) : state.snapshot.cleanup !== null ? (
           <div
-            className="grid gap-5 rounded-xl border border-amber-500/30 bg-amber-500/10 p-6"
+            className="grid gap-5 rounded-xl border border-amber-500/30 bg-amber-500/10 p-5 sm:p-6"
             role="alert"
           >
             <div className="grid gap-2">
@@ -294,7 +294,7 @@ export function StorageManagementView(props: {
             </div>
           </div>
         ) : state.snapshot.connectionStatus === "NEEDS_REAUTHORIZATION" ? (
-          <div className="grid gap-5 rounded-xl border border-amber-500/30 bg-card p-6">
+          <div className="grid gap-5 rounded-xl border border-amber-500/30 bg-card p-5 sm:p-6">
             <div className="grid gap-2">
               <h2 className="font-semibold">
                 {storageProviderLabel(state.snapshot.storageProvider)} needs reconnection
@@ -309,7 +309,7 @@ export function StorageManagementView(props: {
             </Button>
           </div>
         ) : state.snapshot.connectionStatus === "NOT_CONNECTED" ? (
-          <div className="grid gap-5 rounded-xl border border-amber-500/30 bg-card p-6">
+          <div className="grid gap-5 rounded-xl border border-amber-500/30 bg-card p-5 sm:p-6">
             <h2 className="font-semibold">
               {storageProviderLabel(state.snapshot.storageProvider)} is not connected
             </h2>
@@ -318,7 +318,7 @@ export function StorageManagementView(props: {
             </Button>
           </div>
         ) : (
-          <div className="grid gap-5 rounded-xl border border-border bg-card p-6">
+          <div className="grid gap-5 rounded-xl border border-border bg-card p-5 sm:p-6">
             <div className="grid gap-2">
               <h2 className="text-lg font-semibold">
                 {storageProviderLabel(state.snapshot.storageProvider)} connected
@@ -328,7 +328,7 @@ export function StorageManagementView(props: {
                 removed by Unlink or Switch.
               </p>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="grid gap-2 sm:flex sm:flex-wrap">
               {state.snapshot.externalDestinationUrl !== null && (
                 <a
                   className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-input bg-background px-4 text-sm font-medium shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground"

@@ -42,10 +42,10 @@ export function StorageOnboardingInitialization(props: {
   readonly onRetry: (() => void) | null;
 }) {
   return (
-    <main className="grid min-h-screen place-items-center bg-background px-6 py-10 text-foreground">
+    <main className="grid min-h-dvh place-items-center bg-background px-4 py-8 text-foreground sm:px-6 sm:py-10">
       {props.failed ? (
         <section
-          className="grid w-full max-w-xl gap-5 rounded-xl border border-destructive/20 bg-destructive/10 p-6"
+          className="grid w-full max-w-xl gap-5 rounded-xl border border-destructive/20 bg-destructive/10 p-5 sm:p-6"
           role="alert"
         >
           <div className="grid gap-1">
@@ -131,13 +131,16 @@ export function StorageOnboardingView(props: {
   );
 
   return (
-    <main className="grid min-h-screen place-items-center bg-background px-6 py-10 text-foreground">
+    <main className="grid min-h-dvh place-items-center bg-background px-4 py-8 text-foreground sm:px-6 sm:py-10">
       <section className="grid w-full max-w-xl gap-7" aria-labelledby="storage-title">
         <header className="grid gap-2 text-center">
           <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
             Plakk storage
           </p>
-          <h1 id="storage-title" className="text-3xl leading-tight font-semibold tracking-tight">
+          <h1
+            id="storage-title"
+            className="text-2xl leading-tight font-semibold tracking-tight sm:text-3xl"
+          >
             Link your storage
           </h1>
           <p className="text-sm text-muted-foreground">
@@ -186,7 +189,7 @@ export function StorageOnboardingView(props: {
             </p>
           </div>
         ) : state.kind === "return-desktop" ? (
-          <div className="grid gap-5 rounded-xl border border-border bg-card p-6 text-center">
+          <div className="grid gap-5 rounded-xl border border-border bg-card p-5 text-center sm:p-6">
             <Check className="mx-auto size-8 text-emerald-600" aria-hidden="true" />
             <div className="grid gap-1">
               <h2 className="text-lg font-semibold">Storage connected</h2>
@@ -200,7 +203,7 @@ export function StorageOnboardingView(props: {
           </div>
         ) : (
           <div
-            className="grid gap-5 rounded-xl border border-destructive/20 bg-destructive/10 p-6"
+            className="grid gap-5 rounded-xl border border-destructive/20 bg-destructive/10 p-5 sm:p-6"
             role="alert"
           >
             <div className="grid gap-1">

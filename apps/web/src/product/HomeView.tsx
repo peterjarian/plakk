@@ -273,8 +273,8 @@ export function HomeView(props: {
         onSignOutClick={onSignOut}
         {...(onSettings === undefined ? {} : { onSettingsClick: onSettings })}
         storageAction={
-          <span className="flex items-center gap-3 text-xs text-muted-foreground">
-            <span>
+          <span className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground sm:gap-3">
+            <span className="max-w-24 truncate sm:max-w-none">
               {storageProvider === null ? "Web · Read only" : storageProviderLabel(storageProvider)}
             </span>
             <a className="hover:text-foreground hover:underline" href="mailto:help@plakk.io">
@@ -292,7 +292,7 @@ export function HomeView(props: {
         </div>
       )}
 
-      <div className="mx-auto flex w-full max-w-3xl min-h-0 flex-1 flex-col px-6 py-8">
+      <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-4 py-6 sm:px-6 sm:py-8">
         <div className="mb-7">
           <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Home</p>
           <h1 className="text-2xl font-semibold tracking-tight">Your snippets</h1>
@@ -309,11 +309,16 @@ export function HomeView(props: {
         </div>
 
         {!addDisabled && (
-          <SnippetComposer
-            className="mb-6"
-            onFiles={(files) => onAddFiles(Array.from(files))}
-            onSubmit={onAddText}
-          />
+          <div className="mb-6 grid gap-2">
+            <SnippetComposer
+              onFiles={(files) => onAddFiles(Array.from(files))}
+              onSubmit={onAddText}
+            />
+            <p className="px-1 text-xs text-muted-foreground">
+              Paste or drop content on this active page. Uploads continue only while this page
+              remains open.
+            </p>
+          </div>
         )}
 
         {state.kind === "ready" && state.localReadPerformance === "degraded" && (
