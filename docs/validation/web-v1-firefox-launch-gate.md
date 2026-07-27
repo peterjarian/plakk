@@ -10,6 +10,8 @@ billing, deployment, or telemetry evidence.
 
 - Product revision under validation: `ac5ad9673719a6c6975ad542a208420903d1794c`, the exact
   `origin/main` commit containing the squash-merged #132 work.
+- Tested Firefox harness revision: `1576264d5bb748fee889f4db7e40099f661649a7`. The later
+  evidence-only commit does not change the tested Web or Playwright source.
 - Evidence branch: `codex/issue-133-firefox-launch-gate`.
 - Date: 2026-07-27, Europe/Amsterdam.
 - Host: Linux x86_64, kernel `7.0.0-28-generic`.
