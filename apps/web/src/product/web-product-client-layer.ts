@@ -16,12 +16,15 @@ import {
   readStorageOnboarding,
   StorageOnboardingClient,
 } from "./storage-onboarding-client.ts";
+import { WebSnippetActionRemote } from "./snippet-actions.ts";
 import { WebSnippetUploadRemote } from "./snippet-upload.ts";
 
 export const makeWebProductClientLayer = (options: {
   readonly getAccessToken: () => Promise<string | undefined>;
   readonly rpcUrl: string;
-}): Layer.Layer<AccountProductReader | StorageOnboardingClient | WebSnippetUploadRemote> => {
+}): Layer.Layer<
+  AccountProductReader | StorageOnboardingClient | WebSnippetActionRemote | WebSnippetUploadRemote
+> => {
   const protocolLayer = RpcClient.layerProtocolHttp({ url: options.rpcUrl }).pipe(
     Layer.provideMerge(FetchHttpClient.layer),
     Layer.provideMerge(RpcSerialization.layerNdjson),
@@ -44,6 +47,25 @@ export const makeWebProductClientLayer = (options: {
                 beginStorageProviderLink(rpc, options.getAccessToken, storageProvider, origin),
               read: (providerHint) =>
                 readStorageOnboarding(rpc, options.getAccessToken, providerHint),
+            }),
+          ),
+          Context.add(
+            WebSnippetActionRemote,
+            WebSnippetActionRemote.of({
+              delete: (id) =>
+                authenticatedRpcOptions(options.getAccessToken).pipe(
+                  Effect.flatMap((requestOptions) => rpc.DeleteSnippet({ id }, requestOptions)),
+                ),
+              prepareDownload: (id) =>
+                authenticatedRpcOptions(options.getAccessToken).pipe(
+                  Effect.flatMap((requestOptions) =>
+                    rpc.PrepareSnippetDownload({ id }, requestOptions),
+                  ),
+                ),
+              read: (id) =>
+                authenticatedRpcOptions(options.getAccessToken).pipe(
+                  Effect.flatMap((requestOptions) => rpc.GetSnippetContent({ id }, requestOptions)),
+                ),
             }),
           ),
           Context.add(

@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { AccountProductReader } from "./product-reader.ts";
 import { StorageOnboardingClient } from "./storage-onboarding-client.ts";
+import { WebSnippetActionRemote } from "./snippet-actions.ts";
 import { WebSnippetUploadRemote } from "./snippet-upload.ts";
 import { ProductIdentityBoundary, useWebProduct } from "./WebProductProvider.tsx";
 
@@ -42,16 +43,32 @@ const storageOnboardingLayer = Layer.succeed(
     read: () => Effect.succeed({ account, providerStatus: null }),
   }),
 );
-const productClientLayer = (id: string) =>
+const productClientLayer = (
+  id: string,
+  overrides: {
+    readonly delete?: WebSnippetActionRemote["Service"]["delete"];
+    readonly read?: AccountProductReader["Service"]["read"];
+  } = {},
+) =>
   Layer.mergeAll(
     Layer.succeed(
       AccountProductReader,
       AccountProductReader.of({
         invalidations: Effect.void.pipe(Stream.fromEffect, Stream.concat(Stream.never)),
-        read: Effect.succeed({ account, snippets: [snippet(id)] }),
+        read: overrides.read ?? Effect.succeed({ account, snippets: [snippet(id)] }),
       }),
     ),
     storageOnboardingLayer,
+    Layer.succeed(
+      WebSnippetActionRemote,
+      WebSnippetActionRemote.of({
+        delete:
+          overrides.delete ??
+          (() => Effect.die("Snippet deletion is not used in this identity test.")),
+        prepareDownload: () => Effect.die("Prepared downloads are not used in this identity test."),
+        read: () => Effect.die("Snippet content is not used in this identity test."),
+      }),
+    ),
     Layer.succeed(
       WebSnippetUploadRemote,
       WebSnippetUploadRemote.of({
@@ -62,22 +79,34 @@ const productClientLayer = (id: string) =>
   );
 
 function ProductProbe() {
-  const { signOut, state } = useWebProduct();
+  const { signOut, snippetActions, state } = useWebProduct();
   const [signOutFailed, setSignOutFailed] = useState(false);
   return (
     <>
       <output>
         {state.kind === "ready"
           ? `${state.accountId}:${
-              state.snippets[0]?.kind === "PUBLISHED"
-                ? state.snippets[0].snippet.fileName
-                : state.snippets[0]?.fileName
+              state.snippets[0] === undefined
+                ? "empty"
+                : state.snippets[0].kind === "PUBLISHED"
+                  ? state.snippets[0].snippet.fileName
+                  : state.snippets[0]?.fileName
             }`
           : `${state.kind}:${state.kind === "loading" ? state.accountId : "none"}`}
       </output>
       <span data-sign-out-result>{signOutFailed ? "failed" : "not-attempted"}</span>
       <button type="button" onClick={() => void signOut?.().catch(() => setSignOutFailed(true))}>
         Sign out
+      </button>
+      <button
+        type="button"
+        data-delete-snippet
+        onClick={() => {
+          if (state.kind !== "ready" || state.snippets[0]?.kind !== "PUBLISHED") return;
+          void snippetActions?.delete(state.snippets[0].snippet.id);
+        }}
+      >
+        Delete snippet
       </button>
     </>
   );
@@ -157,5 +186,44 @@ describe("Web product identity boundary", () => {
     expect(delegateSignOut).toHaveBeenCalledOnce();
     expect(container.querySelector("[data-sign-out-result]")?.textContent).toBe("failed");
     expect(container.querySelector("output")?.textContent).toBe("user_a:user_a.png");
+  });
+
+  it("refreshes the authoritative snapshot after Delete completes", async () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    let deleted = false;
+    const deleteRemote = vi.fn(() =>
+      Effect.sync(() => {
+        deleted = true;
+      }),
+    );
+    const read = Effect.sync(() => ({
+      account,
+      snippets: deleted ? [] : [snippet("user_a")],
+    }));
+    mountedRoots.push(root);
+
+    await act(async () => {
+      root.render(
+        <ProductIdentityBoundary
+          accountId="user_a"
+          delegateSignOut={vi.fn().mockResolvedValue(undefined)}
+          productClientLayer={productClientLayer("user_a", {
+            delete: deleteRemote,
+            read,
+          })}
+        >
+          <ProductProbe />
+        </ProductIdentityBoundary>,
+      );
+    });
+    expect(container.querySelector("output")?.textContent).toBe("user_a:user_a.png");
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>("[data-delete-snippet]")?.click();
+    });
+
+    expect(deleteRemote).toHaveBeenCalledWith("user_a");
+    expect(container.querySelector("output")?.textContent).toBe("user_a:empty");
   });
 });

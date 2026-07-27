@@ -1,19 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowUpRight, LoaderCircle, Plus, TriangleAlert } from "lucide-react";
 import { AppHeader } from "@plakk/ui/components/AppHeader";
+import { ExternalLinkConfirmationDialog } from "@plakk/ui/components/ExternalLinkConfirmationDialog";
 import { SnippetComposer } from "@plakk/ui/components/SnippetComposer";
 import { SnippetList } from "@plakk/ui/components/SnippetList";
 import { SnippetRow } from "@plakk/ui/components/SnippetRow";
 import { Button } from "@plakk/ui/components/primitives/button";
 import { Checkbox } from "@plakk/ui/components/primitives/checkbox";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@plakk/ui/components/primitives/dialog";
 import { SyncStatusIndicator, type SyncStatus } from "../components/SyncStatusIndicator.tsx";
 import { signOut, useAuth } from "../hooks/useAuth.ts";
 import { useSnippets } from "../hooks/useSnippets.ts";
@@ -256,8 +249,6 @@ export function Home({ active = true }: { active?: boolean }) {
     await openSnippet(snippetId);
   }
 
-  const pendingExternalHost = pendingExternalUrl ? new URL(pendingExternalUrl).host : "";
-
   const storageAction =
     storageStatus.kind === "unlinked" ? (
       <Button
@@ -481,53 +472,22 @@ export function Home({ active = true }: { active?: boolean }) {
         </div>
       )}
 
-      <Dialog
+      <ExternalLinkConfirmationDialog
+        description="This link will open in your browser outside Plakk."
         open={pendingExternalUrl !== null}
-        onOpenChange={(open) => {
-          if (!open) closeExternalLinkDialog();
-        }}
-      >
-        <DialogContent className="w-[min(calc(100%-2rem),24rem)]">
-          <DialogHeader>
-            <div className="flex items-start gap-3">
-              <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-amber-100 text-amber-700 dark:bg-amber-400/15 dark:text-amber-300">
-                <TriangleAlert className="size-4" aria-hidden="true" />
-              </div>
-              <div className="grid gap-2">
-                <DialogTitle>Open external link?</DialogTitle>
-                <DialogDescription>
-                  This link will open in your browser outside Plakk.
-                </DialogDescription>
-              </div>
-            </div>
-          </DialogHeader>
-
-          <div className="grid gap-3">
-            <div className="rounded-lg border border-amber-300/70 bg-amber-50/70 px-3 py-2 text-sm dark:border-amber-400/25 dark:bg-amber-400/10">
-              <p className="truncate font-medium">{pendingExternalHost}</p>
-              <p className="truncate text-xs text-muted-foreground">{pendingExternalUrl}</p>
-            </div>
-
-            <label className="flex items-center gap-2 text-sm">
-              <Checkbox
-                checked={skipExternalLinkWarning}
-                onCheckedChange={(checked) => setSkipExternalLinkWarning(checked === true)}
-              />
-              Do not warn me again
-            </label>
-          </div>
-
-          <DialogFooter className="flex-row justify-end">
-            <Button type="button" variant="outline" onClick={closeExternalLinkDialog}>
-              Cancel
-            </Button>
-            <Button type="button" onClick={() => void confirmExternalLink()}>
-              Open link
-              <ArrowUpRight />
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        url={pendingExternalUrl}
+        onCancel={closeExternalLinkDialog}
+        onConfirm={() => void confirmExternalLink()}
+        preference={
+          <label className="flex items-center gap-2 text-sm">
+            <Checkbox
+              checked={skipExternalLinkWarning}
+              onCheckedChange={(checked) => setSkipExternalLinkWarning(checked === true)}
+            />
+            Do not warn me again
+          </label>
+        }
+      />
     </main>
   );
 }

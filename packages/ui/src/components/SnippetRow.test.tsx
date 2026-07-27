@@ -1,8 +1,9 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 import * as DateTime from "effect/DateTime";
+import { WEB_SNIPPET_CONTENT_MAX_BYTES } from "@plakk/shared/PlakkApi";
 
-import { formatSnippetDate, SnippetRow } from "./SnippetRow.tsx";
+import { formatSnippetDate, PublishedSnippetRow, SnippetRow } from "./SnippetRow.tsx";
 
 const snippet = {
   id: "8c72d6f6-9a25-4633-b72f-d8f83cf1c8e0",
@@ -19,6 +20,9 @@ const snippet = {
 const now = DateTime.toEpochMillis(DateTime.makeUnsafe("2026-07-11T12:00:00.000Z"));
 const dateAt = (millisecondsAgo: number) =>
   DateTime.formatIso(DateTime.makeUnsafe(now - millisecondsAgo));
+
+const actionTag = (markup: string, label: string) =>
+  markup.match(new RegExp(`<button(?=[^>]*aria-label="${label}")[^>]*>`))?.[0] ?? "";
 
 describe("SnippetRow", () => {
   it("does not make ordinary pointer clicks select row content", () => {
@@ -251,9 +255,78 @@ describe("SnippetRow", () => {
     expect(markup).toContain('aria-label="Download to this device"');
     expect(markup).toContain('aria-label="Open link"');
     expect(markup).toContain('aria-label="Delete"');
-    expect(markup).toMatch(/disabled=""[^>]+aria-label="Download to this device"/);
-    expect(markup).toMatch(/disabled=""[^>]+aria-label="Open link"/);
-    expect(markup).not.toMatch(/disabled=""[^>]+aria-label="Delete"/);
+    expect(actionTag(markup, "Download to this device")).toContain('disabled=""');
+    expect(actionTag(markup, "Open link")).toContain('disabled=""');
+    expect(actionTag(markup, "Delete")).not.toContain('disabled=""');
+  });
+});
+
+describe("PublishedSnippetRow browser actions", () => {
+  const renderPublished = (
+    fileName: string,
+    presentation: Parameters<typeof PublishedSnippetRow>[0]["presentation"],
+    productActionsDisabled = false,
+    byteSize: number = snippet.byteSize,
+  ) =>
+    renderToStaticMarkup(
+      <PublishedSnippetRow
+        snippet={{ ...snippet, byteSize, fileName, storageObjectId: "drive-object" }}
+        presentation={presentation}
+        now={now}
+        onCopy={() => undefined}
+        onDelete={() => undefined}
+        onDownload={() => undefined}
+        onOpenLink={() => undefined}
+        productActionsDisabled={productActionsDisabled}
+      />,
+    );
+
+  it("offers Copy and verified-link preparation for text candidates", () => {
+    const markup = renderPublished("note.txt", { type: "file", title: "Text snippet" });
+
+    expect(markup).toContain('aria-label="Copy"');
+    expect(markup).toContain('aria-label="Open link"');
+    expect(markup).toContain('aria-label="Delete"');
+    expect(markup).not.toContain('aria-label="Download"');
+  });
+
+  it("offers image Copy and general-file Download without file clipboard pretense", () => {
+    const image = renderPublished("photo.png", { type: "image", title: "photo.png" });
+    const file = renderPublished("report.pdf", { type: "file", title: "report.pdf" });
+
+    expect(image).toContain('aria-label="Copy"');
+    expect(image).not.toContain('aria-label="Download"');
+    expect(file).toContain('aria-label="Download"');
+    expect(file).not.toContain('aria-label="Copy"');
+  });
+
+  it("offers Download when an image or text candidate is too large to Copy", () => {
+    const byteSize = WEB_SNIPPET_CONTENT_MAX_BYTES + 1;
+    const text = renderPublished(
+      "note.txt",
+      { type: "file", title: "Text snippet" },
+      false,
+      byteSize,
+    );
+    const image = renderPublished(
+      "photo.png",
+      { type: "image", title: "photo.png" },
+      false,
+      byteSize,
+    );
+
+    expect(text).toContain('aria-label="Download"');
+    expect(text).not.toContain('aria-label="Copy"');
+    expect(image).toContain('aria-label="Download"');
+    expect(image).not.toContain('aria-label="Copy"');
+  });
+
+  it("disables content actions while preserving authoritative Delete", () => {
+    const markup = renderPublished("note.txt", { type: "file", title: "Text snippet" }, true);
+
+    expect(actionTag(markup, "Copy")).toContain('disabled=""');
+    expect(actionTag(markup, "Open link")).toContain('disabled=""');
+    expect(actionTag(markup, "Delete")).not.toContain('disabled=""');
   });
 });
 

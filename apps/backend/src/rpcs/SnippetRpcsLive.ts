@@ -15,6 +15,7 @@ import {
   CurrentUser,
   SNIPPET_INVALIDATION_KEEP_ALIVE,
   SNIPPETS_CHANGED,
+  WEB_SNIPPET_CONTENT_MAX_BYTES,
   type ApiSnippet,
   type PrepareSnippetUploadPayload,
   type PublishSnippetPayload,
@@ -211,10 +212,9 @@ const getSnippetSnapshot = Effect.fn("SnippetRpcs.getSnapshot")(function* (
   return rows.map(toApiSnippet);
 });
 
-const prepareSnippetDownload = Effect.fn("SnippetRpcs.prepareDownload")(function* (
+const loadAuthorizedSnippet = Effect.fn("SnippetRpcs.loadAuthorizedSnippet")(function* (
   drizzle: DrizzleService,
   capability: AccountCapability["Service"],
-  storage: StorageProvider["Service"],
   ownerWorkosUserId: string,
   snippetId: string,
 ) {
@@ -233,8 +233,19 @@ const prepareSnippetDownload = Effect.fn("SnippetRpcs.prepareDownload")(function
   }
 
   yield* capability.authorizeProductCommand(ownerWorkosUserId, snippet.storageProvider);
-  const download = yield* storage
-    .getDownloadTarget({
+  return snippet;
+});
+
+const prepareSnippetDownload = Effect.fn("SnippetRpcs.prepareDownload")(function* (
+  drizzle: DrizzleService,
+  capability: AccountCapability["Service"],
+  storage: StorageProvider["Service"],
+  ownerWorkosUserId: string,
+  snippetId: string,
+) {
+  const snippet = yield* loadAuthorizedSnippet(drizzle, capability, ownerWorkosUserId, snippetId);
+  const url = yield* storage
+    .getDownloadUrl({
       storageProvider: snippet.storageProvider,
       storageObjectId: snippet.storageObjectId,
       workosUserId: ownerWorkosUserId,
@@ -245,7 +256,46 @@ const prepareSnippetDownload = Effect.fn("SnippetRpcs.prepareDownload")(function
     storageProvider: snippet.storageProvider,
     fileName: snippet.fileName,
     byteSize: snippet.byteSize,
-    download,
+    // Provider credentials remain backend-owned. The empty collection preserves
+    // compatibility with Desktop clients that predate signed browser downloads.
+    download: { url, headers: [] },
+  };
+});
+
+const getSnippetContent = Effect.fn("SnippetRpcs.getContent")(function* (
+  drizzle: DrizzleService,
+  capability: AccountCapability["Service"],
+  storage: StorageProvider["Service"],
+  ownerWorkosUserId: string,
+  snippetId: string,
+) {
+  const snippet = yield* loadAuthorizedSnippet(drizzle, capability, ownerWorkosUserId, snippetId);
+  if (snippet.byteSize > WEB_SNIPPET_CONTENT_MAX_BYTES) {
+    return yield* new RpcError({
+      code: "FORBIDDEN",
+      message: "This snippet is too large for browser Copy or Open. Download it instead.",
+    });
+  }
+
+  const content = yield* storage
+    .downloadObject({
+      storageProvider: snippet.storageProvider,
+      storageObjectId: snippet.storageObjectId,
+      expectedByteSize: snippet.byteSize,
+      workosUserId: ownerWorkosUserId,
+    })
+    .pipe(mapStorageErrorsToRpc);
+  if (content.byteLength !== snippet.byteSize) {
+    return yield* new RpcError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "Stored object size does not match snippet metadata.",
+    });
+  }
+  return {
+    storageProvider: snippet.storageProvider,
+    fileName: snippet.fileName,
+    byteSize: snippet.byteSize,
+    content,
   };
 });
 
@@ -283,6 +333,7 @@ const deleteSnippet = Effect.fn("SnippetRpcs.delete")(function* (
           storageProvider: deleted.storageProvider,
         }),
       ),
+      Effect.forkDetach({ startImmediately: true }),
     );
 });
 
@@ -378,6 +429,15 @@ export const SnippetRpcsLive = Effect.gen(function* () {
         currentUser.id,
         input.id,
       ).pipe(Effect.annotateSpans({ id: input.id }));
+    }),
+    GetSnippetContent: Effect.fn("rpc.GetSnippetContent")(function* (input) {
+      const capability = yield* AccountCapability;
+      const drizzle = yield* Drizzle;
+      const storage = yield* StorageProvider;
+      const currentUser = yield* CurrentUser;
+      return yield* getSnippetContent(drizzle, capability, storage, currentUser.id, input.id).pipe(
+        Effect.annotateSpans({ id: input.id }),
+      );
     }),
     DeleteSnippet: Effect.fn("rpc.DeleteSnippet")(function* (input) {
       const drizzle = yield* Drizzle;

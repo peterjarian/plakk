@@ -1,4 +1,4 @@
-import type { StorageProvider } from "@plakk/shared";
+import { isTrustedStorageDownloadUrl } from "@plakk/shared";
 import { RpcError } from "@plakk/shared/RpcError";
 import { net } from "electron";
 import { Effect, Layer, Stream } from "effect";
@@ -28,30 +28,6 @@ const preparationError = (cause: RpcError | RpcClientError) => {
       return hydrationError(cause, "This snippet is not ready to download.", false);
     case "INTERNAL_SERVER_ERROR":
       return hydrationError(cause, "Plakk could not prepare this download.", true);
-  }
-};
-
-export const isSignedStorageDownloadUrl = (
-  storageProvider: StorageProvider,
-  value: string,
-): boolean => {
-  try {
-    const url = new URL(value);
-    if (url.protocol !== "https:") return false;
-    if (storageProvider === "GOOGLE_DRIVE") {
-      return (
-        url.hostname === "www.googleapis.com" ||
-        url.hostname === "drive.google.com" ||
-        url.hostname === "drive.usercontent.google.com" ||
-        url.hostname.endsWith(".googleusercontent.com")
-      );
-    }
-    if (storageProvider === "ONE_DRIVE") {
-      return url.hostname.endsWith(".1drv.com") || url.hostname.endsWith(".sharepoint.com");
-    }
-    return url.hostname.endsWith(".dropboxusercontent.com");
-  } catch {
-    return false;
   }
 };
 
@@ -86,7 +62,7 @@ export const makeSnippetHydrationTransportLive = (fetch: SnippetFetch) =>
                     );
                   }
                   if (
-                    !isSignedStorageDownloadUrl(prepared.storageProvider, prepared.download.url)
+                    !isTrustedStorageDownloadUrl(prepared.storageProvider, prepared.download.url)
                   ) {
                     return Effect.fail(
                       hydrationError(

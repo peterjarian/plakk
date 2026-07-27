@@ -3,6 +3,7 @@ import * as Schema from "effect/Schema";
 export * from "./SnippetPresentation.ts";
 export * from "./DeviceSnippet.ts";
 export * from "./ProviderUploadTarget.ts";
+export * from "./StorageDownloadUrl.ts";
 export * from "./StorageProvider.ts";
 
 export const UserSchema = Schema.Struct({

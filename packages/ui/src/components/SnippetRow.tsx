@@ -1,5 +1,10 @@
-import { formatFileSize, type LocalUploadRecord, type SnippetPresentation } from "@plakk/shared";
-import type { ApiSnippet } from "@plakk/shared/PlakkApi";
+import {
+  formatFileSize,
+  isTextSnippetFileName,
+  type LocalUploadRecord,
+  type SnippetPresentation,
+} from "@plakk/shared";
+import { WEB_SNIPPET_CONTENT_MAX_BYTES, type ApiSnippet } from "@plakk/shared/PlakkApi";
 import type { LocalContentAvailability } from "@plakk/shared";
 import * as DateTime from "effect/DateTime";
 import {
@@ -11,6 +16,7 @@ import {
   ImageIcon,
   LoaderCircle,
   LinkIcon,
+  MoreHorizontal,
   RotateCw,
   Trash2,
   Type,
@@ -18,6 +24,12 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { Button } from "./primitives/button.tsx";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "./primitives/dropdown-menu.tsx";
 
 export type SnippetRowItem = Omit<ApiSnippet, "storageObjectId"> & {
   readonly kind: "LOCAL" | "PUBLISHED";
@@ -133,12 +145,136 @@ export function PublishedSnippetRow(props: {
   readonly snippet: ApiSnippet;
   readonly presentation: SnippetPresentation;
   readonly now: number;
+  readonly actionMessage?: string;
+  readonly actionStatus?: "busy" | "copied" | "idle" | "notice";
+  readonly deleteDisabled?: boolean;
+  readonly onCopy?: () => void;
+  readonly onDelete?: () => void;
+  readonly onDownload?: () => void;
+  readonly onOpenLink?: () => void;
+  readonly productActionsDisabled?: boolean;
 }) {
-  const { now, presentation, snippet } = props;
+  const {
+    actionMessage,
+    actionStatus = "idle",
+    deleteDisabled = false,
+    now,
+    onCopy,
+    onDelete,
+    onDownload,
+    onOpenLink,
+    presentation,
+    productActionsDisabled = false,
+    snippet,
+  } = props;
+  const isTextCandidate = isTextSnippetFileName(snippet.fileName);
+  const isCopyCandidate = isTextCandidate || presentation.type === "image";
+  const copyAvailable = isCopyCandidate && snippet.byteSize <= WEB_SNIPPET_CONTENT_MAX_BYTES;
+  const downloadAvailable =
+    (!isTextCandidate && presentation.type === "file") ||
+    (isCopyCandidate && snippet.byteSize > WEB_SNIPPET_CONTENT_MAX_BYTES);
+  const busy = actionStatus === "busy";
+  const primaryAction =
+    copyAvailable && onCopy !== undefined ? (
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        aria-label={actionStatus === "copied" ? "Copied" : "Copy"}
+        disabled={productActionsDisabled}
+        onClick={onCopy}
+      >
+        {actionStatus === "copied" ? <Check className="text-emerald-500" /> : <Copy />}
+      </Button>
+    ) : downloadAvailable && onDownload !== undefined ? (
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        aria-label="Download"
+        disabled={productActionsDisabled}
+        onClick={onDownload}
+      >
+        <Download />
+      </Button>
+    ) : null;
   return (
     <SnippetRowLayout
       presentation={presentation}
-      subtitle={snippetMetadata(snippet, presentation, now)}
+      subtitle={actionMessage ?? snippetMetadata(snippet, presentation, now)}
+      {...(actionMessage === undefined ? {} : { statusMessage: actionMessage })}
+      trailing={
+        onDelete === undefined ? undefined : (
+          <div className="flex shrink-0 items-center justify-end">
+            <div className="flex items-center gap-0.5 md:invisible md:group-hover:visible md:group-focus-within:visible">
+              {busy ? (
+                <span
+                  className="flex size-7 items-center justify-center"
+                  role="status"
+                  aria-label="Working on snippet"
+                >
+                  <LoaderCircle
+                    className="size-4 animate-spin text-muted-foreground"
+                    aria-hidden="true"
+                  />
+                </span>
+              ) : (
+                <>
+                  {primaryAction}
+                  {isTextCandidate && onOpenLink !== undefined && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="Open link"
+                      className="hidden md:inline-flex"
+                      disabled={productActionsDisabled}
+                      onClick={onOpenLink}
+                    >
+                      <ArrowUpRight />
+                    </Button>
+                  )}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="Delete"
+                    className="hidden hover:bg-destructive/10 hover:text-destructive md:inline-flex"
+                    disabled={deleteDisabled}
+                    onClick={onDelete}
+                  >
+                    <Trash2 />
+                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      aria-label="More snippet actions"
+                      className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground md:hidden"
+                    >
+                      <MoreHorizontal className="size-4" />
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      {isTextCandidate && onOpenLink !== undefined && (
+                        <DropdownMenuItem disabled={productActionsDisabled} onClick={onOpenLink}>
+                          <ArrowUpRight />
+                          Open link
+                        </DropdownMenuItem>
+                      )}
+                      <DropdownMenuItem
+                        variant="destructive"
+                        disabled={deleteDisabled}
+                        onClick={onDelete}
+                      >
+                        <Trash2 />
+                        Delete
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </>
+              )}
+            </div>
+          </div>
+        )
+      }
     />
   );
 }
