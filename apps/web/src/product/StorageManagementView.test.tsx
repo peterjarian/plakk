@@ -190,6 +190,38 @@ describe("storage management view", () => {
     expect(retryCleanup).toHaveBeenCalledWith("GOOGLE_DRIVE");
   });
 
+  it("refreshes authoritative connection status after a partial cleanup result", async () => {
+    const progress = {
+      action: "UNLINK" as const,
+      lastFailure: "Reconnect storage before retrying cleanup.",
+      remainingSnippetCount: 1,
+      totalSnippetCount: 3,
+    };
+    const read = vi
+      .fn<Props["read"]>()
+      .mockResolvedValueOnce(connected())
+      .mockResolvedValue(
+        connected({
+          cleanup: progress,
+          connectionStatus: "NEEDS_REAUTHORIZATION",
+          externalDestinationUrl: null,
+        }),
+      );
+    const beginCleanup = vi
+      .fn<Props["beginCleanup"]>()
+      .mockResolvedValue({ outcome: "PARTIAL", progress });
+    const { click, container } = await render({ beginCleanup, read });
+
+    await click("Unlink");
+    await act(async () => {
+      setInputValue(container.querySelector("input") as HTMLInputElement, "DELETE");
+    });
+    await click("Unlink permanently");
+
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(container.textContent).toContain("Reconnect Google Drive");
+  });
+
   it("offers same-provider reconnection when partial cleanup lost credential access", async () => {
     const { click, container, onRedirect, reauthorize } = await render({
       read: () =>
@@ -228,5 +260,65 @@ describe("storage management view", () => {
 
     expect(container.textContent).toContain("Cleanup did not start");
     expect(container.textContent).toContain("3 Snippets");
+  });
+
+  it("routes with the completed cleanup action", async () => {
+    const onCompleted = vi.fn<Props["onCompleted"]>();
+    const beginCleanup = vi
+      .fn<Props["beginCleanup"]>()
+      .mockResolvedValue({ action: "SWITCH", outcome: "COMPLETED" });
+    const { click, container } = await render({ beginCleanup, onCompleted });
+
+    await click("Switch");
+    await act(async () => {
+      setInputValue(container.querySelector("input") as HTMLInputElement, "DELETE");
+    });
+    await click("Switch provider permanently");
+
+    expect(onCompleted).toHaveBeenCalledWith("SWITCH");
+  });
+
+  it("does not issue duplicate destructive requests for rapid clicks", async () => {
+    const beginCleanup = vi.fn<Props["beginCleanup"]>(
+      () => new Promise<StorageCleanupRunResult>(() => undefined),
+    );
+    const { click, container } = await render({ beginCleanup });
+
+    await click("Unlink");
+    await act(async () => {
+      setInputValue(container.querySelector("input") as HTMLInputElement, "DELETE");
+    });
+    const destructive = Array.from(container.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("Unlink permanently"),
+    ) as HTMLButtonElement;
+    await act(async () => {
+      destructive.click();
+      destructive.click();
+    });
+
+    expect(beginCleanup).toHaveBeenCalledOnce();
+  });
+
+  it("reports post-cleanup routing failure without claiming cleanup failed", async () => {
+    const onCompleted = vi
+      .fn<Props["onCompleted"]>()
+      .mockRejectedValue(new Error("controlled routing failure"));
+    const read = vi.fn<Props["read"]>().mockResolvedValueOnce(connected()).mockResolvedValue({
+      affectedSnippetCount: 0,
+      cleanup: null,
+      connectionStatus: "NOT_CONNECTED",
+      externalDestinationUrl: null,
+      storageProvider: null,
+    });
+    const { click, container } = await render({ onCompleted, read });
+
+    await click("Unlink");
+    await act(async () => {
+      setInputValue(container.querySelector("input") as HTMLInputElement, "DELETE");
+    });
+    await click("Unlink permanently");
+
+    expect(container.textContent).toContain("Cleanup completed");
+    expect(container.textContent).not.toContain("Cleanup did not start");
   });
 });

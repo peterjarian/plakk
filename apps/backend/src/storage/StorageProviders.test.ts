@@ -366,6 +366,25 @@ describe("storage deletion providers", () => {
     ).resolves.toBeUndefined();
   });
 
+  it("does not suppress unrelated Dropbox conflict responses", async () => {
+    fetchMock.mockResolvedValue(
+      Response.json({ error_summary: "path_lookup/malformed_path/..." }, { status: 409 }),
+    );
+
+    await expect(
+      Effect.runPromise(
+        DropboxStorageProvider.deleteObject({
+          accessToken: "secret-token",
+          storageProvider: "DROPBOX",
+          storageObjectId: "/snippet/malformed.txt",
+        }).pipe(Effect.provide(FetchHttpClient.layer)),
+      ),
+    ).rejects.toMatchObject({
+      _tag: "StorageProviderError",
+      message: "Stored object deletion failed: 409",
+    });
+  });
+
   it("reports provider deletion failure without retrying", async () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 503 }));
 

@@ -32,6 +32,7 @@ import {
 } from "./StorageProvider.ts";
 
 const WORKOS_BASE_URL = "https://api.workos.com";
+const WORKOS_REQUEST_TIMEOUT = "15 seconds";
 
 type ConnectedStorageToken = {
   readonly accessToken: string;
@@ -85,7 +86,6 @@ export const StorageProviderLive = Layer.effect(
         `${WORKOS_BASE_URL}/data-integrations/${encodeURIComponent(getProviderSlug(input.storageProvider))}/authorize`,
       ).pipe(
         HttpClientRequest.bearerToken(Redacted.value(apiKey)),
-        HttpClientRequest.setHeader("Content-Type", "application/json"),
         HttpClientRequest.bodyJson({
           return_to: input.returnTo,
           user_id: input.workosUserId,
@@ -99,6 +99,7 @@ export const StorageProviderLive = Layer.effect(
         ),
       );
       const response = yield* httpClient.execute(request).pipe(
+        Effect.timeout(WORKOS_REQUEST_TIMEOUT),
         Effect.mapError(
           (cause) =>
             new StorageCredentialsError({
@@ -141,7 +142,16 @@ export const StorageProviderLive = Layer.effect(
             message: "Could not get storage credentials.",
             cause,
           }),
-      });
+      }).pipe(
+        Effect.timeout(WORKOS_REQUEST_TIMEOUT),
+        Effect.mapError(
+          (cause) =>
+            new StorageCredentialsError({
+              message: "Could not get storage credentials.",
+              cause,
+            }),
+        ),
+      );
 
       if (!token.active) {
         if (token.error === "needs_reauthorization") {
@@ -169,12 +179,13 @@ export const StorageProviderLive = Layer.effect(
     ) {
       const response = yield* httpClient
         .get(
-          `https://api.workos.com/user_management/users/${encodeURIComponent(workosUserId)}/data_providers`,
+          `${WORKOS_BASE_URL}/user_management/users/${encodeURIComponent(workosUserId)}/data_providers`,
           {
             headers: { Authorization: `Bearer ${Redacted.value(apiKey)}` },
           },
         )
         .pipe(
+          Effect.timeout(WORKOS_REQUEST_TIMEOUT),
           Effect.mapError(
             (cause) =>
               new StorageCredentialsError({
@@ -226,6 +237,7 @@ export const StorageProviderLive = Layer.effect(
           headers: { Authorization: `Bearer ${Redacted.value(apiKey)}` },
         })
         .pipe(
+          Effect.timeout(WORKOS_REQUEST_TIMEOUT),
           Effect.mapError(
             (cause) =>
               new StorageCredentialsError({
@@ -296,6 +308,7 @@ export const StorageProviderLive = Layer.effect(
           headers: { Authorization: `Bearer ${Redacted.value(apiKey)}` },
         })
         .pipe(
+          Effect.timeout(WORKOS_REQUEST_TIMEOUT),
           Effect.mapError(
             (cause) =>
               new StorageCredentialsError({

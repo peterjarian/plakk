@@ -1,14 +1,11 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 import { CONTROLLED_PRODUCT_ORIGIN } from "./controlled-product/config.ts";
 
 const managementProof = (mode: "connected" | "partial" | "reauthorization", session: string) =>
   `${CONTROLLED_PRODUCT_ORIGIN}/?storage-management=${mode}&storage-session=${session}`;
 
-const confirmCleanup = async (
-  page: import("@playwright/test").Page,
-  action: "Switch" | "Unlink",
-) => {
+const confirmCleanup = async (page: Page, action: "Switch" | "Unlink") => {
   await page.getByRole("button", { name: action, exact: true }).click();
   const destructive = page.getByRole("button", {
     name: `${action === "Switch" ? "Switch provider" : action} permanently`,
@@ -92,6 +89,10 @@ test("partial cleanup retains connection, rejects late commands, and Retry compl
 
   await page.reload();
   await expect(page.getByText("2 of 3 Snippets remain")).toBeVisible();
+  await page.getByRole("button", { name: "Retry cleanup" }).click();
+  await expect(page.getByText("1 of 3 Snippets remain")).toBeVisible();
+  await page.reload();
+  await expect(page.getByText("1 of 3 Snippets remain")).toBeVisible();
   await page.getByRole("button", { name: "Retry cleanup" }).click();
   await expect(page.getByRole("heading", { name: "Choose replacement storage" })).toBeVisible();
 });

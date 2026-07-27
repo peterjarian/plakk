@@ -1,4 +1,5 @@
 import type { StorageCleanupRunResult, StorageManagementState } from "@plakk/shared/PlakkApi";
+import { RpcError } from "@plakk/shared/RpcError";
 import { describe, expect, it, vi } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 
@@ -95,5 +96,24 @@ describe("storage management client", () => {
       { origin: "WEB", storageProvider: "DROPBOX" },
       { headers: { authorization: "Bearer token" } },
     );
+  });
+
+  it("surfaces cleanup RPC failures without converting them to success", async () => {
+    const failure = new RpcError({
+      code: "CONFLICT",
+      message: "The authoritative Snippet count changed.",
+    });
+
+    await expect(
+      Effect.runPromise(
+        beginStorageCleanup(
+          rpc({ BeginStorageCleanup: () => Effect.fail(failure) }),
+          async () => "token",
+          "UNLINK",
+          "GOOGLE_DRIVE",
+          3,
+        ),
+      ),
+    ).rejects.toBe(failure);
   });
 });

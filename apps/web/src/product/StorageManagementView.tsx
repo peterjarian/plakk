@@ -6,7 +6,7 @@ import type {
 } from "@plakk/shared/PlakkApi";
 import { Button } from "@plakk/ui/components/primitives/button";
 import { ExternalLink, LoaderCircle, RotateCcw } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { storageProviderLabel } from "./storage-provider-presentation.ts";
 
@@ -28,6 +28,7 @@ type ViewState =
       readonly confirmation: string;
       readonly kind: "confirming";
       readonly snapshot: StorageManagementState;
+      readonly storageProvider: StorageProvider;
     }
   | {
       readonly action: StorageCleanupAction;
@@ -53,6 +54,7 @@ export function StorageManagementView(props: {
       window.location.assign(url);
     });
   const [state, setState] = useState<ViewState>({ kind: "loading" });
+  const destructiveRequestInFlight = useRef(false);
 
   const reconstruct = useCallback(
     async (notice: string | null = null) => {
@@ -71,55 +73,64 @@ export function StorageManagementView(props: {
   }, [reconstruct]);
 
   const completeOrRetain = useCallback(
-    async (result: StorageCleanupRunResult, snapshot: StorageManagementState) => {
+    async (result: StorageCleanupRunResult) => {
       if (result.outcome === "COMPLETED") {
-        await props.onCompleted(result.action);
+        try {
+          await props.onCompleted(result.action);
+        } catch {
+          await reconstruct(
+            "Cleanup completed, but provider choice could not open. Retry navigation; no provider content will be deleted again.",
+          );
+        }
         return;
       }
-      setState({
-        kind: "ready",
-        notice: null,
-        snapshot: {
-          ...snapshot,
-          affectedSnippetCount: result.progress.totalSnippetCount,
-          cleanup: result.progress,
-        },
-      });
+      await reconstruct();
     },
-    [props.onCompleted],
+    [props.onCompleted, reconstruct],
   );
 
   const beginCleanup = useCallback(async () => {
-    if (state.kind !== "confirming") return;
-    const { action, snapshot } = state;
-    const storageProvider = snapshot.storageProvider;
-    if (storageProvider === null) return;
+    if (destructiveRequestInFlight.current || state.kind !== "confirming") return;
+    destructiveRequestInFlight.current = true;
+    const { action, snapshot, storageProvider } = state;
     setState({ action, kind: "cleaning", snapshot });
     try {
-      await completeOrRetain(
-        await props.beginCleanup(action, storageProvider, snapshot.affectedSnippetCount),
-        snapshot,
-      );
-    } catch {
-      await reconstruct(
-        "Cleanup did not start. Review the refreshed provider state and Snippet count, then try again.",
-      );
+      let result: StorageCleanupRunResult;
+      try {
+        result = await props.beginCleanup(action, storageProvider, snapshot.affectedSnippetCount);
+      } catch {
+        await reconstruct(
+          "Cleanup did not start. Review the refreshed provider state and Snippet count, then try again.",
+        );
+        return;
+      }
+      await completeOrRetain(result);
+    } finally {
+      destructiveRequestInFlight.current = false;
     }
   }, [completeOrRetain, props.beginCleanup, reconstruct, state]);
 
   const retryCleanup = useCallback(async () => {
-    if (state.kind !== "ready") return;
+    if (destructiveRequestInFlight.current || state.kind !== "ready") return;
     const snapshot = state.snapshot;
     const storageProvider = snapshot.storageProvider;
     if (storageProvider === null) return;
+    destructiveRequestInFlight.current = true;
     const action = snapshot.cleanup?.action ?? "UNLINK";
     setState({ action, kind: "cleaning", snapshot });
     try {
-      await completeOrRetain(await props.retryCleanup(storageProvider), snapshot);
-    } catch {
-      await reconstruct(
-        "Cleanup Retry did not complete. The authoritative progress was refreshed; review it before trying again.",
-      );
+      let result: StorageCleanupRunResult;
+      try {
+        result = await props.retryCleanup(storageProvider);
+      } catch {
+        await reconstruct(
+          "Cleanup Retry did not complete. The authoritative progress was refreshed; review it before trying again.",
+        );
+        return;
+      }
+      await completeOrRetain(result);
+    } finally {
+      destructiveRequestInFlight.current = false;
     }
   }, [completeOrRetain, props.retryCleanup, reconstruct, state]);
 
@@ -132,6 +143,20 @@ export function StorageManagementView(props: {
       setState({ kind: "failed" });
     }
   }, [onRedirect, props.reauthorize, state]);
+
+  const confirmCleanup = useCallback(
+    (action: StorageCleanupAction, snapshot: StorageManagementState) => {
+      if (snapshot.storageProvider === null) return;
+      setState({
+        action,
+        confirmation: "",
+        kind: "confirming",
+        snapshot,
+        storageProvider: snapshot.storageProvider,
+      });
+    },
+    [],
+  );
 
   return (
     <main className="grid min-h-screen place-items-center bg-background px-6 py-10 text-foreground">
@@ -189,12 +214,12 @@ export function StorageManagementView(props: {
           <div className="grid gap-5 rounded-xl border border-destructive/30 bg-card p-6">
             <div className="grid gap-2">
               <h2 className="text-lg font-semibold">
-                {actionLabel(state.action)} {storageProviderLabel(state.snapshot.storageProvider!)}?
+                {actionLabel(state.action)} {storageProviderLabel(state.storageProvider)}?
               </h2>
               <p className="text-sm text-muted-foreground">
                 This permanently deletes {snippetCountLabel(state.snapshot.affectedSnippetCount)}{" "}
                 and their provider content before disconnecting{" "}
-                {storageProviderLabel(state.snapshot.storageProvider!)}.
+                {storageProviderLabel(state.storageProvider)}.
               </p>
               <p className="text-sm text-muted-foreground">
                 Switching offers no migration. A replacement provider can be chosen only after this
@@ -318,28 +343,14 @@ export function StorageManagementView(props: {
               <Button
                 type="button"
                 variant="outline"
-                onClick={() =>
-                  setState({
-                    action: "UNLINK",
-                    confirmation: "",
-                    kind: "confirming",
-                    snapshot: state.snapshot,
-                  })
-                }
+                onClick={() => confirmCleanup("UNLINK", state.snapshot)}
               >
                 Unlink
               </Button>
               <Button
                 type="button"
                 variant="destructive"
-                onClick={() =>
-                  setState({
-                    action: "SWITCH",
-                    confirmation: "",
-                    kind: "confirming",
-                    snapshot: state.snapshot,
-                  })
-                }
+                onClick={() => confirmCleanup("SWITCH", state.snapshot)}
               >
                 Switch
               </Button>

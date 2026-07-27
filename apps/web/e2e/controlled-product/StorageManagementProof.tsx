@@ -129,6 +129,23 @@ export function StorageManagementProof(props: {
       if (authority.linkedProvider !== storageProvider || action === undefined) {
         throw new Error("No controlled cleanup is available.");
       }
+      const remainingSnippetCount = (authority.snapshot.cleanup?.remainingSnippetCount ?? 0) - 1;
+      if (remainingSnippetCount > 0) {
+        const progress = {
+          action,
+          lastFailure: "Controlled provider deletion failed again. Retry cleanup.",
+          remainingSnippetCount,
+          totalSnippetCount: authority.snapshot.cleanup?.totalSnippetCount ?? 0,
+        };
+        writeAuthority({
+          linkedProvider: storageProvider,
+          snapshot: {
+            ...authority.snapshot,
+            cleanup: progress,
+          },
+        });
+        return { outcome: "PARTIAL", progress };
+      }
       writeAuthority({
         linkedProvider: null,
         snapshot: {

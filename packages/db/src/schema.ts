@@ -79,6 +79,7 @@ export type AccountBillingStateRow = typeof accountBillingStates.$inferSelect;
 export const storageAuthorizationIntents = pgTable("storage_authorization_intents", {
   workosUserId: text("workos_user_id").primaryKey(),
   storageProvider: storageProvider("storage_provider").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   ...timestamps,
 });
 

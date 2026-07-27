@@ -5,7 +5,11 @@ import * as Effect from "effect/Effect";
 import * as DateTime from "effect/DateTime";
 import * as Layer from "effect/Layer";
 
-import { StorageProvider, StorageProviderError } from "./StorageProvider.ts";
+import {
+  StorageCredentialsError,
+  StorageProvider,
+  StorageProviderError,
+} from "./StorageProvider.ts";
 import {
   StorageLifecycle,
   StorageLifecycleStore,
@@ -18,6 +22,7 @@ const provider = "GOOGLE_DRIVE" as const;
 
 const makeStore = (ids: ReadonlyArray<string>) => {
   let authorization: StorageProviderName | null = null;
+  let renewals = 0;
   let cleanup: StorageCleanupRecord | null = null;
   let snippets: Array<StorageCleanupSnippet> = ids.map((id) => ({
     id,
@@ -28,6 +33,7 @@ const makeStore = (ids: ReadonlyArray<string>) => {
   const service = StorageLifecycleStore.of({
     begin: (input) =>
       Effect.sync(() => {
+        if (authorization !== null) return null;
         if (cleanup !== null) return cleanup;
         if (input.expectedSnippetCount !== snippets.length) return null;
         cleanup = {
@@ -47,7 +53,8 @@ const makeStore = (ids: ReadonlyArray<string>) => {
           cleanup === null ||
           cleanup.workosUserId !== workosUserId ||
           cleanup.storageProvider !== storageProvider ||
-          cleanup.attemptId !== null
+          cleanup.attemptId !== null ||
+          authorization !== null
         ) {
           return null;
         }
@@ -58,9 +65,9 @@ const makeStore = (ids: ReadonlyArray<string>) => {
         };
         return { cleanup, snippets };
       }),
-    clearAuthorization: () =>
+    clearAuthorization: (_, storageProvider) =>
       Effect.sync(() => {
-        authorization = null;
+        if (authorization === storageProvider) authorization = null;
       }),
     complete: (workosUserId, attemptId) =>
       Effect.sync(() => {
@@ -112,17 +119,28 @@ const makeStore = (ids: ReadonlyArray<string>) => {
           cleanup.attemptId === attemptId &&
           snippets.length === 0,
       ),
+    renew: (workosUserId, attemptId) =>
+      Effect.sync(() => {
+        if (cleanup?.workosUserId !== workosUserId || cleanup.attemptId !== attemptId) return false;
+        renewals += 1;
+        return true;
+      }),
     reserveAuthorization: (_, storageProvider) =>
       Effect.sync(() => {
-        if (cleanup !== null) return null;
-        authorization ??= storageProvider;
-        return authorization;
+        if (cleanup !== null && cleanup.storageProvider !== storageProvider) return null;
+        if (authorization !== null) {
+          return { acquired: false, storageProvider: authorization };
+        }
+        authorization = storageProvider;
+        return { acquired: true, storageProvider };
       }),
   });
 
   return {
+    authorization: () => authorization,
     cleanup: () => cleanup,
     layer: Layer.succeed(StorageLifecycleStore, service),
+    renewals: () => renewals,
     service,
     snippets: () => snippets,
     supersede: () => {
@@ -132,14 +150,23 @@ const makeStore = (ids: ReadonlyArray<string>) => {
 };
 
 const makeStorage = (options?: {
+  readonly authorizationFails?: boolean;
   readonly deleteFailureFor?: string;
+  readonly disconnectFails?: boolean;
   readonly linkedProvider?: StorageProviderName | null;
   readonly onDelete?: () => void;
   readonly status?: "CONNECTED" | "NEEDS_REAUTHORIZATION" | "NOT_CONNECTED";
 }) => {
   const events: Array<string> = [];
   const service = StorageProvider.of({
-    beginAuthorization: () => Effect.succeed({ url: "https://workos.example/authorize" }),
+    beginAuthorization: () =>
+      options?.authorizationFails
+        ? Effect.fail(
+            new StorageCredentialsError({
+              message: "controlled authorization failure",
+            }),
+          )
+        : Effect.succeed({ url: "https://workos.example/authorize" }),
     deleteObject: (input) => {
       events.push(`provider:${input.storageObjectId}`);
       options?.onDelete?.();
@@ -152,10 +179,16 @@ const makeStorage = (options?: {
           )
         : Effect.void;
     },
-    disconnect: () =>
-      Effect.sync(() => {
-        events.push("credential:disconnect");
-      }),
+    disconnect: () => {
+      events.push("credential:disconnect");
+      return options?.disconnectFails
+        ? Effect.fail(
+            new StorageCredentialsError({
+              message: "controlled credential disconnection failure",
+            }),
+          )
+        : Effect.void;
+    },
     downloadObject: () => Effect.succeed(new Uint8Array()),
     ensureConnected: () => Effect.void,
     getDestinationUrl: () => Effect.succeed("https://drive.example/folder"),
@@ -236,6 +269,7 @@ describe("storage destructive lifecycle", () => {
       "provider:object-second",
       "credential:disconnect",
     ]);
+    expect(store.renewals()).toBe(2);
     expect(store.snippets()).toEqual([]);
     expect(store.cleanup()).toBeNull();
   });
@@ -277,6 +311,44 @@ describe("storage destructive lifecycle", () => {
 
     expect(completed).toEqual({ action: "SWITCH", outcome: "COMPLETED" });
     expect(recoveredStorage.events.at(-1)).toBe("credential:disconnect");
+  });
+
+  it("retains zero remaining Snippets when credential disconnection fails, then retries only disconnection", async () => {
+    const store = makeStore(["first"]);
+    const failingStorage = makeStorage({ disconnectFails: true });
+
+    const partial = await run(
+      Effect.flatMap(StorageLifecycle, (lifecycle) =>
+        lifecycle.beginCleanup({
+          action: "UNLINK",
+          expectedSnippetCount: 1,
+          storageProvider: provider,
+          workosUserId: owner,
+        }),
+      ),
+      store,
+      failingStorage,
+    );
+
+    expect(partial).toMatchObject({
+      outcome: "PARTIAL",
+      progress: {
+        lastFailure: "Provider content is removed, but credential disconnection still needs Retry.",
+        remainingSnippetCount: 0,
+      },
+    });
+    expect(store.snippets()).toEqual([]);
+    expect(failingStorage.events).toEqual(["provider:object-first", "credential:disconnect"]);
+
+    const recoveredStorage = makeStorage();
+    await expect(
+      run(
+        Effect.flatMap(StorageLifecycle, (lifecycle) => lifecycle.retryCleanup(owner, provider)),
+        store,
+        recoveredStorage,
+      ),
+    ).resolves.toEqual({ action: "UNLINK", outcome: "COMPLETED" });
+    expect(recoveredStorage.events).toEqual(["credential:disconnect"]);
   });
 
   it("rejects a stale exact count without beginning cleanup", async () => {
@@ -326,6 +398,11 @@ describe("storage destructive lifecycle", () => {
       storageWithBegin,
     );
     expect(begin).toHaveBeenCalled();
+    await run(
+      Effect.flatMap(StorageLifecycle, (lifecycle) => lifecycle.getProviderStatus(owner, provider)),
+      store,
+      storageWithBegin,
+    );
 
     const wrongProvider = await run(
       Effect.flatMap(StorageLifecycle, (lifecycle) =>
@@ -360,6 +437,29 @@ describe("storage destructive lifecycle", () => {
       _tag: "Failure",
       failure: { code: "CONFLICT" },
     });
+
+    await expect(
+      run(
+        Effect.flatMap(StorageLifecycle, (lifecycle) =>
+          lifecycle.beginAuthorization(owner, provider, "https://app.plakk.io/storage"),
+        ),
+        store,
+        storageWithBegin,
+      ),
+    ).resolves.toEqual({ url: "https://workos.example/authorize" });
+    const cleanupProviderConflict = await run(
+      Effect.flatMap(StorageLifecycle, (lifecycle) =>
+        lifecycle
+          .beginAuthorization(owner, "DROPBOX", "https://app.plakk.io/storage")
+          .pipe(Effect.result),
+      ),
+      store,
+      storageWithBegin,
+    );
+    expect(cleanupProviderConflict).toMatchObject({
+      _tag: "Failure",
+      failure: { code: "CONFLICT" },
+    });
   });
 
   it("reserves one first-link provider across concurrent authorization attempts", async () => {
@@ -389,6 +489,46 @@ describe("storage destructive lifecycle", () => {
     });
   });
 
+  it("fences cleanup and duplicate redirects while linked-provider reauthorization is active", async () => {
+    const store = makeStore(["first"]);
+    const storage = makeStorage({ status: "NEEDS_REAUTHORIZATION" });
+
+    await run(
+      Effect.flatMap(StorageLifecycle, (lifecycle) =>
+        lifecycle.beginAuthorization(owner, provider, "https://app.plakk.io/storage"),
+      ),
+      store,
+      storage,
+    );
+    const duplicate = await run(
+      Effect.flatMap(StorageLifecycle, (lifecycle) =>
+        lifecycle
+          .beginAuthorization(owner, provider, "https://app.plakk.io/storage")
+          .pipe(Effect.result),
+      ),
+      store,
+      storage,
+    );
+    const destructive = await run(
+      Effect.flatMap(StorageLifecycle, (lifecycle) =>
+        lifecycle
+          .beginCleanup({
+            action: "SWITCH",
+            expectedSnippetCount: 1,
+            storageProvider: provider,
+            workosUserId: owner,
+          })
+          .pipe(Effect.result),
+      ),
+      store,
+      storage,
+    );
+
+    expect(duplicate).toMatchObject({ _tag: "Failure", failure: { code: "CONFLICT" } });
+    expect(destructive).toMatchObject({ _tag: "Failure", failure: { code: "CONFLICT" } });
+    expect(store.snippets()).toHaveLength(1);
+  });
+
   it("releases a first-link reservation after an unconfirmed provider return", async () => {
     const store = makeStore([]);
     const storage = makeStorage({ linkedProvider: null, status: "NOT_CONNECTED" });
@@ -414,6 +554,86 @@ describe("storage destructive lifecycle", () => {
     );
 
     expect(replacement.url).toContain("workos.example");
+  });
+
+  it("does not clear another provider's authorization reservation during status reconstruction", async () => {
+    const store = makeStore([]);
+    const storage = makeStorage({ linkedProvider: null, status: "NOT_CONNECTED" });
+
+    await run(
+      Effect.flatMap(StorageLifecycle, (lifecycle) =>
+        lifecycle.beginAuthorization(owner, provider, "https://app.plakk.io/storage"),
+      ),
+      store,
+      storage,
+    );
+    await run(
+      Effect.flatMap(StorageLifecycle, (lifecycle) =>
+        lifecycle.getProviderStatus(owner, "DROPBOX"),
+      ),
+      store,
+      storage,
+    );
+
+    expect(store.authorization()).toBe(provider);
+  });
+
+  it("releases a newly acquired reservation when authorization setup fails", async () => {
+    const store = makeStore([]);
+    const failingStorage = makeStorage({ authorizationFails: true, linkedProvider: null });
+
+    await expect(
+      run(
+        Effect.flatMap(StorageLifecycle, (lifecycle) =>
+          lifecycle.beginAuthorization(owner, provider, "https://app.plakk.io/storage"),
+        ),
+        store,
+        failingStorage,
+      ),
+    ).rejects.toMatchObject({ code: "INTERNAL_SERVER_ERROR" });
+    expect(store.authorization()).toBeNull();
+
+    const recoveredStorage = makeStorage({ linkedProvider: null });
+    await expect(
+      run(
+        Effect.flatMap(StorageLifecycle, (lifecycle) =>
+          lifecycle.beginAuthorization(owner, "DROPBOX", "https://app.plakk.io/storage"),
+        ),
+        store,
+        recoveredStorage,
+      ),
+    ).resolves.toEqual({ url: "https://workos.example/authorize" });
+  });
+
+  it("rejects a different exact count when an existing cleanup intent is reused", async () => {
+    const store = makeStore(["first", "second"]);
+    const storage = makeStorage();
+    await Effect.runPromise(
+      store.service.begin({
+        action: "UNLINK",
+        expectedSnippetCount: 2,
+        storageProvider: provider,
+        workosUserId: owner,
+      }),
+    );
+
+    const result = await run(
+      Effect.flatMap(StorageLifecycle, (lifecycle) =>
+        lifecycle
+          .beginCleanup({
+            action: "UNLINK",
+            expectedSnippetCount: 1,
+            storageProvider: provider,
+            workosUserId: owner,
+          })
+          .pipe(Effect.result),
+      ),
+      store,
+      storage,
+    );
+
+    expect(result).toMatchObject({ _tag: "Failure", failure: { code: "CONFLICT" } });
+    expect(storage.events).toEqual([]);
   });
 
   it("does not disconnect or report success after another Retry steals the lease", async () => {

@@ -21,10 +21,7 @@ function Storage() {
   const search = Route.useSearch();
   const product = useWebProduct();
   const chooseReplacement = useCallback(async () => {
-    if (product.refresh === null) {
-      throw new Error("The authenticated product cannot be refreshed.");
-    }
-    await product.refresh();
+    if (product.refresh !== null) await product.refresh();
     await navigate({
       to: "/storage",
       search: {

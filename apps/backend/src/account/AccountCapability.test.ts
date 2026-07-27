@@ -440,4 +440,20 @@ describe("account trial capability", () => {
       failure: { code: "FORBIDDEN" },
     });
   });
+
+  it("rejects Snippet deletion when no provider is linked", async () => {
+    const result = await runCapability(
+      (capability) => capability.authorizeSnippetDeletion("user-1").pipe(Effect.result),
+      {
+        storage: storageService({
+          getLinkedProvider: () => Effect.succeed(null),
+        }),
+      },
+    );
+
+    expect(result).toMatchObject({
+      _tag: "Failure",
+      failure: { code: "FORBIDDEN" },
+    });
+  });
 });

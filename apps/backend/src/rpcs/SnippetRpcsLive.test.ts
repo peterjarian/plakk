@@ -169,6 +169,19 @@ const queryValues = (condition: unknown): ReadonlyArray<unknown> => {
   return [];
 };
 
+const queryText = (statement: unknown): string => {
+  if (typeof statement === "string") return statement;
+  if (Array.isArray(statement)) return statement.map(queryText).join("");
+  if (statement === null || typeof statement !== "object") return "";
+  if (statement.constructor.name === "StringChunk" && "value" in statement) {
+    return queryText(statement.value);
+  }
+  if ("queryChunks" in statement && Array.isArray(statement.queryChunks)) {
+    return statement.queryChunks.map(queryText).join("");
+  }
+  return "";
+};
+
 const publicationDatabase = (
   options: {
     cleanupActive?: boolean;
@@ -178,7 +191,6 @@ const publicationDatabase = (
 ) => {
   const events: Array<string> = [];
   const insertedValues: Array<Record<string, unknown>> = [];
-  let executeCount = 0;
   const db = {
     transaction: <A, E, R>(body: (tx: DrizzleService["db"]) => Effect.Effect<A, E, R>) =>
       body(db as unknown as DrizzleService["db"]).pipe(
@@ -219,10 +231,9 @@ const publicationDatabase = (
         };
       },
     }),
-    execute: () =>
+    execute: (statement: unknown) =>
       Effect.sync(() => {
-        executeCount += 1;
-        if (executeCount > 1) events.push("notify");
+        if (queryText(statement).includes("pg_notify")) events.push("notify");
       }),
   } as unknown as DrizzleService["db"];
   return { db, events, insertedValues };
@@ -233,7 +244,6 @@ const deletionDatabase = (
   options: { readonly cleanupActive?: boolean } = {},
 ) => {
   const events: Array<string> = [];
-  let executeCount = 0;
   const db = {
     transaction: <A, E, R>(body: (tx: DrizzleService["db"]) => Effect.Effect<A, E, R>) =>
       body(db as unknown as DrizzleService["db"]).pipe(
@@ -269,10 +279,9 @@ const deletionDatabase = (
         };
       },
     }),
-    execute: () =>
+    execute: (statement: unknown) =>
       Effect.sync(() => {
-        executeCount += 1;
-        if (executeCount > 1) events.push("notify");
+        if (queryText(statement).includes("pg_notify")) events.push("notify");
       }),
   } as unknown as DrizzleService["db"];
   return { db, events };
