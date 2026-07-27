@@ -1,92 +1,23 @@
 import * as Context from "effect/Context";
-import * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 import * as RpcMiddleware from "effect/unstable/rpc/RpcMiddleware";
 
-import { StorageProviderLiteral } from "../StorageProvider.ts";
-import { AuthenticatedRpcRequest } from "./AuthenticatedRpcRequest.ts";
+import { StorageProviderLiteral } from "../index.ts";
 import { RpcError } from "./RpcError.ts";
-
-export { AuthenticatedRpcRequest } from "./AuthenticatedRpcRequest.ts";
 
 export const AccountBlockedReasonSchema = Schema.Literals(["billing", "storage"] as const);
 
 export type AccountBlockedReason = typeof AccountBlockedReasonSchema.Type;
 
-export const AccountAccessEntitlementSchema = Schema.Union([
-  Schema.Struct({
-    status: Schema.Literal("TRIAL_ACTIVE"),
-    trialEndsAt: Schema.DateTimeUtcFromString,
-  }),
-  Schema.Struct({
-    status: Schema.Literal("PAID_ACTIVE"),
-    paidThrough: Schema.DateTimeUtcFromString,
-    cancelAtPeriodEnd: Schema.Boolean,
-  }),
-  Schema.Struct({
-    status: Schema.Literal("GRACE_ACTIVE"),
-    graceEndsAt: Schema.DateTimeUtcFromString,
-  }),
-  Schema.Struct({
-    status: Schema.Literal("BILLING_RESTRICTED"),
-  }),
-]);
-
-export type AccountAccessEntitlement = typeof AccountAccessEntitlementSchema.Type;
-
-export const formatAccountBillingInstant = (instant: DateTime.Utc): string =>
-  DateTime.formatUtc(instant, {
-    dateStyle: "long",
-    locale: "en",
-    timeStyle: "short",
-  });
-
 export const AccountStatusSchema = Schema.Struct({
-  accessEntitlement: AccountAccessEntitlementSchema,
   canSync: Schema.Boolean,
   storageProvider: Schema.NullOr(StorageProviderLiteral),
   blockedReasons: Schema.Array(AccountBlockedReasonSchema),
 });
 
 export type AccountStatus = typeof AccountStatusSchema.Type;
-
-export const accountEntitlementEndsAtMillis = (
-  entitlement: AccountAccessEntitlement,
-): number | null => {
-  switch (entitlement.status) {
-    case "TRIAL_ACTIVE":
-      return DateTime.toEpochMillis(entitlement.trialEndsAt);
-    case "PAID_ACTIVE":
-      return DateTime.toEpochMillis(entitlement.paidThrough);
-    case "GRACE_ACTIVE":
-      return DateTime.toEpochMillis(entitlement.graceEndsAt);
-    case "BILLING_RESTRICTED":
-      return null;
-  }
-};
-
-export const accountEntitlementExpiryDelayMillis = (
-  account: AccountStatus,
-  nowMillis: number,
-): number | null => {
-  const endsAtMillis = accountEntitlementEndsAtMillis(account.accessEntitlement);
-  return endsAtMillis === null ? null : Math.max(0, endsAtMillis - nowMillis);
-};
-
-export const accountWithBillingRestriction = (account: AccountStatus): AccountStatus => ({
-  ...account,
-  accessEntitlement: { status: "BILLING_RESTRICTED" },
-  blockedReasons: account.blockedReasons.includes("billing")
-    ? account.blockedReasons
-    : [...account.blockedReasons, "billing"],
-  canSync: false,
-});
-
-export const accountBillingRestricted = (account: AccountStatus): boolean =>
-  account.accessEntitlement.status === "BILLING_RESTRICTED" ||
-  account.blockedReasons.includes("billing");
 
 export const accountCanSync = (account: AccountStatus): boolean =>
   account.canSync && account.blockedReasons.length === 0 && account.storageProvider !== null;
@@ -113,48 +44,6 @@ export const StorageProviderStatusSchema = Schema.Union([
 ]);
 
 export type StorageProviderStatus = typeof StorageProviderStatusSchema.Type;
-
-export const StorageOnboardingOriginSchema = Schema.Literals(["WEB", "DESKTOP"] as const);
-
-export type StorageOnboardingOrigin = typeof StorageOnboardingOriginSchema.Type;
-
-export const StorageCleanupActionSchema = Schema.Literals(["UNLINK", "SWITCH"] as const);
-
-export type StorageCleanupAction = typeof StorageCleanupActionSchema.Type;
-
-const StorageSnippetCountSchema = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
-
-export const StorageCleanupProgressSchema = Schema.Struct({
-  action: StorageCleanupActionSchema,
-  totalSnippetCount: StorageSnippetCountSchema,
-  remainingSnippetCount: StorageSnippetCountSchema,
-  lastFailure: Schema.NullOr(Schema.String),
-});
-
-export type StorageCleanupProgress = typeof StorageCleanupProgressSchema.Type;
-
-export const StorageManagementStateSchema = Schema.Struct({
-  storageProvider: Schema.NullOr(StorageProviderLiteral),
-  connectionStatus: StorageProviderConnectionStatusSchema,
-  externalDestinationUrl: Schema.NullOr(Schema.String),
-  affectedSnippetCount: StorageSnippetCountSchema,
-  cleanup: Schema.NullOr(StorageCleanupProgressSchema),
-});
-
-export type StorageManagementState = typeof StorageManagementStateSchema.Type;
-
-export const StorageCleanupRunResultSchema = Schema.Union([
-  Schema.Struct({
-    outcome: Schema.Literal("COMPLETED"),
-    action: StorageCleanupActionSchema,
-  }),
-  Schema.Struct({
-    outcome: Schema.Literal("PARTIAL"),
-    progress: StorageCleanupProgressSchema,
-  }),
-]);
-
-export type StorageCleanupRunResult = typeof StorageCleanupRunResultSchema.Type;
 
 export const accountCanSyncWithConnection = (
   account: AccountStatus,
@@ -196,27 +85,6 @@ export const ApiSnippetSchema = Schema.Struct({
 
 export type ApiSnippet = typeof ApiSnippetSchema.Type;
 
-export const PreparedSnippetDownloadSchema = Schema.Struct({
-  storageProvider: StorageProviderLiteral,
-  fileName: Schema.String,
-  byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-  download: Schema.Struct({
-    url: Schema.String,
-    headers: Schema.Array(Schema.Struct({ name: Schema.String, value: Schema.String })),
-  }),
-});
-
-export type PreparedSnippetDownload = typeof PreparedSnippetDownloadSchema.Type;
-
-export const SnippetContentSchema = Schema.Struct({
-  storageProvider: StorageProviderLiteral,
-  fileName: Schema.String,
-  byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-  content: Schema.Uint8Array,
-});
-
-export type SnippetContent = typeof SnippetContentSchema.Type;
-
 export const SNIPPETS_CHANGED = "SNIPPETS_CHANGED" as const;
 export const SNIPPET_INVALIDATION_KEEP_ALIVE = "KEEP_ALIVE" as const;
 
@@ -226,8 +94,6 @@ export const SnippetInvalidationEventSchema = Schema.Literals([
 ] as const);
 
 export type SnippetInvalidationEvent = typeof SnippetInvalidationEventSchema.Type;
-
-export const WEB_SNIPPET_CONTENT_MAX_BYTES = 16 * 1024 * 1024;
 
 export const PrepareSnippetUploadPayloadSchema = Schema.Struct({
   id: SnippetIdSchema,
@@ -260,7 +126,7 @@ export class InternalServerErrorMiddleware extends RpcMiddleware.Service<Interna
 
 export class AuthMiddleware extends RpcMiddleware.Service<
   AuthMiddleware,
-  { provides: AuthenticatedRpcRequest | CurrentUser }
+  { provides: CurrentUser }
 >()("AuthMiddleware", { error: RpcError }) {}
 
 export const HealthRpcs = RpcGroup.make(
@@ -277,56 +143,20 @@ export const AccountRpcs = RpcGroup.make(
   }),
 );
 
-export const BillingPlanSchema = Schema.Literals(["MONTHLY", "ANNUAL"] as const);
-
-export type BillingPlan = typeof BillingPlanSchema.Type;
-
-export const BillingRpcs = RpcGroup.make(
-  Rpc.make("BeginBillingCheckout", {
-    payload: { plan: BillingPlanSchema },
-    success: Schema.Struct({ url: Schema.String }),
-    error: RpcError,
-  }),
-  Rpc.make("OpenBillingPortal", {
-    success: Schema.Struct({ url: Schema.String }),
-    error: RpcError,
-  }),
-);
-
 export const StorageRpcs = RpcGroup.make(
   Rpc.make("BeginStorageProviderLink", {
-    payload: {
-      storageProvider: StorageProviderLiteral,
-      origin: StorageOnboardingOriginSchema,
-    },
+    payload: { storageProvider: StorageProviderLiteral },
     success: Schema.Struct({ url: Schema.String }),
     error: RpcError,
   }),
   Rpc.make("GetStorageProviderStatus", {
-    payload: {
-      consumeAuthorization: Schema.Boolean,
-      storageProvider: StorageProviderLiteral,
-    },
+    payload: { storageProvider: StorageProviderLiteral },
     success: StorageProviderStatusSchema,
     error: RpcError,
   }),
-  Rpc.make("GetStorageManagementState", {
-    success: StorageManagementStateSchema,
-    error: RpcError,
-  }),
-  Rpc.make("BeginStorageCleanup", {
-    payload: {
-      action: StorageCleanupActionSchema,
-      confirmation: Schema.Literal("DELETE"),
-      expectedSnippetCount: StorageSnippetCountSchema,
-      storageProvider: StorageProviderLiteral,
-    },
-    success: StorageCleanupRunResultSchema,
-    error: RpcError,
-  }),
-  Rpc.make("RetryStorageCleanup", {
+  Rpc.make("UnlinkStorageProvider", {
     payload: { storageProvider: StorageProviderLiteral },
-    success: StorageCleanupRunResultSchema,
+    success: Schema.Void,
     error: RpcError,
   }),
 );
@@ -353,12 +183,15 @@ export const SnippetRpcs = RpcGroup.make(
   }),
   Rpc.make("PrepareSnippetDownload", {
     payload: { id: SnippetIdSchema },
-    success: PreparedSnippetDownloadSchema,
-    error: RpcError,
-  }),
-  Rpc.make("GetSnippetContent", {
-    payload: { id: SnippetIdSchema },
-    success: SnippetContentSchema,
+    success: Schema.Struct({
+      storageProvider: StorageProviderLiteral,
+      fileName: Schema.String,
+      byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+      download: Schema.Struct({
+        url: Schema.String,
+        headers: Schema.Array(Schema.Struct({ name: Schema.String, value: Schema.String })),
+      }),
+    }),
     error: RpcError,
   }),
   Rpc.make("DeleteSnippet", {
@@ -368,8 +201,6 @@ export const SnippetRpcs = RpcGroup.make(
   }),
 );
 
-const ProtectedRpcs = AccountRpcs.merge(BillingRpcs, StorageRpcs, SnippetRpcs).middleware(
-  AuthMiddleware,
-);
+const ProtectedRpcs = AccountRpcs.merge(StorageRpcs, SnippetRpcs).middleware(AuthMiddleware);
 
 export const PlakkApi = HealthRpcs.merge(ProtectedRpcs).middleware(InternalServerErrorMiddleware);

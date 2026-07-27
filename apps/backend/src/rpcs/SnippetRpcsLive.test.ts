@@ -4,20 +4,16 @@ import {
   PostgresNotifications,
   type DrizzleService,
 } from "@plakk/db";
-import { snippets, storageCleanupIntents, type SnippetRow } from "@plakk/db/schema";
+import { snippets, type SnippetRow } from "@plakk/db/schema";
 import {
-  AuthenticatedRpcRequest,
   CurrentUser,
   SNIPPET_INVALIDATION_KEEP_ALIVE,
   SNIPPETS_CHANGED,
-  WEB_SNIPPET_CONTENT_MAX_BYTES,
 } from "@plakk/shared/PlakkApi";
-import { RpcError } from "@plakk/shared/RpcError";
 import { describe, expect, it, vi } from "vite-plus/test";
-import { ConfigProvider, DateTime, Effect, Fiber, Stream } from "effect";
+import { DateTime, Effect, Fiber, Stream } from "effect";
 import { TestClock } from "effect/testing";
 
-import { AccountCapability } from "../account/AccountCapability.ts";
 import {
   StorageCredentialsError,
   type StorageDownloadError,
@@ -59,19 +55,11 @@ const storageService = (
   overrides: Partial<StorageProvider["Service"]> = {},
 ): StorageProvider["Service"] =>
   StorageProvider.of({
-    beginAuthorization: () => Effect.succeed({ url: "https://workos.example/authorize" }),
     deleteObject: () => Effect.void,
-    disconnect: () => Effect.void,
     downloadObject: () => Effect.succeed(new Uint8Array()),
     ensureConnected: () => Effect.void,
     getDestinationUrl: () => Effect.succeed("https://drive.example/folder"),
     getLinkedProvider: () => Effect.succeed("GOOGLE_DRIVE"),
-    getStatus: () =>
-      Effect.succeed({
-        externalDestinationUrl: "https://drive.example/folder",
-        status: "CONNECTED",
-        storageProvider: "GOOGLE_DRIVE",
-      }),
     getDownloadTarget: () => Effect.succeed({ url: "https://download.example", headers: [] }),
     getDownloadUrl: () => Effect.succeed("https://download.example"),
     prepareUpload: () =>
@@ -80,35 +68,11 @@ const storageService = (
         storageObjectId: null,
         upload: {
           method: "PUT",
-          url: "https://www.googleapis.com/upload/drive/v3/files?upload_id=test",
+          url: "https://upload.example",
           headers: [],
           strategy: { type: "single_request" },
         },
         expiresAt: null,
-      }),
-    ...overrides,
-  });
-
-const accountCapabilityService = (
-  overrides: Partial<AccountCapability["Service"]> = {},
-): AccountCapability["Service"] =>
-  AccountCapability.of({
-    authorizeProductCommand: () => Effect.void,
-    authorizeSnippetDeletion: () => Effect.void,
-    getStatus: () =>
-      Effect.succeed({
-        accessEntitlement: {
-          status: "TRIAL_ACTIVE",
-          trialEndsAt: DateTime.makeUnsafe("2026-08-03T20:00:00.000Z"),
-        },
-        blockedReasons: [],
-        canSync: true,
-        storageProvider: "GOOGLE_DRIVE",
-      }),
-    startTrial: () =>
-      Effect.succeed({
-        status: "TRIAL_ACTIVE",
-        trialEndsAt: DateTime.makeUnsafe("2026-08-03T20:00:00.000Z"),
       }),
     ...overrides,
   });
@@ -126,35 +90,16 @@ const withSnippetRpcs = <A, E, R>(
   );
 
 const runSnippetEffect = <A, E>(
-  use: (
-    rpcs: SnippetRpcsHandlers,
-  ) => Effect.Effect<
-    A,
-    E,
-    AccountCapability | AuthenticatedRpcRequest | CurrentUser | Drizzle | StorageProvider
-  >,
+  use: (rpcs: SnippetRpcsHandlers) => Effect.Effect<A, E, CurrentUser | Drizzle | StorageProvider>,
   db: DrizzleService["db"],
   storage: StorageProvider["Service"] = storageService(),
   user: CurrentUser["Service"] = currentUser,
-  capability: AccountCapability["Service"] = accountCapabilityService(),
-  requestOrigin: string | null = "https://app.plakk.io",
 ) =>
   Effect.runPromise(
     withSnippetRpcs(use).pipe(
-      Effect.provideService(AccountCapability, capability),
-      Effect.provideService(AuthenticatedRpcRequest, { origin: requestOrigin }),
       Effect.provideService(CurrentUser, user),
       Effect.provideService(Drizzle, { db }),
       Effect.provideService(StorageProvider, storage),
-      Effect.provideService(
-        ConfigProvider.ConfigProvider,
-        ConfigProvider.fromEnv({
-          env: {
-            NODE_ENV: "production",
-            PLAKK_WEB_ORIGIN: "https://app.plakk.io",
-          },
-        }),
-      ),
     ),
   );
 
@@ -169,22 +114,8 @@ const queryValues = (condition: unknown): ReadonlyArray<unknown> => {
   return [];
 };
 
-const queryText = (statement: unknown): string => {
-  if (typeof statement === "string") return statement;
-  if (Array.isArray(statement)) return statement.map(queryText).join("");
-  if (statement === null || typeof statement !== "object") return "";
-  if (statement.constructor.name === "StringChunk" && "value" in statement) {
-    return queryText(statement.value);
-  }
-  if ("queryChunks" in statement && Array.isArray(statement.queryChunks)) {
-    return statement.queryChunks.map(queryText).join("");
-  }
-  return "";
-};
-
 const publicationDatabase = (
   options: {
-    cleanupActive?: boolean;
     inserted?: ReadonlyArray<SnippetRow>;
     selected?: ReadonlyArray<SnippetRow>;
   } = {},
@@ -215,14 +146,6 @@ const publicationDatabase = (
     },
     select: () => ({
       from: (table: unknown) => {
-        if (table === storageCleanupIntents) {
-          return {
-            where: () => ({
-              limit: () =>
-                Effect.succeed(options.cleanupActive ? [{ workosUserId: currentUser.id }] : []),
-            }),
-          };
-        }
         if (table !== snippets) throw new Error("Unexpected select table.");
         return {
           where: () => ({
@@ -231,18 +154,15 @@ const publicationDatabase = (
         };
       },
     }),
-    execute: (statement: unknown) =>
+    execute: () =>
       Effect.sync(() => {
-        if (queryText(statement).includes("pg_notify")) events.push("notify");
+        events.push("notify");
       }),
   } as unknown as DrizzleService["db"];
   return { db, events, insertedValues };
 };
 
-const deletionDatabase = (
-  rows: ReadonlyArray<SnippetRow>,
-  options: { readonly cleanupActive?: boolean } = {},
-) => {
+const deletionDatabase = (rows: ReadonlyArray<SnippetRow>) => {
   const events: Array<string> = [];
   const db = {
     transaction: <A, E, R>(body: (tx: DrizzleService["db"]) => Effect.Effect<A, E, R>) =>
@@ -268,20 +188,9 @@ const deletionDatabase = (
         }),
       };
     },
-    select: () => ({
-      from: (table: unknown) => {
-        if (table !== storageCleanupIntents) throw new Error("Unexpected select table.");
-        return {
-          where: () => ({
-            limit: () =>
-              Effect.succeed(options.cleanupActive ? [{ workosUserId: currentUser.id }] : []),
-          }),
-        };
-      },
-    }),
-    execute: (statement: unknown) =>
+    execute: () =>
       Effect.sync(() => {
-        if (queryText(statement).includes("pg_notify")) events.push("notify");
+        events.push("notify");
       }),
   } as unknown as DrizzleService["db"];
   return { db, events };
@@ -387,91 +296,6 @@ describe("completed Snippet publication", () => {
     expect(store.insertedValues).toEqual([]);
   });
 
-  it("rejects Web preparation from an origin other than the configured production Web origin", async () => {
-    const store = publicationDatabase();
-    const prepareUpload = vi.fn(storageService().prepareUpload);
-    const { storageObjectId: _storageObjectId, ...prepareInput } = {
-      ...publication,
-      mediaType: "text/plain",
-    };
-
-    await expect(
-      runSnippetEffect(
-        (rpcs) => rpcs.PrepareSnippetUpload(prepareInput),
-        store.db,
-        storageService({ prepareUpload }),
-        currentUser,
-        accountCapabilityService(),
-        "https://evil.example",
-      ),
-    ).rejects.toMatchObject({ code: "FORBIDDEN" });
-
-    expect(prepareUpload).not.toHaveBeenCalled();
-  });
-
-  it("rejects a prepared upload outside the provider's documented HTTPS target", async () => {
-    const store = publicationDatabase();
-    const prepareUpload = vi.fn(() =>
-      Effect.succeed({
-        storageProvider: "GOOGLE_DRIVE" as const,
-        storageObjectId: null,
-        upload: {
-          method: "PUT" as const,
-          url: "https://www.googleapis.com.evil.example/upload",
-          headers: [],
-          strategy: { type: "single_request" as const },
-        },
-        expiresAt: null,
-      }),
-    );
-    const { storageObjectId: _storageObjectId, ...prepareInput } = {
-      ...publication,
-      mediaType: "text/plain",
-    };
-
-    await expect(
-      runSnippetEffect(
-        (rpcs) => rpcs.PrepareSnippetUpload(prepareInput),
-        store.db,
-        storageService({ prepareUpload }),
-      ),
-    ).rejects.toMatchObject({ code: "INTERNAL_SERVER_ERROR" });
-  });
-
-  it("keeps Desktop preparation on the originless main-process request", async () => {
-    const store = publicationDatabase();
-    const prepareUpload = vi.fn(() =>
-      Effect.succeed({
-        storageProvider: "GOOGLE_DRIVE" as const,
-        storageObjectId: null,
-        upload: {
-          method: "PUT" as const,
-          url: "https://desktop-provider-upload.example/upload",
-          headers: [],
-          strategy: { type: "single_request" as const },
-        },
-        expiresAt: null,
-      }),
-    );
-    const { storageObjectId: _storageObjectId, ...prepareInput } = {
-      ...publication,
-      mediaType: "text/plain",
-    };
-
-    await expect(
-      runSnippetEffect(
-        (rpcs) => rpcs.PrepareSnippetUpload(prepareInput),
-        store.db,
-        storageService({ prepareUpload }),
-        currentUser,
-        accountCapabilityService(),
-        null,
-      ),
-    ).resolves.toMatchObject({
-      upload: { url: "https://desktop-provider-upload.example/upload" },
-    });
-  });
-
   it("inserts only the completed Snippet and notifies before commit", async () => {
     const stored = snippet();
     const store = publicationDatabase({ inserted: [stored] });
@@ -518,19 +342,6 @@ describe("completed Snippet publication", () => {
       ),
     ).rejects.toMatchObject({ code: "CONFLICT" });
   });
-
-  it("rejects a late publication after cleanup wins the account lock", async () => {
-    const store = publicationDatabase({ cleanupActive: true });
-
-    await expect(
-      runSnippetEffect((rpcs) => rpcs.PublishSnippet(publication), store.db),
-    ).rejects.toMatchObject({
-      code: "CONFLICT",
-      message: expect.stringContaining("cleanup"),
-    });
-    expect(store.insertedValues).toEqual([]);
-    expect(store.events).toEqual(["commit"]);
-  });
 });
 
 describe("complete Snippet snapshots", () => {
@@ -560,22 +371,22 @@ describe("complete Snippet snapshots", () => {
 describe("stored snippet download preparation", () => {
   it("returns only durable metadata and a short-lived download target", async () => {
     const stored = snippet();
-    const downloadUrl = "https://download.example/object";
-    const getDownloadUrl = vi.fn(() => Effect.succeed(downloadUrl));
+    const download = { url: "https://download.example/object", headers: [] };
+    const getDownloadTarget = vi.fn(() => Effect.succeed(download));
 
     const result = await runSnippetEffect(
       (rpcs) => rpcs.PrepareSnippetDownload({ id: stored.id }),
       downloadDatabase([stored]),
-      storageService({ getDownloadUrl }),
+      storageService({ getDownloadTarget }),
     );
 
     expect(result).toEqual({
       storageProvider: "GOOGLE_DRIVE",
       fileName: "note.txt",
       byteSize: 4,
-      download: { url: downloadUrl, headers: [] },
+      download,
     });
-    expect(getDownloadUrl).toHaveBeenCalledWith({
+    expect(getDownloadTarget).toHaveBeenCalledWith({
       storageProvider: "GOOGLE_DRIVE",
       storageObjectId: "drive-object",
       workosUserId: currentUser.id,
@@ -583,16 +394,16 @@ describe("stored snippet download preparation", () => {
   });
 
   it("does not resolve a download target when no uploaded object is available", async () => {
-    const getDownloadUrl = vi.fn(storageService().getDownloadUrl);
+    const getDownloadTarget = vi.fn(storageService().getDownloadTarget);
 
     await expect(
       runSnippetEffect(
         (rpcs) => rpcs.PrepareSnippetDownload({ id: publication.id }),
         downloadDatabase([]),
-        storageService({ getDownloadUrl }),
+        storageService({ getDownloadTarget }),
       ),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
-    expect(getDownloadUrl).not.toHaveBeenCalled();
+    expect(getDownloadTarget).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -624,205 +435,20 @@ describe("stored snippet download preparation", () => {
       "GOOGLE_DRIVE: provider failed",
     ],
   ] as const)("maps %s to %s", async (storageError, code, message) => {
-    const getDownloadUrl = () => Effect.fail(storageError as StorageDownloadError);
+    const getDownloadTarget = () => Effect.fail(storageError as StorageDownloadError);
 
     await expect(
       runSnippetEffect(
         (rpcs) => rpcs.PrepareSnippetDownload({ id: publication.id }),
         downloadDatabase([snippet()]),
-        storageService({ getDownloadUrl }),
+        storageService({ getDownloadTarget }),
       ),
     ).rejects.toMatchObject({ code, message });
   });
 });
 
-describe("on-demand stored Snippet content", () => {
-  it("authorizes the owner and returns only completely validated content", async () => {
-    const stored = snippet();
-    const content = new TextEncoder().encode("note");
-    const downloadObject = vi.fn(() => Effect.succeed(content));
-    const authorizeProductCommand = vi.fn(() => Effect.void);
-
-    const result = await runSnippetEffect(
-      (rpcs) => rpcs.GetSnippetContent({ id: stored.id }),
-      downloadDatabase([stored]),
-      storageService({ downloadObject }),
-      currentUser,
-      accountCapabilityService({ authorizeProductCommand }),
-    );
-
-    expect(result).toEqual({
-      storageProvider: stored.storageProvider,
-      fileName: stored.fileName,
-      byteSize: stored.byteSize,
-      content,
-    });
-    expect(authorizeProductCommand).toHaveBeenCalledWith(currentUser.id, stored.storageProvider);
-    expect(downloadObject).toHaveBeenCalledWith({
-      storageProvider: stored.storageProvider,
-      storageObjectId: stored.storageObjectId,
-      expectedByteSize: stored.byteSize,
-      workosUserId: currentUser.id,
-    });
-  });
-
-  it("rejects incomplete provider content even when an adapter violates its size contract", async () => {
-    await expect(
-      runSnippetEffect(
-        (rpcs) => rpcs.GetSnippetContent({ id: publication.id }),
-        downloadDatabase([snippet()]),
-        storageService({ downloadObject: () => Effect.succeed(new Uint8Array([1, 2, 3])) }),
-      ),
-    ).rejects.toMatchObject({
-      code: "INTERNAL_SERVER_ERROR",
-      message: "Stored object size does not match snippet metadata.",
-    });
-  });
-
-  it("rejects oversized buffered content before requesting the provider object", async () => {
-    const downloadObject = vi.fn(storageService().downloadObject);
-
-    await expect(
-      runSnippetEffect(
-        (rpcs) => rpcs.GetSnippetContent({ id: publication.id }),
-        downloadDatabase([snippet({ byteSize: WEB_SNIPPET_CONTENT_MAX_BYTES + 1 })]),
-        storageService({ downloadObject }),
-      ),
-    ).rejects.toMatchObject({
-      code: "FORBIDDEN",
-      message: "This snippet is too large for browser Copy or Open. Download it instead.",
-    });
-    expect(downloadObject).not.toHaveBeenCalled();
-  });
-
-  it("does not access a provider object owned by another account", async () => {
-    const downloadObject = vi.fn(storageService().downloadObject);
-
-    await expect(
-      runSnippetEffect(
-        (rpcs) => rpcs.GetSnippetContent({ id: publication.id }),
-        downloadDatabase([]),
-        storageService({ downloadObject }),
-      ),
-    ).rejects.toMatchObject({ code: "NOT_FOUND" });
-    expect(downloadObject).not.toHaveBeenCalled();
-  });
-});
-
-describe("account capability enforcement", () => {
-  it.each(["Restore billing access to use this action.", "Reconnect storage to use this action."])(
-    "rejects upload preparation, publication, and content reads before side effects: %s",
-    async (message) => {
-      const denied = new RpcError({
-        code: "FORBIDDEN",
-        message,
-      });
-      const authorizeProductCommand = vi.fn(() => Effect.fail(denied));
-      const capability = accountCapabilityService({ authorizeProductCommand });
-      const store = publicationDatabase({ inserted: [snippet()] });
-      const prepareUpload = vi.fn(storageService().prepareUpload);
-      const getDownloadUrl = vi.fn(storageService().getDownloadUrl);
-      const downloadObject = vi.fn(storageService().downloadObject);
-      const storage = storageService({ downloadObject, getDownloadUrl, prepareUpload });
-
-      await expect(
-        runSnippetEffect(
-          (rpcs) =>
-            rpcs.PrepareSnippetUpload({
-              id: publication.id,
-              fileName: publication.fileName,
-              byteSize: publication.byteSize,
-              storageProvider: publication.storageProvider,
-              mediaType: "text/plain",
-            }),
-          store.db,
-          storage,
-          currentUser,
-          capability,
-        ),
-      ).rejects.toMatchObject({ code: "FORBIDDEN" });
-      await expect(
-        runSnippetEffect(
-          (rpcs) => rpcs.PublishSnippet(publication),
-          store.db,
-          storage,
-          currentUser,
-          capability,
-        ),
-      ).rejects.toMatchObject({ code: "FORBIDDEN" });
-      await expect(
-        runSnippetEffect(
-          (rpcs) => rpcs.PrepareSnippetDownload({ id: publication.id }),
-          downloadDatabase([snippet()]),
-          storage,
-          currentUser,
-          capability,
-        ),
-      ).rejects.toMatchObject({ code: "FORBIDDEN" });
-      await expect(
-        runSnippetEffect(
-          (rpcs) => rpcs.GetSnippetContent({ id: publication.id }),
-          downloadDatabase([snippet()]),
-          storage,
-          currentUser,
-          capability,
-        ),
-      ).rejects.toMatchObject({ code: "FORBIDDEN" });
-
-      expect(authorizeProductCommand).toHaveBeenCalledTimes(4);
-      expect(prepareUpload).not.toHaveBeenCalled();
-      expect(store.insertedValues).toEqual([]);
-      expect(getDownloadUrl).not.toHaveBeenCalled();
-      expect(downloadObject).not.toHaveBeenCalled();
-    },
-  );
-
-  it("keeps authoritative deletion available while billing is restricted", async () => {
-    const stored = snippet();
-    const store = deletionDatabase([stored]);
-    const capability = accountCapabilityService({
-      authorizeProductCommand: () =>
-        Effect.fail(
-          new RpcError({
-            code: "FORBIDDEN",
-            message: "Restore billing access to use this action.",
-          }),
-        ),
-    });
-
-    await runSnippetEffect(
-      (rpcs) => rpcs.DeleteSnippet({ id: stored.id }),
-      store.db,
-      storageService(),
-      currentUser,
-      capability,
-    );
-
-    expect(store.events).toEqual(["remove", "notify", "commit"]);
-  });
-});
-
 describe("completed Snippet deletion", () => {
-  it("rejects a late deletion after cleanup wins the account lock", async () => {
-    const stored = snippet();
-    const store = deletionDatabase([stored], { cleanupActive: true });
-    const deleteObject = vi.fn(storageService().deleteObject);
-
-    await expect(
-      runSnippetEffect(
-        (rpcs) => rpcs.DeleteSnippet({ id: stored.id }),
-        store.db,
-        storageService({ deleteObject }),
-      ),
-    ).rejects.toMatchObject({
-      code: "CONFLICT",
-      message: expect.stringContaining("cleanup"),
-    });
-    expect(store.events).toEqual(["commit"]);
-    expect(deleteObject).not.toHaveBeenCalled();
-  });
-
-  it("commits removal and notification before starting provider cleanup once", async () => {
+  it("commits removal and notification before deleting the provider object once", async () => {
     const stored = snippet();
     const store = deletionDatabase([stored]);
     const deleteObject = vi.fn(() =>
@@ -837,7 +463,7 @@ describe("completed Snippet deletion", () => {
       storageService({ deleteObject }),
     );
 
-    expect(store.events.slice(0, 3)).toEqual(["remove", "notify", "commit"]);
+    expect(store.events).toEqual(["remove", "notify", "commit", "provider-delete"]);
     expect(deleteObject).toHaveBeenCalledOnce();
     expect(deleteObject).toHaveBeenCalledWith({
       storageProvider: stored.storageProvider,
@@ -872,24 +498,7 @@ describe("completed Snippet deletion", () => {
       ),
     ).resolves.toBeUndefined();
 
-    expect(store.events.slice(0, 3)).toEqual(["remove", "notify", "commit"]);
-    expect(deleteObject).toHaveBeenCalledOnce();
-  });
-
-  it("returns authoritative success without waiting for provider cleanup", async () => {
-    const stored = snippet();
-    const store = deletionDatabase([stored]);
-    const deleteObject = vi.fn(() => Effect.never);
-
-    await expect(
-      runSnippetEffect(
-        (rpcs) => rpcs.DeleteSnippet({ id: stored.id }),
-        store.db,
-        storageService({ deleteObject }),
-      ),
-    ).resolves.toBeUndefined();
-
-    expect(store.events).toEqual(["remove", "notify", "commit"]);
+    expect(store.events).toEqual(["remove", "notify", "commit", "provider-delete"]);
     expect(deleteObject).toHaveBeenCalledOnce();
   });
 

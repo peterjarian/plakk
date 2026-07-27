@@ -10,8 +10,8 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
-    "@effect/opentelemetry": "4.0.0-beta.99",
-    "@effect/platform-node": "4.0.0-beta.99",
+    "@effect/opentelemetry": "4.0.0-beta.92",
+    "@effect/platform-node": "4.0.0-beta.92",
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/api-logs": "^0.217.0",
     "@opentelemetry/exporter-logs-otlp-http": "^0.217.0",
@@ -25,14 +25,13 @@
     "@opentelemetry/semantic-conventions": "^1.40.0",
     "@plakk/db": "workspace:*",
     "@plakk/shared": "workspace:*",
-    "@polar-sh/sdk": "0.49.0",
     "@workos-inc/node": "^10.7.0",
     "dotenv": "^17.4.2",
     "effect": "catalog:",
     "jose": "^6.2.3"
   },
   "devDependencies": {
-    "@effect/vitest": "4.0.0-beta.99",
+    "@effect/vitest": "4.0.0-beta.92",
     "@types/node": "catalog:",
     "typescript": "catalog:"
   }

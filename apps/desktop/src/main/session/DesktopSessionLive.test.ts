@@ -1,7 +1,7 @@
 import type { User } from "@plakk/shared";
 import { NodeFileSystem } from "@effect/platform-node";
 import { describe, expect, it } from "@effect/vitest";
-import { DateTime, Deferred, Effect, Fiber, Layer, Stream } from "effect";
+import { Deferred, Effect, Fiber, Layer, Stream } from "effect";
 
 import { AuthService } from "../auth/AuthService.ts";
 import { LocalState, type LocalStateUpdate } from "../local-state/LocalState.ts";
@@ -177,10 +177,6 @@ describe("DesktopSession", () => {
           PlakkRpcClient.of({
             GetAccountStatus: () =>
               Effect.succeed({
-                accessEntitlement: {
-                  status: "TRIAL_ACTIVE",
-                  trialEndsAt: DateTime.makeUnsafe("2026-08-10T00:00:00.000Z"),
-                },
                 canSync: true,
                 storageProvider: "GOOGLE_DRIVE",
                 blockedReasons: [],
@@ -265,10 +261,6 @@ describe("DesktopSession", () => {
           kind: "online",
           account: secondAccount,
           accountStatus: {
-            accessEntitlement: {
-              status: "TRIAL_ACTIVE",
-              trialEndsAt: DateTime.makeUnsafe("2026-08-10T00:00:00.000Z"),
-            },
             canSync: true,
             storageProvider: "GOOGLE_DRIVE",
             blockedReasons: [],

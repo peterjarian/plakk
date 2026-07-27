@@ -1,7 +1,7 @@
 import { NodeFileSystem } from "@effect/platform-node";
 import type { User } from "@plakk/shared";
 import { describe, expect, it } from "@effect/vitest";
-import { DateTime, Effect, FileSystem, Layer, ManagedRuntime, Stream } from "effect";
+import { Effect, FileSystem, Layer, ManagedRuntime, Stream } from "effect";
 import { vi } from "vite-plus/test";
 
 const electron = vi.hoisted(() => {
@@ -145,10 +145,6 @@ describe("Local State IPC", () => {
               kind: "online",
               account,
               accountStatus: {
-                accessEntitlement: {
-                  status: "TRIAL_ACTIVE",
-                  trialEndsAt: DateTime.makeUnsafe("2026-08-10T00:00:00.000Z"),
-                },
                 canSync: true,
                 storageProvider: "GOOGLE_DRIVE",
                 blockedReasons: [],

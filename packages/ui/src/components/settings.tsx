@@ -27,17 +27,14 @@ function SettingsSectionBody({ className, ...props }: ComponentProps<"section">)
 function SettingsRow({ className, ...props }: ComponentProps<"div">) {
   return (
     <div
-      className={cn(
-        "flex flex-col items-stretch justify-between gap-3 px-3 py-3 sm:flex-row sm:items-center sm:gap-4",
-        className,
-      )}
+      className={cn("flex items-center justify-between gap-4 px-3 py-3", className)}
       {...props}
     />
   );
 }
 
 function SettingsRowMain({ className, ...props }: ComponentProps<"div">) {
-  return <div className={cn("flex min-w-0 flex-1 items-center gap-3", className)} {...props} />;
+  return <div className={cn("flex min-w-0 items-center gap-3", className)} {...props} />;
 }
 
 function SettingsRowIcon({ className, children, ...props }: ComponentProps<"span">) {
@@ -72,12 +69,7 @@ function SettingsRowText({
 }
 
 function SettingsRowAction({ className, ...props }: ComponentProps<"div">) {
-  return (
-    <div
-      className={cn("flex shrink-0 items-center justify-end gap-2 sm:justify-start", className)}
-      {...props}
-    />
-  );
+  return <div className={cn("flex shrink-0 items-center gap-2", className)} {...props} />;
 }
 
 export {

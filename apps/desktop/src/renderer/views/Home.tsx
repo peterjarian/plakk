@@ -1,20 +1,25 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowUpRight, LoaderCircle, Plus, TriangleAlert } from "lucide-react";
 import { AppHeader } from "@plakk/ui/components/AppHeader";
-import { ExternalLinkConfirmationDialog } from "@plakk/ui/components/ExternalLinkConfirmationDialog";
-import { SnippetComposer } from "@plakk/ui/components/SnippetComposer";
 import { SnippetList } from "@plakk/ui/components/SnippetList";
 import { SnippetRow } from "@plakk/ui/components/SnippetRow";
 import { Button } from "@plakk/ui/components/primitives/button";
 import { Checkbox } from "@plakk/ui/components/primitives/checkbox";
-import * as DateTime from "effect/DateTime";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@plakk/ui/components/primitives/dialog";
+import { SnippetComposer } from "../components/SnippetComposer.tsx";
 import { SyncStatusIndicator, type SyncStatus } from "../components/SyncStatusIndicator.tsx";
 import { signOut, useAuth } from "../hooks/useAuth.ts";
 import { useSnippets } from "../hooks/useSnippets.ts";
 import { useLocalState } from "../hooks/useLocalState.tsx";
 import {
   StorageProviderIcon,
-  billingRestrictedFromLocalState,
   storageProviderLabel,
   openStorageSetup,
   useLinkedStorageProvider,
@@ -25,7 +30,6 @@ import { ipcActionErrorMessage } from "../lib/ipcActionErrorMessage.ts";
 import { ingestFileSnippet, ingestTextSnippet } from "../lib/snippetIngestion.ts";
 
 const accountSetupUrl = "https://app.plakk.io/account/setup";
-const billingUrl = "https://app.plakk.io/billing";
 export const STORAGE_WARNING_BYTES = 30 * 1024 * 1024 * 1024;
 export const shouldWarnForStorageUsage = (bytes: number) => bytes > STORAGE_WARNING_BYTES;
 
@@ -35,15 +39,9 @@ export function Home({ active = true }: { active?: boolean }) {
   const storageStatus = useStorageStatus();
   const localState = useLocalState().localState;
   const liveConnection = localState.liveConnection;
-  const billingRestricted = billingRestrictedFromLocalState(localState);
-  const entitlement =
-    localState.capability.status === "ONLINE"
-      ? localState.capability.account.accessEntitlement
-      : null;
   const [isDragging, setIsDragging] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copyingId, setCopyingId] = useState<string | null>(null);
-  const [pendingExternalSnippetId, setPendingExternalSnippetId] = useState<string | null>(null);
   const [pendingExternalUrl, setPendingExternalUrl] = useState<string | null>(null);
   const [skipExternalLinkWarning, setSkipExternalLinkWarning] = useState(false);
   const [showExternalLinkWarning, setShowExternalLinkWarning] = useState(true);
@@ -87,9 +85,8 @@ export function Home({ active = true }: { active?: boolean }) {
           : storageStatus.kind === "needs-reauthorization"
             ? `Sync paused. Reconnect ${storageProviderLabel(storageStatus.provider)} to add snippets.`
             : "Sync paused. Finish storage setup to add snippets.";
-  const syncSetupUrl = billingRestricted
-    ? billingUrl
-    : storageStatus.kind === "unlinked" || storageStatus.kind === "needs-reauthorization"
+  const syncSetupUrl =
+    storageStatus.kind === "unlinked" || storageStatus.kind === "needs-reauthorization"
       ? storageStatus.actionUrl
       : accountSetupUrl;
 
@@ -208,28 +205,20 @@ export function Home({ active = true }: { active?: boolean }) {
     return window.ipc.clipboard.onPaste((content) => handleClipboardPaste(content));
   }, [accountBlocked, active, storageStatus]);
 
-  function openLink(snippetId: string, url: string) {
+  function openLink(url: string) {
     setExternalActionError(null);
     if (!showExternalLinkWarning) {
-      void openSnippet(snippetId);
+      void openExternal(url);
       return;
     }
 
     setSkipExternalLinkWarning(false);
-    setPendingExternalSnippetId(snippetId);
     setPendingExternalUrl(url);
   }
 
   function closeExternalLinkDialog() {
-    setPendingExternalSnippetId(null);
     setPendingExternalUrl(null);
     setSkipExternalLinkWarning(false);
-  }
-
-  function openSnippet(snippetId: string) {
-    return window.ipc.snippets
-      .open(snippetId)
-      .catch(() => setExternalActionError("Plakk couldn’t open this link."));
   }
 
   function openExternal(url: string) {
@@ -239,9 +228,9 @@ export function Home({ active = true }: { active?: boolean }) {
   }
 
   async function confirmExternalLink() {
-    if (pendingExternalSnippetId === null || pendingExternalUrl === null) return;
+    if (!pendingExternalUrl) return;
 
-    const snippetId = pendingExternalSnippetId;
+    const url = pendingExternalUrl;
     const shouldSkipWarning = skipExternalLinkWarning;
     closeExternalLinkDialog();
     setExternalActionError(null);
@@ -253,8 +242,10 @@ export function Home({ active = true }: { active?: boolean }) {
       );
     }
 
-    await openSnippet(snippetId);
+    await openExternal(url);
   }
+
+  const pendingExternalHost = pendingExternalUrl ? new URL(pendingExternalUrl).host : "";
 
   const storageAction =
     storageStatus.kind === "unlinked" ? (
@@ -369,32 +360,6 @@ export function Home({ active = true }: { active?: boolean }) {
               <span className="min-w-0 flex-1 truncate">{auth.issue.message}</span>
             </div>
           )}
-          {entitlement?.status === "GRACE_ACTIVE" && (
-            <div
-              className="mb-2 flex items-center gap-2 rounded-md bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive"
-              role="alert"
-            >
-              <TriangleAlert className="size-3.5 shrink-0" aria-hidden="true" />
-              <span className="min-w-0 flex-1">
-                Payment needs attention. Normal use continues through{" "}
-                {DateTime.formatUtc(entitlement.graceEndsAt, {
-                  dateStyle: "long",
-                  locale: "en",
-                  timeStyle: "short",
-                })}
-                .
-              </span>
-              <Button
-                type="button"
-                variant="ghost"
-                size="xs"
-                onClick={() => openStorageSetup(billingUrl)}
-              >
-                Recover billing
-                <ArrowUpRight />
-              </Button>
-            </div>
-          )}
           {accountBlocked &&
             storageStatus.kind !== "loading" &&
             storageStatus.kind !== "offline" &&
@@ -408,7 +373,7 @@ export function Home({ active = true }: { active?: boolean }) {
                   size="xs"
                   onClick={() => openStorageSetup(syncSetupUrl)}
                 >
-                  {billingRestricted ? "Recover billing" : "Finish on web"}
+                  Finish on web
                   <ArrowUpRight />
                 </Button>
               </div>
@@ -469,11 +434,9 @@ export function Home({ active = true }: { active?: boolean }) {
                 copying={copyingId === snippet.id}
                 onCopy={() => void copySnippet(snippet)}
                 copyDisabled={
-                  billingRestricted ||
                   snippet.kind !== "PUBLISHED" ||
                   snippet.localContentAvailability.status !== "AVAILABLE"
                 }
-                productActionsDisabled={billingRestricted}
                 copyError={copyErrors[snippet.id]}
                 onDelete={() => {
                   void runSnippetAction(snippet.id, () =>
@@ -485,7 +448,7 @@ export function Home({ active = true }: { active?: boolean }) {
                 onDownload={() =>
                   void runSnippetAction(snippet.id, () => window.ipc.snippets.download(snippet.id))
                 }
-                onOpenLink={(url) => openLink(snippet.id, url)}
+                onOpenLink={openLink}
                 {...(snippet.presentation.type === "image"
                   ? {
                       thumbnailUrl: snippet.thumbnailUrl,
@@ -505,22 +468,53 @@ export function Home({ active = true }: { active?: boolean }) {
         </div>
       )}
 
-      <ExternalLinkConfirmationDialog
-        description="This link will open in your browser outside Plakk."
+      <Dialog
         open={pendingExternalUrl !== null}
-        url={pendingExternalUrl}
-        onCancel={closeExternalLinkDialog}
-        onConfirm={() => void confirmExternalLink()}
-        preference={
-          <label className="flex items-center gap-2 text-sm">
-            <Checkbox
-              checked={skipExternalLinkWarning}
-              onCheckedChange={(checked) => setSkipExternalLinkWarning(checked === true)}
-            />
-            Do not warn me again
-          </label>
-        }
-      />
+        onOpenChange={(open) => {
+          if (!open) closeExternalLinkDialog();
+        }}
+      >
+        <DialogContent className="w-[min(calc(100%-2rem),24rem)]">
+          <DialogHeader>
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-amber-100 text-amber-700 dark:bg-amber-400/15 dark:text-amber-300">
+                <TriangleAlert className="size-4" aria-hidden="true" />
+              </div>
+              <div className="grid gap-2">
+                <DialogTitle>Open external link?</DialogTitle>
+                <DialogDescription>
+                  This link will open in your browser outside Plakk.
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+
+          <div className="grid gap-3">
+            <div className="rounded-lg border border-amber-300/70 bg-amber-50/70 px-3 py-2 text-sm dark:border-amber-400/25 dark:bg-amber-400/10">
+              <p className="truncate font-medium">{pendingExternalHost}</p>
+              <p className="truncate text-xs text-muted-foreground">{pendingExternalUrl}</p>
+            </div>
+
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={skipExternalLinkWarning}
+                onCheckedChange={(checked) => setSkipExternalLinkWarning(checked === true)}
+              />
+              Do not warn me again
+            </label>
+          </div>
+
+          <DialogFooter className="flex-row justify-end">
+            <Button type="button" variant="outline" onClick={closeExternalLinkDialog}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={() => void confirmExternalLink()}>
+              Open link
+              <ArrowUpRight />
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </main>
   );
 }

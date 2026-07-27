@@ -6,44 +6,15 @@ import { PlakkApi } from "@plakk/shared/PlakkApi";
 import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
-import {
-  FetchHttpClient,
-  HttpMiddleware,
-  HttpRouter,
-  HttpServerRequest,
-  HttpServerResponse,
-} from "effect/unstable/http";
+import { FetchHttpClient, HttpRouter, HttpServerResponse } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 import { createServer } from "node:http";
 
-import { AccountCapability, AccountTrialRepository } from "./account/AccountCapability.ts";
-import {
-  AccountBilling,
-  AccountBillingStateRepository,
-  BillingAuthority,
-  type BillingWebhookPayloadError,
-  type BillingWebhookVerificationError,
-} from "./billing/AccountBilling.ts";
-import {
-  allowedBackendOrigins,
-  BACKEND_CORS_ALLOWED_HEADERS,
-  InvalidCorsConfiguration,
-} from "./cors.ts";
 import { AuthMiddlewareLive } from "./middleware/AuthMiddlewareLive.ts";
 import { InternalServerErrorMiddlewareLive } from "./middleware/InternalServerErrorMiddlewareLive.ts";
-import { WorkosAccessTokenVerifierLive } from "./middleware/WorkosAccessTokenVerifier.ts";
-import { validateBackendProductionEnvironmentOnStartup } from "./ProductionConfig.ts";
 import { PlakkApiLive } from "./rpcs/PlakkApiLive.ts";
-import { StorageLifecycle, StorageLifecycleStore } from "./storage/StorageLifecycle.ts";
 import { StorageProviderLive } from "./storage/StorageProviderLive.ts";
 import { TelemetryLive } from "./TelemetryLive.ts";
-import { BrowserTelemetryRateLimiterLive } from "./telemetry/BrowserTelemetryRateLimiter.ts";
-import { BrowserTelemetryRoute } from "./telemetry/BrowserTelemetryRoute.ts";
-import { BrowserTelemetrySinkLive } from "./telemetry/BrowserTelemetrySink.ts";
-import { TelemetryConfigLive } from "./telemetry/TelemetryConfig.ts";
-
-validateBackendProductionEnvironmentOnStartup();
 
 const InfrastructureLive = Layer.mergeAll(
   DrizzleLive,
@@ -51,21 +22,6 @@ const InfrastructureLive = Layer.mergeAll(
   PostgresNotificationsLive,
   StorageProviderLive,
 ).pipe(Layer.provideMerge(FetchHttpClient.layer));
-
-const BillingDomainLive = AccountBilling.layer.pipe(
-  Layer.provideMerge(AccountBillingStateRepository.layer),
-  Layer.provideMerge(BillingAuthority.layer),
-);
-
-const StorageDomainLive = StorageLifecycle.layer.pipe(
-  Layer.provideMerge(StorageLifecycleStore.layer),
-);
-
-const AccountDomainLive = AccountCapability.layer.pipe(
-  Layer.provideMerge(AccountTrialRepository.layer),
-  Layer.provideMerge(BillingDomainLive),
-  Layer.provideMerge(StorageDomainLive),
-);
 
 const RpcRoutes = RpcServer.layerHttp({
   group: PlakkApi,
@@ -76,15 +32,9 @@ const RpcRoutes = RpcServer.layerHttp({
   Layer.provide(PlakkApiLive),
   Layer.provide(AuthMiddlewareLive),
   Layer.provide(InternalServerErrorMiddlewareLive),
-  Layer.provide(AccountDomainLive),
   Layer.provide(FetchHttpClient.layer),
   Layer.provide(RpcSerialization.layerNdjson),
   Layer.provide(InfrastructureLive),
-);
-
-const BrowserTelemetryRoutes = BrowserTelemetryRoute.pipe(
-  Layer.provide(BrowserTelemetryRateLimiterLive),
-  Layer.provide(BrowserTelemetrySinkLive),
 );
 
 const HealthRoute = HttpRouter.add(
@@ -93,82 +43,15 @@ const HealthRoute = HttpRouter.add(
   Effect.succeed(HttpServerResponse.text("ok")),
 ).pipe(HttpRouter.serve);
 
-const PolarWebhookRoute = HttpRouter.add(
-  "POST",
-  "/api/webhooks/polar",
-  Effect.gen(function* () {
-    const request = yield* HttpServerRequest.HttpServerRequest;
-    const body = yield* request.text;
-    const billing = yield* AccountBilling;
-    return yield* billing.handleWebhook(body, request.headers).pipe(
-      Effect.match({
-        onFailure: (error) =>
-          HttpServerResponse.empty({
-            status: webhookFailureStatus(error),
-          }),
-        onSuccess: () => HttpServerResponse.empty({ status: 202 }),
-      }),
-    );
-  }),
-).pipe(HttpRouter.serve, Layer.provide(BillingDomainLive), Layer.provide(InfrastructureLive));
-
-export const webhookFailureStatus = (
-  error:
-    | { readonly _tag: "BillingProviderError" }
-    | BillingWebhookPayloadError
-    | BillingWebhookVerificationError,
-): 400 | 403 | 503 => {
-  switch (error._tag) {
-    case "BillingWebhookPayloadError":
-      return 400;
-    case "BillingWebhookVerificationError":
-      return 403;
-    case "BillingProviderError":
-      return 503;
-  }
-};
-
-const CorsLive = Layer.unwrap(
-  Effect.all({
-    configuredWebOrigin: Config.option(Config.string("PLAKK_WEB_ORIGIN")).pipe(
-      Effect.map(Option.getOrUndefined),
-    ),
-    nodeEnv: Config.string("NODE_ENV").pipe(Config.withDefault("development")),
-  }).pipe(
-    Effect.flatMap(({ configuredWebOrigin, nodeEnv }) =>
-      Effect.try({
-        try: () => allowedBackendOrigins(configuredWebOrigin, nodeEnv === "production"),
-        catch: (cause) =>
-          cause instanceof InvalidCorsConfiguration
-            ? cause
-            : new InvalidCorsConfiguration({
-                cause,
-                message: "Invalid backend CORS configuration.",
-              }),
-      }),
-    ),
-    Effect.orDie,
-    Effect.map((allowedOrigins) =>
-      HttpRouter.cors({
-        allowedOrigins,
-        allowedMethods: ["GET", "POST", "OPTIONS"],
-        allowedHeaders: BACKEND_CORS_ALLOWED_HEADERS,
-        maxAge: 86_400,
-      }),
-    ),
-  ),
-);
-
 const BackendRoutes = Layer.mergeAll(
   HealthRoute,
-  PolarWebhookRoute,
   RpcRoutes,
-  BrowserTelemetryRoutes,
-  CorsLive,
-).pipe(
-  Layer.provide(WorkosAccessTokenVerifierLive),
-  Layer.provide(TelemetryConfigLive),
-  Layer.provide(FetchHttpClient.layer),
+  HttpRouter.cors({
+    allowedOrigins: ["plakk-app://renderer"],
+    allowedMethods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["authorization", "content-type"],
+    maxAge: 86_400,
+  }),
 );
 
 const NodeServerLive = NodeHttpServer.layerConfig(createServer, {
@@ -176,8 +59,6 @@ const NodeServerLive = NodeHttpServer.layerConfig(createServer, {
   port: Config.int("PORT").pipe(Config.withDefault(3100)),
 });
 
-export const BackendLive = HttpRouter.serve(BackendRoutes, {
-  middleware: HttpMiddleware.tracer,
-}).pipe(Layer.provide(NodeServerLive));
+export const BackendLive = HttpRouter.serve(BackendRoutes).pipe(Layer.provide(NodeServerLive));
 
 NodeRuntime.runMain(Layer.launch(BackendLive.pipe(Layer.provideMerge(TelemetryLive))));

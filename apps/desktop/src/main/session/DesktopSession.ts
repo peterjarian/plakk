@@ -34,12 +34,9 @@ export interface DesktopSessionShape {
   readonly refresh: Effect.Effect<void, DesktopSessionTransitionError>;
   readonly start: Effect.Effect<void, DesktopSessionTransitionError>;
   readonly signOut: Effect.Effect<void, DesktopSessionSignOutError>;
-  readonly withCurrentAccount: <A, E, R>(
-    command: (account: DesktopSessionAccount) => Effect.Effect<A, E, R>,
-  ) => Effect.Effect<A, E | DesktopSessionCommandError, R>;
-  readonly withCurrentProductAccess: <A, E, R>(
-    command: (account: DesktopSessionAccount) => Effect.Effect<A, E, R>,
-  ) => Effect.Effect<A, E | DesktopSessionCommandError, R>;
+  readonly withCurrentAccount: <A, E>(
+    command: (account: DesktopSessionAccount) => Effect.Effect<A, E>,
+  ) => Effect.Effect<A, E | DesktopSessionCommandError>;
 }
 
 export class DesktopSession extends Context.Service<DesktopSession, DesktopSessionShape>()(

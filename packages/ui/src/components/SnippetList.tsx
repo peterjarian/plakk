@@ -8,16 +8,8 @@ import {
   EmptyTitle,
 } from "./primitives/empty.tsx";
 
-export function SnippetList(props: {
-  empty: boolean;
-  children: ReactNode;
-  emptyDescription?: ReactNode;
-}) {
-  const {
-    empty,
-    children,
-    emptyDescription = "Add something above and it shows up on your other devices.",
-  } = props;
+export function SnippetList(props: { empty: boolean; children: ReactNode }) {
+  const { empty, children } = props;
 
   function focusRow(event: KeyboardEvent<HTMLUListElement>) {
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
@@ -48,7 +40,9 @@ export function SnippetList(props: {
               <Paperclip />
             </EmptyMedia>
             <EmptyTitle>Nothing added yet</EmptyTitle>
-            <EmptyDescription>{emptyDescription}</EmptyDescription>
+            <EmptyDescription>
+              Add something above and it shows up on your other devices.
+            </EmptyDescription>
           </EmptyHeader>
         </Empty>
       ) : (
