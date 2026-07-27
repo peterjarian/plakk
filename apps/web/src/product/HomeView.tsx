@@ -76,9 +76,12 @@ export function HomeView(props: {
     state.kind === "ready" && state.apiAvailability === "available" && snippetActions !== null;
   const productActionsDisabled =
     !remoteActionsAvailable || state.kind !== "ready" || !accountCanSync(state.account);
-  const deleteDisabled =
-    !remoteActionsAvailable ||
-    (state.kind === "ready" && state.account.blockedReasons.includes("storage"));
+  const addDisabled =
+    uploadsDisabled ||
+    state.kind !== "ready" ||
+    state.apiAvailability !== "available" ||
+    !accountCanSync(state.account);
+  const deleteDisabled = !remoteActionsAvailable;
 
   useEffect(() => {
     if (productActionsDisabled) setPendingExternalLink(null);
@@ -214,12 +217,12 @@ export function HomeView(props: {
   const addDroppedFiles = (event: DragEvent<HTMLElement>) => {
     event.preventDefault();
     setIsDragging(false);
-    if (!uploadsDisabled && event.dataTransfer.files.length > 0) {
+    if (!addDisabled && event.dataTransfer.files.length > 0) {
       onAddFiles(Array.from(event.dataTransfer.files));
     }
   };
   const addPastedContent = (event: ClipboardEvent<HTMLElement>) => {
-    if (uploadsDisabled) return;
+    if (addDisabled) return;
     if (
       event.target instanceof Element &&
       event.target.closest(
@@ -246,13 +249,13 @@ export function HomeView(props: {
       className="relative flex min-h-screen flex-col bg-background text-foreground"
       aria-label="Plakk"
       onDragEnter={(event) => {
-        if (!uploadsDisabled && event.dataTransfer.types.includes("Files")) {
+        if (!addDisabled && event.dataTransfer.types.includes("Files")) {
           event.preventDefault();
           setIsDragging(true);
         }
       }}
       onDragOver={(event) => {
-        if (!uploadsDisabled && event.dataTransfer.types.includes("Files")) {
+        if (!addDisabled && event.dataTransfer.types.includes("Files")) {
           event.preventDefault();
         }
       }}
@@ -270,8 +273,13 @@ export function HomeView(props: {
         onSignOutClick={onSignOut}
         {...(onSettings === undefined ? {} : { onSettingsClick: onSettings })}
         storageAction={
-          <span className="text-xs text-muted-foreground">
-            {storageProvider === null ? "Web · Read only" : storageProviderLabel(storageProvider)}
+          <span className="flex items-center gap-3 text-xs text-muted-foreground">
+            <span>
+              {storageProvider === null ? "Web · Read only" : storageProviderLabel(storageProvider)}
+            </span>
+            <a className="hover:text-foreground hover:underline" href="mailto:help@plakk.io">
+              Help
+            </a>
           </span>
         }
       />
@@ -300,7 +308,7 @@ export function HomeView(props: {
             )}
         </div>
 
-        {!uploadsDisabled && (
+        {!addDisabled && (
           <SnippetComposer
             className="mb-6"
             onFiles={(files) => onAddFiles(Array.from(files))}
@@ -395,8 +403,10 @@ export function HomeView(props: {
             className="mb-4 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive"
             role="alert"
           >
-            <strong>Storage access required.</strong> Your snippets remain visible. Reconnect
-            storage to resume Copy, Download, Open, and Delete.
+            <strong>Storage access required.</strong> Your snippets remain visible and Delete stays
+            available. Reconnect storage to resume Add, Copy, Download, and Open.
+            {state.account.blockedReasons.includes("billing") &&
+              " Resolving billing will not clear this storage restriction."}
             {onStorageReconnect !== undefined && (
               <Button
                 type="button"

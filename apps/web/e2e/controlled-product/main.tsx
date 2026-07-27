@@ -31,6 +31,7 @@ import {
 import { StorageOnboardingProof } from "./StorageOnboardingProof.tsx";
 import { StorageManagementProof } from "./StorageManagementProof.tsx";
 import { BillingProof } from "./BillingProof.tsx";
+import { Issue130Proof, type Issue130Mode } from "./Issue130Proof.tsx";
 import {
   WebProviderTransfer,
   WebSnippetUploadRemote,
@@ -51,6 +52,14 @@ const storageManagementMode = query.get("storage-management");
 const storageManagementSession = query.get("storage-session") ?? "default";
 const snippetActionsProof = query.get("snippet-actions") === "true";
 const billingModeValue = query.get("billing");
+const issue130ModeValue = query.get("issue130");
+const issue130Mode: Issue130Mode | null =
+  issue130ModeValue === "billing" ||
+  issue130ModeValue === "both" ||
+  issue130ModeValue === "normal" ||
+  issue130ModeValue === "storage"
+    ? issue130ModeValue
+    : null;
 const billingMode =
   billingModeValue === "grace" ||
   billingModeValue === "recovered" ||
@@ -643,7 +652,9 @@ const root = document.getElementById("root");
 if (root === null) throw new Error("Controlled product root is missing.");
 
 createRoot(root).render(
-  controlledStorageManagementMode !== null ? (
+  issue130Mode !== null ? (
+    <Issue130Proof mode={issue130Mode} />
+  ) : controlledStorageManagementMode !== null ? (
     <StorageManagementProof
       mode={controlledStorageManagementMode}
       session={storageManagementSession}

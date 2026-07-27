@@ -21,6 +21,15 @@ export const storageOnboardingOrigin = (value: unknown): StorageOnboardingOrigin
 export const accountNeedsStorageOnboarding = (account: AccountStatus): boolean =>
   account.blockedReasons.includes("storage");
 
+export const accountNeedsFirstRunStorageOnboarding = (
+  account: AccountStatus,
+  hasPublishedSnippets: boolean,
+): boolean =>
+  account.storageProvider === null &&
+  account.accessEntitlement.status !== "BILLING_RESTRICTED" &&
+  accountNeedsStorageOnboarding(account) &&
+  !hasPublishedSnippets;
+
 export const storageOnboardingDestination = (
   account: AccountStatus,
   providerStatus: StorageProviderStatus | null,

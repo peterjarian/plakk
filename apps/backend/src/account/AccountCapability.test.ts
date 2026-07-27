@@ -420,40 +420,35 @@ describe("account trial capability", () => {
     expect(ensureConnected).not.toHaveBeenCalled();
   });
 
-  it("rejects Snippet deletion while the linked provider needs reauthorization", async () => {
+  it("keeps Snippet deletion available while the linked provider needs reauthorization", async () => {
+    const ensureConnected = vi.fn(() =>
+      Effect.fail(
+        new StorageNeedsReauthorizationError({
+          message: "Reconnect storage before using provider content.",
+        }),
+      ),
+    );
     const result = await runCapability(
       (capability) => capability.authorizeSnippetDeletion("user-1").pipe(Effect.result),
       {
-        storage: storageService({
-          ensureConnected: () =>
-            Effect.fail(
-              new StorageNeedsReauthorizationError({
-                message: "Reconnect storage before deleting Snippets.",
-              }),
-            ),
-        }),
+        storage: storageService({ ensureConnected }),
       },
     );
 
-    expect(result).toMatchObject({
-      _tag: "Failure",
-      failure: { code: "FORBIDDEN" },
-    });
+    expect(result).toMatchObject({ _tag: "Success" });
+    expect(ensureConnected).not.toHaveBeenCalled();
   });
 
-  it("rejects Snippet deletion when no provider is linked", async () => {
+  it("keeps Snippet deletion available when no provider is linked", async () => {
+    const getLinkedProvider = vi.fn(() => Effect.succeed(null));
     const result = await runCapability(
       (capability) => capability.authorizeSnippetDeletion("user-1").pipe(Effect.result),
       {
-        storage: storageService({
-          getLinkedProvider: () => Effect.succeed(null),
-        }),
+        storage: storageService({ getLinkedProvider }),
       },
     );
 
-    expect(result).toMatchObject({
-      _tag: "Failure",
-      failure: { code: "FORBIDDEN" },
-    });
+    expect(result).toMatchObject({ _tag: "Success" });
+    expect(getLinkedProvider).not.toHaveBeenCalled();
   });
 });

@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { HomeView } from "./HomeView.tsx";
 import { AccountProductMirrorError } from "./readable-mirror.ts";
-import { accountNeedsStorageOnboarding } from "./storage-onboarding.ts";
+import { accountNeedsFirstRunStorageOnboarding } from "./storage-onboarding.ts";
 import { useWebProduct } from "./web-product-context.tsx";
 
 export function AuthenticatedHome(props: {
@@ -49,8 +49,10 @@ export function AuthenticatedHome(props: {
   const storageOnboardingRequired =
     product.state.kind === "ready" &&
     product.state.apiAvailability === "available" &&
-    accountNeedsStorageOnboarding(product.state.account) &&
-    !product.state.snippets.some((record) => record.kind === "PUBLISHED");
+    accountNeedsFirstRunStorageOnboarding(
+      product.state.account,
+      product.state.snippets.some((record) => record.kind === "PUBLISHED"),
+    );
   const uploadProvider =
     product.state.kind === "ready" &&
     product.state.apiAvailability === "available" &&
