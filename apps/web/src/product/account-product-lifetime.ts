@@ -3,12 +3,16 @@ import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as FiberHandle from "effect/FiberHandle";
 import * as Layer from "effect/Layer";
+import * as Stream from "effect/Stream";
 
 import {
   AccountProductReader,
   type AccountProductReadError,
   type AccountProductSnapshot,
 } from "./product-reader.ts";
+
+const INITIAL_RECONNECT_DELAY_MILLIS = 1_000;
+const MAX_RECONNECT_DELAY_MILLIS = 30_000;
 
 export class AccountProductLifetimeInitializationFailure extends Data.TaggedError(
   "AccountProductLifetimeInitializationFailure",
@@ -24,10 +28,19 @@ export type AccountProductState =
       readonly accountId: string;
       readonly cause: AccountProductReadError | AccountProductLifetimeInitializationFailure;
     }
-  | ({
+  | (AccountProductSnapshot & {
       readonly kind: "ready";
       readonly accountId: string;
-    } & AccountProductSnapshot);
+      readonly apiAvailability: "available";
+      readonly liveConnection: "connected" | "reconnecting";
+    })
+  | (AccountProductSnapshot & {
+      readonly kind: "ready";
+      readonly accountId: string;
+      readonly apiAvailability: "unavailable";
+      readonly cause: AccountProductReadError;
+      readonly liveConnection: "connected" | "reconnecting";
+    });
 
 export interface AccountProductLifetimeShape {
   readonly clear: Effect.Effect<void>;
@@ -45,10 +58,13 @@ export class AccountProductLifetime extends Context.Service<
     AccountProductLifetime,
     Effect.gen(function* () {
       const reader = yield* AccountProductReader;
-      const readFiber = yield* FiberHandle.make<void, never>();
+      const refreshFiber = yield* FiberHandle.make<void, never>();
+      const synchronizationFiber = yield* FiberHandle.make<void, never>();
       let state: AccountProductState = { kind: "idle" };
       let activeAccountId: string | null = null;
       let generation = 0;
+      let refreshSequence = 0;
+      let liveConnection: "connected" | "reconnecting" = "reconnecting";
       const listeners = new Set<() => void>();
 
       const publish = (next: AccountProductState) => {
@@ -56,43 +72,133 @@ export class AccountProductLifetime extends Context.Service<
         for (const listener of listeners) listener();
       };
 
-      const load = Effect.fn("AccountProductLifetime.load")(function* (accountId: string) {
-        generation += 1;
-        const loadGeneration = generation;
-        activeAccountId = accountId;
-        publish({ accountId, kind: "loading" });
+      const isCurrent = (accountId: string, expectedGeneration: number) =>
+        generation === expectedGeneration && activeAccountId === accountId;
 
-        const work = reader.read.pipe(
+      const publishLiveConnection = (
+        accountId: string,
+        expectedGeneration: number,
+        next: "connected" | "reconnecting",
+      ) => {
+        if (!isCurrent(accountId, expectedGeneration)) return;
+        liveConnection = next;
+        if (state.kind !== "ready" || state.accountId !== accountId) {
+          return;
+        }
+        publish({ ...state, liveConnection: next });
+      };
+
+      const refresh = Effect.fn("AccountProductLifetime.refresh")(function* (
+        accountId: string,
+        expectedGeneration: number,
+      ) {
+        refreshSequence += 1;
+        const expectedRefreshSequence = refreshSequence;
+        yield* reader.read.pipe(
           Effect.match({
             onFailure: (cause) => {
-              if (generation === loadGeneration && activeAccountId === accountId) {
-                publish({ accountId, cause, kind: "failed" });
+              if (
+                !isCurrent(accountId, expectedGeneration) ||
+                refreshSequence !== expectedRefreshSequence
+              ) {
+                return;
               }
+              if (state.kind === "ready" && state.accountId === accountId) {
+                publish({
+                  account: state.account,
+                  accountId,
+                  apiAvailability: "unavailable",
+                  cause,
+                  kind: "ready",
+                  liveConnection,
+                  snippets: state.snippets,
+                });
+                return;
+              }
+              publish({ accountId, cause, kind: "failed" });
             },
             onSuccess: (snapshot) => {
-              if (generation === loadGeneration && activeAccountId === accountId) {
-                publish({ ...snapshot, accountId, kind: "ready" });
+              if (
+                !isCurrent(accountId, expectedGeneration) ||
+                refreshSequence !== expectedRefreshSequence
+              ) {
+                return;
               }
+              publish({
+                ...snapshot,
+                accountId,
+                apiAvailability: "available",
+                kind: "ready",
+                liveConnection,
+              });
             },
           }),
         );
-        yield* FiberHandle.run(readFiber, work, { startImmediately: true });
+      });
+
+      const startRefresh = (accountId: string, expectedGeneration: number) =>
+        FiberHandle.run(refreshFiber, refresh(accountId, expectedGeneration), {
+          startImmediately: true,
+        }).pipe(Effect.asVoid);
+
+      const synchronize = Effect.fn("AccountProductLifetime.synchronize")(function* (
+        accountId: string,
+        expectedGeneration: number,
+      ) {
+        let reconnectDelayMillis = INITIAL_RECONNECT_DELAY_MILLIS;
+        yield* startRefresh(accountId, expectedGeneration);
+        while (isCurrent(accountId, expectedGeneration)) {
+          let observedConnection = false;
+          yield* reader.invalidations.pipe(
+            Stream.runForEach(() => {
+              observedConnection = true;
+              reconnectDelayMillis = INITIAL_RECONNECT_DELAY_MILLIS;
+              publishLiveConnection(accountId, expectedGeneration, "connected");
+              return startRefresh(accountId, expectedGeneration);
+            }),
+            Effect.ignore,
+          );
+          publishLiveConnection(accountId, expectedGeneration, "reconnecting");
+          if (!isCurrent(accountId, expectedGeneration)) return;
+          const delayMillis = reconnectDelayMillis;
+          if (!observedConnection) {
+            reconnectDelayMillis = Math.min(reconnectDelayMillis * 2, MAX_RECONNECT_DELAY_MILLIS);
+          }
+          yield* Effect.sleep(delayMillis);
+        }
+      });
+
+      const start = Effect.fn("AccountProductLifetime.start")(function* (accountId: string) {
+        generation += 1;
+        const synchronizationGeneration = generation;
+        refreshSequence += 1;
+        activeAccountId = accountId;
+        liveConnection = "reconnecting";
+        publish({ accountId, kind: "loading" });
+        yield* FiberHandle.run(
+          synchronizationFiber,
+          synchronize(accountId, synchronizationGeneration),
+          { startImmediately: true },
+        );
       });
 
       const clear = Effect.gen(function* () {
         generation += 1;
+        refreshSequence += 1;
         activeAccountId = null;
+        liveConnection = "reconnecting";
         publish({ kind: "idle" });
-        yield* FiberHandle.clear(readFiber);
+        yield* FiberHandle.clear(synchronizationFiber);
+        yield* FiberHandle.clear(refreshFiber);
       });
 
       return AccountProductLifetime.of({
         clear,
         enter: (accountId) =>
-          Effect.suspend(() => (activeAccountId === accountId ? Effect.void : load(accountId))),
+          Effect.suspend(() => (activeAccountId === accountId ? Effect.void : start(accountId))),
         getSnapshot: () => state,
         retry: Effect.suspend(() =>
-          activeAccountId === null ? Effect.void : load(activeAccountId),
+          activeAccountId === null ? Effect.void : startRefresh(activeAccountId, generation),
         ),
         subscribe: (listener) => {
           listeners.add(listener);

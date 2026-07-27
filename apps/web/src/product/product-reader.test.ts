@@ -1,11 +1,18 @@
-import type { AccountStatus } from "@plakk/shared/PlakkApi";
+import {
+  SNIPPET_INVALIDATION_KEEP_ALIVE,
+  SNIPPETS_CHANGED,
+  type AccountStatus,
+} from "@plakk/shared/PlakkApi";
+import { RpcError } from "@plakk/shared/RpcError";
 import * as Effect from "effect/Effect";
+import * as Stream from "effect/Stream";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import {
   MissingAccessToken,
   readAuthenticatedProduct,
   resolveProductRpcUrl,
+  watchAuthenticatedInvalidations,
 } from "./product-reader.ts";
 
 const account: AccountStatus = {
@@ -27,6 +34,7 @@ describe("authenticated product reader", () => {
         headers.push(options.headers);
         return Effect.succeed([]);
       },
+      WatchSnippetInvalidations: () => Stream.empty,
     };
 
     await expect(Effect.runPromise(readAuthenticatedProduct(rpc, getAccessToken))).resolves.toEqual(
@@ -43,6 +51,7 @@ describe("authenticated product reader", () => {
     const rpc = {
       GetAccountStatus: vi.fn(),
       GetSnippetSnapshot: vi.fn(),
+      WatchSnippetInvalidations: vi.fn(),
     };
 
     await expect(
@@ -50,6 +59,70 @@ describe("authenticated product reader", () => {
     ).rejects.toThrow(MissingAccessToken);
     expect(rpc.GetAccountStatus).not.toHaveBeenCalled();
     expect(rpc.GetSnippetSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("uses a fresh bearer token for each stream connection and ignores keep-alives", async () => {
+    const headers: Array<Readonly<Record<string, string>>> = [];
+    const getAccessToken = vi
+      .fn<() => Promise<string>>()
+      .mockResolvedValueOnce("stream-token-1")
+      .mockResolvedValueOnce("stream-token-2");
+    const rpc = {
+      GetAccountStatus: vi.fn(),
+      GetSnippetSnapshot: vi.fn(),
+      WatchSnippetInvalidations: (
+        _payload: undefined,
+        options: { headers: Record<string, string> },
+      ) => {
+        headers.push(options.headers);
+        return Stream.make(SNIPPET_INVALIDATION_KEEP_ALIVE, SNIPPETS_CHANGED);
+      },
+    };
+
+    const invalidations = watchAuthenticatedInvalidations(rpc, getAccessToken);
+    await expect(
+      Effect.runPromise(
+        Stream.concat(invalidations, invalidations).pipe(Stream.runCollect, Effect.map(Array.from)),
+      ),
+    ).resolves.toEqual([undefined, undefined]);
+    expect(getAccessToken).toHaveBeenCalledTimes(2);
+    expect(headers).toEqual([
+      { authorization: "Bearer stream-token-1" },
+      { authorization: "Bearer stream-token-2" },
+    ]);
+  });
+
+  it("surfaces a missing stream token instead of completing silently", async () => {
+    const rpc = {
+      GetAccountStatus: vi.fn(),
+      GetSnippetSnapshot: vi.fn(),
+      WatchSnippetInvalidations: vi.fn(),
+    };
+
+    await expect(
+      Effect.runPromise(
+        watchAuthenticatedInvalidations(rpc, async () => undefined).pipe(Stream.runCollect),
+      ),
+    ).rejects.toThrow(MissingAccessToken);
+    expect(rpc.WatchSnippetInvalidations).not.toHaveBeenCalled();
+  });
+
+  it("surfaces an RPC stream failure instead of completing silently", async () => {
+    const failure = new RpcError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "stream unavailable",
+    });
+    const rpc = {
+      GetAccountStatus: vi.fn(),
+      GetSnippetSnapshot: vi.fn(),
+      WatchSnippetInvalidations: vi.fn(() => Stream.fail(failure)),
+    };
+
+    await expect(
+      Effect.runPromise(
+        watchAuthenticatedInvalidations(rpc, async () => "fresh-token").pipe(Stream.runCollect),
+      ),
+    ).rejects.toBe(failure);
   });
 
   it("resolves the independent product API from an exact configured origin", () => {

@@ -3,6 +3,7 @@
 import type { AccountStatus, ApiSnippet } from "@plakk/shared/PlakkApi";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Stream from "effect/Stream";
 import { act, StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
@@ -31,6 +32,7 @@ const readerLayer = (id: string) =>
   Layer.succeed(
     AccountProductReader,
     AccountProductReader.of({
+      invalidations: Effect.void.pipe(Stream.fromEffect, Stream.concat(Stream.never)),
       read: Effect.succeed({ account, snippets: [snippet(id)] }),
     }),
   );

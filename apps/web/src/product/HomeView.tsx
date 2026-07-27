@@ -45,6 +45,13 @@ export function HomeView(props: {
           <p className="mt-1 text-sm text-muted-foreground">
             The complete published collection for your Plakk account.
           </p>
+          {state.kind === "ready" &&
+            state.apiAvailability === "available" &&
+            state.liveConnection === "connected" && (
+              <p className="mt-2 text-xs text-muted-foreground" role="status">
+                Live updates connected
+              </p>
+            )}
         </div>
 
         {signOutError !== null && (
@@ -69,7 +76,9 @@ export function HomeView(props: {
             className="flex items-center justify-between gap-4 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive"
             role="alert"
           >
-            <span>Plakk couldn’t load your snippets.</span>
+            <span>
+              <strong>Product unavailable.</strong> Plakk couldn’t load your snippets.
+            </span>
             {onRetry !== null && (
               <Button type="button" variant="ghost" size="sm" onClick={onRetry}>
                 Try again
@@ -77,19 +86,47 @@ export function HomeView(props: {
             )}
           </div>
         ) : (
-          <SnippetList
-            empty={state.snippets.length === 0}
-            emptyDescription="Published snippets from your Plakk account will appear here."
-          >
-            {state.snippets.map((snippet) => (
-              <PublishedSnippetRow
-                key={snippet.id}
-                snippet={snippet}
-                presentation={deriveSnippetPresentation({ fileName: snippet.fileName })}
-                now={now}
-              />
-            ))}
-          </SnippetList>
+          <>
+            {state.apiAvailability === "available" && state.liveConnection === "reconnecting" && (
+              <div
+                className="mb-4 rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground"
+                role="status"
+              >
+                <span className="font-medium text-foreground">Live updates reconnecting.</span> Your
+                last-confirmed snippets remain visible. This status describes update freshness;
+                commands check the API when used.
+              </div>
+            )}
+            {state.apiAvailability === "unavailable" && (
+              <div
+                className="mb-4 flex items-center justify-between gap-4 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+                role="alert"
+              >
+                <span>
+                  <strong>API unavailable.</strong> Showing your last-confirmed snippets. Remote
+                  actions are paused.
+                </span>
+                {onRetry !== null && (
+                  <Button type="button" variant="ghost" size="sm" onClick={onRetry}>
+                    Try again
+                  </Button>
+                )}
+              </div>
+            )}
+            <SnippetList
+              empty={state.snippets.length === 0}
+              emptyDescription="Published snippets from your Plakk account will appear here."
+            >
+              {state.snippets.map((snippet) => (
+                <PublishedSnippetRow
+                  key={snippet.id}
+                  snippet={snippet}
+                  presentation={deriveSnippetPresentation({ fileName: snippet.fileName })}
+                  now={now}
+                />
+              ))}
+            </SnippetList>
+          </>
         )}
       </div>
     </main>

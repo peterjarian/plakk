@@ -49,7 +49,7 @@ describe("Web Home", () => {
     expect(html).not.toContain("Nothing added yet");
   });
 
-  it("renders a retryable failure inside the product shell", () => {
+  it("renders a retryable product-load failure without assuming an API outage", () => {
     const html = render({
       accountId: user.id,
       cause: new RpcError({
@@ -59,29 +59,77 @@ describe("Web Home", () => {
       kind: "failed",
     });
     expect(html).toContain(">WR<");
+    expect(html).toContain("Product unavailable");
     expect(html).toContain("Plakk couldn’t load your snippets.");
     expect(html).toContain("Try again");
+    expect(html).not.toContain("API unavailable");
     expect(html).not.toContain("Nothing added yet");
   });
 
   it("renders the established empty state for a confirmed empty snapshot", () => {
-    const html = render({ account, accountId: user.id, kind: "ready", snippets: [] });
+    const html = render({
+      account,
+      accountId: user.id,
+      apiAvailability: "available",
+      kind: "ready",
+      liveConnection: "connected",
+      snippets: [],
+    });
     expect(html).toContain("Nothing added yet");
     expect(html).toContain("Published snippets from your Plakk account will appear here.");
     expect(html).not.toContain("Add something above");
+    expect(html).toContain("Live updates connected");
   });
 
   it("renders account-owned published Snippets without mutation actions", () => {
     const html = render({
       account,
       accountId: user.id,
+      apiAvailability: "available",
       kind: "ready",
+      liveConnection: "connected",
       snippets: [photo],
     });
     expect(html).toContain("Summer photo.png");
     expect(html).toContain("Google Drive");
     expect(html).not.toContain('aria-label="Copy"');
     expect(html).not.toContain('aria-label="Delete"');
+  });
+
+  it("keeps last-confirmed snippets visible while live updates reconnect", () => {
+    const html = render({
+      account,
+      accountId: user.id,
+      apiAvailability: "available",
+      kind: "ready",
+      liveConnection: "reconnecting",
+      snippets: [photo],
+    });
+    expect(html).toContain("Summer photo.png");
+    expect(html).toContain("Live updates reconnecting");
+    expect(html).toContain("last-confirmed snippets remain visible");
+    expect(html).not.toContain("API unavailable");
+  });
+
+  it("keeps last-confirmed snippets visible during an API outage", () => {
+    const html = render({
+      account,
+      accountId: user.id,
+      apiAvailability: "unavailable",
+      cause: new RpcError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "backend unavailable",
+      }),
+      kind: "ready",
+      liveConnection: "connected",
+      snippets: [photo],
+    });
+    expect(html).toContain("Summer photo.png");
+    expect(html).toContain("API unavailable");
+    expect(html).toContain("Showing your last-confirmed snippets");
+    expect(html).toContain("Remote actions are paused");
+    expect(html).toContain("Try again");
+    expect(html).not.toContain("Nothing added yet");
   });
 
   it("keeps a delegated sign-out failure visible and retryable", () => {
