@@ -17,6 +17,11 @@ import { makeDesktopSqliteLayer } from "../Sqlite.ts";
 import { DesktopContentStore } from "../snippets/DesktopContentStore.ts";
 import { NativeFileSources } from "../snippets/NativeFileSources.ts";
 import { AuthService } from "./AuthService.ts";
+import {
+  AuthServiceError,
+  AuthSessionExpiredError,
+  type AuthServiceFailure,
+} from "./AuthService.ts";
 import { DesktopSession, makeDesktopSessionLive } from "./DesktopSession.ts";
 
 const firstUser: User = {
@@ -47,6 +52,7 @@ describe("DesktopSession", () => {
       let cleanupOwner: User | null = null;
       let storedUser: User | null = firstUser;
       let sessionUser: User | null = firstUser;
+      let sessionFailure: AuthServiceFailure | null = null;
 
       const fakeClientLayer = Layer.effect(
         Client,
@@ -104,9 +110,11 @@ describe("DesktopSession", () => {
               }),
             getStoredAccount: () => Effect.sync(() => storedUser),
             getSession: () =>
-              Effect.sync(() =>
-                sessionUser === null ? null : { user: sessionUser, accessToken: "fresh-token" },
-              ),
+              sessionFailure === null
+                ? Effect.sync(() =>
+                    sessionUser === null ? null : { user: sessionUser, accessToken: "fresh-token" },
+                  )
+                : Effect.fail(sessionFailure),
             handleCallbackUrl: () => {
               storedUser = secondUser;
               sessionUser = secondUser;
@@ -155,12 +163,34 @@ describe("DesktopSession", () => {
         yield* desktopSession.start;
         yield* desktopSession.refresh;
         const firstToken = yield* accessTokens.get(firstUser.id)!;
+
+        sessionFailure = new AuthServiceError({
+          cause: new TypeError("fetch failed"),
+          message: "Could not refresh desktop auth credentials.",
+        });
+        yield* desktopSession.refresh;
+        const offlineState = yield* desktopSession.current;
+
+        sessionFailure = new AuthSessionExpiredError({
+          cause: { status: 400 },
+          message: "The desktop session is no longer valid.",
+        });
+        yield* desktopSession.refresh;
+        const expiredState = yield* desktopSession.current;
+        const expiredCommand = yield* desktopSession
+          .withClient(() => Effect.void)
+          .pipe(Effect.result);
+
+        sessionFailure = null;
         yield* desktopSession.handleCallbackUrl("plakk-auth://callback");
         const secondToken = yield* accessTokens.get(secondUser.id)!;
         yield* desktopSession.signOut;
         return {
           command: yield* desktopSession.withClient(() => Effect.void).pipe(Effect.result),
+          expiredCommand,
+          expiredState,
           firstToken,
+          offlineState,
           secondToken,
           state: yield* desktopSession.current,
         };
@@ -169,6 +199,12 @@ describe("DesktopSession", () => {
       );
 
       expect(result.firstToken).toBe("fresh-token");
+      expect(result.offlineState.user).toEqual(firstUser);
+      expect(result.expiredState.user).toBeNull();
+      expect(result.expiredCommand).toMatchObject({
+        _tag: "Failure",
+        failure: { _tag: "SessionError" },
+      });
       expect(result.secondToken).toBe("second-token");
       expect(result.state.user).toBeNull();
       expect(result.command).toMatchObject({

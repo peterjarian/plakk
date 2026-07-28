@@ -9,7 +9,7 @@ export type AuthSession = {
   readonly user: User;
 };
 
-export type AuthServiceFailure = AuthServiceError | Config.ConfigError;
+export type AuthServiceFailure = AuthServiceError | AuthSessionExpiredError | Config.ConfigError;
 
 export class AuthServiceError extends Schema.TaggedErrorClass<AuthServiceError>()(
   "AuthServiceError",
@@ -18,6 +18,27 @@ export class AuthServiceError extends Schema.TaggedErrorClass<AuthServiceError>(
     message: Schema.String,
   },
 ) {}
+
+export class AuthSessionExpiredError extends Schema.TaggedErrorClass<AuthSessionExpiredError>()(
+  "AuthSessionExpiredError",
+  {
+    cause: Schema.Defect(),
+    message: Schema.String,
+  },
+) {}
+
+/**
+ * A client-side or transient server failure cannot prove that the session is
+ * invalid. A non-retryable 4xx response does: WorkOS was reachable and rejected
+ * the refresh request.
+ */
+export function authRefreshFailureExpiresSession(cause: unknown): boolean {
+  if (typeof cause !== "object" || cause === null || !("status" in cause)) return false;
+  const status = cause.status;
+  return (
+    typeof status === "number" && status >= 400 && status < 500 && status !== 408 && status !== 429
+  );
+}
 
 export function deriveDesktopAuthCallbackUrl(configuredUrl: URL, isPackaged: boolean): URL {
   const protocol = isPackaged ? "plakk:" : "plakk-dev:";

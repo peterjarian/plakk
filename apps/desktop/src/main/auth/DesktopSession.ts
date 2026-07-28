@@ -302,11 +302,41 @@ const makeDesktopSession = (sharedClientLayer: SharedClientLayer) =>
       });
     });
 
+    const clearSession = Effect.fn("DesktopSession.clearSession")(function* () {
+      yield* commandLock.withPermit(
+        Effect.gen(function* () {
+          const current = yield* Ref.get(status);
+          yield* Ref.set(status, {
+            accessToken: null,
+            user: current.user,
+            commandsAuthorized: false,
+          });
+          if (current.user !== null) {
+            yield* auth.setCleanupOwner(current.user);
+            yield* clearFileSources;
+            yield* purgeActiveClient(current.user.id);
+          }
+          yield* auth.signOut();
+          yield* deactivateClient;
+          yield* Ref.set(status, {
+            accessToken: null,
+            user: null,
+            commandsAuthorized: false,
+          });
+          yield* publish(emptyState());
+        }),
+      );
+    });
+
     const reconcileCredentials = Effect.fn("DesktopSession.reconcileCredentials")(function* () {
       const current = yield* Ref.get(status);
       const session = yield* auth.getSession().pipe(Effect.result);
       if (Result.isSuccess(session)) {
         yield* setStatus(statusFrom(session.success));
+        return;
+      }
+      if (session.failure._tag === "AuthSessionExpiredError") {
+        yield* clearSession();
         return;
       }
       yield* Ref.set(status, {
@@ -339,31 +369,7 @@ const makeDesktopSession = (sharedClientLayer: SharedClientLayer) =>
         }),
       );
 
-    const signOut = refreshLock.withPermit(
-      commandLock.withPermit(
-        Effect.gen(function* () {
-          const current = yield* Ref.get(status);
-          yield* Ref.set(status, {
-            accessToken: null,
-            user: current.user,
-            commandsAuthorized: false,
-          });
-          if (current.user !== null) {
-            yield* auth.setCleanupOwner(current.user);
-            yield* clearFileSources;
-            yield* purgeActiveClient(current.user.id);
-          }
-          yield* auth.signOut();
-          yield* deactivateClient;
-          yield* Ref.set(status, {
-            accessToken: null,
-            user: null,
-            commandsAuthorized: false,
-          });
-          yield* publish(emptyState());
-        }),
-      ),
-    );
+    const signOut = refreshLock.withPermit(clearSession());
 
     const start = Effect.gen(function* () {
       if (yield* Ref.getAndSet(started, true)) return;

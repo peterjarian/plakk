@@ -11,6 +11,7 @@ vi.mock("electron", () => ({
 
 import {
   accessTokenNeedsRefresh,
+  authRefreshFailureExpiresSession,
   deriveDesktopAuthCallbackUrl,
   parseTrustedAuthCallbackUrl,
   AuthService,
@@ -86,6 +87,17 @@ describe("desktop access token refresh", () => {
     await expect(
       Effect.runPromise(accessTokenNeedsRefresh(accessToken({ exp: "invalid" }), now)),
     ).resolves.toBe(true);
+  });
+
+  it("expires only sessions rejected by a non-retryable WorkOS client response", () => {
+    expect(authRefreshFailureExpiresSession({ status: 400 })).toBe(true);
+    expect(authRefreshFailureExpiresSession({ status: 401 })).toBe(true);
+    expect(authRefreshFailureExpiresSession({ status: 422 })).toBe(true);
+
+    expect(authRefreshFailureExpiresSession(new TypeError("fetch failed"))).toBe(false);
+    expect(authRefreshFailureExpiresSession({ status: 408 })).toBe(false);
+    expect(authRefreshFailureExpiresSession({ status: 429 })).toBe(false);
+    expect(authRefreshFailureExpiresSession({ status: 500 })).toBe(false);
   });
 });
 
