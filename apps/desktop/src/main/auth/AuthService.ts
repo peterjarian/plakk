@@ -61,6 +61,10 @@ export class AuthService extends Context.Service<
   AuthService,
   {
     readonly callbackUrl: Effect.Effect<string, Config.ConfigError>;
+    /** Returns the account whose local data must be cleared before activation. */
+    readonly cleanupOwner: Effect.Effect<User | null, AuthServiceError>;
+    /** Persists or clears the account owner for crash-safe local cleanup. */
+    readonly setCleanupOwner: (user: User | null) => Effect.Effect<void, AuthServiceError>;
     getStoredAccount(): Effect.Effect<User | null, AuthServiceError>;
     getSession(): Effect.Effect<AuthSession | null, AuthServiceFailure>;
     handleCallbackUrl(rawUrl: string): Effect.Effect<AuthSession | null, AuthServiceFailure>;

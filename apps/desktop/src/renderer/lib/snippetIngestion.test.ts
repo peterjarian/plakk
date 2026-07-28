@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { ingestFileSnippet, ingestTextSnippet } from "./snippetIngestion.ts";
 
 describe("desktop snippet ingestion commands", () => {
-  const ingest = vi.fn().mockResolvedValue({ status: "ENQUEUED" as const });
+  const ingest = vi.fn().mockResolvedValue(undefined);
   const randomUUID = vi.fn();
 
   beforeEach(() => {
@@ -17,9 +17,7 @@ describe("desktop snippet ingestion commands", () => {
     randomUUID.mockReturnValue("8c72d6f6-9a25-4633-b72f-d8f83cf1c8e0");
     const text = "  hello 👋  ";
 
-    await expect(ingestTextSnippet("GOOGLE_DRIVE", text)).resolves.toEqual({
-      status: "ENQUEUED",
-    });
+    await expect(ingestTextSnippet("GOOGLE_DRIVE", text)).resolves.toBeUndefined();
 
     expect(ingest).toHaveBeenCalledOnce();
     expect(ingest).toHaveBeenCalledWith({
@@ -61,7 +59,7 @@ describe("desktop snippet ingestion commands", () => {
         { name: "report.pdf", size: 42_000, type: "application/pdf" },
         "/tmp/report.pdf",
       ),
-    ).resolves.toEqual({ status: "ENQUEUED" });
+    ).resolves.toBeUndefined();
 
     expect(ingest).toHaveBeenCalledOnce();
     expect(ingest).toHaveBeenCalledWith({

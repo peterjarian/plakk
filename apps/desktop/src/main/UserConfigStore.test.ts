@@ -22,13 +22,12 @@ vi.mock("electron-store", () => ({
   },
 }));
 
-import { UserConfigStore } from "./UserConfigStore.ts";
-import { UserConfigStoreLive } from "./UserConfigStoreLive.ts";
+import { UserConfigStore, UserConfigStoreLive } from "./UserConfigStore.ts";
 
 const runWithStore = <A>(effect: Effect.Effect<A, unknown, UserConfigStore>) =>
   Effect.runPromise(effect.pipe(Effect.provide(UserConfigStoreLive)));
 
-describe("desktop user config persistence", () => {
+describe("UserConfigStore", () => {
   beforeEach(() => stores.clear());
 
   it("defaults missing appearance and Toolbar widget choices", async () => {

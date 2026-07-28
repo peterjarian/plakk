@@ -3,12 +3,14 @@ import {
   isTextSnippetFileName,
   type SnippetPresentation,
 } from "@plakk/shared";
+import type { SnippetRowItem } from "@plakk/ui/components/SnippetRow";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { DesktopSnippet } from "../../ipc/contracts.ts";
 import { useLocalState } from "./useLocalState.tsx";
 
-export type SnippetReadModel = DesktopSnippet & {
+export type SnippetReadModel = SnippetRowItem & {
+  readonly localTextPreview: string | null;
   readonly presentation: SnippetPresentation;
   readonly thumbnailUrl: string | null;
 };
@@ -17,24 +19,52 @@ export const projectSnippetReadModels = (
   replicaItems: ReadonlyArray<DesktopSnippet>,
   thumbnailUrls: Readonly<Record<string, string>>,
 ): ReadonlyArray<SnippetReadModel> =>
-  replicaItems.flatMap((snippet) => {
+  replicaItems.flatMap(({ snippet, localTextPreview }) => {
     if (
-      snippet.kind === "PUBLISHED" &&
+      snippet.status === "PUBLISHED" &&
       isTextSnippetFileName(snippet.fileName) &&
-      snippet.localTextPreview === null &&
+      localTextPreview === null &&
       snippet.localContentAvailability.status === "DOWNLOADING"
     ) {
       return [];
     }
     const presentation = deriveSnippetPresentation({
       fileName: snippet.fileName,
-      ...(snippet.localTextPreview === null ? {} : { content: snippet.localTextPreview }),
+      ...(localTextPreview === null ? {} : { content: localTextPreview }),
     });
+    const row: SnippetRowItem =
+      snippet.status === "PUBLISHED"
+        ? {
+            id: snippet.id,
+            fileName: snippet.fileName,
+            byteSize: snippet.byteSize,
+            storageProvider: snippet.storageProvider,
+            createdAt: snippet.createdAt,
+            updatedAt: snippet.updatedAt,
+            kind: "PUBLISHED",
+            localState: null,
+            localContentAvailability: snippet.localContentAvailability,
+          }
+        : {
+            id: snippet.id,
+            fileName: snippet.fileName,
+            byteSize: snippet.byteSize,
+            storageProvider: snippet.storageProvider,
+            createdAt: snippet.createdAt,
+            updatedAt: snippet.updatedAt,
+            kind: "LOCAL",
+            localState: {
+              status: snippet.status === "FAILED" ? "FAILED" : "UPLOADING",
+              errorMessage: snippet.status === "FAILED" ? snippet.errorMessage : null,
+            },
+            localContentAvailability: snippet.localContentAvailability,
+          };
     return [
       {
-        ...snippet,
+        ...row,
+        localTextPreview,
         presentation,
-        thumbnailUrl: thumbnailUrls[snippet.id] ?? null,
+        thumbnailUrl: thumbnailUrls[row.id] ?? null,
       },
     ];
   });
@@ -81,11 +111,11 @@ const useSnippetImageUrls = (snippets: ReadonlyArray<DesktopSnippet>) => {
 
   useEffect(() => {
     const images = snippets.filter(
-      (snippet) =>
+      ({ snippet }) =>
         deriveSnippetPresentation({ fileName: snippet.fileName }).type === "image" &&
         snippet.localContentAvailability.status === "AVAILABLE",
     );
-    const visibleIds = new Set(images.map(({ id }) => id));
+    const visibleIds = new Set(images.map(({ snippet }) => snippet.id));
     visibleIdsRef.current = visibleIds;
 
     const registry = registryRef.current;
@@ -99,7 +129,7 @@ const useSnippetImageUrls = (snippets: ReadonlyArray<DesktopSnippet>) => {
       });
     }
 
-    for (const snippet of images) {
+    for (const { snippet } of images) {
       if (registry.has(snippet.id) || loadingIdsRef.current.has(snippet.id)) continue;
       loadingIdsRef.current.add(snippet.id);
       void window.ipc.snippets

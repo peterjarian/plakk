@@ -35,22 +35,15 @@ const payload = {
 describe("snippet ingestion preload boundary", () => {
   beforeEach(() => boundary.invoke.mockReset());
 
-  it("preserves explicitly authored ingest failure copy as a structured result", async () => {
-    const result = { status: "FAILED", message: "Choose a local file to add." } as const;
-    boundary.invoke.mockResolvedValue(result);
-
-    await expect(boundary.api?.snippets.ingest(payload)).resolves.toEqual(result);
-  });
-
   it("passes the invocation promise through without translating its failure channel", () => {
-    const invocation = Promise.resolve({ status: "ENQUEUED" } as const);
+    const invocation = Promise.resolve();
     boundary.invoke.mockReturnValue(invocation);
 
     expect(boundary.api?.snippets.ingest(payload)).toBe(invocation);
   });
 
   it("passes an opaque native source without exposing its filesystem path", async () => {
-    boundary.invoke.mockResolvedValue({ status: "ENQUEUED" });
+    boundary.invoke.mockResolvedValue(undefined);
     const { bytes: _bytes, ...fileMetadata } = payload;
 
     await boundary.api?.snippets.ingest({

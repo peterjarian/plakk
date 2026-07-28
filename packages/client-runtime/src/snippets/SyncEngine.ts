@@ -1,6 +1,6 @@
 import { SNIPPETS_CHANGED, OfflineError, SessionError } from "@plakk/shared/PlakkApi";
 import type { RpcError } from "@plakk/shared/RpcError";
-import { Cause, Context, Effect, Layer, Option, Stream } from "effect";
+import { Cause, Context, Effect, Layer, Option, Schema, Stream, SubscriptionRef } from "effect";
 import type { RpcClientError } from "effect/unstable/rpc/RpcClientError";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
@@ -29,6 +29,9 @@ export type SyncFailure =
   | SnippetConflictError
   | SnippetNotFoundError;
 
+export const SyncStatusSchema = Schema.Literals(["CONNECTED", "RECONNECTING"] as const);
+export type SyncStatus = typeof SyncStatusSchema.Type;
+
 export class SyncEngine extends Context.Service<
   SyncEngine,
   {
@@ -36,6 +39,8 @@ export class SyncEngine extends Context.Service<
     readonly pull: Effect.Effect<void, SyncFailure>;
     /** Keeps pulling after startup, invalidation signals, and reconnects. */
     readonly run: Effect.Effect<never>;
+    /** Subscribes to backend snippet-sync connection state. */
+    readonly subscribe: () => Stream.Stream<SyncStatus>;
     /** Deletes a published snippet remotely and then removes its local record. */
     readonly delete: (snippetId: string) => Effect.Effect<void, SyncFailure>;
   }
@@ -48,6 +53,7 @@ export class SyncEngine extends Context.Service<
       const sql = yield* SqlClient.SqlClient;
       const snippets = yield* SnippetStore;
       const content = Option.getOrUndefined(yield* Effect.serviceOption(ContentStore));
+      const status = yield* SubscriptionRef.make<SyncStatus>("RECONNECTING");
 
       /** Converts a backend-declared failure into a safe runtime error. */
       const failRpc = (error: RpcError): Effect.Effect<never, SyncFailure> => {
@@ -131,6 +137,7 @@ export class SyncEngine extends Context.Service<
       const run = Effect.gen(function* () {
         while (true) {
           yield* pull.pipe(
+            Effect.tap(() => SubscriptionRef.set(status, "CONNECTED")),
             Effect.catchCause((cause) =>
               Effect.logWarning("Initial snippet sync failed", {
                 cause: Cause.pretty(cause),
@@ -148,6 +155,7 @@ export class SyncEngine extends Context.Service<
             ),
           );
 
+          yield* SubscriptionRef.set(status, "RECONNECTING");
           yield* Effect.sleep("5 seconds");
         }
       }).pipe(Effect.withSpan("SyncEngine.run"));
@@ -182,7 +190,12 @@ export class SyncEngine extends Context.Service<
         }),
       );
 
-      return SyncEngine.of({ pull, run, delete: deleteSnippet });
+      return SyncEngine.of({
+        pull,
+        run,
+        subscribe: () => SubscriptionRef.changes(status),
+        delete: deleteSnippet,
+      });
     }),
   );
 }

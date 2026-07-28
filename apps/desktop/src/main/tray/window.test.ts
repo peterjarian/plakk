@@ -114,7 +114,6 @@ vi.mock("electron", () => ({
   Tray: electron.Tray,
 }));
 
-import { createToolbarWidgetLifecycle } from "../lifecycle.ts";
 import { createTrayWindowController } from "./window.ts";
 
 describe("tray window lifecycle", () => {
@@ -125,7 +124,7 @@ describe("tray window lifecycle", () => {
 
   afterEach(() => vi.useRealTimers());
 
-  it("preloads hidden and waits for renderer and account readiness before showing", () => {
+  it("preloads hidden and waits for the renderer before showing", () => {
     const loadTrayRenderer = vi.fn();
     const controller = createTrayWindowController({
       getBackgroundColor: () => "#0a0a0a",
@@ -135,7 +134,8 @@ describe("tray window lifecycle", () => {
       preloadPath: "/preload.cjs",
     });
 
-    controller.setup();
+    controller.setEnabled(true);
+    controller.setAccountState(true, false);
     const window = electron.BrowserWindow.instances[0]!;
     expect(electron.Tray.instances).toHaveLength(1);
     expect(electron.BrowserWindow.instances).toHaveLength(1);
@@ -146,8 +146,6 @@ describe("tray window lifecycle", () => {
     controller.show();
     expect(window.visible).toBe(false);
     window.webContents.emit("did-finish-load");
-    expect(window.visible).toBe(false);
-    controller.setAccountState(true, false);
     expect(window.visible).toBe(true);
   });
 
@@ -168,7 +166,8 @@ describe("tray window lifecycle", () => {
       preloadPath: "/preload.cjs",
     });
 
-    controller.setup();
+    controller.setEnabled(true);
+    controller.setAccountState(true, false);
     const tray = electron.Tray.instances[0]!;
     tray.emit("drop-files", {}, ["blocked.txt"]);
     expect(onDropFiles).not.toHaveBeenCalled();
@@ -185,7 +184,7 @@ describe("tray window lifecycle", () => {
     expect(onDropText).toHaveBeenCalledWith(expect.objectContaining({ text: "ready text" }));
     expect(electron.BrowserWindow.instances[0]!.visible).toBe(true);
 
-    controller.disable();
+    controller.setAccountState(false, false);
     expect(tray.destroyed).toBe(true);
     expect(electron.BrowserWindow.instances[0]!.destroyed).toBe(true);
     expect(controller.isIngestionEnabled()).toBe(false);
@@ -201,9 +200,10 @@ describe("tray window lifecycle", () => {
       preloadPath: "/preload.cjs",
     });
 
-    controller.setup();
+    controller.setEnabled(true);
+    controller.setAccountState(true, false);
     const tray = electron.Tray.instances[0]!;
-    controller.disable();
+    controller.setEnabled(false);
 
     expect(tray.images).toEqual([electron.transparentImage]);
     expect(tray.toolTip).toBe("");
@@ -228,11 +228,11 @@ describe("tray window lifecycle", () => {
       preloadPath: "/preload.cjs",
     });
 
-    controller.setup();
+    controller.setEnabled(true);
+    controller.setAccountState(true, true);
     const tray = electron.Tray.instances[0]!;
     const window = electron.BrowserWindow.instances[0]!;
     window.webContents.emit("did-finish-load");
-    controller.setAccountState(true, true);
     vi.advanceTimersByTime(5 * 60 * 1000 + 1);
 
     tray.emit("click", {}, tray.getBounds());
@@ -254,16 +254,17 @@ describe("tray window lifecycle", () => {
       preloadPath: "/preload.cjs",
     });
 
-    controller.setup();
-    controller.setup();
+    controller.setEnabled(true);
+    controller.setAccountState(true, false);
+    controller.setAccountState(true, false);
     expect(electron.Tray.instances).toHaveLength(1);
     expect(electron.BrowserWindow.instances).toHaveLength(1);
     expect(loadTrayRenderer).toHaveBeenCalledOnce();
 
-    controller.disable();
-    controller.disable();
-    controller.setup();
-    controller.setup();
+    controller.setEnabled(false);
+    controller.setEnabled(false);
+    controller.setEnabled(true);
+    controller.setEnabled(true);
 
     expect(electron.Tray.instances).toHaveLength(2);
     expect(electron.BrowserWindow.instances).toHaveLength(2);
@@ -280,32 +281,22 @@ describe("tray window lifecycle", () => {
       platform: "win32",
       preloadPath: "/preload.cjs",
     });
-    const lifecycle = createToolbarWidgetLifecycle(controller, false);
-    const user = {
-      id: "user_1",
-      email: "user@example.com",
-      firstName: "Test",
-      lastName: "User",
-      createdAt: "2026-01-01T00:00:00.000Z",
-      updatedAt: "2026-01-01T00:00:00.000Z",
-    };
-
-    lifecycle.applyAccountState({ canIngest: true, user });
+    controller.setAccountState(true, true);
     expect(electron.Tray.instances).toHaveLength(0);
 
-    lifecycle.applyToolbarWidgetPreference(true);
+    controller.setEnabled(true);
     expect(electron.Tray.instances).toHaveLength(1);
     expect(electron.BrowserWindow.instances).toHaveLength(1);
 
-    lifecycle.applyToolbarWidgetPreference(false);
+    controller.setEnabled(false);
     expect(electron.Tray.instances[0]!.destroyed).toBe(true);
     expect(electron.BrowserWindow.instances[0]!.destroyed).toBe(true);
 
-    lifecycle.applyToolbarWidgetPreference(true);
+    controller.setEnabled(true);
     expect(electron.Tray.instances).toHaveLength(2);
     expect(electron.BrowserWindow.instances).toHaveLength(2);
 
-    lifecycle.applyAccountState({ canIngest: false, user: null });
+    controller.setAccountState(false, false);
     expect(electron.Tray.instances[1]!.destroyed).toBe(true);
     expect(electron.BrowserWindow.instances[1]!.destroyed).toBe(true);
   });

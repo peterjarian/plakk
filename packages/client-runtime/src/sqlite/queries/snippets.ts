@@ -80,3 +80,12 @@ export const removeSnippet = Effect.fn("ClientQueries.removeSnippet")(function* 
       AND id = ${snippetId}
   `;
 });
+
+/** Removes every locally stored snippet record owned by one user. */
+export const clearSnippets = Effect.fn("ClientQueries.clearSnippets")(function* (userId: string) {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`
+    DELETE FROM client_snippets
+    WHERE user_id = ${userId}
+  `;
+});

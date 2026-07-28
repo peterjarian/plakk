@@ -1,7 +1,7 @@
 import "dotenv/config";
 
 import { basename, join, resolve, sep } from "node:path";
-import { rm, stat } from "node:fs/promises";
+import { open, rm, stat } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { decodeSnippetText, deriveSnippetPresentation, isHttpUrl } from "@plakk/shared";
 import { accountCanSyncWithConnection } from "@plakk/shared/PlakkApi";
@@ -15,7 +15,8 @@ import type {
 } from "../ipc/contracts.ts";
 import { ipcEvents, ipcMethods } from "../ipc/contracts.ts";
 import { IpcHandlerError, makeHandle, send } from "../ipc/main.ts";
-import { AuthService, AuthServiceError } from "./auth/AuthService.ts";
+import { AuthService, type AuthServiceFailure } from "./auth/AuthService.ts";
+import { DesktopSession } from "./auth/DesktopSession.ts";
 import {
   consumeTemporaryClipboardFile,
   readClipboard,
@@ -25,16 +26,8 @@ import {
 } from "./clipboard.ts";
 import { UserConfigStore } from "./UserConfigStore.ts";
 import { createAppearanceController } from "./appearance.ts";
-import { createToolbarWidgetLifecycle, isReloadShortcut } from "./lifecycle.ts";
-import { LocalState } from "./local-state/LocalState.ts";
 import { runEffect, runtime } from "./runtime.ts";
-import { DesktopSession } from "./session/DesktopSession.ts";
-import { SnippetHydrationEngine } from "./snippets/hydration/SnippetHydration.ts";
-import { getManagedSnippetBytes } from "./snippets/replica/read.ts";
-import { NativeFileSources } from "./snippets/sources/NativeFileSources.ts";
-import { SnippetUploadEngine } from "./snippets/upload/SnippetUploadEngine.ts";
-import { SnippetDeletion } from "./snippets/deletion/SnippetDeletion.ts";
-import { snippetUploadFailureMessage } from "./snippets/upload/SnippetUploadEngineLive.ts";
+import { NativeFileSources } from "./snippets/NativeFileSources.ts";
 import { createTrayWindowController } from "./tray/window.ts";
 
 const linuxDesktopName = process.env.PLAKK_LINUX_DESKTOP_NAME;
@@ -44,10 +37,13 @@ if (process.platform === "linux" && linuxDesktopName !== undefined) {
 
 const handle = makeHandle(runtime);
 
-const asIpcFailure =
+const withIpcMessage =
   (message: string) =>
   <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(Effect.mapError((cause) => new IpcHandlerError({ cause, message })));
+
+const asIpcError = <A, E extends { readonly message: string }, R>(effect: Effect.Effect<A, E, R>) =>
+  effect.pipe(Effect.mapError((cause) => new IpcHandlerError({ cause, message: cause.message })));
 
 const rendererScheme = "plakk-app";
 const rendererHost = "renderer";
@@ -73,17 +69,21 @@ handle(ipcMethods.openExternal, (url) =>
       }),
 );
 
-const getLocalState = LocalState.use((localState) => localState.current);
+const getLocalState = DesktopSession.use((session) => session.current);
 
 const applyUserConfigToTray = (config: UserConfig) =>
   Effect.try({
     try: () => {
-      if (toolbarWidgetLifecycle === undefined) {
-        throw new Error("Toolbar widget lifecycle is not ready.");
+      if (trayWindowController === undefined) {
+        throw new Error("Toolbar widget is not ready.");
       }
-      toolbarWidgetLifecycle.applyToolbarWidgetPreference(config.toolbarWidgetEnabled);
+      trayWindowController.setEnabled(config.toolbarWidgetEnabled);
     },
-    catch: (cause) => cause,
+    catch: (cause) =>
+      new IpcHandlerError({
+        cause,
+        message: "Could not apply the Toolbar widget preference.",
+      }),
   });
 
 handle(ipcMethods.localStateGet, () => getLocalState);
@@ -123,173 +123,145 @@ handle(ipcMethods.snippetIngest, (payload, event) =>
     });
     return yield* Effect.gen(function* () {
       if (resolvedPayload === undefined) {
-        return { status: "FAILED", message: "Choose the file again before adding it." } as const;
+        return yield* new IpcHandlerError({
+          cause: null,
+          message: "Choose the file again before adding it.",
+        });
       }
       if (
         trayWindowController?.ownsWebContents(event.sender) === true &&
         !trayWindowController.isIngestionEnabled()
       ) {
-        return {
-          status: "FAILED",
+        return yield* new IpcHandlerError({
+          cause: null,
           message: "Adding is paused until the account is ready.",
-        } as const;
+        });
       }
-      const engine = yield* SnippetUploadEngine;
       const session = yield* DesktopSession;
       return yield* session
-        .withCurrentAccount((account) => {
-          if (account.accessToken === null) {
-            return Effect.succeed({
-              status: "FAILED" as const,
-              message: "Reconnect storage before adding snippets.",
-            });
-          }
-          return engine
-            .ingest({ id: account.id, accessToken: account.accessToken }, resolvedPayload)
-            .pipe(
-              Effect.as({ status: "ENQUEUED" } as const),
-              Effect.catch((error) =>
-                Effect.succeed({
-                  status: "FAILED",
-                  message: snippetUploadFailureMessage(error),
-                } as const),
-              ),
-            );
+        .withClient((client) => {
+          const source =
+            "bytes" in resolvedPayload
+              ? {
+                  read: (offset: number, byteSize: number) =>
+                    Effect.succeed(resolvedPayload.bytes.slice(offset, offset + byteSize)),
+                }
+              : {
+                  read: (offset: number, byteSize: number) =>
+                    Effect.acquireUseRelease(
+                      Effect.tryPromise(() => open(resolvedPayload.filePath, "r")),
+                      (file) =>
+                        Effect.tryPromise(async () => {
+                          const bytes = new Uint8Array(byteSize);
+                          const { bytesRead } = await file.read(bytes, 0, byteSize, offset);
+                          return bytes.subarray(0, bytesRead);
+                        }),
+                      (file) => Effect.promise(() => file.close()),
+                    ),
+                };
+          return client.uploads.upload(
+            {
+              id: resolvedPayload.id,
+              fileName: resolvedPayload.fileName,
+              byteSize: resolvedPayload.byteSize,
+              mediaType: resolvedPayload.mediaType,
+              storageProvider: resolvedPayload.storageProvider,
+            },
+            source,
+          );
         })
-        .pipe(
-          Effect.catchTag("DesktopSessionCommandError", () =>
-            Effect.succeed({
-              status: "FAILED",
-              message: "Sign in before adding snippets.",
-            } as const),
-          ),
-        );
+        .pipe(asIpcError);
     }).pipe(Effect.ensuring(cleanup));
   }),
 );
 
 handle(ipcMethods.snippetDiscard, (id) =>
   Effect.gen(function* () {
-    const engine = yield* SnippetUploadEngine;
     const session = yield* DesktopSession;
-    yield* session
-      .withCurrentAccount((account) => engine.discard(account.id, id))
-      .pipe(asIpcFailure("Could not discard this local snippet."));
+    yield* session.withClient((client) => client.snippets.dismissFailedUpload(id)).pipe(asIpcError);
   }),
 );
 
 handle(ipcMethods.snippetDelete, (id) =>
   Effect.gen(function* () {
-    const deletion = yield* SnippetDeletion;
     const session = yield* DesktopSession;
-    yield* session
-      .withCurrentAccount((account) => deletion.delete(account, id))
-      .pipe(asIpcFailure("Could not delete this snippet."));
+    yield* session.withClient((client) => client.snippets.delete(id)).pipe(asIpcError);
   }),
 );
 
 handle(ipcMethods.snippetDownload, (id) =>
   Effect.gen(function* () {
-    const engine = yield* SnippetHydrationEngine;
     const session = yield* DesktopSession;
-    yield* session
-      .withCurrentAccount((account) => {
-        if (account.accessToken === null) {
-          return Effect.fail(
-            new IpcHandlerError({
-              cause: null,
-              message: "Reconnect storage before downloading this snippet.",
-            }),
-          );
-        }
-        return engine
-          .download({ id: account.id, accessToken: account.accessToken }, id)
-          .pipe(Effect.mapError((cause) => new IpcHandlerError({ cause, message: cause.reason })));
-      })
-      .pipe(
-        Effect.mapError((cause) =>
-          cause instanceof IpcHandlerError
-            ? cause
-            : new IpcHandlerError({
-                cause,
-                message: "Reconnect storage before downloading this snippet.",
-              }),
-        ),
-      );
+    yield* session.withClient((client) => client.content.download(id)).pipe(asIpcError);
   }),
 );
 
 handle(ipcMethods.storageFreeUp, () =>
   Effect.gen(function* () {
-    const hydration = yield* SnippetHydrationEngine;
     const session = yield* DesktopSession;
-    return yield* session
-      .withCurrentAccount((account) => hydration.freeUpSpace(account.id))
-      .pipe(asIpcFailure("Plakk couldn’t free device space. Try again."));
+    return yield* session.withClient((client) => client.content.freeUp).pipe(asIpcError);
   }),
 );
 
-const findSnippet = Effect.fn("LocalState.findSnippet")(function* (id: string) {
-  const localState = yield* LocalState;
+const findSnippet = Effect.fn("DesktopSession.findSnippet")(function* (id: string) {
   const session = yield* DesktopSession;
   return yield* session
-    .withCurrentAccount(
-      Effect.fn("LocalState.findAuthorizedSnippet")(function* (account) {
-        const current = yield* localState.current;
-        const snippets = current.account?.id === account.id ? current.snippets : [];
-        const snippet = snippets.find((item) => item.id === id);
+    .withClient(
+      Effect.fn("DesktopSession.findAuthorizedSnippet")(function* (client) {
+        const current = yield* session.current;
+        const snippet = current.snippets.find((item) => item.snippet.id === id);
         if (snippet === undefined) {
           return yield* new IpcHandlerError({ cause: null, message: "Snippet was not found." });
         }
-        return { account, snippet };
+        return { client, snippet };
       }),
     )
-    .pipe(
-      Effect.mapError((cause) =>
-        cause instanceof IpcHandlerError
-          ? cause
-          : new IpcHandlerError({ cause, message: "Sign in to load stored snippets." }),
-      ),
-    );
+    .pipe(asIpcError);
 });
 
 handle(ipcMethods.snippetCopy, (id) =>
   Effect.gen(function* () {
-    const { account, snippet } = yield* findSnippet(id);
-    const { bytes } = yield* Effect.scoped(getManagedSnippetBytes(account, id, snippet)).pipe(
-      asIpcFailure("Could not load this snippet."),
+    const { client, snippet } = yield* findSnippet(id);
+    const bytes = yield* client.content.read(id).pipe(
+      Stream.runCollect,
+      Effect.map((chunks) => Uint8Array.from(Buffer.concat(chunks))),
+      asIpcError,
     );
-    const presentation = deriveSnippetPresentation({ fileName: snippet.fileName, content: bytes });
+    const presentation = deriveSnippetPresentation({
+      fileName: snippet.snippet.fileName,
+      content: bytes,
+    });
     if (presentation.type === "text" || presentation.type === "hyperlink") {
       const text = decodeSnippetText(bytes);
       if (text !== null) {
         return yield* writeClipboard({ type: "text", text }).pipe(
-          asIpcFailure("Could not copy this snippet."),
+          withIpcMessage("Could not copy this snippet."),
         );
       }
     }
     return yield* writeSnippetToClipboard({
       bytes,
-      fileName: snippet.fileName,
+      fileName: snippet.snippet.fileName,
       contentType: null,
-    }).pipe(asIpcFailure("Could not copy this snippet."));
+    }).pipe(withIpcMessage("Could not copy this snippet."));
   }),
 );
 
 handle(ipcMethods.snippetRead, (id) =>
   Effect.gen(function* () {
-    const { account, snippet } = yield* findSnippet(id);
-    const { bytes } = yield* Effect.scoped(getManagedSnippetBytes(account, id, snippet)).pipe(
-      asIpcFailure("Could not load this snippet."),
+    const { client } = yield* findSnippet(id);
+    return yield* client.content.read(id).pipe(
+      Stream.runCollect,
+      Effect.map((chunks) => Uint8Array.from(Buffer.concat(chunks))),
+      asIpcError,
     );
-    return bytes;
   }),
 );
 
 handle(ipcMethods.clipboardRead, () =>
   readClipboard().pipe(
     Effect.flatMap(projectClipboardContent),
-    asIpcFailure("Could not read the clipboard."),
+    withIpcMessage("Could not read the clipboard."),
   ),
 );
 
@@ -315,23 +287,21 @@ handle(ipcMethods.traySelectFiles, (_payload, event) =>
     if (result.canceled) return [];
     return yield* Effect.forEach(
       result.filePaths,
-      (path) => projectNativeFile(path).pipe(asIpcFailure("Could not read the selected file.")),
+      (path) => projectNativeFile(path).pipe(withIpcMessage("Could not read the selected file.")),
       { concurrency: "unbounded" },
     );
   }),
 );
 
-const authFailureMessage = (cause: unknown, fallback: string) =>
-  cause instanceof AuthServiceError ? cause.message : fallback;
-
-const withAuthIpcError = Effect.fn("withAuthIpcError")(function* <A, E, R>(
-  effect: Effect.Effect<A, E, R>,
+const withAuthIpcError = Effect.fn("withAuthIpcError")(function* <A, R>(
+  effect: Effect.Effect<A, AuthServiceFailure, R>,
   fallback: string,
 ): Effect.fn.Return<A, IpcHandlerError, R> {
   return yield* effect.pipe(
-    Effect.mapError(
-      (cause) => new IpcHandlerError({ cause, message: authFailureMessage(cause, fallback) }),
+    Effect.catchTag("AuthServiceError", (cause) =>
+      Effect.fail(new IpcHandlerError({ cause, message: cause.message })),
     ),
+    Effect.mapError((cause) => new IpcHandlerError({ cause, message: fallback })),
   );
 });
 
@@ -359,14 +329,12 @@ handle(ipcMethods.authSignIn, () =>
 );
 
 handle(ipcMethods.authSignOut, () =>
-  DesktopSession.use((session) => session.signOut).pipe(
-    Effect.mapError((cause) => new IpcHandlerError({ cause, message: cause.reason })),
-  ),
+  DesktopSession.use((session) => session.signOut).pipe(asIpcError),
 );
 
 handle(ipcMethods.appearanceGet, () =>
   Effect.sync(() => appearanceController.getState()).pipe(
-    asIpcFailure("Could not load desktop appearance."),
+    withIpcMessage("Could not load desktop appearance."),
   ),
 );
 
@@ -376,20 +344,20 @@ handle(ipcMethods.appearanceSet, (preference) =>
       Effect.sync(() => appearanceController.setPreference(config.appearance)),
     ),
     Effect.map(() => appearanceController.getState()),
-    asIpcFailure("Could not save desktop appearance."),
+    withIpcMessage("Could not save desktop appearance."),
   ),
 );
 
 handle(ipcMethods.userConfigGet, () =>
   UserConfigStore.use((store) => store.get).pipe(
-    asIpcFailure("Could not load desktop preferences."),
+    withIpcMessage("Could not load desktop preferences."),
   ),
 );
 
 handle(ipcMethods.userConfigSet, (patch) =>
   UserConfigStore.use((store) => store.set(patch)).pipe(
     Effect.tap(applyUserConfigToTray),
-    asIpcFailure("Could not save desktop preferences."),
+    withIpcMessage("Could not save desktop preferences."),
   ),
 );
 
@@ -399,7 +367,7 @@ handle(ipcMethods.userConfigReset, () =>
       Effect.sync(() => appearanceController.setPreference(config.appearance)),
     ),
     Effect.tap(applyUserConfigToTray),
-    asIpcFailure("Could not reset desktop preferences."),
+    withIpcMessage("Could not reset desktop preferences."),
   ),
 );
 
@@ -407,7 +375,6 @@ type RendererView = "home" | "settings" | "tray" | "welcome";
 
 let mainWindow: BrowserWindow | undefined;
 let trayWindowController: ReturnType<typeof createTrayWindowController> | undefined;
-let toolbarWidgetLifecycle: ReturnType<typeof createToolbarWidgetLifecycle> | undefined;
 let appearanceController: ReturnType<
   typeof createAppearanceController<BrowserWindow["webContents"]>
 >;
@@ -463,7 +430,11 @@ function guardExternalWindows(window: BrowserWindow) {
   });
 
   window.webContents.on("before-input-event", (event, input) => {
-    if (isReloadShortcut(input)) event.preventDefault();
+    if (input.type !== "keyDown") return;
+    const reloadModifier = process.platform === "darwin" ? input.meta : input.control;
+    if (input.key === "F5" || (reloadModifier && input.key.toLowerCase() === "r")) {
+      event.preventDefault();
+    }
   });
 }
 
@@ -573,10 +544,7 @@ function broadcastLocalState(localState: LocalStateValue): void {
   const canSync =
     localState.capability.status === "ONLINE" &&
     accountCanSyncWithConnection(localState.capability.account, localState.capability.connection);
-  toolbarWidgetLifecycle?.applyAccountState({
-    canIngest: canSync,
-    user: localState.account,
-  });
+  trayWindowController?.setAccountState(localState.user !== null, canSync);
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed()) {
       send(window.webContents, ipcEvents.localStateChanged, localState);
@@ -644,7 +612,7 @@ async function handleAuthUrls(values: readonly string[]): Promise<boolean> {
     if (!Result.isSuccess(result)) {
       handled = true;
       revealMainWindow();
-      broadcastAuthError(authFailureMessage(result.failure, "Could not complete sign-in."));
+      broadcastAuthError(result.failure.message);
       continue;
     }
 
@@ -716,20 +684,12 @@ if (!hasSingleInstanceLock) {
     });
 
     runtime.runFork(
-      LocalState.use((localState) =>
-        localState.changes.pipe(
+      DesktopSession.use((session) =>
+        session.changes.pipe(
           Stream.runForEach((value) => Effect.sync(() => broadcastLocalState(value))),
         ),
       ),
     );
-    runtime.runFork(
-      DesktopSession.use((session) =>
-        session.issues.pipe(
-          Stream.runForEach((message) => Effect.sync(() => broadcastAuthError(message))),
-        ),
-      ),
-    );
-
     Menu.setApplicationMenu(
       Menu.buildFromTemplate([
         {
@@ -778,16 +738,13 @@ if (!hasSingleInstanceLock) {
       },
       preloadPath: join(__dirname, "../preload/index.cjs"),
     });
-    toolbarWidgetLifecycle = createToolbarWidgetLifecycle(
-      trayWindowController,
+    trayWindowController.setEnabled(
       Result.isSuccess(initialUserConfig) ? initialUserConfig.success.toolbarWidgetEnabled : false,
     );
     createWindow();
     runtime.runFork(
-      LocalState.use((localState) =>
-        localState.current.pipe(
-          Effect.tap((value) => Effect.sync(() => broadcastLocalState(value))),
-        ),
+      DesktopSession.use((session) =>
+        session.current.pipe(Effect.tap((value) => Effect.sync(() => broadcastLocalState(value)))),
       ),
     );
     if (Result.isFailure(initialSession)) {

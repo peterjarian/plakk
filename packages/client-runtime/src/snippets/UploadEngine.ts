@@ -35,7 +35,7 @@ import {
   markSnippetUploading,
   SnippetAlreadyExistsError,
 } from "../sqlite/queries/uploads.ts";
-import { ContentStore, type ContentStoreError } from "./ContentMirror.ts";
+import { ContentStore } from "./ContentMirror.ts";
 import { SnippetStore } from "./SnippetStore.ts";
 
 const CONTENT_COPY_CHUNK_BYTES = 4 * 1024 * 1024;
@@ -84,7 +84,6 @@ export type UploadFailure =
   | UploadSourceUnavailableError;
 
 type UploadAttemptFailure =
-  | ContentStoreError
   | HttpClientError.HttpClientError
   | InvalidUploadResponseError
   | LocalStorageError
@@ -136,12 +135,6 @@ export class UploadEngine extends Context.Service<
         },
         Effect.provideService(SqlClient.SqlClient, sql),
         Effect.catchTags({
-          ContentStoreError: () =>
-            Effect.fail(
-              new LocalStorageError({
-                message: "Plakk could not remove the locally stored snippet.",
-              }),
-            ),
           SchemaError: () =>
             Effect.fail(
               new LocalStorageError({
@@ -214,7 +207,7 @@ export class UploadEngine extends Context.Service<
       const transfer = Effect.fn("UploadEngine.transfer")(
         function* (
           input: PrepareSnippetUploadPayload,
-          source: UploadSource<ContentStoreError | UploadSourceUnavailableError>,
+          source: UploadSource<LocalStorageError | UploadSourceUnavailableError>,
         ) {
           const prepared = yield* rpc.PrepareSnippetUpload(input);
           if (prepared.storageProvider !== input.storageProvider) {
@@ -370,7 +363,7 @@ export class UploadEngine extends Context.Service<
       /** Starts one deduplicated background upload with typed retry behavior. */
       const launch = Effect.fn("UploadEngine.launch")(function* (
         input: PrepareSnippetUploadPayload,
-        source: UploadSource<ContentStoreError | UploadSourceUnavailableError>,
+        source: UploadSource<LocalStorageError | UploadSourceUnavailableError>,
       ) {
         if (activeSnippetIds.has(input.id)) return;
         activeSnippetIds.add(input.id);
@@ -493,7 +486,7 @@ export class UploadEngine extends Context.Service<
           yield* createPreparingSnippet(session.user.id, input, createdAt);
           yield* snippets.refresh;
 
-          let uploadSource: UploadSource<ContentStoreError | UploadSourceUnavailableError> = {
+          let uploadSource: UploadSource<LocalStorageError | UploadSourceUnavailableError> = {
             read: (offset, byteSize) =>
               source.read(offset, byteSize).pipe(
                 Effect.mapError(
@@ -532,12 +525,6 @@ export class UploadEngine extends Context.Service<
         },
         Effect.provideService(SqlClient.SqlClient, sql),
         Effect.catchTags({
-          ContentStoreError: () =>
-            Effect.fail(
-              new LocalStorageError({
-                message: "Plakk could not store the selected file locally.",
-              }),
-            ),
           SchemaError: () =>
             Effect.fail(
               new LocalStorageError({

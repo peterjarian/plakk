@@ -3,7 +3,6 @@ import { NodeCrypto } from "@effect/platform-node";
 import { Effect, Layer } from "effect";
 
 import { NativeFileSources } from "./NativeFileSources.ts";
-import { NativeFileSourcesLive } from "./NativeFileSourcesLive.ts";
 
 describe("NativeFileSources", () => {
   it.effect("resolves an opaque source exactly once", () =>
@@ -16,7 +15,7 @@ describe("NativeFileSources", () => {
         expect(first).toEqual({ filePath: "/private/native/file.txt", temporary: false });
         expect(second).toBeUndefined();
       }),
-    ).pipe(Effect.provide(NativeFileSourcesLive.pipe(Layer.provide(NodeCrypto.layer)))),
+    ).pipe(Effect.provide(NativeFileSources.layer.pipe(Layer.provide(NodeCrypto.layer)))),
   );
 
   it.effect("invalidates all sources and returns temporary files for cleanup", () =>
@@ -28,6 +27,6 @@ describe("NativeFileSources", () => {
         expect(sources.take(native)).toBeUndefined();
         expect(sources.take(temporary)).toBeUndefined();
       }),
-    ).pipe(Effect.provide(NativeFileSourcesLive.pipe(Layer.provide(NodeCrypto.layer)))),
+    ).pipe(Effect.provide(NativeFileSources.layer.pipe(Layer.provide(NodeCrypto.layer)))),
   );
 });

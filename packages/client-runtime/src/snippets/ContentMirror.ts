@@ -37,35 +37,27 @@ export const ContentEntrySchema = Schema.Struct({
 
 export type ContentEntry = typeof ContentEntrySchema.Type;
 
-export class ContentStoreError extends Schema.TaggedErrorClass<ContentStoreError>()(
-  "ContentStoreError",
-  {
-    message: Schema.String,
-    cause: Schema.optionalKey(Schema.Defect()),
-  },
-) {}
-
 export class ContentStore extends Context.Service<
   ContentStore,
   {
     /** Lists complete snippet content currently managed by this device. */
-    readonly entries: Effect.Effect<ReadonlyArray<ContentEntry>, ContentStoreError>;
+    readonly entries: Effect.Effect<ReadonlyArray<ContentEntry>, LocalStorageError>;
     /** Atomically stores complete snippet content from a byte stream. */
     readonly write: <E>(
       snippetId: string,
       expectedByteSize: number,
       source: Stream.Stream<Uint8Array, E>,
-    ) => Effect.Effect<void, E | ContentStoreError>;
+    ) => Effect.Effect<void, E | LocalStorageError>;
     /** Streams complete locally managed content for one snippet. */
-    readonly read: (snippetId: string) => Stream.Stream<Uint8Array, ContentStoreError>;
+    readonly read: (snippetId: string) => Stream.Stream<Uint8Array, LocalStorageError>;
     /** Reads one exact byte range from locally managed content. */
     readonly readRange: (
       snippetId: string,
       offset: number,
       byteSize: number,
-    ) => Effect.Effect<Uint8Array, ContentStoreError>;
+    ) => Effect.Effect<Uint8Array, LocalStorageError>;
     /** Removes locally managed content without deleting snippet records. */
-    readonly remove: (snippetIds: ReadonlyArray<string>) => Effect.Effect<void, ContentStoreError>;
+    readonly remove: (snippetIds: ReadonlyArray<string>) => Effect.Effect<void, LocalStorageError>;
   }
 >()("@plakk/client-runtime/snippets/ContentMirror/ContentStore") {}
 
@@ -106,11 +98,13 @@ export type ContentMirrorFailure =
   | SnippetNotFoundError
   | SnippetNotPublishedError;
 
-export type FreeUpSpaceResult = {
-  readonly reclaimedBytes: number;
-  readonly removedCopies: number;
-  readonly storageUsageBytes: number;
-};
+export const FreeUpSpaceResultSchema = Schema.Struct({
+  reclaimedBytes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  removedCopies: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  storageUsageBytes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+});
+
+export type FreeUpSpaceResult = typeof FreeUpSpaceResultSchema.Type;
 
 export class ContentMirror extends Context.Service<
   ContentMirror,
@@ -288,17 +282,11 @@ export class ContentMirror extends Context.Service<
                   ? retryLater(failure)
                   : fail(failure);
               },
-              ContentStoreError: () =>
-                fail(
-                  new LocalStorageError({
-                    message: "Plakk could not store the downloaded content.",
-                  }),
-                ),
+              LocalStorageError: fail,
               DownloadRejectedError: (error) =>
                 error.status === 408 || error.status === 429 || error.status >= 500
                   ? retryLater(error)
                   : fail(error),
-              LocalStorageError: fail,
               PreparedDownloadMismatchError: fail,
             }),
             Effect.onInterrupt(() =>
@@ -422,12 +410,6 @@ export class ContentMirror extends Context.Service<
       }).pipe(
         Effect.provideService(SqlClient.SqlClient, sql),
         Effect.catchTags({
-          ContentStoreError: () =>
-            Effect.fail(
-              new LocalStorageError({
-                message: "Plakk could not reconcile its locally stored content.",
-              }),
-            ),
           SchemaError: () =>
             Effect.fail(
               new LocalStorageError({
@@ -478,12 +460,6 @@ export class ContentMirror extends Context.Service<
       }).pipe(
         Effect.provideService(SqlClient.SqlClient, sql),
         Effect.catchTags({
-          ContentStoreError: () =>
-            Effect.fail(
-              new LocalStorageError({
-                message: "Plakk could not free locally stored content.",
-              }),
-            ),
           SchemaError: () =>
             Effect.fail(
               new LocalStorageError({

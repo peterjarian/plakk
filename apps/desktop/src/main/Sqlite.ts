@@ -3,14 +3,11 @@ import { basename } from "node:path";
 import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
-import { runDesktopMigrations } from "./Migrations.ts";
-
 const setup = Layer.effectDiscard(
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     yield* sql`PRAGMA foreign_keys = ON`;
     yield* sql`PRAGMA busy_timeout = 5000`;
-    yield* runDesktopMigrations;
   }),
 );
 

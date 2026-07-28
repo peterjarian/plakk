@@ -50,6 +50,9 @@ export function createTrayWindowController({
   let freshnessTimer: ReturnType<typeof setTimeout> | undefined;
   let showWhenReady: { bounds?: Rectangle; focus: boolean } | undefined;
   let lastBlurHideAt = 0;
+  let enabled = false;
+  let signedIn = false;
+  let accountCanIngest = false;
 
   function createTrayIcon() {
     const image = nativeImage.createFromPath(join(__dirname, "../../resources/icon.png")).resize({
@@ -223,6 +226,38 @@ export function createTrayWindowController({
     disabledTray.destroy();
   }
 
+  function reconcileOwnership() {
+    if (!enabled || !signedIn) {
+      disable();
+      return;
+    }
+    setup();
+    applyAccountState(true, accountCanIngest);
+  }
+
+  function setup() {
+    if (tray !== undefined) return;
+    createTrayIcon();
+    createWindow();
+  }
+
+  function applyAccountState(resolved: boolean, canIngest: boolean) {
+    accountStateResolved = resolved;
+    if (freshnessTimer !== undefined) clearTimeout(freshnessTimer);
+    freshnessTimer = undefined;
+    if (resolved) {
+      accountStateUpdatedAt = Date.now();
+      freshnessTimer = setTimeout(() => {
+        ingestionEnabled = false;
+        if (window?.isVisible() === true) {
+          requestAccountRefresh();
+        }
+      }, accountStateMaxAgeMs);
+    }
+    ingestionEnabled = resolved && canIngest;
+    revealWhenReady();
+  }
+
   function accountStateIsCurrent() {
     return accountStateResolved && Date.now() - accountStateUpdatedAt <= accountStateMaxAgeMs;
   }
@@ -262,30 +297,17 @@ export function createTrayWindowController({
   }
 
   return {
-    disable,
     isIngestionEnabled: canIngest,
     ownsWebContents: (contents: Electron.WebContents) => window?.webContents === contents,
-    setAccountState(resolved: boolean, canIngest: boolean) {
-      accountStateResolved = resolved;
-      if (freshnessTimer !== undefined) clearTimeout(freshnessTimer);
-      freshnessTimer = undefined;
-      if (resolved) {
-        accountStateUpdatedAt = Date.now();
-        freshnessTimer = setTimeout(() => {
-          ingestionEnabled = false;
-          if (window?.isVisible() === true) {
-            requestAccountRefresh();
-          }
-        }, accountStateMaxAgeMs);
-      }
-      ingestionEnabled = resolved && canIngest;
-      revealWhenReady();
+    setAccountState(accountSignedIn: boolean, canIngest: boolean) {
+      signedIn = accountSignedIn;
+      accountCanIngest = canIngest;
+      reconcileOwnership();
+    },
+    setEnabled(value: boolean) {
+      enabled = value;
+      reconcileOwnership();
     },
     show: showWindow,
-    setup() {
-      if (tray !== undefined) return;
-      createTrayIcon();
-      createWindow();
-    },
   };
 }

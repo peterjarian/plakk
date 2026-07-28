@@ -136,6 +136,9 @@ importers:
       '@effect/sql-sqlite-node':
         specifier: 4.0.0-beta.92
         version: 4.0.0-beta.92(effect@4.0.0-beta.92)
+      '@plakk/client-runtime':
+        specifier: workspace:*
+        version: link:../../packages/client-runtime
       '@plakk/shared':
         specifier: workspace:*
         version: link:../../packages/shared

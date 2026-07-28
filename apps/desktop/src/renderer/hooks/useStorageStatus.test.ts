@@ -5,19 +5,26 @@ import { storageStatusFromLocalState } from "./useStorageStatus.tsx";
 
 const localState = (input: Partial<LocalState> = {}): LocalState => ({
   revision: 1,
-  account: null,
-  provider: { known: false, value: null },
-  capability: { status: "OFFLINE" },
-  liveConnection: null,
+  user: null,
+  capability: {
+    status: "OFFLINE",
+    storageProvider: { known: false, value: null },
+  },
+  syncStatus: null,
   storageUsageBytes: 0,
   snippets: [],
   ...input,
 });
 
 describe("storage status from the local state", () => {
-  it("keeps cached provider display facts out of offline capability status", () => {
+  it("keeps cached provider display facts in the shared offline capability", () => {
     const status = storageStatusFromLocalState(
-      localState({ provider: { known: true, value: "GOOGLE_DRIVE" } }),
+      localState({
+        capability: {
+          status: "OFFLINE",
+          storageProvider: { known: true, value: "GOOGLE_DRIVE" },
+        },
+      }),
     );
 
     expect(status).toEqual({ kind: "offline", canSync: false });
@@ -26,7 +33,6 @@ describe("storage status from the local state", () => {
   it("uses a live connected capability only when main confirms it", () => {
     const status = storageStatusFromLocalState(
       localState({
-        provider: { known: true, value: "GOOGLE_DRIVE" },
         capability: {
           status: "ONLINE",
           account: { canSync: true, storageProvider: "GOOGLE_DRIVE", blockedReasons: [] },
@@ -50,7 +56,6 @@ describe("storage status from the local state", () => {
   it("keeps a confirmed unlinked account distinct from offline capability", () => {
     const status = storageStatusFromLocalState(
       localState({
-        provider: { known: true, value: null },
         capability: {
           status: "ONLINE",
           account: { canSync: false, storageProvider: null, blockedReasons: ["storage"] },

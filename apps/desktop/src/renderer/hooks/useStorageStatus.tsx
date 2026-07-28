@@ -76,7 +76,11 @@ export function useStorageStatus(): StorageStatus {
 }
 
 export function useLinkedStorageProvider(): StorageProvider | null {
-  return useLocalState().localState.provider.value;
+  const { capability } = useLocalState().localState;
+  if (capability.status === "OFFLINE") return capability.storageProvider.value;
+  return capability.connection?.status === "NOT_CONNECTED"
+    ? null
+    : capability.account.storageProvider;
 }
 
 export const openStorageSetup = (url: string) => window.ipc.openExternal(url);

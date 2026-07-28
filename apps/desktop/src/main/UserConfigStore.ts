@@ -1,6 +1,7 @@
-import { Context, Data, type Effect } from "effect";
+import ElectronStore from "electron-store";
+import { Context, Data, Effect, Layer, Schema } from "effect";
 
-import type { UserConfig } from "../ipc/contracts.ts";
+import { UserConfigSchema, type UserConfig } from "../ipc/contracts.ts";
 
 export class UserConfigStoreError extends Data.TaggedError("UserConfigStoreError")<{
   readonly cause: unknown;
@@ -14,3 +15,50 @@ export class UserConfigStore extends Context.Service<
     readonly reset: Effect.Effect<UserConfig, UserConfigStoreError>;
   }
 >()("plakk/main/UserConfigStore") {}
+
+const defaultUserConfig: UserConfig = {
+  appearance: "system",
+  showExternalLinkWarning: true,
+  toolbarWidgetEnabled: true,
+};
+
+const decodeUserConfig = (input: unknown) =>
+  Schema.decodeUnknownEffect(UserConfigSchema)(input).pipe(
+    Effect.mapError((cause) => new UserConfigStoreError({ cause })),
+  );
+
+/** Persists desktop-only appearance and Toolbar widget preferences. */
+export const UserConfigStoreLive = Layer.effect(
+  UserConfigStore,
+  Effect.try({
+    try: () => {
+      const store = new ElectronStore<UserConfig>({
+        name: "user-config",
+        defaults: defaultUserConfig,
+      });
+      const get = Effect.try({
+        try: () => ({ ...defaultUserConfig, ...store.store }),
+        catch: (cause) => new UserConfigStoreError({ cause }),
+      }).pipe(Effect.flatMap(decodeUserConfig));
+      const set = Effect.fn("UserConfigStore.set")(function* (patch: Partial<UserConfig>) {
+        const config = yield* decodeUserConfig({ ...(yield* get), ...patch });
+        yield* Effect.try({
+          try: () => {
+            store.store = config;
+          },
+          catch: (cause) => new UserConfigStoreError({ cause }),
+        });
+        return config;
+      });
+      const reset = Effect.try({
+        try: () => {
+          store.store = defaultUserConfig;
+          return defaultUserConfig;
+        },
+        catch: (cause) => new UserConfigStoreError({ cause }),
+      });
+      return UserConfigStore.of({ get, reset, set });
+    },
+    catch: (cause) => new UserConfigStoreError({ cause }),
+  }),
+);

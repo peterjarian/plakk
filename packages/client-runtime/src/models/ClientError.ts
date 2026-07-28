@@ -15,7 +15,10 @@ export class InvalidResponseError extends Schema.TaggedErrorClass<InvalidRespons
 /** SQLite or native content storage could not complete a local operation. */
 export class LocalStorageError extends Schema.TaggedErrorClass<LocalStorageError>()(
   "LocalStorageError",
-  { message: Schema.String },
+  {
+    message: Schema.String,
+    cause: Schema.optionalKey(Schema.Defect()),
+  },
 ) {}
 
 /** The backend could not complete an otherwise valid operation. */

@@ -1,22 +1,31 @@
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import type { Snippet } from "@plakk/client-runtime";
 
 import type { DesktopSnippet } from "../../ipc/contracts.ts";
 import { createImageUrlRegistry, projectSnippetReadModels } from "./useSnippets.ts";
 
-const snippet = (input: Partial<DesktopSnippet> = {}): DesktopSnippet =>
-  ({
-    id: "8c72d6f6-9a25-4633-b72f-d8f83cf1c8e0",
-    fileName: "8c72d6f6-9a25-4633-b72f-d8f83cf1c8e0.txt",
-    byteSize: 24,
-    storageProvider: "GOOGLE_DRIVE",
-    kind: "LOCAL",
-    createdAt: "2026-07-11T00:00:00.000Z",
-    updatedAt: "2026-07-11T00:00:00.000Z",
-    localState: { status: "UPLOADING", errorMessage: null },
-    localTextPreview: "A stable local snippet",
-    localContentAvailability: { status: "AVAILABLE" },
-    ...input,
-  }) as DesktopSnippet;
+const snippet = (
+  input: Partial<Snippet> & { readonly localTextPreview?: string | null } = {},
+): DesktopSnippet => {
+  const { localTextPreview = "A stable local snippet", ...snippetInput } = input;
+  return {
+    snippet: {
+      id: "8c72d6f6-9a25-4633-b72f-d8f83cf1c8e0",
+      fileName: "8c72d6f6-9a25-4633-b72f-d8f83cf1c8e0.txt",
+      byteSize: 24,
+      storageProvider: "GOOGLE_DRIVE",
+      mediaType: "text/plain",
+      storageObjectId: null,
+      status: "UPLOADING",
+      errorMessage: null,
+      createdAt: "2026-07-11T00:00:00.000Z",
+      updatedAt: "2026-07-11T00:00:00.000Z",
+      localContentAvailability: { status: "AVAILABLE" },
+      ...snippetInput,
+    } as Snippet,
+    localTextPreview,
+  };
+};
 
 describe("snippet read-model projection", () => {
   it("uses durable local text as the immediate presentation", () => {
@@ -27,9 +36,9 @@ describe("snippet read-model projection", () => {
 
   it("withholds pulled text until its local presentation is available", () => {
     const remoteText = snippet({
-      localState: null,
       localTextPreview: null,
-      kind: "PUBLISHED",
+      status: "PUBLISHED",
+      storageObjectId: "object-1",
       localContentAvailability: { status: "DOWNLOADING" },
     });
 
@@ -41,9 +50,9 @@ describe("snippet read-model projection", () => {
   it("does not expose a user-named text file before its content is decoded", () => {
     const remoteText = snippet({
       fileName: "private-notes.md",
-      localState: null,
       localTextPreview: null,
-      kind: "PUBLISHED",
+      status: "PUBLISHED",
+      storageObjectId: "object-1",
       localContentAvailability: { status: "NOT_AVAILABLE" },
     });
 
@@ -55,8 +64,8 @@ describe("snippet read-model projection", () => {
 
   it("projects decoded managed content atomically without a filename intermediate", () => {
     const remoteText = snippet({
-      localState: null,
-      kind: "PUBLISHED",
+      status: "PUBLISHED",
+      storageObjectId: "object-1",
       localTextPreview: "https://plakk.app",
       localContentAvailability: { status: "AVAILABLE" },
     });
@@ -67,27 +76,27 @@ describe("snippet read-model projection", () => {
       title: "https://plakk.app",
       url: "https://plakk.app",
     });
-    expect(item?.presentation.title).not.toContain(remoteText.id);
+    expect(item?.presentation.title).not.toContain(remoteText.snippet.id);
   });
 
   it("never uses the generated package name when decoded text has no title", () => {
     const remoteText = snippet({
-      localState: null,
-      kind: "PUBLISHED",
+      status: "PUBLISHED",
+      storageObjectId: "object-1",
       localTextPreview: "   ",
       localContentAvailability: { status: "AVAILABLE" },
     });
     const [item] = projectSnippetReadModels([remoteText], {});
 
     expect(item?.presentation).toEqual({ type: "text", title: "Text snippet" });
-    expect(item?.presentation.title).not.toContain(remoteText.id);
+    expect(item?.presentation.title).not.toContain(remoteText.snippet.id);
   });
 
   it("shows a controlled actionable row when remote text hydration fails", () => {
     const remoteText = snippet({
-      localState: null,
       localTextPreview: null,
-      kind: "PUBLISHED",
+      status: "PUBLISHED",
+      storageObjectId: "object-1",
       localContentAvailability: {
         status: "FAILED",
         message: "Couldn’t download this text. Try again.",
@@ -97,7 +106,7 @@ describe("snippet read-model projection", () => {
 
     expect(item?.presentation).toEqual({ type: "file", title: "Text snippet" });
     expect(JSON.stringify(item)).not.toContain("Loading text");
-    expect(item?.presentation.title).not.toContain(remoteText.id);
+    expect(item?.presentation.title).not.toContain(remoteText.snippet.id);
   });
 
   it("keeps a local in-progress text row honest without inventing decoded content", () => {

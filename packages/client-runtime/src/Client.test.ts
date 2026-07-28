@@ -1,15 +1,27 @@
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { describe, expect, it } from "@effect/vitest";
+import type { User } from "@plakk/shared";
 import { SessionError } from "@plakk/shared/PlakkApi";
 import { Effect, Layer, Option, Stream } from "effect";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { Client, clientLive } from "./Client.ts";
-import { ContentMirror } from "./snippets/ContentMirror.ts";
+import { CurrentSession } from "./CurrentSession.ts";
+import { RpcClient } from "./RpcClient.ts";
+import { ContentMirror, ContentStore } from "./snippets/ContentMirror.ts";
 import { SnippetStore } from "./snippets/SnippetStore.ts";
 import { SyncEngine } from "./snippets/SyncEngine.ts";
 import { UploadEngine, UploadSourceUnavailableError } from "./snippets/UploadEngine.ts";
 
 const snippetId = "0d1e2f3a-4567-4890-8abc-def012345678";
+const user: User = {
+  id: "user-1",
+  firstName: "Test",
+  lastName: "User",
+  email: "test@example.com",
+  createdAt: "2026-07-20T18:00:00.000Z",
+  updatedAt: "2026-07-20T18:00:00.000Z",
+};
 
 const makeLayer = (options?: {
   readonly deleteError?: SessionError;
@@ -23,9 +35,30 @@ const makeLayer = (options?: {
     );
 
   return clientLive.pipe(
-    Layer.provide(
+    Layer.provideMerge(
       Layer.mergeAll(
         SqliteClient.layer({ filename: ":memory:" }),
+        Layer.succeed(
+          CurrentSession,
+          CurrentSession.of({ user, accessToken: Effect.succeed("token") }),
+        ),
+        Layer.succeed(
+          RpcClient,
+          RpcClient.of({
+            GetAccountStatus: () =>
+              Effect.succeed({
+                canSync: true,
+                storageProvider: "GOOGLE_DRIVE",
+                blockedReasons: [],
+              }),
+            GetStorageProviderStatus: () =>
+              Effect.succeed({
+                storageProvider: "GOOGLE_DRIVE",
+                status: "CONNECTED",
+                externalDestinationUrl: "https://drive.google.com/drive/folders/plakk",
+              }),
+          } as unknown as RpcClient["Service"]),
+        ),
         Layer.succeed(
           ContentMirror,
           ContentMirror.of({
@@ -52,6 +85,19 @@ const makeLayer = (options?: {
           }),
         ),
         Layer.succeed(
+          ContentStore,
+          ContentStore.of({
+            entries: Effect.succeed([{ snippetId, byteSize: 4 }]),
+            write: () => Effect.void,
+            read: () => Stream.empty,
+            readRange: () => Effect.succeed(new Uint8Array()),
+            remove: (ids) =>
+              Effect.sync(() => {
+                events.push(`clear:${ids.join(",")}`);
+              }),
+          }),
+        ),
+        Layer.succeed(
           SnippetStore,
           SnippetStore.of({
             subscribe: () => Stream.make([]),
@@ -63,6 +109,7 @@ const makeLayer = (options?: {
           SyncEngine.of({
             pull: Effect.void,
             run: Effect.sync(() => events.push("sync")).pipe(Effect.andThen(Effect.never)),
+            subscribe: () => Stream.make("CONNECTED"),
             delete: (id) =>
               options?.deleteError === undefined
                 ? Effect.sync(() => {
@@ -98,8 +145,23 @@ describe("Client", () => {
       yield* Effect.yieldNow;
 
       expect(events.slice(0, 2)).toEqual(["initialize", "sync"]);
-      const initial = yield* client.snippets.subscribe().pipe(Stream.runHead);
-      expect(Option.getOrThrow(initial)).toEqual([]);
+      const initial = Option.getOrThrow(yield* client.subscribe().pipe(Stream.runHead));
+      expect(initial.snippets).toEqual([]);
+      expect(initial.syncStatus).toBe("CONNECTED");
+      yield* client.refresh;
+      expect(Option.getOrThrow(yield* client.subscribe().pipe(Stream.runHead)).capability).toEqual({
+        status: "ONLINE",
+        account: {
+          canSync: true,
+          storageProvider: "GOOGLE_DRIVE",
+          blockedReasons: [],
+        },
+        connection: {
+          storageProvider: "GOOGLE_DRIVE",
+          status: "CONNECTED",
+          externalDestinationUrl: "https://drive.google.com/drive/folders/plakk",
+        },
+      });
 
       yield* client.uploads.upload(
         {
@@ -119,6 +181,43 @@ describe("Client", () => {
       yield* client.content.read(snippetId).pipe(Stream.runDrain);
       yield* client.content.freeUp;
 
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`
+        INSERT INTO client_snippets (
+          user_id,
+          id,
+          file_name,
+          byte_size,
+          storage_provider,
+          media_type,
+          storage_object_id,
+          status,
+          error_message,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          ${user.id},
+          ${snippetId},
+          'failed.txt',
+          4,
+          'GOOGLE_DRIVE',
+          'text/plain',
+          NULL,
+          'FAILED',
+          'Upload failed.',
+          '2026-07-20T19:00:00.000Z',
+          '2026-07-20T19:00:00.000Z'
+        )
+      `;
+      yield* client.clearLocalData;
+      const remaining = yield* sql<{ readonly count: number }>`
+        SELECT COUNT(*) AS count
+        FROM client_snippets
+        WHERE user_id = ${user.id}
+      `;
+      expect(remaining).toEqual([{ count: 0 }]);
+
       expect(events).toEqual([
         "initialize",
         "sync",
@@ -128,6 +227,7 @@ describe("Client", () => {
         `download:${snippetId}`,
         `read:${snippetId}`,
         "freeUp",
+        `clear:${snippetId}`,
       ]);
     }).pipe(Effect.provide(makeLayer({ events })));
   });

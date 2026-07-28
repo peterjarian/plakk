@@ -30,10 +30,12 @@ type LocalStateApi = Window["ipc"]["localState"];
 export const initialLocalStateSubscription: LocalStateSubscription = {
   localState: {
     revision: 0,
-    account: null,
-    provider: { known: false, value: null },
-    capability: { status: "OFFLINE" },
-    liveConnection: null,
+    user: null,
+    capability: {
+      status: "OFFLINE",
+      storageProvider: { known: false, value: null },
+    },
+    syncStatus: null,
     storageUsageBytes: 0,
     snippets: [],
   },

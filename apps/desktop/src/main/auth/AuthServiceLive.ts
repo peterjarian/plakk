@@ -107,6 +107,13 @@ export const AuthServiceLive = Layer.effect(
 
     return AuthService.of({
       callbackUrl: clientConfig.pipe(Effect.map(({ callbackUrl }) => callbackUrl.href)),
+      cleanupOwner: store
+        .get("cleanupOwner")
+        .pipe(Effect.mapError((cause) => new AuthServiceError({ cause, message: cause.reason }))),
+      setCleanupOwner: (user) =>
+        store
+          .set("cleanupOwner", user)
+          .pipe(Effect.mapError((cause) => new AuthServiceError({ cause, message: cause.reason }))),
       getStoredAccount: Effect.fn("AuthService.getStoredAccount")(function* () {
         return (yield* readStoredCredentials())?.user ?? null;
       }),

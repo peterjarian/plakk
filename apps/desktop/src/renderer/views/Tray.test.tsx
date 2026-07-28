@@ -35,7 +35,7 @@ vi.mock("../hooks/useAuth.ts", () => ({
 }));
 
 vi.mock("../hooks/useLocalState.tsx", () => ({
-  useLocalState: () => ({ localState: { liveConnection: null } }),
+  useLocalState: () => ({ localState: { syncStatus: null } }),
 }));
 
 vi.mock("../hooks/useStorageStatus.tsx", () => ({

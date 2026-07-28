@@ -38,7 +38,7 @@ export function Home({ active = true }: { active?: boolean }) {
   const linkedProvider = useLinkedStorageProvider();
   const storageStatus = useStorageStatus();
   const localState = useLocalState().localState;
-  const liveConnection = localState.liveConnection;
+  const clientSyncStatus = localState.syncStatus;
   const [isDragging, setIsDragging] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copyingId, setCopyingId] = useState<string | null>(null);
@@ -70,7 +70,7 @@ export function Home({ active = true }: { active?: boolean }) {
         ? "OFFLINE"
         : storageStatus.kind !== "connected" || !storageStatus.canSync
           ? "PAUSED"
-          : liveConnection?.status === "CONNECTED"
+          : clientSyncStatus === "CONNECTED"
             ? "CONNECTED"
             : "RECONNECTING";
   const user = auth.user;
@@ -101,10 +101,9 @@ export function Home({ active = true }: { active?: boolean }) {
   function handleIngestion(ingestion: ReturnType<typeof ingestFileSnippet>) {
     setIngestionError(null);
     void ingestion.then(
-      (result) => {
-        if (result.status === "FAILED") setIngestionError(result.message);
-      },
-      () => setIngestionError("Plakk couldn’t save this snippet."),
+      () => {},
+      (cause) =>
+        setIngestionError(ipcActionErrorMessage(cause, "Plakk couldn’t save this snippet.")),
     );
   }
 

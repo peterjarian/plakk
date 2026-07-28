@@ -6,7 +6,6 @@ import type {
   ClipboardContent,
   LocalState,
   SnippetIngestPayload,
-  SnippetIngestResult,
   StorageFreeUpResult,
   TrayDroppedItem,
   UserConfig,
@@ -68,7 +67,7 @@ export type DesktopApi = {
     readonly delete: (id: string) => Promise<void>;
     readonly download: (id: string) => Promise<void>;
     readonly discard: (id: string) => Promise<void>;
-    readonly ingest: (payload: RendererSnippetIngestPayload) => Promise<SnippetIngestResult>;
+    readonly ingest: (payload: RendererSnippetIngestPayload) => Promise<void>;
     readonly read: (id: string) => Promise<Uint8Array>;
   };
   readonly storage: {

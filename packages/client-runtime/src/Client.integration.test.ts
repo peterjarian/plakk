@@ -9,8 +9,9 @@ import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { CurrentSession } from "./CurrentSession.ts";
+import { LocalStorageError } from "./models/ClientError.ts";
 import { RpcClient } from "./RpcClient.ts";
-import { ContentMirror, ContentStore, ContentStoreError } from "./snippets/ContentMirror.ts";
+import { ContentMirror, ContentStore } from "./snippets/ContentMirror.ts";
 import { SnippetStore } from "./snippets/SnippetStore.ts";
 import { SyncEngine } from "./snippets/SyncEngine.ts";
 import { UploadEngine } from "./snippets/UploadEngine.ts";
@@ -68,7 +69,7 @@ const makeLayer = (
       headers: { "content-type": "application/json" },
     }),
   options?: {
-    readonly contentRemoveError?: ContentStoreError;
+    readonly contentRemoveError?: LocalStorageError;
     readonly localContent?: Map<string, Uint8Array> | false;
   },
 ) => {
@@ -107,7 +108,7 @@ const makeLayer = (
                     }
                     if (bytes.byteLength !== expectedByteSize) {
                       return Effect.fail(
-                        new ContentStoreError({
+                        new LocalStorageError({
                           message: "Unexpected test content size.",
                         }),
                       );
@@ -120,13 +121,13 @@ const makeLayer = (
               read: (snippetId) => {
                 const bytes = stored.get(snippetId);
                 return bytes === undefined
-                  ? Stream.fail(new ContentStoreError({ message: "Test content is missing." }))
+                  ? Stream.fail(new LocalStorageError({ message: "Test content is missing." }))
                   : Stream.make(bytes);
               },
               readRange: (snippetId, offset, byteSize) => {
                 const bytes = stored.get(snippetId);
                 return bytes === undefined
-                  ? Effect.fail(new ContentStoreError({ message: "Test content is missing." }))
+                  ? Effect.fail(new LocalStorageError({ message: "Test content is missing." }))
                   : Effect.succeed(bytes.slice(offset, offset + byteSize));
               },
               remove: (snippetIds) =>
@@ -154,7 +155,30 @@ const makeLayer = (
   ).pipe(Layer.provideMerge(dependencies));
 };
 
-describe("client runtime prototype", () => {
+describe("shared client integration", () => {
+  it.effect("reports backend snippet-sync connection state", () => {
+    const layer = makeLayer(
+      makeRpc({
+        WatchSnippetInvalidations: () => Stream.empty,
+      }),
+    );
+
+    return Effect.gen(function* () {
+      const sync = yield* SyncEngine;
+      const statusesFiber = yield* sync
+        .subscribe()
+        .pipe(Stream.take(3), Stream.runCollect, Effect.forkChild);
+      const syncFiber = yield* sync.run.pipe(Effect.forkChild);
+
+      expect(Array.from(yield* Fiber.join(statusesFiber))).toEqual([
+        "RECONNECTING",
+        "CONNECTED",
+        "RECONNECTING",
+      ]);
+      yield* Fiber.interrupt(syncFiber);
+    }).pipe(Effect.provide(layer));
+  });
+
   it.effect("tracks schema migrations and reruns them safely", () => {
     const layer = makeLayer(makeRpc());
 
@@ -167,10 +191,13 @@ describe("client runtime prototype", () => {
         readonly name: string;
       }>`
           SELECT migration_id, name
-          FROM effect_sql_migrations
+          FROM client_runtime_migrations
           ORDER BY migration_id
         `;
-      expect(migrations).toEqual([{ migration_id: 1, name: "initial" }]);
+      expect(migrations).toEqual([
+        { migration_id: 1, name: "initial" },
+        { migration_id: 2, name: "account" },
+      ]);
     }).pipe(Effect.provide(layer));
   });
 
@@ -409,7 +436,7 @@ describe("client runtime prototype", () => {
       undefined,
       {
         localContent: stored,
-        contentRemoveError: new ContentStoreError({
+        contentRemoveError: new LocalStorageError({
           message: "The test content could not be removed.",
         }),
       },

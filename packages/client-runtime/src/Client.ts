@@ -1,16 +1,41 @@
+import { StorageProviderLiteral, UserSchema } from "@plakk/shared";
 import type { PrepareSnippetUploadPayload } from "@plakk/shared/PlakkApi";
-import { Cause, Context, Effect, Layer, Schedule, Stream } from "effect";
+import {
+  AccountStatusSchema,
+  OfflineError,
+  SessionError,
+  StorageProviderStatusSchema,
+} from "@plakk/shared/PlakkApi";
+import {
+  Cause,
+  Context,
+  Effect,
+  Layer,
+  Option,
+  Schedule,
+  Schema,
+  Stream,
+  SubscriptionRef,
+} from "effect";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 
-import type { LocalStorageError } from "./models/ClientError.ts";
-import { isPublishedSnippet, type Snippet } from "./models/Snippet.ts";
+import { CurrentSession } from "./CurrentSession.ts";
+import {
+  ActionNotAllowedError,
+  InvalidResponseError,
+  LocalStorageError,
+  ServerUnavailableError,
+} from "./models/ClientError.ts";
+import { isPublishedSnippet, SnippetSchema } from "./models/Snippet.ts";
 import { RpcClient } from "./RpcClient.ts";
 import {
   ContentMirror,
+  ContentStore,
   type ContentMirrorFailure,
   type FreeUpSpaceResult,
 } from "./snippets/ContentMirror.ts";
 import { SnippetStore } from "./snippets/SnippetStore.ts";
-import { SyncEngine, type SyncFailure } from "./snippets/SyncEngine.ts";
+import { SyncEngine, type SyncFailure, SyncStatusSchema } from "./snippets/SyncEngine.ts";
 import {
   UploadEngine,
   type UploadFailure,
@@ -18,12 +43,52 @@ import {
   UploadSourceUnavailableError,
 } from "./snippets/UploadEngine.ts";
 import { runMigrations } from "./sqlite/Migrations.ts";
+import { clearAccount, getStorageProvider, setStorageProvider } from "./sqlite/queries/account.ts";
+import { clearSnippets } from "./sqlite/queries/snippets.ts";
 
 export type ClientError = ContentMirrorFailure | LocalStorageError | SyncFailure | UploadFailure;
+
+const ClientCapabilitySchema = Schema.Union([
+  Schema.Struct({
+    status: Schema.Literal("OFFLINE"),
+    storageProvider: Schema.Struct({
+      known: Schema.Boolean,
+      value: Schema.NullOr(StorageProviderLiteral),
+    }),
+  }),
+  Schema.Struct({
+    status: Schema.Literal("ONLINE"),
+    account: AccountStatusSchema,
+    connection: Schema.NullOr(StorageProviderStatusSchema),
+  }),
+]);
+
+export type ClientCapability = typeof ClientCapabilitySchema.Type;
+
+export const ClientSnapshotSchema = Schema.Struct({
+  user: UserSchema,
+  capability: ClientCapabilitySchema,
+  syncStatus: SyncStatusSchema,
+  storageUsageBytes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  snippets: Schema.Array(SnippetSchema),
+});
+
+export type ClientSnapshot = typeof ClientSnapshotSchema.Type;
 
 export class Client extends Context.Service<
   Client,
   {
+    /**
+     * Subscribes to the complete current-user state owned by the client.
+     *
+     * The current SQLite-backed state is emitted immediately. Platforms can
+     * project this snapshot for their own process or UI transport.
+     */
+    readonly subscribe: () => Stream.Stream<ClientSnapshot, ClientError>;
+    /** Refreshes account and storage-provider capability from the backend. */
+    readonly refresh: Effect.Effect<void, ClientError>;
+    /** Removes all snippet records and managed content owned by the current user. */
+    readonly clearLocalData: Effect.Effect<void, ClientError>;
     readonly content: {
       /** Downloads and stores one published snippet on this device. */
       readonly download: (snippetId: string) => Effect.Effect<void, ClientError>;
@@ -33,13 +98,6 @@ export class Client extends Context.Service<
       readonly freeUp: Effect.Effect<FreeUpSpaceResult, ClientError>;
     };
     readonly snippets: {
-      /**
-       * Subscribes to the current user's complete local snippet snapshots.
-       *
-       * The current SQLite state is emitted immediately, followed by every
-       * committed change made by uploads or synchronization.
-       */
-      readonly subscribe: () => Stream.Stream<ReadonlyArray<Snippet>, ClientError>;
       /** Deletes a published snippet remotely and then removes its local state. */
       readonly delete: (snippetId: string) => Effect.Effect<void, ClientError>;
       /** Permanently removes a failed local upload after the user dismisses it. */
@@ -51,7 +109,7 @@ export class Client extends Context.Service<
        *
        * Platform code only supplies metadata and a range-readable source. The
        * effect completes once the source is safe to release. Publication or
-       * failure is reported through `snippets.subscribe()`.
+       * failure is reported through `subscribe()`.
        */
       readonly upload: <E>(
         input: PrepareSnippetUploadPayload,
@@ -69,8 +127,33 @@ export const clientLive = Layer.effect(
     const sync = yield* SyncEngine;
     const uploads = yield* UploadEngine;
     const content = yield* ContentMirror;
+    const contentStore = Option.getOrUndefined(yield* Effect.serviceOption(ContentStore));
+    const session = yield* CurrentSession;
+    const rpc = yield* RpcClient;
+    const sql = yield* SqlClient.SqlClient;
 
     yield* runMigrations();
+    const cachedStorageProvider = yield* getStorageProvider(session.user.id).pipe(
+      Effect.provideService(SqlClient.SqlClient, sql),
+      Effect.catchTags({
+        SchemaError: () =>
+          Effect.fail(
+            new LocalStorageError({
+              message: "Plakk could not read its local account state.",
+            }),
+          ),
+        SqlError: () =>
+          Effect.fail(
+            new LocalStorageError({
+              message: "Plakk could not read its local account state.",
+            }),
+          ),
+      }),
+    );
+    const capability = yield* SubscriptionRef.make<ClientCapability>({
+      status: "OFFLINE",
+      storageProvider: cachedStorageProvider,
+    });
     yield* uploads.initialize;
     yield* snippets.subscribe().pipe(
       Stream.map((snapshot) =>
@@ -107,9 +190,123 @@ export const clientLive = Layer.effect(
     );
     yield* sync.run.pipe(Effect.forkScoped);
 
-    /** Exposes the local snippet snapshots maintained by the runtime. */
-    const subscribe = (): Stream.Stream<ReadonlyArray<Snippet>, ClientError> =>
-      snippets.subscribe();
+    /** Refreshes account capability and retains the provider for offline display. */
+    const refresh = Effect.gen(function* () {
+      const account = yield* rpc.GetAccountStatus(undefined);
+      const connection =
+        account.storageProvider === null
+          ? null
+          : yield* rpc.GetStorageProviderStatus({ storageProvider: account.storageProvider });
+      yield* setStorageProvider(
+        session.user.id,
+        connection?.status === "NOT_CONNECTED" ? null : account.storageProvider,
+      );
+      yield* SubscriptionRef.set(capability, {
+        status: "ONLINE",
+        account,
+        connection,
+      });
+    }).pipe(
+      Effect.provideService(SqlClient.SqlClient, sql),
+      Effect.catchTags({
+        RpcClientError: (error) =>
+          error.reason._tag === "RpcClientDefect"
+            ? Effect.fail(
+                new InvalidResponseError({
+                  message: "Plakk received an unexpected account response.",
+                }),
+              )
+            : Effect.fail(
+                new OfflineError({
+                  message: "Plakk could not connect. Your local snippets remain available.",
+                }),
+              ),
+        RpcError: (error) => {
+          switch (error.code) {
+            case "UNAUTHENTICATED":
+              return Effect.fail(
+                new SessionError({
+                  message: "Your session expired. Sign in again to continue.",
+                }),
+              );
+            case "FORBIDDEN":
+              return Effect.fail(
+                new ActionNotAllowedError({
+                  message: "You do not have permission to access this account.",
+                }),
+              );
+            case "NOT_FOUND":
+            case "CONFLICT":
+            case "INTERNAL_SERVER_ERROR":
+              return Effect.fail(
+                new ServerUnavailableError({
+                  message: "Plakk could not load your account. Please try again.",
+                }),
+              );
+          }
+        },
+        SqlError: () =>
+          Effect.fail(
+            new LocalStorageError({
+              message: "Plakk could not save its local account state.",
+            }),
+          ),
+      }),
+      Effect.tapError(() =>
+        SubscriptionRef.update(
+          capability,
+          (current): ClientCapability => ({
+            status: "OFFLINE",
+            storageProvider:
+              current.status === "ONLINE"
+                ? {
+                    known: true,
+                    value:
+                      current.connection?.status === "NOT_CONNECTED"
+                        ? null
+                        : current.account.storageProvider,
+                  }
+                : current.storageProvider,
+          }),
+        ),
+      ),
+      Effect.withSpan("Client.refresh"),
+    );
+
+    /** Exposes one cohesive snapshot instead of separate platform-owned stores. */
+    const subscribe = (): Stream.Stream<ClientSnapshot, ClientError> =>
+      Stream.zipLatest(
+        Stream.zipLatest(snippets.subscribe(), sync.subscribe()),
+        SubscriptionRef.changes(capability),
+      ).pipe(
+        Stream.map(([[snapshot, syncStatus], currentCapability]) => ({
+          user: session.user,
+          capability: currentCapability,
+          syncStatus,
+          storageUsageBytes: snapshot.reduce(
+            (total, snippet) =>
+              snippet.localContentAvailability.status === "AVAILABLE"
+                ? total + snippet.byteSize
+                : total,
+            0,
+          ),
+          snippets: snapshot,
+        })),
+      );
+
+    yield* sync.subscribe().pipe(
+      Stream.filter((status) => status === "CONNECTED"),
+      Stream.runForEach(() =>
+        refresh.pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("Account capability refresh failed", {
+              cause: Cause.pretty(cause),
+            }),
+          ),
+        ),
+      ),
+      Effect.forkScoped,
+    );
 
     /** Runs the complete remote-first snippet deletion procedure. */
     const deleteSnippet = Effect.fn("Client.snippets.delete")(function* (snippetId: string) {
@@ -144,14 +341,38 @@ export const clientLive = Layer.effect(
       },
     );
 
+    /** Removes all local snippet state after the platform has revoked commands. */
+    const clearLocalData = Effect.gen(function* () {
+      if (contentStore !== undefined) {
+        const entries = yield* contentStore.entries;
+        yield* contentStore.remove(entries.map((entry) => entry.snippetId));
+      }
+      yield* clearAccount(session.user.id);
+      yield* clearSnippets(session.user.id);
+      yield* snippets.refresh;
+    }).pipe(
+      Effect.provideService(SqlClient.SqlClient, sql),
+      Effect.catchTags({
+        SqlError: () =>
+          Effect.fail(
+            new LocalStorageError({
+              message: "Plakk could not remove its local snippet data.",
+            }),
+          ),
+      }),
+      Effect.withSpan("Client.clearLocalData"),
+    );
+
     return Client.of({
+      subscribe,
+      refresh,
+      clearLocalData,
       content: {
         download: content.download,
         read: content.read,
         freeUp: content.freeUp,
       },
       snippets: {
-        subscribe,
         delete: deleteSnippet,
         dismissFailedUpload,
       },
