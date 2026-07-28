@@ -5,28 +5,24 @@ Plakk is a personal cross-device handoff utility for making a user's snippets av
 ## Language
 
 **Snippet**:
-An authoritative record for complete content stored in the user's linked storage provider. It exists only after the provider content is complete and Snippet publication succeeds.
-_Avoid_: Upload activity, pending upload, incomplete Snippet
+A local-first product object created on the device as soon as the user adds content. It remains the same Snippet while uploading, after a local failure, and after publication to the backend.
+_Avoid_: Upload attempt, backend-only Snippet
 
 **Snippet upload**:
-The device-local process of obtaining a provider upload destination, transferring complete content, and then publishing a Snippet. A failed upload creates no Snippet and is never synchronized to another device.
+The device-local process that moves an uploading Snippet through provider transfer and publication. A failed upload leaves the Snippet visible locally but does not synchronize it to another device.
 _Avoid_: Snippet ingestion, queued upload, offline upload
 
 **Snippet publication**:
-The idempotent creation of a Snippet after the linked storage provider confirms complete content. Repeating the same publication is success; attempting to reuse its identity for different content is a conflict.
+The idempotent creation of a Snippet's authoritative backend record after the linked storage provider confirms complete content. Repeating the same publication is success; attempting to reuse its identity for different content is a conflict.
 _Avoid_: Upload finalization, upload completion transition, authoritative upload
 
-**Device Snippet record**:
-A record in the single device-owned collection presented to Home and Tray. It is either a local upload record or a published Snippet record; only the published form represents authoritative shared work.
-_Avoid_: Combined renderer list, upload-attempt collection, second product cache
-
-**Local upload record**:
-The device-only form of a Device Snippet record before publication. It is uploading or failed, never synchronizes to another device, offers Dismiss rather than Retry after failure, and becomes a published record when the backend snapshot or publication response contains the same identity.
-_Avoid_: Snippet, authoritative upload status, queued work, recoverable upload
+**Local Snippet**:
+The SQLite-backed representation of a Snippet on one device. Uploading and failed Snippets exist only on their originating device; a published Snippet also corresponds to an authoritative backend record.
+_Avoid_: Device Snippet record, local upload record, second product cache
 
 **Interrupted local upload**:
-A local upload record left uploading when Plakk starts. It becomes failed and dismissible without resuming or retaining a recovery workflow.
-_Avoid_: Restart recovery, automatic resume, interrupted Snippet
+A Snippet left uploading when Plakk starts. It becomes failed and dismissible without resuming or retaining a recovery workflow.
+_Avoid_: Restart recovery, automatic resume
 
 **Orphaned provider content**:
 Complete or partial provider content that has no Snippet because an upload or publication ended unexpectedly. Plakk may attempt immediate best-effort cleanup, but accepts rare orphaning rather than maintaining durable cleanup work.
@@ -61,7 +57,7 @@ The current online assessment that a storage provider is connected for the curre
 _Avoid_: Pipe connection, live connection
 
 **Snippet snapshot**:
-The complete authoritative set of Snippet records for an account at refresh time. Applying it atomically replaces published device records, preserves local upload records, promotes a matching local identity to published, and treats absence of a previously published identity as deletion.
+The complete authoritative set of published Snippets for an account at refresh time. Applying it atomically replaces published local state, preserves unpublished local Snippets, promotes a matching local identity to published, and treats absence of a previously published identity as deletion.
 _Avoid_: Change page, partial snapshot, event batch
 
 **Snippet invalidation**:
@@ -69,15 +65,15 @@ A payload-free live signal that the authoritative Snippet set may have changed. 
 _Avoid_: Snippet event, change feed, cursor update
 
 **Readable mirror**:
-The device-owned, durable copy of last-confirmed remote facts needed for local reading: the current account, linked storage provider, and published Device Snippet records. Its published records are replaced only from one authoritative source and never accept competing offline mutations.
+The device-owned, durable copy of last-confirmed remote facts needed for local reading: the current account, linked storage provider, and published local Snippets. Its published state is replaced only from one authoritative source and never accepts competing offline mutations.
 _Avoid_: Local authority, offline mutation store, renderer cache
 
 **Local state**:
-The device-owned representation of everything desktop surfaces need to present consistently: the readable mirror, one Device Snippet collection, live connection status, local content availability, and storage usage. Home and Tray infer presentation from this same materialization rather than combining independent upload and Snippet collections.
+The device-owned representation of everything app surfaces need to present consistently: one Local Snippet collection, the readable mirror, live connection status, local content availability, and storage usage. Surfaces read this same materialization rather than combining independent upload and Snippet collections.
 _Avoid_: Renderer store, server snapshot, authoritative local state
 
 **Screen-local optimistic update**:
-A transient renderer-owned presentation of an interaction that does not alter Device Snippet records. It is not written to local state, broadcast to other windows, or retained across restart.
+A transient renderer-owned presentation of an interaction that does not alter Local Snippets. It is not written to local state, broadcast to other windows, or retained across restart.
 _Avoid_: Cross-window optimistic state, offline mutation, durable optimistic journal
 
 **Live connection status**:
