@@ -59,8 +59,8 @@ const collectBytes = <E,>(stream: Stream.Stream<Uint8Array, E>) =>
     }),
   );
 
-const downloadBytes = (bytes: Uint8Array, fileName: string) => {
-  const url = URL.createObjectURL(new Blob([Uint8Array.from(bytes)]));
+const downloadBlob = (blob: Blob, fileName: string, cleanup?: () => void) => {
+  const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.hidden = true;
   anchor.href = url;
@@ -71,7 +71,8 @@ const downloadBytes = (bytes: Uint8Array, fileName: string) => {
   window.setTimeout(() => {
     anchor.remove();
     URL.revokeObjectURL(url);
-  }, 1_000);
+    cleanup?.();
+  }, 60_000);
 };
 
 const ensureBufferable = (snippet: Pick<ProductSnippet, "byteSize">) => {
@@ -387,6 +388,38 @@ export function WebProduct() {
     [withClient],
   );
 
+  const downloadRemote = useCallback(
+    (snippet: ProductSnippet) =>
+      withClient(async (resource) => {
+        const root = await navigator.storage.getDirectory();
+        const directory = await root.getDirectoryHandle("plakk-downloads", { create: true });
+        const temporaryName = crypto.randomUUID();
+        const handle = await directory.getFileHandle(temporaryName, { create: true });
+        const writable = await handle.createWritable();
+        try {
+          await resource.runtime.runPromise(
+            resource.client.content
+              .readRemote(snippet.id)
+              .pipe(
+                Stream.runForEach((chunk) =>
+                  Effect.tryPromise(() => writable.write(Uint8Array.from(chunk))),
+                ),
+              ),
+          );
+          await writable.close();
+          const file = await handle.getFile();
+          downloadBlob(file, snippet.fileName, () => {
+            void directory.removeEntry(temporaryName);
+          });
+        } catch (cause) {
+          await writable.abort().catch(() => {});
+          await directory.removeEntry(temporaryName).catch(() => {});
+          throw cause;
+        }
+      }),
+    [withClient],
+  );
+
   const capability =
     snapshot?.capability ??
     ({
@@ -475,9 +508,6 @@ export function WebProduct() {
       }}
       onFiles={async (files) => {
         if (provider === null) throw new Error("Connect storage before adding snippets.");
-        if (files.some((file) => file.size > BUFFERED_CONTENT_MAX_BYTES)) {
-          throw new Error("Web uploads cannot be larger than 64 MiB.");
-        }
         await Promise.all(
           files.map((file) =>
             withClient(({ client, runtime }) =>
@@ -531,10 +561,7 @@ export function WebProduct() {
         });
         await navigator.clipboard.write([new ClipboardItem({ "text/plain": content })]);
       }}
-      onDownload={async (snippet) => {
-        ensureBufferable(snippet);
-        downloadBytes(await readRemote(snippet.id), snippet.fileName);
-      }}
+      onDownload={downloadRemote}
       onOpenExternal={(url) => {
         window.open(url, "_blank", "noopener,noreferrer");
       }}
