@@ -1,9 +1,13 @@
 import type { ReactNode } from "react";
 import { HeadContent, Outlet, Scripts, createRootRoute } from "@tanstack/react-router";
+import { getAuth } from "@workos/authkit-tanstack-react-start";
+import { AuthKitProvider } from "@workos/authkit-tanstack-react-start/client";
+import { TooltipProvider } from "@plakk/ui/components/primitives/tooltip";
 
 import appCss from "../styles.css?url";
 
 export const Route = createRootRoute({
+  loader: () => getAuth(),
   head: () => ({
     meta: [
       {
@@ -28,16 +32,21 @@ export const Route = createRootRoute({
 });
 
 function RootComponent() {
+  const initialAuth = Route.useLoaderData();
   return (
     <RootDocument>
-      <Outlet />
+      <AuthKitProvider initialAuth={initialAuth}>
+        <TooltipProvider>
+          <Outlet />
+        </TooltipProvider>
+      </AuthKitProvider>
     </RootDocument>
   );
 }
 
 function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <HeadContent />
       </head>

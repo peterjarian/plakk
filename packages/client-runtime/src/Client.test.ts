@@ -82,6 +82,13 @@ const makeLayer = (options?: {
                   return new Uint8Array([1, 2, 3, 4]);
                 }),
               ),
+            readRemote: (id) =>
+              Stream.fromEffect(
+                Effect.sync(() => {
+                  events.push(`readRemote:${id}`);
+                  return new Uint8Array([1, 2, 3, 4]);
+                }),
+              ),
           }),
         ),
         Layer.succeed(
@@ -179,6 +186,7 @@ describe("Client", () => {
       yield* client.snippets.dismissFailedUpload(snippetId);
       yield* client.content.download(snippetId);
       yield* client.content.read(snippetId).pipe(Stream.runDrain);
+      yield* client.content.readRemote(snippetId).pipe(Stream.runDrain);
       yield* client.content.freeUp;
 
       const sql = yield* SqlClient.SqlClient;
@@ -226,6 +234,7 @@ describe("Client", () => {
         `dismiss:${snippetId}`,
         `download:${snippetId}`,
         `read:${snippetId}`,
+        `readRemote:${snippetId}`,
         "freeUp",
         `clear:${snippetId}`,
       ]);

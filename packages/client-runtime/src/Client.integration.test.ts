@@ -718,6 +718,33 @@ describe("shared client integration", () => {
     }).pipe(Effect.provide(layer));
   });
 
+  it.effect("streams remote content without requiring a local content store", () => {
+    const bytes = new TextEncoder().encode("note");
+    const layer = makeLayer(
+      makeRpc({
+        GetSnippetSnapshot: () => Effect.succeed([published]),
+        PrepareSnippetDownload: () =>
+          Effect.succeed({
+            storageProvider: published.storageProvider,
+            fileName: published.fileName,
+            byteSize: published.byteSize,
+            download: { url: "https://download.example/published", headers: [] },
+          }),
+      }),
+      () => new Response(bytes, { status: 200 }),
+      { localContent: false },
+    );
+
+    return Effect.gen(function* () {
+      yield* (yield* SyncEngine).pull;
+      const content = yield* (yield* ContentMirror).readRemote(publishedId).pipe(
+        Stream.runCollect,
+        Effect.map((chunks) => Uint8Array.from(chunks.flatMap((chunk) => Array.from(chunk)))),
+      );
+      expect(content).toEqual(bytes);
+    }).pipe(Effect.provide(layer));
+  });
+
   it.effect("keeps the newest twenty eligible snippets available locally", () => {
     const snippets = Array.from(
       { length: 21 },

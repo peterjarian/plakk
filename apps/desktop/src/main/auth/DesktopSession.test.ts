@@ -79,6 +79,7 @@ describe("DesktopSession", () => {
               content: {
                 download: () => Effect.void,
                 read: () => Stream.empty,
+                readRemote: () => Stream.empty,
                 freeUp: Effect.succeed({
                   reclaimedBytes: 0,
                   removedCopies: 0,

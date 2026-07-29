@@ -94,6 +94,8 @@ export class Client extends Context.Service<
       readonly download: (snippetId: string) => Effect.Effect<void, ClientError>;
       /** Streams locally stored content for one snippet. */
       readonly read: (snippetId: string) => Stream.Stream<Uint8Array, ClientError>;
+      /** Streams published content without retaining a device-local copy. */
+      readonly readRemote: (snippetId: string) => Stream.Stream<Uint8Array, ClientError>;
       /** Removes local copies outside the automatically maintained set. */
       readonly freeUp: Effect.Effect<FreeUpSpaceResult, ClientError>;
     };
@@ -370,6 +372,7 @@ export const clientLive = Layer.effect(
       content: {
         download: content.download,
         read: content.read,
+        readRemote: content.readRemote,
         freeUp: content.freeUp,
       },
       snippets: {

@@ -90,6 +90,7 @@ export function SnippetRow(props: {
   copying?: boolean;
   copyError?: string;
   showActions?: boolean;
+  contentMode?: "mirrored" | "remote";
 }) {
   const {
     snippet,
@@ -105,6 +106,7 @@ export function SnippetRow(props: {
     copying = false,
     copyError,
     showActions = true,
+    contentMode = "mirrored",
   } = props;
   const { Icon } = presentationMeta[presentation.type];
   const localState = snippet.localState;
@@ -112,6 +114,7 @@ export function SnippetRow(props: {
   const isFailed = localState?.status === "FAILED";
   const isDownloading = snippet.localContentAvailability.status === "DOWNLOADING";
   const needsDownload =
+    contentMode === "mirrored" &&
     snippet.kind === "PUBLISHED" &&
     (snippet.localContentAvailability.status === "NOT_AVAILABLE" ||
       snippet.localContentAvailability.status === "FAILED");
@@ -223,6 +226,17 @@ export function SnippetRow(props: {
                   onClick={() => onOpenLink(presentation.url)}
                 >
                   <ArrowUpRight />
+                </Button>
+              )}
+              {contentMode === "remote" && onDownload && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Download"
+                  onClick={onDownload}
+                >
+                  <Download />
                 </Button>
               )}
               <Button

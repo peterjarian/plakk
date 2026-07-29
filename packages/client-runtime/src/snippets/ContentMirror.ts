@@ -116,6 +116,8 @@ export class ContentMirror extends Context.Service<
     readonly download: (snippetId: string) => Effect.Effect<void, ContentMirrorFailure>;
     /** Removes managed content outside the automatic newest-twenty set. */
     readonly freeUp: Effect.Effect<FreeUpSpaceResult, ContentMirrorFailure>;
+    /** Streams one published snippet directly from its storage provider. */
+    readonly readRemote: (snippetId: string) => Stream.Stream<Uint8Array, ContentMirrorFailure>;
     /** Streams locally managed bytes for one snippet. */
     readonly read: (snippetId: string) => Stream.Stream<Uint8Array, LocalStorageError>;
   }
@@ -337,6 +339,65 @@ export class ContentMirror extends Context.Service<
         }),
       );
 
+      /** Streams published content without retaining a device-local copy. */
+      const readRemote = (snippetId: string): Stream.Stream<Uint8Array, ContentMirrorFailure> =>
+        Stream.unwrap(
+          Effect.gen(function* () {
+            const published = yield* listPublishedSnippets(session.user.id);
+            const snippet = published.find((candidate) => candidate.id === snippetId);
+            if (snippet === undefined) {
+              return yield* new SnippetNotPublishedError({
+                snippetId,
+                message: "This snippet is not available.",
+              });
+            }
+
+            const prepared = yield* rpc.PrepareSnippetDownload({ id: snippet.id });
+            if (
+              prepared.storageProvider !== snippet.storageProvider ||
+              prepared.fileName !== snippet.fileName ||
+              prepared.byteSize !== snippet.byteSize
+            ) {
+              return yield* new PreparedDownloadMismatchError({
+                snippetId: snippet.id,
+                message: "The storage provider returned unexpected download metadata.",
+              });
+            }
+
+            let request = HttpClientRequest.get(prepared.download.url);
+            for (const header of prepared.download.headers) {
+              request = HttpClientRequest.setHeader(request, header.name, header.value);
+            }
+            const response = yield* http.execute(request);
+            if (response.status < 200 || response.status >= 300) {
+              return yield* new DownloadRejectedError({
+                status: response.status,
+                message: "The storage provider rejected the download.",
+              });
+            }
+            return response.stream.pipe(Stream.mapError(httpClientFailure));
+          }).pipe(
+            Effect.provideService(SqlClient.SqlClient, sql),
+            Effect.catchTags({
+              HttpClientError: (error) => Effect.fail(httpClientFailure(error)),
+              RpcClientError: (error) => Effect.fail(rpcClientFailure(error)),
+              RpcError: (error) => Effect.fail(rpcFailure(error)),
+              SchemaError: () =>
+                Effect.fail(
+                  new LocalStorageError({
+                    message: "Plakk could not read its local snippet data.",
+                  }),
+                ),
+              SqlError: () =>
+                Effect.fail(
+                  new LocalStorageError({
+                    message: "Plakk could not read its local snippet data.",
+                  }),
+                ),
+            }),
+          ),
+        );
+
       /** Repairs local availability and downloads the automatic newest-twenty set. */
       const reconcile = Effect.gen(function* () {
         if (content === undefined) return;
@@ -482,6 +543,7 @@ export class ContentMirror extends Context.Service<
         reconcile,
         download,
         freeUp,
+        readRemote,
         read:
           content === undefined
             ? () => Stream.fail(contentUnavailable())
