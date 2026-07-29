@@ -1,4 +1,5 @@
 import { ArrowRight } from "lucide-react";
+import { ProductNotice } from "@plakk/ui/components/ProductNotice";
 import { Button } from "@plakk/ui/primitives/button";
 import { useEffect } from "react";
 import { SnippetFlowAnimation } from "../components/SnippetFlowAnimation/index.tsx";
@@ -26,7 +27,9 @@ export function Welcome() {
           <SnippetFlowAnimation />
 
           {auth.issue && (
-            <p className="text-center text-xs text-muted-foreground">{auth.issue.message}</p>
+            <ProductNotice tone="danger" title="Couldn’t sign in">
+              {auth.issue.message} Try again.
+            </ProductNotice>
           )}
 
           <Button

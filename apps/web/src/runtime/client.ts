@@ -26,9 +26,6 @@ export const databaseNameFor = (userId: string) => `plakk-${userId}.sqlite`;
 export const databaseLockNameFor = (userId: string) => `plakk:sqlite:${databaseNameFor(userId)}`;
 export const runtimeChannelNameFor = (userId: string) => `plakk:runtime:${userId}`;
 
-export const messageFrom = (cause: unknown, fallback: string) =>
-  cause instanceof Error && cause.message.trim() ? cause.message : fallback;
-
 export const collectBytes = <E>(stream: Stream.Stream<Uint8Array, E>) =>
   stream.pipe(
     Stream.runCollect,

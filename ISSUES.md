@@ -65,41 +65,7 @@ This is shared client/read-model work, not `SnippetRow` styling.
 - `Text snippet` is not shown as an intermediate loading state.
 - Unreadable or invalid content still has a stable fallback presentation.
 
-## 3. User-facing error experience
-
-This is cross-cutting work: runtime owners classify failures, while shared UI owns
-their consistent presentation.
-
-### Problems
-
-- Web errors are shown as raw red text without enough context or a useful next
-  action.
-- Internal implementation conditions can leak into product copy.
-- The same failure can be repeated in several unrelated places.
-- Error presentation differs between desktop and web.
-
-### Scope
-
-- Define meaningful failure states at the module that owns each operation.
-- Map known failures to concise user-facing explanations and relevant recovery
-  actions.
-- Add shared notice and failure presentation where desktop and web have the same
-  user intention.
-- Keep action-local failures near the action and reserve blocking states for
-  failures that actually block the product surface.
-
-### Acceptance criteria
-
-- Error copy says what could not be completed and what the user can do next.
-- Raw provider, database, lock, RPC, and JavaScript error text is not shown
-  directly.
-- A single failure is not duplicated across banners, composer feedback, and empty
-  states.
-- Notices and errors are accessible without relying on color alone.
-- Equivalent desktop and web failures use the same product presentation.
-
 ## Recommended implementation order
 
 1. Web runtime reliability and uploads.
 2. Snippet presentation lifecycle.
-3. Apply the shared error experience while implementing each owning area.

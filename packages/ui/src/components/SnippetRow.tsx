@@ -7,6 +7,7 @@ import * as DateTime from "effect/DateTime";
 import {
   ArrowUpRight,
   Check,
+  CircleAlert,
   Copy,
   Download,
   FileText,
@@ -137,10 +138,12 @@ export function SnippetRow(props: SnippetRowProps) {
     copyError !== undefined
       ? copyError
       : isFailed
-        ? (localState?.errorMessage ?? "Upload failed. Dismiss it and add the content again.")
+        ? `${localState?.errorMessage ?? "Upload failed."} Dismiss it and add the content again.`
         : snippet.localContentAvailability.status === "FAILED"
           ? snippet.localContentAvailability.message
           : metadata;
+  const hasInlineFailure =
+    copyError !== undefined || isFailed || snippet.localContentAvailability.status === "FAILED";
 
   return (
     <li>
@@ -159,7 +162,15 @@ export function SnippetRow(props: SnippetRowProps) {
 
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium">{title}</p>
-          {subtitle && <p className="truncate text-xs text-muted-foreground">{subtitle}</p>}
+          {subtitle &&
+            (hasInlineFailure ? (
+              <p className="flex items-center gap-1 truncate text-xs text-destructive" role="alert">
+                <CircleAlert className="size-3 shrink-0" aria-hidden="true" />
+                <span className="truncate">{subtitle}</span>
+              </p>
+            ) : (
+              <p className="truncate text-xs text-muted-foreground">{subtitle}</p>
+            ))}
         </div>
 
         <div className="flex shrink-0 items-center justify-end">
@@ -261,11 +272,6 @@ export function SnippetRow(props: SnippetRowProps) {
             </div>
           )}
         </div>
-        {copyError && (
-          <span className="sr-only" role="status">
-            {copyError}
-          </span>
-        )}
       </div>
     </li>
   );

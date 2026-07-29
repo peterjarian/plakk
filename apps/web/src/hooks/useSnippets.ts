@@ -274,11 +274,9 @@ const useSnippetImageUrls = (snippets: ReadonlyArray<Snippet>, run: RunClient) =
 };
 
 export function useSnippets(state: {
-  readonly error: string | null;
   readonly loading: boolean;
   readonly snapshot: ClientSnapshot | null;
   readonly run: RunClient;
-  readonly refresh: () => Promise<void>;
 }) {
   const textPreviews = useSnippetTextPreviews(state.snapshot, state.run);
   const thumbnailUrls = useSnippetImageUrls(state.snapshot?.snippets ?? [], state.run);
@@ -288,9 +286,7 @@ export function useSnippets(state: {
   );
 
   return {
-    error: state.error,
     isLoading: state.loading,
     items,
-    reload: state.refresh,
   };
 }

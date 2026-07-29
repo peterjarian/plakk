@@ -9,11 +9,12 @@ import {
   databaseNameFor,
   makeClientRuntime,
   makeSqliteLayer,
-  messageFrom,
   type ClientResource,
   type RunClient,
   runtimeChannelNameFor,
 } from "../runtime/client.ts";
+
+export type ClientRuntimeIssue = "another-tab" | "session" | "startup";
 
 export function useClientRuntime(user: User | null) {
   const accessToken = useAccessToken();
@@ -22,7 +23,7 @@ export function useClientRuntime(user: User | null) {
   getAccessTokenRef.current = accessToken.getAccessToken;
   const resourceRef = useRef<ClientResource | null>(null);
   const [snapshot, setSnapshot] = useState<ClientSnapshot | null>(null);
-  const [runtimeError, setRuntimeError] = useState<string | null>(null);
+  const [runtimeIssue, setRuntimeIssue] = useState<ClientRuntimeIssue | null>(null);
   const [loading, setLoading] = useState(user !== null);
   const [attempt, setAttempt] = useState(0);
 
@@ -30,12 +31,13 @@ export function useClientRuntime(user: User | null) {
     if (user === null) {
       setSnapshot(null);
       setLoading(false);
+      setRuntimeIssue(null);
       return;
     }
 
     let active = true;
     setLoading(true);
-    setRuntimeError(null);
+    setRuntimeIssue(null);
     setSnapshot(null);
     let runtime: ClientResource["runtime"] | null = null;
     const runtimeChannel = new BroadcastChannel(runtimeChannelNameFor(user.id));
@@ -47,7 +49,7 @@ export function useClientRuntime(user: User | null) {
       if (resourceRef.current?.runtime === acquiredRuntime) resourceRef.current = null;
       setSnapshot(null);
       setLoading(false);
-      setRuntimeError(null);
+      setRuntimeIssue(null);
       void (async () => {
         if (acquiredRuntime !== null) await acquiredRuntime.dispose();
         window.location.assign("/api/auth/sign-out");
@@ -59,7 +61,7 @@ export function useClientRuntime(user: User | null) {
         if (lock === null) {
           if (active) {
             setLoading(false);
-            setRuntimeError("Plakk is already open in another browser tab.");
+            setRuntimeIssue("another-tab");
           }
           return;
         }
@@ -88,10 +90,10 @@ export function useClientRuntime(user: User | null) {
           await acquiredRuntime.dispose();
         }
       })
-      .catch((cause) => {
+      .catch(() => {
         if (!active) return;
         setLoading(false);
-        setRuntimeError(messageFrom(cause, "Plakk could not start in this browser."));
+        setRuntimeIssue("startup");
       });
 
     return () => {
@@ -135,7 +137,9 @@ export function useClientRuntime(user: User | null) {
   }, [user?.id]);
 
   return {
-    error: runtimeError ?? accessToken.error?.message ?? null,
+    issue:
+      runtimeIssue ??
+      (accessToken.error === null || accessToken.error === undefined ? null : "session"),
     loading,
     snapshot,
     run,

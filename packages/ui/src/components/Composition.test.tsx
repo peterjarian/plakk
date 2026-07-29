@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { AppHeader } from "./AppHeader.tsx";
+import { ProductNotice } from "./ProductNotice.tsx";
 import { SnippetList } from "./SnippetList.tsx";
 import { SyncStatusIndicator } from "./SyncStatusIndicator.tsx";
 import { Settings } from "./settings.tsx";
@@ -135,5 +136,33 @@ describe("shared composition", () => {
     expect(markup).toContain('aria-label="Up to date"');
     expect(markup).toContain("bg-emerald-500/80");
     expect(markup).not.toContain("Synced");
+  });
+
+  it("presents product failures with an icon, explanation, and recovery action", () => {
+    const markup = renderToStaticMarkup(
+      <ProductNotice
+        tone="danger"
+        title="Couldn’t load snippets"
+        action={<button type="button">Try again</button>}
+      >
+        Check your connection. Your saved snippets are still safe.
+      </ProductNotice>,
+    );
+
+    expect(markup).toContain('data-slot="product-notice"');
+    expect(markup).toContain('data-tone="danger"');
+    expect(markup).toContain('role="alert"');
+    expect(markup).toContain("Couldn’t load snippets");
+    expect(markup).toContain("Your saved snippets are still safe.");
+    expect(markup).toContain("Try again");
+  });
+
+  it("announces non-blocking product notices politely", () => {
+    const markup = renderToStaticMarkup(
+      <ProductNotice tone="warning">Sync is paused until storage is connected.</ProductNotice>,
+    );
+
+    expect(markup).toContain('role="status"');
+    expect(markup).toContain('aria-live="polite"');
   });
 });

@@ -8,6 +8,7 @@ import {
 } from "@plakk/shared";
 import { accountCanSyncWithConnection } from "@plakk/shared/PlakkApi";
 import { AppHeader } from "@plakk/ui/components/AppHeader";
+import { ProductNotice, type ProductNoticeTone } from "@plakk/ui/components/ProductNotice";
 import { Settings as SettingsUI } from "@plakk/ui/components/settings";
 import { SnippetComposer } from "@plakk/ui/components/SnippetComposer";
 import { SnippetList } from "@plakk/ui/components/SnippetList";
@@ -38,15 +39,15 @@ import {
   MessageCircle,
   Plus,
   SunMoon,
-  TriangleAlert,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { StorageProviderIcon, storageProviderLabel } from "../components/StorageProviderIcon.tsx";
-import { useClientRuntime } from "../hooks/useClientRuntime.ts";
+import { useClientRuntime, type ClientRuntimeIssue } from "../hooks/useClientRuntime.ts";
 import { useSnippets, type SnippetReadModel } from "../hooks/useSnippets.ts";
 import { useTheme, type Theme } from "../hooks/useTheme.tsx";
 import { downloadFile, sweepTemporaryDownloads } from "../lib/browserDownloads.ts";
+import { productFailureFrom, type ProductFailure } from "../lib/productFailure.ts";
 import { storageState } from "../lib/storageState.ts";
 import { collectBytes } from "../runtime/client.ts";
 
@@ -55,6 +56,59 @@ const BUFFERED_CONTENT_MAX_BYTES = 64 * 1024 * 1024;
 const offlineCapability: ClientCapability = {
   status: "OFFLINE",
   storageProvider: { known: false, value: null },
+};
+
+const actionFailures = {
+  addSnippet: {
+    title: "Couldn’t add this snippet",
+    description: "Nothing was added. Try again with content under 64 MiB.",
+  },
+  addFiles: {
+    title: "Couldn’t add these files",
+    description: "Nothing was added. Choose the files again and retry.",
+  },
+  connectStorage: {
+    title: "Couldn’t connect storage",
+    description: "Your storage setup was not changed. Try again.",
+  },
+  copySnippet: {
+    title: "Couldn’t copy this snippet",
+    description: "Your clipboard was not changed. Try again.",
+  },
+  downloadSnippet: {
+    title: "Couldn’t download this snippet",
+    description: "No file was saved. Try again.",
+  },
+  removeSnippet: {
+    title: "Couldn’t remove this snippet",
+    description: "The snippet is still in your list. Try again.",
+  },
+  signOut: {
+    title: "Couldn’t sign out",
+    description: "You are still signed in. Try again.",
+  },
+} satisfies Record<string, ProductFailure>;
+
+const runtimeIssuePresentation: Record<
+  ClientRuntimeIssue,
+  ProductFailure & { readonly tone: ProductNoticeTone }
+> = {
+  "another-tab": {
+    tone: "warning",
+    title: "Plakk is open in another tab",
+    description: "Continue there, or close that tab and try again here.",
+  },
+  session: {
+    tone: "danger",
+    title: "Couldn’t verify your session",
+    description: "Check your connection and try again. Sign in again if the problem continues.",
+  },
+  startup: {
+    tone: "danger",
+    title: "Plakk couldn’t start in this tab",
+    description:
+      "Reload this tab and try again. Your snippets in connected storage are still safe.",
+  },
 };
 
 const {
@@ -66,9 +120,6 @@ const {
   SectionBody: SettingsSectionBody,
   SectionTitle: SettingsSectionTitle,
 } = SettingsUI;
-
-const messageFrom = (cause: unknown, fallback: string) =>
-  cause instanceof Error && cause.message.trim() ? cause.message : fallback;
 
 const toUser = (user: AuthKitUser | null): User | null =>
   user === null
@@ -90,8 +141,8 @@ function IndexRoute() {
   const { theme, setTheme } = useTheme();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [storageError, setStorageError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<ProductFailure | null>(null);
+  const [storageError, setStorageError] = useState<ProductFailure | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copyingId, setCopyingId] = useState<string | null>(null);
   const [now, setNow] = useState(() => DateTime.toEpochMillis(DateTime.nowUnsafe()));
@@ -127,9 +178,9 @@ function IndexRoute() {
   );
 
   const openExternal = (url: string) => window.open(url, "_blank", "noopener,noreferrer");
-  const runAction = (operation: Promise<void>, fallback: string) => {
+  const runAction = (operation: Promise<void>, fallback: ProductFailure) => {
     setActionError(null);
-    void operation.catch((cause) => setActionError(messageFrom(cause, fallback)));
+    void operation.catch((cause) => setActionError(productFailureFrom(cause, fallback)));
   };
   const connectStorage = async (storageProvider: StorageProvider) => {
     const url = await runtime.run((client) => client.storage.beginLink(storageProvider));
@@ -219,7 +270,7 @@ function IndexRoute() {
           if (copiedTimer.current !== undefined) window.clearTimeout(copiedTimer.current);
           copiedTimer.current = window.setTimeout(() => setCopiedId(null), 1_200);
         },
-        (cause) => setActionError(messageFrom(cause, "Could not copy this snippet.")),
+        (cause) => setActionError(productFailureFrom(cause, actionFailures.copySnippet)),
       )
       .finally(() => setCopyingId(null));
   };
@@ -233,6 +284,7 @@ function IndexRoute() {
           ),
       ),
     );
+  const runtimeIssue = runtime.issue === null ? null : runtimeIssuePresentation[runtime.issue];
 
   if (user === null) {
     return (
@@ -244,7 +296,11 @@ function IndexRoute() {
             </p>
             <h1 className="text-2xl leading-tight font-semibold">Move snippets between devices.</h1>
           </div>
-          {runtime.error && <p className="text-xs text-destructive">{runtime.error}</p>}
+          {runtimeIssue !== null && (
+            <ProductNotice tone={runtimeIssue.tone} title={runtimeIssue.title}>
+              {runtimeIssue.description}
+            </ProductNotice>
+          )}
           <Button
             type="button"
             className="h-10 w-full"
@@ -362,7 +418,9 @@ function IndexRoute() {
                         onClick={() => {
                           setStorageError(null);
                           void connectStorage(storageProvider).catch((cause) =>
-                            setStorageError(messageFrom(cause, "Could not connect storage.")),
+                            setStorageError(
+                              productFailureFrom(cause, actionFailures.connectStorage),
+                            ),
                           );
                         }}
                       >
@@ -382,7 +440,7 @@ function IndexRoute() {
                       if (storage.provider === null) return;
                       setStorageError(null);
                       void connectStorage(storage.provider).catch((cause) =>
-                        setStorageError(messageFrom(cause, "Could not connect storage.")),
+                        setStorageError(productFailureFrom(cause, actionFailures.connectStorage)),
                       );
                     }}
                   >
@@ -391,7 +449,11 @@ function IndexRoute() {
                   </Button>
                 )}
               </SettingsRow>
-              {storageError && <p className="px-4 pb-3 text-xs text-destructive">{storageError}</p>}
+              {storageError !== null && (
+                <ProductNotice className="mx-4 mb-3" tone="danger" title={storageError.title}>
+                  {storageError.description}
+                </ProductNotice>
+              )}
             </SettingsSectionBody>
           </SettingsSection>
           <SettingsSection>
@@ -465,15 +527,18 @@ function IndexRoute() {
     </Dialog>
   );
 
-  const syncStatus: SyncStatus = runtime.loading
-    ? "CHECKING"
-    : capability.status === "OFFLINE"
-      ? "OFFLINE"
-      : blocked
-        ? "PAUSED"
-        : runtime.snapshot?.syncStatus === "CONNECTED"
-          ? "CONNECTED"
-          : "RECONNECTING";
+  const syncStatus: SyncStatus =
+    runtime.issue !== null
+      ? "PAUSED"
+      : runtime.loading
+        ? "CHECKING"
+        : capability.status === "OFFLINE"
+          ? "OFFLINE"
+          : blocked
+            ? "PAUSED"
+            : runtime.snapshot?.syncStatus === "CONNECTED"
+              ? "CONNECTED"
+              : "RECONNECTING";
 
   return (
     <main
@@ -489,10 +554,10 @@ function IndexRoute() {
           return;
         }
         const files = Array.from(event.clipboardData.files);
-        if (files.length > 0) runAction(addFiles(files), "Could not add pasted files.");
+        if (files.length > 0) runAction(addFiles(files), actionFailures.addFiles);
         else {
           const text = event.clipboardData.getData("text/plain").trim();
-          if (text) runAction(addText(text), "Could not add pasted text.");
+          if (text) runAction(addText(text), actionFailures.addSnippet);
         }
       }}
       onDragOver={(event) => {
@@ -507,10 +572,10 @@ function IndexRoute() {
         setIsDragging(false);
         if (blocked) return;
         const files = Array.from(event.dataTransfer.files);
-        if (files.length > 0) runAction(addFiles(files), "Could not add dropped files.");
+        if (files.length > 0) runAction(addFiles(files), actionFailures.addFiles);
         else {
           const text = event.dataTransfer.getData("text/plain").trim();
-          if (text) runAction(addText(text), "Could not add dropped text.");
+          if (text) runAction(addText(text), actionFailures.addSnippet);
         }
       }}
     >
@@ -519,7 +584,7 @@ function IndexRoute() {
           className="mt-3"
           user={user}
           onSettingsClick={() => setSettingsOpen(true)}
-          onSignOutClick={() => runAction(runtime.signOut(), "Could not sign out.")}
+          onSignOutClick={() => runAction(runtime.signOut(), actionFailures.signOut)}
           statusIndicator={<SyncStatusIndicator status={syncStatus} />}
           storageAction={
             storage.kind === "connected" ? (
@@ -539,101 +604,122 @@ function IndexRoute() {
           }
         />
         <div className="flex min-h-0 flex-1 flex-col px-6 pb-6">
-          <div className="sticky top-0 z-20 bg-background pt-5 pb-4">
-            {blocked && !runtime.loading && (
-              <div className="mb-2 flex items-center gap-2 rounded-md bg-muted px-2.5 py-1.5 text-xs text-muted-foreground">
-                <TriangleAlert className="size-3.5 text-amber-600" />
-                <span className="min-w-0 flex-1">
-                  {capability.status === "OFFLINE"
-                    ? "Offline — your saved snippet list remains available."
-                    : billingBlocked
-                      ? "Sync is paused until billing is resolved."
-                      : "Sync is paused until account storage is ready."}
-                </span>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="xs"
-                  onClick={() =>
-                    billingBlocked
-                      ? openExternal("https://app.plakk.io/billing")
-                      : setSettingsOpen(true)
-                  }
-                >
-                  {billingBlocked ? "Manage billing" : "Finish setup"}
-                </Button>
-              </div>
-            )}
-            <SnippetComposer.Root
-              disabled={blocked}
-              onSubmit={(text) => runAction(addText(text), "Could not add this snippet.")}
-            >
-              <SnippetComposer.Input />
-              <SnippetComposer.Attachment>
-                <input
-                  multiple
-                  onChange={(event) => {
-                    if (event.currentTarget.files?.length) {
-                      runAction(
-                        addFiles(Array.from(event.currentTarget.files)),
-                        "Could not add these files.",
-                      );
-                    }
-                    event.currentTarget.value = "";
-                  }}
-                />
-              </SnippetComposer.Attachment>
-              <SnippetComposer.Submit />
-            </SnippetComposer.Root>
-            {(actionError ?? snippets.error) && (
-              <p className="mt-2 text-xs text-destructive" role="alert">
-                {actionError ?? snippets.error}
-              </p>
-            )}
-          </div>
-          {snippets.isLoading && snippets.items.length === 0 ? (
-            <div className="grid flex-1 place-items-center text-muted-foreground">
-              <LoaderCircle className="size-5 animate-spin" />
+          {runtimeIssue !== null ? (
+            <div className="grid flex-1 place-items-center py-12">
+              <ProductNotice
+                className="w-full max-w-md"
+                tone={runtimeIssue.tone}
+                title={runtimeIssue.title}
+                action={
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void runtime.refresh()}
+                  >
+                    Try again
+                  </Button>
+                }
+              >
+                {runtimeIssue.description}
+              </ProductNotice>
             </div>
-          ) : snippets.error && snippets.items.length === 0 ? (
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => runAction(snippets.reload(), "Could not refresh.")}
-            >
-              Try again
-            </Button>
           ) : (
-            <SnippetList.Root>
-              <SnippetList.Heading />
-              {snippets.items.length === 0 ? (
-                <SnippetList.Empty />
-              ) : (
-                <SnippetList.Items>
-                  {snippets.items.map((snippet) => (
-                    <SnippetRow
-                      key={snippet.id}
-                      snippet={snippet}
-                      presentation={snippet.presentation}
-                      thumbnailUrl={snippet.thumbnailUrl}
-                      now={now}
-                      copied={copiedId === snippet.id}
-                      copying={copyingId === snippet.id}
-                      copyDisabled={snippet.kind !== "PUBLISHED"}
-                      onCopy={() => copy(snippet)}
-                      onDelete={() =>
-                        runAction(deleteSnippet(snippet), "Could not remove this snippet.")
-                      }
-                      onDownload={() =>
-                        runAction(downloadSnippet(snippet), "Could not download this snippet.")
-                      }
-                      onOpenLink={openExternal}
-                      contentMode="remote"
+            <>
+              <div className="sticky top-0 z-20 bg-background pt-5 pb-4">
+                {blocked && !runtime.loading && (
+                  <ProductNotice
+                    className="mb-2"
+                    tone="warning"
+                    action={
+                      capability.status === "OFFLINE" ? undefined : (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="xs"
+                          onClick={() =>
+                            billingBlocked
+                              ? openExternal("https://app.plakk.io/billing")
+                              : setSettingsOpen(true)
+                          }
+                        >
+                          {billingBlocked ? "Manage billing" : "Finish setup"}
+                        </Button>
+                      )
+                    }
+                  >
+                    {capability.status === "OFFLINE"
+                      ? "You’re offline. Your saved snippet list remains available."
+                      : billingBlocked
+                        ? "Sync is paused until billing is resolved."
+                        : "Sync is paused until account storage is ready."}
+                  </ProductNotice>
+                )}
+                <SnippetComposer.Root
+                  disabled={blocked}
+                  onSubmit={(text) => runAction(addText(text), actionFailures.addSnippet)}
+                >
+                  <SnippetComposer.Input />
+                  <SnippetComposer.Attachment>
+                    <input
+                      multiple
+                      onChange={(event) => {
+                        if (event.currentTarget.files?.length) {
+                          runAction(
+                            addFiles(Array.from(event.currentTarget.files)),
+                            actionFailures.addFiles,
+                          );
+                        }
+                        event.currentTarget.value = "";
+                      }}
                     />
-                  ))}
-                </SnippetList.Items>
+                  </SnippetComposer.Attachment>
+                  <SnippetComposer.Submit />
+                </SnippetComposer.Root>
+                {actionError !== null && (
+                  <ProductNotice className="mt-2" tone="danger" title={actionError.title}>
+                    {actionError.description}
+                  </ProductNotice>
+                )}
+              </div>
+              {snippets.isLoading && snippets.items.length === 0 ? (
+                <div className="grid flex-1 place-items-center text-muted-foreground" role="status">
+                  <LoaderCircle className="size-5 animate-spin" aria-hidden="true" />
+                  <span className="sr-only">Loading snippets</span>
+                </div>
+              ) : (
+                <SnippetList.Root>
+                  <SnippetList.Heading />
+                  {snippets.items.length === 0 ? (
+                    <SnippetList.Empty />
+                  ) : (
+                    <SnippetList.Items>
+                      {snippets.items.map((snippet) => (
+                        <SnippetRow
+                          key={snippet.id}
+                          snippet={snippet}
+                          presentation={snippet.presentation}
+                          thumbnailUrl={snippet.thumbnailUrl}
+                          now={now}
+                          copied={copiedId === snippet.id}
+                          copying={copyingId === snippet.id}
+                          copyDisabled={snippet.kind !== "PUBLISHED"}
+                          onCopy={() => copy(snippet)}
+                          onDelete={() =>
+                            runAction(deleteSnippet(snippet), actionFailures.removeSnippet)
+                          }
+                          onDownload={() =>
+                            runAction(downloadSnippet(snippet), actionFailures.downloadSnippet)
+                          }
+                          onOpenLink={openExternal}
+                          contentMode="remote"
+                        />
+                      ))}
+                    </SnippetList.Items>
+                  )}
+                </SnippetList.Root>
               )}
-            </SnippetList.Root>
+            </>
           )}
         </div>
       </div>

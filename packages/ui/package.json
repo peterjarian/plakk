@@ -5,6 +5,7 @@
   "exports": {
     "./foundation.css": "./src/styles/foundation.css",
     "./components/AppHeader": "./src/components/AppHeader.tsx",
+    "./components/ProductNotice": "./src/components/ProductNotice.tsx",
     "./components/SnippetComposer": "./src/components/SnippetComposer.tsx",
     "./components/SnippetList": "./src/components/SnippetList.tsx",
     "./components/SnippetRow": "./src/components/SnippetRow.tsx",

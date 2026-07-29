@@ -23,6 +23,7 @@ import {
   SelectValue,
 } from "@plakk/ui/primitives/select";
 import { Switch } from "@plakk/ui/primitives/switch";
+import { ProductNotice } from "@plakk/ui/components/ProductNotice";
 import { Settings as SettingsUI } from "@plakk/ui/components/settings";
 import { getInitials } from "@plakk/ui/lib/getInitials";
 import { useAuth } from "../hooks/useAuth.ts";
@@ -333,15 +334,15 @@ export function Settings() {
                   {freeingStorage ? "Freeing…" : "Free up space"}
                 </Button>
               </SettingsUI.Row>
-              {storageFeedback !== null && (
+              {storageFeedback?.kind === "failed" ? (
+                <ProductNotice className="mx-4 my-2" tone="danger" title={storageFeedback.message}>
+                  No device copies were removed. Try again.
+                </ProductNotice>
+              ) : storageFeedback !== null ? (
                 <p
-                  className={
-                    storageFeedback.kind === "failed"
-                      ? "px-4 py-2 text-xs text-destructive"
-                      : "px-4 py-2 text-xs text-muted-foreground"
-                  }
-                  role={storageFeedback.kind === "failed" ? "alert" : "status"}
-                  aria-live={storageFeedback.kind === "failed" ? undefined : "polite"}
+                  className="px-4 py-2 text-xs text-muted-foreground"
+                  role="status"
+                  aria-live="polite"
                 >
                   {storageFeedback.kind === "reclaimed"
                     ? storageFeedback.reclaimedBytes > 0
@@ -349,11 +350,9 @@ export function Settings() {
                       : `Removed ${storageFeedback.removedCopies} older device ${
                           storageFeedback.removedCopies === 1 ? "copy" : "copies"
                         } from this device.`
-                    : storageFeedback.kind === "no-op"
-                      ? "No older device copies are available to remove."
-                      : storageFeedback.message}
+                    : "No older device copies are available to remove."}
                 </p>
-              )}
+              ) : null}
             </SettingsUI.SectionBody>
           </SettingsUI.Section>
 
@@ -397,9 +396,9 @@ export function Settings() {
                 </Select>
               </SettingsUI.Row>
               {appearanceError !== null && (
-                <p className="px-4 py-2 text-xs text-destructive" role="alert">
-                  {appearanceError}
-                </p>
+                <ProductNotice className="mx-4 my-2" tone="danger" title={appearanceError}>
+                  Your previous appearance setting is still active.
+                </ProductNotice>
               )}
 
               <SettingsUI.Row>
@@ -410,9 +409,7 @@ export function Settings() {
                   />
                   <SettingsUI.RowText
                     title="Toolbar widget"
-                    description={
-                      toolbarWidgetError ?? "Show quick access from the desktop toolbar."
-                    }
+                    description="Show quick access from the desktop toolbar."
                   />
                 </SettingsUI.RowMain>
                 <Switch
@@ -422,6 +419,11 @@ export function Settings() {
                   onCheckedChange={updateToolbarWidget}
                 />
               </SettingsUI.Row>
+              {toolbarWidgetError !== null && (
+                <ProductNotice className="mx-4 my-2" tone="danger" title={toolbarWidgetError}>
+                  Your previous toolbar setting is still active.
+                </ProductNotice>
+              )}
             </SettingsUI.SectionBody>
           </SettingsUI.Section>
 
