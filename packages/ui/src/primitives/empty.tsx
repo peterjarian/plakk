@@ -3,7 +3,9 @@ import type { ComponentProps } from "react";
 
 import { cn } from "@plakk/ui/lib/utils";
 
-function Empty({ className, ...props }: ComponentProps<"div">) {
+export type EmptyProps = ComponentProps<"div">;
+
+function Empty({ className, ...props }: EmptyProps) {
   return (
     <div
       data-slot="empty"
@@ -16,7 +18,9 @@ function Empty({ className, ...props }: ComponentProps<"div">) {
   );
 }
 
-function EmptyHeader({ className, ...props }: ComponentProps<"div">) {
+export type EmptyHeaderProps = ComponentProps<"div">;
+
+function EmptyHeader({ className, ...props }: EmptyHeaderProps) {
   return (
     <div
       data-slot="empty-header"
@@ -41,11 +45,9 @@ const emptyMediaVariants = cva(
   },
 );
 
-function EmptyMedia({
-  className,
-  variant = "default",
-  ...props
-}: ComponentProps<"div"> & VariantProps<typeof emptyMediaVariants>) {
+export type EmptyMediaProps = ComponentProps<"div"> & VariantProps<typeof emptyMediaVariants>;
+
+function EmptyMedia({ className, variant = "default", ...props }: EmptyMediaProps) {
   return (
     <div
       data-slot="empty-icon"
@@ -56,7 +58,9 @@ function EmptyMedia({
   );
 }
 
-function EmptyTitle({ className, ...props }: ComponentProps<"div">) {
+export type EmptyTitleProps = ComponentProps<"div">;
+
+function EmptyTitle({ className, ...props }: EmptyTitleProps) {
   return (
     <div
       data-slot="empty-title"
@@ -66,9 +70,11 @@ function EmptyTitle({ className, ...props }: ComponentProps<"div">) {
   );
 }
 
-function EmptyDescription({ className, ...props }: ComponentProps<"p">) {
+export type EmptyDescriptionProps = ComponentProps<"p">;
+
+function EmptyDescription({ className, ...props }: EmptyDescriptionProps) {
   return (
-    <div
+    <p
       data-slot="empty-description"
       className={cn(
         "text-sm/relaxed text-muted-foreground [&>a]:underline [&>a]:underline-offset-4 [&>a:hover]:text-primary",
@@ -79,7 +85,9 @@ function EmptyDescription({ className, ...props }: ComponentProps<"p">) {
   );
 }
 
-function EmptyContent({ className, ...props }: ComponentProps<"div">) {
+export type EmptyContentProps = ComponentProps<"div">;
+
+function EmptyContent({ className, ...props }: EmptyContentProps) {
   return (
     <div
       data-slot="empty-content"

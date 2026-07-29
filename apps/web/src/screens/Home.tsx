@@ -1,7 +1,7 @@
 import { AppHeader } from "@plakk/ui/components/AppHeader";
 import { SnippetList } from "@plakk/ui/components/SnippetList";
 import { SnippetRow } from "@plakk/ui/components/SnippetRow";
-import { Button } from "@plakk/ui/components/primitives/button";
+import { Button } from "@plakk/ui/primitives/button";
 import * as DateTime from "effect/DateTime";
 import { LoaderCircle, Plus, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -9,16 +9,14 @@ import { useEffect, useRef, useState } from "react";
 import { SnippetComposer } from "../components/SnippetComposer.tsx";
 import { StorageProviderIcon, storageProviderLabel } from "../components/StorageProviderIcon.tsx";
 import { SyncStatusIndicator, type SyncStatus } from "../components/SyncStatusIndicator.tsx";
-import type { usePlakk, WebSnippet } from "../hooks/usePlakk.ts";
+import type { WebAppModel } from "../App.tsx";
+import type { WebSnippet } from "../hooks/useSnippets.ts";
 import { storageState } from "../lib/storageState.ts";
 
 const messageFrom = (cause: unknown, fallback: string) =>
   cause instanceof Error && cause.message.trim() ? cause.message : fallback;
 
-export function Home(props: {
-  readonly plakk: ReturnType<typeof usePlakk>;
-  readonly onSettings: () => void;
-}) {
+export function Home(props: { readonly plakk: WebAppModel; readonly onSettings: () => void }) {
   const { plakk } = props;
   const storage = storageState(plakk.capability);
   const blocked = storage.kind !== "connected" || !storage.canSync;
@@ -186,28 +184,35 @@ export function Home(props: {
               Try again
             </Button>
           ) : (
-            <SnippetList empty={plakk.snippets.length === 0}>
-              {plakk.snippets.map((snippet) => (
-                <SnippetRow
-                  key={snippet.id}
-                  snippet={snippet}
-                  presentation={snippet.presentation}
-                  now={now}
-                  copied={copiedId === snippet.id}
-                  copying={copyingId === snippet.id}
-                  copyDisabled={snippet.kind !== "PUBLISHED"}
-                  onCopy={() => copy(snippet)}
-                  onDelete={() =>
-                    run(plakk.deleteSnippet(snippet), "Could not remove this snippet.")
-                  }
-                  onDownload={() =>
-                    run(plakk.downloadSnippet(snippet), "Could not download this snippet.")
-                  }
-                  onOpenLink={plakk.openExternal}
-                  contentMode="remote"
-                />
-              ))}
-            </SnippetList>
+            <SnippetList.Root>
+              <SnippetList.Heading />
+              {plakk.snippets.length === 0 ? (
+                <SnippetList.Empty />
+              ) : (
+                <SnippetList.Items>
+                  {plakk.snippets.map((snippet) => (
+                    <SnippetRow
+                      key={snippet.id}
+                      snippet={snippet}
+                      presentation={snippet.presentation}
+                      now={now}
+                      copied={copiedId === snippet.id}
+                      copying={copyingId === snippet.id}
+                      copyDisabled={snippet.kind !== "PUBLISHED"}
+                      onCopy={() => copy(snippet)}
+                      onDelete={() =>
+                        run(plakk.deleteSnippet(snippet), "Could not remove this snippet.")
+                      }
+                      onDownload={() =>
+                        run(plakk.downloadSnippet(snippet), "Could not download this snippet.")
+                      }
+                      onOpenLink={plakk.openExternal}
+                      contentMode="remote"
+                    />
+                  ))}
+                </SnippetList.Items>
+              )}
+            </SnippetList.Root>
           )}
         </div>
       </div>

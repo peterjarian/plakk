@@ -1,6 +1,6 @@
 import { STORAGE_PROVIDERS } from "@plakk/shared";
-import { Avatar, AvatarFallback } from "@plakk/ui/components/primitives/avatar";
-import { Button } from "@plakk/ui/components/primitives/button";
+import { Avatar, AvatarFallback } from "@plakk/ui/primitives/avatar";
+import { Button } from "@plakk/ui/primitives/button";
 import {
   Select,
   SelectContent,
@@ -8,16 +8,8 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@plakk/ui/components/primitives/select";
-import {
-  SettingsRow,
-  SettingsRowIcon,
-  SettingsRowMain,
-  SettingsRowText,
-  SettingsSection,
-  SettingsSectionBody,
-  SettingsSectionTitle,
-} from "@plakk/ui/components/settings";
+} from "@plakk/ui/primitives/select";
+import { Settings as SettingsUI } from "@plakk/ui/components/settings";
 import { getInitials } from "@plakk/ui/lib/getInitials";
 import {
   ArrowLeft,
@@ -30,16 +22,23 @@ import {
 import { useState } from "react";
 
 import { StorageProviderIcon, storageProviderLabel } from "../components/StorageProviderIcon.tsx";
-import type { usePlakk } from "../hooks/usePlakk.ts";
+import type { WebAppModel } from "../App.tsx";
 import { storageState } from "../lib/storageState.ts";
+
+const {
+  Row: SettingsRow,
+  RowIcon: SettingsRowIcon,
+  RowMain: SettingsRowMain,
+  RowText: SettingsRowText,
+  Section: SettingsSection,
+  SectionBody: SettingsSectionBody,
+  SectionTitle: SettingsSectionTitle,
+} = SettingsUI;
 
 const messageFrom = (cause: unknown, fallback: string) =>
   cause instanceof Error && cause.message.trim() ? cause.message : fallback;
 
-export function Settings(props: {
-  readonly plakk: ReturnType<typeof usePlakk>;
-  readonly onBack: () => void;
-}) {
+export function Settings(props: { readonly plakk: WebAppModel; readonly onBack: () => void }) {
   const { plakk } = props;
   const [appearanceError, setAppearanceError] = useState<string | null>(null);
   const [storageError, setStorageError] = useState<string | null>(null);

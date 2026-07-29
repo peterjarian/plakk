@@ -1,9 +1,5 @@
-@import "tailwindcss" source("../..");
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-
-@source "../components";
-@source "../../../../apps/desktop/src/renderer";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -124,28 +120,5 @@
   }
   body {
     @apply bg-background text-foreground;
-  }
-}
-
-@layer utilities {
-  .scrollbar-hidden {
-    scrollbar-width: none;
-  }
-
-  .scrollbar-hidden::-webkit-scrollbar {
-    display: none;
-  }
-
-  .drag-region {
-    -webkit-app-region: drag;
-  }
-
-  .drag-region button,
-  .drag-region input,
-  .drag-region textarea,
-  .drag-region select,
-  .drag-region a,
-  .drag-region label {
-    -webkit-app-region: no-drag;
   }
 }

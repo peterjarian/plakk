@@ -1,19 +1,34 @@
 import {
   deriveSnippetPresentation,
   isTextSnippetFileName,
+  type LocalContentAvailability,
   type SnippetPresentation,
 } from "@plakk/shared";
-import type { SnippetRowItem } from "@plakk/ui/components/SnippetRow";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { DesktopSnippet } from "../../ipc/contracts.ts";
 import { useLocalState } from "./useLocalState.tsx";
 
-export type SnippetReadModel = SnippetRowItem & {
+export type SnippetReadModel = {
+  readonly id: string;
+  readonly fileName: string;
+  readonly byteSize: number;
+  readonly createdAt: string;
+  readonly kind: "LOCAL" | "PUBLISHED";
+  readonly localState: null | {
+    readonly status: "UPLOADING" | "FAILED";
+    readonly errorMessage: string | null;
+  };
+  readonly localContentAvailability: LocalContentAvailability;
   readonly localTextPreview: string | null;
   readonly presentation: SnippetPresentation;
   readonly thumbnailUrl: string | null;
 };
+
+type SnippetRowReadModel = Omit<
+  SnippetReadModel,
+  "localTextPreview" | "presentation" | "thumbnailUrl"
+>;
 
 export const projectSnippetReadModels = (
   replicaItems: ReadonlyArray<DesktopSnippet>,
@@ -32,15 +47,13 @@ export const projectSnippetReadModels = (
       fileName: snippet.fileName,
       ...(localTextPreview === null ? {} : { content: localTextPreview }),
     });
-    const row: SnippetRowItem =
+    const row: SnippetRowReadModel =
       snippet.status === "PUBLISHED"
         ? {
             id: snippet.id,
             fileName: snippet.fileName,
             byteSize: snippet.byteSize,
-            storageProvider: snippet.storageProvider,
             createdAt: snippet.createdAt,
-            updatedAt: snippet.updatedAt,
             kind: "PUBLISHED",
             localState: null,
             localContentAvailability: snippet.localContentAvailability,
@@ -49,9 +62,7 @@ export const projectSnippetReadModels = (
             id: snippet.id,
             fileName: snippet.fileName,
             byteSize: snippet.byteSize,
-            storageProvider: snippet.storageProvider,
             createdAt: snippet.createdAt,
-            updatedAt: snippet.updatedAt,
             kind: "LOCAL",
             localState: {
               status: snippet.status === "FAILED" ? "FAILED" : "UPLOADING",

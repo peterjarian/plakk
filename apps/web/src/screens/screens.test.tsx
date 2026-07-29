@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import type { usePlakk } from "../hooks/usePlakk.ts";
+import type { WebAppModel } from "../App.tsx";
 import { Home } from "./Home.tsx";
 import { Welcome } from "./Welcome.tsx";
 
@@ -56,7 +56,7 @@ const plakk = {
   copySnippet: vi.fn(),
   downloadSnippet: vi.fn(),
   openExternal: vi.fn(),
-} as unknown as ReturnType<typeof usePlakk>;
+} as unknown as WebAppModel;
 
 describe("web screens", () => {
   it("renders the WorkOS entry surface while signed out", () => {
@@ -110,7 +110,7 @@ describe("web screens", () => {
           externalDestinationUrl: "https://drive.google.com/drive/folders/plakk",
         },
       },
-    } as ReturnType<typeof usePlakk>;
+    } as WebAppModel;
     const markup = renderToStaticMarkup(<Home plakk={blocked} onSettings={vi.fn()} />);
 
     expect(markup).toContain("Sync is paused until billing is resolved.");

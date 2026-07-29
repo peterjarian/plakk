@@ -1,4 +1,4 @@
-import { Button } from "@plakk/ui/components/primitives/button";
+import { Button } from "@plakk/ui/primitives/button";
 import { ArrowUpRight } from "lucide-react";
 
 export function Welcome(props: {

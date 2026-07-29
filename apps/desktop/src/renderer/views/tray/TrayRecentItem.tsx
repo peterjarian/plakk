@@ -1,5 +1,5 @@
 import { SnippetRow } from "@plakk/ui/components/SnippetRow";
-import { Button } from "@plakk/ui/components/primitives/button";
+import { Button } from "@plakk/ui/primitives/button";
 
 import type { SnippetReadModel } from "../../hooks/useSnippets.ts";
 

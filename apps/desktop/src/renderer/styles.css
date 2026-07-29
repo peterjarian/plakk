@@ -1,0 +1,27 @@
+@import "tailwindcss" source(".");
+@import "@plakk/ui/foundation.css";
+
+@source "../../../../packages/ui/src";
+
+@layer utilities {
+  .scrollbar-hidden {
+    scrollbar-width: none;
+  }
+
+  .scrollbar-hidden::-webkit-scrollbar {
+    display: none;
+  }
+
+  .drag-region {
+    -webkit-app-region: drag;
+  }
+
+  .drag-region button,
+  .drag-region input,
+  .drag-region textarea,
+  .drag-region select,
+  .drag-region a,
+  .drag-region label {
+    -webkit-app-region: no-drag;
+  }
+}

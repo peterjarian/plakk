@@ -1,4 +1,4 @@
-import { Button } from "@plakk/ui/components/primitives/button";
+import { Button } from "@plakk/ui/primitives/button";
 import { cn } from "@plakk/ui/lib/utils";
 import { Paperclip } from "lucide-react";
 import { useState } from "react";

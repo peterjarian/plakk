@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { HeadContent, Outlet, Scripts, createRootRoute } from "@tanstack/react-router";
 import { getAuth } from "@workos/authkit-tanstack-react-start";
 import { AuthKitProvider } from "@workos/authkit-tanstack-react-start/client";
-import { TooltipProvider } from "@plakk/ui/components/primitives/tooltip";
+import { TooltipProvider } from "@plakk/ui/primitives/tooltip";
 
 import appCss from "../styles.css?url";
 
