@@ -10,17 +10,21 @@ This is upload-path work, not UI polish.
 
 ### Problems
 
-- Adding snippets on web never completes successfully.
+- A snippet added on web appears locally as `Uploading` indefinitely.
+- The upload never publishes, so the snippet does not appear on other clients.
+- Refreshing the web app changes the abandoned local upload to `Upload interrupted`.
 
 ### Scope
 
-- Reproduce the failure through the existing web add controls.
-- Trace the existing upload path from the browser source through provider transfer
-  and Snippet publication.
+- Trace the existing upload after its local record is created, through provider
+  transfer and Snippet publication.
+- Find why the background upload neither completes nor reaches a terminal failure
+  before the page is refreshed.
 - Fix the root cause without introducing a separate web upload architecture.
 
 ### Acceptance criteria
 
 - The existing web add controls publish a Snippet successfully.
 - The published Snippet synchronizes to another client.
+- An upload never remains in `Uploading` indefinitely.
 - A failed upload reports an actionable product error.
