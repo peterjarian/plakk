@@ -37,13 +37,11 @@ export function useClientRuntime(user: User | null) {
     setLoading(true);
     setRuntimeError(null);
     setSnapshot(null);
-    const lockAbort = new AbortController();
     let runtime: ClientResource["runtime"] | null = null;
     const runtimeChannel = new BroadcastChannel(runtimeChannelNameFor(user.id));
     runtimeChannel.addEventListener("message", (event) => {
       if (event.data?.type !== "release" || event.data.sourceTabId === tabIdRef.current) return;
       active = false;
-      lockAbort.abort();
       const acquiredRuntime = runtime;
       runtime = null;
       if (resourceRef.current?.runtime === acquiredRuntime) resourceRef.current = null;
@@ -57,43 +55,39 @@ export function useClientRuntime(user: User | null) {
     });
 
     void navigator.locks
-      .request(
-        databaseLockNameFor(user.id),
-        { ifAvailable: true, signal: lockAbort.signal },
-        async (lock) => {
-          if (lock === null) {
-            if (active) {
-              setLoading(false);
-              setRuntimeError("Plakk is already open in another browser tab.");
-            }
-            return;
+      .request(databaseLockNameFor(user.id), { ifAvailable: true }, async (lock) => {
+        if (lock === null) {
+          if (active) {
+            setLoading(false);
+            setRuntimeError("Plakk is already open in another browser tab.");
           }
-          if (!active) return;
-          const acquiredRuntime = makeClientRuntime(user, () => getAccessTokenRef.current());
-          runtime = acquiredRuntime;
-          try {
-            await acquiredRuntime.runPromise(
-              Effect.gen(function* () {
-                const client = yield* Client;
-                if (active) resourceRef.current = { client, runtime: acquiredRuntime };
-                yield* client.subscribe().pipe(
-                  Stream.runForEach((next) =>
-                    Effect.sync(() => {
-                      if (!active) return;
-                      setSnapshot(next);
-                      setLoading(false);
-                    }),
-                  ),
-                );
-              }),
-            );
-          } finally {
-            if (resourceRef.current?.runtime === acquiredRuntime) resourceRef.current = null;
-            if (runtime === acquiredRuntime) runtime = null;
-            await acquiredRuntime.dispose();
-          }
-        },
-      )
+          return;
+        }
+        if (!active) return;
+        const acquiredRuntime = makeClientRuntime(user, () => getAccessTokenRef.current());
+        runtime = acquiredRuntime;
+        try {
+          await acquiredRuntime.runPromise(
+            Effect.gen(function* () {
+              const client = yield* Client;
+              if (active) resourceRef.current = { client, runtime: acquiredRuntime };
+              yield* client.subscribe().pipe(
+                Stream.runForEach((next) =>
+                  Effect.sync(() => {
+                    if (!active) return;
+                    setSnapshot(next);
+                    setLoading(false);
+                  }),
+                ),
+              );
+            }),
+          );
+        } finally {
+          if (resourceRef.current?.runtime === acquiredRuntime) resourceRef.current = null;
+          if (runtime === acquiredRuntime) runtime = null;
+          await acquiredRuntime.dispose();
+        }
+      })
       .catch((cause) => {
         if (!active) return;
         setLoading(false);
@@ -102,7 +96,6 @@ export function useClientRuntime(user: User | null) {
 
     return () => {
       active = false;
-      lockAbort.abort();
       runtimeChannel.close();
       const acquiredRuntime = runtime;
       if (acquiredRuntime !== null) {
