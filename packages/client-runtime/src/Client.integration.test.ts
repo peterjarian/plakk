@@ -48,17 +48,16 @@ type RpcOverrides = Partial<Record<keyof RpcClient["Service"], unknown>>;
 type SnapshotInput = Parameters<RpcClient["Service"]["GetSnippetSnapshot"]>[0];
 type PrepareUploadInput = Parameters<RpcClient["Service"]["PrepareSnippetUpload"]>[0];
 type PublishInput = Parameters<RpcClient["Service"]["PublishSnippet"]>[0];
-type PrepareDownloadInput = Parameters<RpcClient["Service"]["PrepareSnippetDownload"]>[0];
 
 const makeRpc = (overrides: RpcOverrides = {}): RpcClient["Service"] =>
   RpcClient.of({
     BeginStorageProviderLink: () => Effect.die("not used"),
     DeleteSnippet: () => Effect.void,
+    DownloadSnippetContent: () => Stream.die("not used"),
     GetAccountStatus: () => Effect.die("not used"),
     GetSnippetSnapshot: () => Effect.succeed([]),
     GetStorageProviderStatus: () => Effect.die("not used"),
     Ping: () => Effect.die("not used"),
-    PrepareSnippetDownload: () => Effect.die("not used"),
     PrepareSnippetUpload: () => Effect.die("not used"),
     PublishSnippet: () => Effect.die("not used"),
     UnlinkStorageProvider: () => Effect.die("not used"),
@@ -710,8 +709,8 @@ describe("shared client integration", () => {
     const layer = makeLayer(
       makeRpc({
         GetSnippetSnapshot: () => Effect.succeed([published]),
-        PrepareSnippetDownload: () =>
-          Effect.fail(
+        DownloadSnippetContent: () =>
+          Stream.fail(
             new OfflineError({
               message: "The test client is offline.",
             }),
@@ -735,15 +734,9 @@ describe("shared client integration", () => {
     const layer = makeLayer(
       makeRpc({
         GetSnippetSnapshot: () => Effect.succeed([published]),
-        PrepareSnippetDownload: () =>
-          Effect.succeed({
-            storageProvider: published.storageProvider,
-            fileName: published.fileName,
-            byteSize: published.byteSize,
-            download: { url: "https://download.example/published", headers: [] },
-          }),
+        DownloadSnippetContent: () => Stream.succeed(bytes),
       }),
-      () => new Response(bytes, { status: 200 }),
+      undefined,
       { localContent: false },
     );
 
@@ -761,15 +754,9 @@ describe("shared client integration", () => {
     const layer = makeLayer(
       makeRpc({
         GetSnippetSnapshot: () => Effect.succeed([published]),
-        PrepareSnippetDownload: () =>
-          Effect.succeed({
-            storageProvider: published.storageProvider,
-            fileName: published.fileName,
-            byteSize: published.byteSize,
-            download: { url: "https://download.example/published", headers: [] },
-          }),
+        DownloadSnippetContent: () => Stream.succeed(new Uint8Array([1, 2, 3])),
       }),
-      () => new Response(new Uint8Array([1, 2, 3]), { status: 200 }),
+      undefined,
       { localContent: false },
     );
 
@@ -793,15 +780,9 @@ describe("shared client integration", () => {
     const layer = makeLayer(
       makeRpc({
         GetSnippetSnapshot: () => Effect.succeed([published]),
-        PrepareSnippetDownload: () =>
-          Effect.succeed({
-            storageProvider: published.storageProvider,
-            fileName: published.fileName,
-            byteSize: published.byteSize,
-            download: { url: "https://download.example/published", headers: [] },
-          }),
+        DownloadSnippetContent: () => Stream.succeed(new Uint8Array([1, 2, 3, 4, 5])),
       }),
-      () => new Response(new Uint8Array([1, 2, 3, 4, 5]), { status: 200 }),
+      undefined,
       { localContent: false },
     );
 
@@ -834,23 +815,11 @@ describe("shared client integration", () => {
         updatedAt: `2026-07-20T20:00:${String(index).padStart(2, "0")}.000Z`,
       }),
     );
-    const byId = new Map(snippets.map((snippet) => [snippet.id, snippet]));
     const layer = makeLayer(
       makeRpc({
         GetSnippetSnapshot: () => Effect.succeed(snippets),
-        PrepareSnippetDownload: ({ id }: PrepareDownloadInput) => {
-          const snippet = byId.get(id);
-          return snippet === undefined
-            ? Effect.die("missing test snippet")
-            : Effect.succeed({
-                storageProvider: snippet.storageProvider,
-                fileName: snippet.fileName,
-                byteSize: snippet.byteSize,
-                download: { url: `https://download.example/${id}`, headers: [] },
-              });
-        },
+        DownloadSnippetContent: () => Stream.succeed(new Uint8Array([1])),
       }),
-      () => new Response(new Uint8Array([1]), { status: 200 }),
     );
 
     return Effect.gen(function* () {

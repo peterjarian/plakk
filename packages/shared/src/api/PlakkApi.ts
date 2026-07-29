@@ -115,18 +115,6 @@ export const PublishSnippetPayloadSchema = Schema.Struct({
 
 export type PublishSnippetPayload = typeof PublishSnippetPayloadSchema.Type;
 
-export const PreparedSnippetDownloadSchema = Schema.Struct({
-  storageProvider: StorageProviderLiteral,
-  fileName: Schema.String,
-  byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-  download: Schema.Struct({
-    url: Schema.String,
-    headers: Schema.Array(Schema.Struct({ name: Schema.String, value: Schema.String })),
-  }),
-});
-
-export type PreparedSnippetDownload = typeof PreparedSnippetDownloadSchema.Type;
-
 export class CurrentUser extends Context.Service<CurrentUser, { readonly id: string }>()(
   "@plakk/shared/api/PlakkApi/CurrentUser",
 ) {}
@@ -206,10 +194,11 @@ export const SnippetRpcs = RpcGroup.make(
     success: ApiSnippetSchema,
     error: RpcError,
   }),
-  Rpc.make("PrepareSnippetDownload", {
+  Rpc.make("DownloadSnippetContent", {
     payload: { id: SnippetIdSchema },
-    success: PreparedSnippetDownloadSchema,
+    success: Schema.Uint8Array,
     error: RpcError,
+    stream: true,
   }),
   Rpc.make("DeleteSnippet", {
     payload: { id: SnippetIdSchema },

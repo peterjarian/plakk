@@ -10,6 +10,7 @@ import {
   type Snippet,
 } from "@plakk/client-runtime";
 import {
+  decodeSnippetText,
   decodeSnippetTextPreview,
   deriveSnippetPresentation,
   isTextSnippetFileName,
@@ -108,10 +109,13 @@ const projectSnippet = (snippet: Snippet, preview: string | undefined): ProductS
           errorMessage: snippet.status === "FAILED" ? snippet.errorMessage : null,
         },
   localContentAvailability: snippet.localContentAvailability,
-  presentation: deriveSnippetPresentation({
-    fileName: snippet.fileName,
-    ...(preview === undefined ? {} : { content: preview }),
-  }),
+  presentation:
+    preview === undefined && isTextSnippetFileName(snippet.fileName)
+      ? { type: "text", title: "Text snippet" }
+      : deriveSnippetPresentation({
+          fileName: snippet.fileName,
+          ...(preview === undefined ? {} : { content: preview }),
+        }),
 });
 
 const useAppearance = () => {
@@ -148,11 +152,14 @@ export function WebProduct() {
   getAccessTokenRef.current = accessToken.getAccessToken;
   const resourceRef = useRef<RuntimeResource | null>(null);
   const previewingRef = useRef(new Set<string>());
+  const previewFailuresRef = useRef(new Map<string, number>());
+  const previewRetryTimersRef = useRef(new Map<string, number>());
   const [snapshot, setSnapshot] = useState<ClientSnapshot | null>(null);
   const [previews, setPreviews] = useState<Record<string, string>>({});
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const [runtimeLoading, setRuntimeLoading] = useState(false);
   const [runtimeAttempt, setRuntimeAttempt] = useState(0);
+  const [previewRetryTick, setPreviewRetryTick] = useState(0);
   const appearance = useAppearance();
 
   const user: User | null =
@@ -181,6 +188,9 @@ export function WebProduct() {
     setSnapshot(null);
     setPreviews({});
     previewingRef.current.clear();
+    previewFailuresRef.current.clear();
+    for (const timer of previewRetryTimersRef.current.values()) window.clearTimeout(timer);
+    previewRetryTimersRef.current.clear();
     const lockAbort = new AbortController();
     let runtime: RuntimeResource["runtime"] | null = null;
     const runtimeChannel = new BroadcastChannel(runtimeChannelNameFor(user.id));
@@ -271,6 +281,8 @@ export function WebProduct() {
       active = false;
       lockAbort.abort();
       runtimeChannel.close();
+      for (const timer of previewRetryTimersRef.current.values()) window.clearTimeout(timer);
+      previewRetryTimersRef.current.clear();
       const acquiredRuntime = runtime;
       if (acquiredRuntime !== null) {
         if (resourceRef.current?.runtime === acquiredRuntime) resourceRef.current = null;
@@ -301,13 +313,31 @@ export function WebProduct() {
             collectBytes(resource.client.content.readRemote(snippet.id)).pipe(
               Effect.tap((bytes) =>
                 Effect.sync(() => {
+                  previewFailuresRef.current.delete(snippet.id);
+                  const retryTimer = previewRetryTimersRef.current.get(snippet.id);
+                  if (retryTimer !== undefined) window.clearTimeout(retryTimer);
+                  previewRetryTimersRef.current.delete(snippet.id);
                   const preview = decodeSnippetTextPreview(bytes);
                   if (preview !== null) {
                     setPreviews((current) => ({ ...current, [snippet.id]: preview }));
                   }
                 }),
               ),
-              Effect.catchCause(() => Effect.void),
+              Effect.catchCause(() =>
+                Effect.sync(() => {
+                  if (previewRetryTimersRef.current.has(snippet.id)) return;
+                  const failures = (previewFailuresRef.current.get(snippet.id) ?? 0) + 1;
+                  previewFailuresRef.current.set(snippet.id, failures);
+                  const timer = window.setTimeout(
+                    () => {
+                      previewRetryTimersRef.current.delete(snippet.id);
+                      setPreviewRetryTick((tick) => tick + 1);
+                    },
+                    Math.min(30_000, 1_000 * 2 ** Math.min(failures - 1, 5)),
+                  );
+                  previewRetryTimersRef.current.set(snippet.id, timer);
+                }),
+              ),
               Effect.ensuring(
                 Effect.sync(() => {
                   previewingRef.current.delete(snippet.id);
@@ -320,7 +350,7 @@ export function WebProduct() {
       .catch(() => {
         // Runtime disposal can interrupt an in-flight preview batch.
       });
-  }, [previews, snapshot]);
+  }, [previewRetryTick, previews, snapshot]);
 
   const withClient = useCallback(
     async <A,>(run: (resource: RuntimeResource) => Promise<A>): Promise<A> => {
@@ -468,10 +498,20 @@ export function WebProduct() {
       }
       onCopy={async (snippet) => {
         const text = previews[snippet.id];
-        if (text === undefined || !isTextSnippetFileName(snippet.fileName)) {
+        if (!isTextSnippetFileName(snippet.fileName)) {
           throw new Error("This snippet is not ready to copy.");
         }
-        await navigator.clipboard.writeText(text);
+        if (text !== undefined) {
+          await navigator.clipboard.writeText(text);
+          return;
+        }
+        ensureBufferable(snippet);
+        const content = readRemote(snippet.id).then((bytes) => {
+          const decoded = decodeSnippetText(bytes);
+          if (decoded === null) throw new Error("This snippet is not valid UTF-8 text.");
+          return new Blob([decoded], { type: "text/plain" });
+        });
+        await navigator.clipboard.write([new ClipboardItem({ "text/plain": content })]);
       }}
       onDownload={async (snippet) => {
         ensureBufferable(snippet);

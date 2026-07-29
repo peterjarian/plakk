@@ -358,6 +358,9 @@ function SettingsView(props: ProductAppProps & { readonly onBack: () => void }) 
 function HomeView(props: ProductAppProps & { readonly onSettings: () => void }) {
   const storage = storageState(props.capability);
   const blocked = storage.kind !== "connected" || !storage.canSync;
+  const billingBlocked =
+    props.capability.status === "ONLINE" &&
+    props.capability.account.blockedReasons.includes("billing");
   const [isDragging, setIsDragging] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -475,15 +478,23 @@ function HomeView(props: ProductAppProps & { readonly onSettings: () => void }) 
                 <span className="min-w-0 flex-1">
                   {props.capability.status === "OFFLINE"
                     ? "Offline — your saved snippet list remains available."
-                    : "Sync is paused until account storage is ready."}
+                    : billingBlocked
+                      ? "Sync is paused until billing is resolved."
+                      : "Sync is paused until account storage is ready."}
                 </span>
                 <Button
                   type="button"
                   variant="ghost"
                   size="xs"
-                  onClick={() => props.onOpenExternal("https://app.plakk.io/storage")}
+                  onClick={() =>
+                    props.onOpenExternal(
+                      billingBlocked
+                        ? "https://app.plakk.io/billing"
+                        : "https://app.plakk.io/storage",
+                    )
+                  }
                 >
-                  Finish setup
+                  {billingBlocked ? "Manage billing" : "Finish setup"}
                 </Button>
               </div>
             )}

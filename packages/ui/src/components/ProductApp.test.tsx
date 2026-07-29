@@ -86,4 +86,23 @@ describe("ProductApp", () => {
     expect(markup).not.toContain('aria-label="Copy"');
     expect(markup).toContain('aria-label="Download"');
   });
+
+  it("routes billing-blocked accounts to billing recovery", () => {
+    const markup = renderToStaticMarkup(
+      <ProductApp
+        {...props}
+        capability={{
+          ...props.capability,
+          account: {
+            ...props.capability.account,
+            canSync: false,
+            blockedReasons: ["billing"],
+          },
+        }}
+      />,
+    );
+
+    expect(markup).toContain("Sync is paused until billing is resolved.");
+    expect(markup).toContain("Manage billing");
+  });
 });

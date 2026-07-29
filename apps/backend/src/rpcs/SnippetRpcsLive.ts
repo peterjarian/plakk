@@ -75,28 +75,26 @@ const toApiSnippet = (snippet: SnippetRow): ApiSnippet => ({
   updatedAt: snippet.updatedAt.toISOString(),
 });
 
+const storageErrorToRpc = (error: StorageDownloadError): RpcError => {
+  switch (error._tag) {
+    case "StorageObjectNotFoundError":
+      return new RpcError({ code: "NOT_FOUND", message: error.message });
+    case "StorageNotConnectedError":
+    case "StorageNeedsReauthorizationError":
+      return new RpcError({ code: "FORBIDDEN", message: error.message });
+    case "StorageCredentialsError":
+      return new RpcError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
+    case "StorageProviderError":
+      return new RpcError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: `${error.storageProvider}: ${error.message}`,
+      });
+  }
+};
+
 const mapStorageErrorsToRpc = <A, R>(
   effect: Effect.Effect<A, StorageDownloadError, R>,
-): Effect.Effect<A, RpcError, R> =>
-  effect.pipe(
-    Effect.catchTags({
-      StorageObjectNotFoundError: (error) =>
-        Effect.fail(new RpcError({ code: "NOT_FOUND", message: error.message })),
-      StorageNotConnectedError: (error) =>
-        Effect.fail(new RpcError({ code: "FORBIDDEN", message: error.message })),
-      StorageNeedsReauthorizationError: (error) =>
-        Effect.fail(new RpcError({ code: "FORBIDDEN", message: error.message })),
-      StorageCredentialsError: (error) =>
-        Effect.fail(new RpcError({ code: "INTERNAL_SERVER_ERROR", message: error.message })),
-      StorageProviderError: (error) =>
-        Effect.fail(
-          new RpcError({
-            code: "INTERNAL_SERVER_ERROR",
-            message: `${error.storageProvider}: ${error.message}`,
-          }),
-        ),
-    }),
-  );
+): Effect.Effect<A, RpcError, R> => effect.pipe(Effect.mapError(storageErrorToRpc));
 
 const samePublication = (snippet: SnippetRow, input: PublishSnippetPayload) =>
   snippet.id === input.id &&
@@ -184,7 +182,7 @@ const getSnippetSnapshot = Effect.fn("SnippetRpcs.getSnapshot")(function* (
   return rows.map(toApiSnippet);
 });
 
-const prepareSnippetDownload = Effect.fn("SnippetRpcs.prepareDownload")(function* (
+const downloadSnippetContent = Effect.fn("SnippetRpcs.downloadContent")(function* (
   drizzle: DrizzleService,
   storage: StorageProvider["Service"],
   ownerWorkosUserId: string,
@@ -204,20 +202,14 @@ const prepareSnippetDownload = Effect.fn("SnippetRpcs.prepareDownload")(function
     });
   }
 
-  const download = yield* storage
-    .getDownloadTarget({
+  return storage
+    .downloadStream({
       storageProvider: snippet.storageProvider,
       storageObjectId: snippet.storageObjectId,
+      expectedByteSize: snippet.byteSize,
       workosUserId: ownerWorkosUserId,
     })
-    .pipe(mapStorageErrorsToRpc);
-
-  return {
-    storageProvider: snippet.storageProvider,
-    fileName: snippet.fileName,
-    byteSize: snippet.byteSize,
-    download,
-  };
+    .pipe(Stream.mapError(storageErrorToRpc));
 });
 
 const deleteSnippet = Effect.fn("SnippetRpcs.delete")(function* (
@@ -317,14 +309,15 @@ export const SnippetRpcsLive = Effect.gen(function* () {
           );
         }),
       ),
-    PrepareSnippetDownload: Effect.fn("rpc.PrepareSnippetDownload")(function* (input) {
-      const drizzle = yield* Drizzle;
-      const storage = yield* StorageProvider;
-      const currentUser = yield* CurrentUser;
-      return yield* prepareSnippetDownload(drizzle, storage, currentUser.id, input.id).pipe(
-        Effect.annotateSpans({ id: input.id }),
-      );
-    }),
+    DownloadSnippetContent: (input) =>
+      Stream.unwrap(
+        Effect.gen(function* () {
+          const drizzle = yield* Drizzle;
+          const storage = yield* StorageProvider;
+          const currentUser = yield* CurrentUser;
+          return yield* downloadSnippetContent(drizzle, storage, currentUser.id, input.id);
+        }).pipe(Effect.annotateSpans({ id: input.id })),
+      ),
     DeleteSnippet: Effect.fn("rpc.DeleteSnippet")(function* (input) {
       const drizzle = yield* Drizzle;
       const storage = yield* StorageProvider;

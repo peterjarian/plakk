@@ -56,7 +56,7 @@ const storageService = (
 ): StorageProvider["Service"] =>
   StorageProvider.of({
     deleteObject: () => Effect.void,
-    downloadObject: () => Effect.succeed(new Uint8Array()),
+    downloadStream: () => Stream.empty,
     ensureConnected: () => Effect.void,
     getDestinationUrl: () => Effect.succeed("https://drive.example/folder"),
     getLinkedProvider: () => Effect.succeed("GOOGLE_DRIVE"),
@@ -368,42 +368,41 @@ describe("complete Snippet snapshots", () => {
   });
 });
 
-describe("stored snippet download preparation", () => {
-  it("returns only durable metadata and a short-lived download target", async () => {
-    const stored = snippet();
-    const download = { url: "https://download.example/object", headers: [] };
-    const getDownloadTarget = vi.fn(() => Effect.succeed(download));
+describe("stored snippet content download", () => {
+  it("streams bytes through the backend without exposing provider credentials", async () => {
+    const bytes = new TextEncoder().encode("note");
+    const downloadStream = vi.fn(() => Stream.succeed(bytes));
 
     const result = await runSnippetEffect(
-      (rpcs) => rpcs.PrepareSnippetDownload({ id: stored.id }),
-      downloadDatabase([stored]),
-      storageService({ getDownloadTarget }),
+      (rpcs) =>
+        rpcs.DownloadSnippetContent({ id: publication.id }).pipe(
+          Stream.runCollect,
+          Effect.map((chunks) => Uint8Array.from(chunks.flatMap((chunk) => Array.from(chunk)))),
+        ),
+      downloadDatabase([snippet()]),
+      storageService({ downloadStream }),
     );
 
-    expect(result).toEqual({
-      storageProvider: "GOOGLE_DRIVE",
-      fileName: "note.txt",
-      byteSize: 4,
-      download,
-    });
-    expect(getDownloadTarget).toHaveBeenCalledWith({
+    expect(result).toEqual(bytes);
+    expect(downloadStream).toHaveBeenCalledWith({
       storageProvider: "GOOGLE_DRIVE",
       storageObjectId: "drive-object",
+      expectedByteSize: 4,
       workosUserId: currentUser.id,
     });
   });
 
-  it("does not resolve a download target when no uploaded object is available", async () => {
-    const getDownloadTarget = vi.fn(storageService().getDownloadTarget);
+  it("does not access storage when no uploaded object is available", async () => {
+    const downloadStream = vi.fn(storageService().downloadStream);
 
     await expect(
       runSnippetEffect(
-        (rpcs) => rpcs.PrepareSnippetDownload({ id: publication.id }),
+        (rpcs) => rpcs.DownloadSnippetContent({ id: publication.id }).pipe(Stream.runDrain),
         downloadDatabase([]),
-        storageService({ getDownloadTarget }),
+        storageService({ downloadStream }),
       ),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
-    expect(getDownloadTarget).not.toHaveBeenCalled();
+    expect(downloadStream).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -435,13 +434,13 @@ describe("stored snippet download preparation", () => {
       "GOOGLE_DRIVE: provider failed",
     ],
   ] as const)("maps %s to %s", async (storageError, code, message) => {
-    const getDownloadTarget = () => Effect.fail(storageError as StorageDownloadError);
+    const downloadStream = () => Stream.fail(storageError as StorageDownloadError);
 
     await expect(
       runSnippetEffect(
-        (rpcs) => rpcs.PrepareSnippetDownload({ id: publication.id }),
+        (rpcs) => rpcs.DownloadSnippetContent({ id: publication.id }).pipe(Stream.runDrain),
         downloadDatabase([snippet()]),
-        storageService({ getDownloadTarget }),
+        storageService({ downloadStream }),
       ),
     ).rejects.toMatchObject({ code, message });
   });

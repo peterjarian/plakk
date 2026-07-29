@@ -202,9 +202,9 @@ export class StorageProvider extends Context.Service<
     readonly getLinkedProvider: (
       workosUserId: string,
     ) => Effect.Effect<StorageProviderName | null, StorageCredentialsError>;
-    readonly downloadObject: (
+    readonly downloadStream: (
       input: Omit<DownloadStorageObjectInput, "accessToken"> & { readonly workosUserId: string },
-    ) => Effect.Effect<Uint8Array, StorageDownloadError>;
+    ) => Stream.Stream<Uint8Array, StorageDownloadError>;
     readonly getDownloadUrl: (
       input: Omit<GetStorageObjectUrlInput, "accessToken"> & { readonly workosUserId: string },
     ) => Effect.Effect<string, StorageDownloadError>;

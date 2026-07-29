@@ -1,8 +1,7 @@
-import type { RpcError } from "@plakk/shared/RpcError";
+import { RpcError } from "@plakk/shared/RpcError";
 import { OfflineError, SessionError } from "@plakk/shared/PlakkApi";
 import { Context, Effect, Layer, Option, Schema, Semaphore, Stream } from "effect";
-import { HttpClient, type HttpClientError, HttpClientRequest } from "effect/unstable/http";
-import type { RpcClientError } from "effect/unstable/rpc/RpcClientError";
+import { RpcClientError } from "effect/unstable/rpc/RpcClientError";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { CurrentSession } from "../CurrentSession.ts";
@@ -70,22 +69,6 @@ export class SnippetNotPublishedError extends Schema.TaggedErrorClass<SnippetNot
   },
 ) {}
 
-export class PreparedDownloadMismatchError extends Schema.TaggedErrorClass<PreparedDownloadMismatchError>()(
-  "PreparedDownloadMismatchError",
-  {
-    snippetId: Schema.String,
-    message: Schema.String,
-  },
-) {}
-
-export class DownloadRejectedError extends Schema.TaggedErrorClass<DownloadRejectedError>()(
-  "DownloadRejectedError",
-  {
-    status: Schema.Int,
-    message: Schema.String,
-  },
-) {}
-
 export class DownloadedContentMismatchError extends Schema.TaggedErrorClass<DownloadedContentMismatchError>()(
   "DownloadedContentMismatchError",
   {
@@ -98,12 +81,10 @@ export class DownloadedContentMismatchError extends Schema.TaggedErrorClass<Down
 
 export type ContentMirrorFailure =
   | ActionNotAllowedError
-  | DownloadRejectedError
   | DownloadedContentMismatchError
   | InvalidResponseError
   | LocalStorageError
   | OfflineError
-  | PreparedDownloadMismatchError
   | ServerUnavailableError
   | SessionError
   | SnippetConflictError
@@ -138,7 +119,6 @@ export class ContentMirror extends Context.Service<
     Effect.gen(function* () {
       const session = yield* CurrentSession;
       const rpc = yield* RpcClient;
-      const http = yield* HttpClient.HttpClient;
       const content = Option.getOrUndefined(yield* Effect.serviceOption(ContentStore));
       const sql = yield* SqlClient.SqlClient;
       const snippets = yield* SnippetStore;
@@ -188,17 +168,14 @@ export class ContentMirror extends Context.Service<
               message: "Plakk could not connect. Check your connection and try again.",
             });
 
-      /** Converts a storage HTTP failure without exposing its URL or response. */
-      const httpClientFailure = (
-        error: HttpClientError.HttpClientError,
-      ): InvalidResponseError | OfflineError =>
-        error.reason._tag === "TransportError"
-          ? new OfflineError({
-              message: "The download could not connect. Check your connection and try again.",
-            })
-          : new InvalidResponseError({
-              message: "The storage provider returned an unexpected response.",
-            });
+      /** Converts all declared and transport failures from a streaming RPC. */
+      const remoteRpcFailure = (
+        error: RpcError | RpcClientError | SessionError | OfflineError,
+      ): ContentMirrorFailure => {
+        if (Schema.is(RpcError)(error)) return rpcFailure(error);
+        if (Schema.is(SessionError)(error) || Schema.is(OfflineError)(error)) return error;
+        return rpcClientFailure(error);
+      };
 
       /** Commits local availability and immediately publishes the new snippet snapshot. */
       const updateContentStatus = Effect.fn("ContentMirror.updateContentStatus")(
@@ -220,36 +197,6 @@ export class ContentMirror extends Context.Service<
             ),
         }),
       );
-
-      /** Prepares, validates, and executes one storage-provider download. */
-      const executePreparedDownload = Effect.fn("ContentMirror.executePreparedDownload")(function* (
-        snippet: PublishedSnippet,
-      ) {
-        const prepared = yield* rpc.PrepareSnippetDownload({ id: snippet.id });
-        if (
-          prepared.storageProvider !== snippet.storageProvider ||
-          prepared.fileName !== snippet.fileName ||
-          prepared.byteSize !== snippet.byteSize
-        ) {
-          return yield* new PreparedDownloadMismatchError({
-            snippetId: snippet.id,
-            message: "The storage provider returned unexpected download metadata.",
-          });
-        }
-
-        let request = HttpClientRequest.get(prepared.download.url);
-        for (const header of prepared.download.headers) {
-          request = HttpClientRequest.setHeader(request, header.name, header.value);
-        }
-        const response = yield* http.execute(request);
-        if (response.status < 200 || response.status >= 300) {
-          return yield* new DownloadRejectedError({
-            status: response.status,
-            message: "The storage provider rejected the download.",
-          });
-        }
-        return response;
-      });
 
       /** Downloads and stores one already-resolved published snippet. */
       const downloadSnippet = Effect.fn("ContentMirror.downloadSnippet")(
@@ -279,37 +226,22 @@ export class ContentMirror extends Context.Service<
           const work = concurrency.withPermit(
             Effect.gen(function* () {
               yield* updateContentStatus(snippet.id, "DOWNLOADING", null);
-              const response = yield* executePreparedDownload(snippet);
-              yield* content.write(snippet.id, snippet.byteSize, response.stream);
+              const source = rpc
+                .DownloadSnippetContent({ id: snippet.id })
+                .pipe(Stream.mapError(remoteRpcFailure));
+              yield* content.write(snippet.id, snippet.byteSize, source);
               yield* updateContentStatus(snippet.id, "AVAILABLE", null);
             }),
           );
 
           return yield* work.pipe(
-            Effect.catchTags({
-              SessionError: retryLater,
-              OfflineError: retryLater,
-              RpcClientError: (error) => {
-                const failure = rpcClientFailure(error);
-                return failure._tag === "OfflineError" ? retryLater(failure) : fail(failure);
-              },
-              HttpClientError: (error) => {
-                const failure = httpClientFailure(error);
-                return failure._tag === "OfflineError" ? retryLater(failure) : fail(failure);
-              },
-              RpcError: (error) => {
-                const failure = rpcFailure(error);
-                return failure._tag === "SessionError" || failure._tag === "ServerUnavailableError"
-                  ? retryLater(failure)
-                  : fail(failure);
-              },
-              LocalStorageError: fail,
-              DownloadRejectedError: (error) =>
-                error.status === 408 || error.status === 429 || error.status >= 500
-                  ? retryLater(error)
-                  : fail(error),
-              PreparedDownloadMismatchError: fail,
-            }),
+            Effect.catch((error) =>
+              error._tag === "SessionError" ||
+              error._tag === "OfflineError" ||
+              error._tag === "ServerUnavailableError"
+                ? retryLater(error)
+                : fail(error),
+            ),
             Effect.onInterrupt(() =>
               retryLater(
                 new OfflineError({
@@ -370,7 +302,6 @@ export class ContentMirror extends Context.Service<
               });
             }
 
-            const response = yield* executePreparedDownload(snippet);
             let receivedByteSize = 0;
             const mismatch = () =>
               new DownloadedContentMismatchError({
@@ -379,7 +310,7 @@ export class ContentMirror extends Context.Service<
                 actualByteSize: receivedByteSize,
                 message: "The downloaded content size does not match the snippet.",
               });
-            return response.stream.pipe(
+            return rpc.DownloadSnippetContent({ id: snippet.id }).pipe(
               Stream.mapEffect((chunk) => {
                 receivedByteSize += chunk.byteLength;
                 return receivedByteSize > snippet.byteSize
@@ -387,7 +318,7 @@ export class ContentMirror extends Context.Service<
                   : Effect.succeed(chunk);
               }),
               Stream.mapError((error) =>
-                Schema.is(DownloadedContentMismatchError)(error) ? error : httpClientFailure(error),
+                Schema.is(DownloadedContentMismatchError)(error) ? error : remoteRpcFailure(error),
               ),
               Stream.concat(
                 Stream.fromEffect(
@@ -400,9 +331,6 @@ export class ContentMirror extends Context.Service<
           }).pipe(
             Effect.provideService(SqlClient.SqlClient, sql),
             Effect.catchTags({
-              HttpClientError: (error) => Effect.fail(httpClientFailure(error)),
-              RpcClientError: (error) => Effect.fail(rpcClientFailure(error)),
-              RpcError: (error) => Effect.fail(rpcFailure(error)),
               SchemaError: () =>
                 Effect.fail(
                   new LocalStorageError({
