@@ -249,6 +249,9 @@ export function WebProduct() {
           const preview = decodeSnippetTextPreview(bytes);
           if (preview !== null) setPreviews((current) => ({ ...current, [snippet.id]: preview }));
         })
+        .catch(() => {
+          // The generic text-snippet presentation remains if a preview cannot be read.
+        })
         .finally(() => previewingRef.current.delete(snippet.id));
     }
   }, [previews, snapshot]);
