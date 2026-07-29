@@ -1,16 +1,15 @@
+import { Button } from "@plakk/ui/components/primitives/button";
+import { cn } from "@plakk/ui/lib/utils";
 import { Paperclip } from "lucide-react";
 import { useState } from "react";
-
-import { cn } from "../lib/utils.ts";
-import { Button } from "./primitives/button.tsx";
 
 export function SnippetComposer(props: {
   readonly className?: string;
   readonly disabled?: boolean;
-  readonly onFiles: (files: FileList) => void;
   readonly onSubmit: (value: string) => void;
+  readonly onFiles: (files: FileList) => void;
 }) {
-  const { className, disabled = false, onFiles, onSubmit } = props;
+  const { className, disabled = false, onSubmit, onFiles } = props;
   const [value, setValue] = useState("");
   const trimmed = value.trim();
 
@@ -39,6 +38,7 @@ export function SnippetComposer(props: {
           onChange={(event) => setValue(event.target.value)}
         />
       </label>
+
       <Button
         render={<label />}
         variant="ghost"
@@ -46,7 +46,6 @@ export function SnippetComposer(props: {
         className={cn("cursor-pointer", disabled && "cursor-default")}
         toolTip="Attach files"
         aria-disabled={disabled}
-        nativeButton={false}
       >
         <Paperclip className="size-4" aria-hidden="true" />
         <span className="sr-only">Choose file</span>

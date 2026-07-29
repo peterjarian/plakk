@@ -1,4 +1,4 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { WebProduct } from "../product/WebProduct.tsx";
+import { App } from "../App.tsx";
 
-export const Route = createFileRoute("/")({ component: WebProduct });
+export const Route = createFileRoute("/")({ component: App });

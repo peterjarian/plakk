@@ -1,6 +1,6 @@
 import { Check, CloudOff, LoaderCircle, Pause } from "lucide-react";
 
-export type ProductSyncStatus = "CHECKING" | "CONNECTED" | "OFFLINE" | "PAUSED" | "RECONNECTING";
+export type SyncStatus = "CHECKING" | "CONNECTED" | "OFFLINE" | "PAUSED" | "RECONNECTING";
 
 const presentations = {
   CHECKING: { Icon: LoaderCircle, label: "Checking", className: "animate-spin" },
@@ -10,7 +10,7 @@ const presentations = {
   RECONNECTING: { Icon: LoaderCircle, label: "Reconnecting", className: "animate-spin" },
 } as const;
 
-export function SyncStatusIndicator({ status }: { readonly status: ProductSyncStatus }) {
+export function SyncStatusIndicator({ status }: { readonly status: SyncStatus }) {
   const { Icon, className, label } = presentations[status];
   return (
     <span className="flex items-center gap-1.5 text-xs text-muted-foreground">

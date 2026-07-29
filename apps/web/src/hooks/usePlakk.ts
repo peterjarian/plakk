@@ -14,19 +14,18 @@ import {
   decodeSnippetTextPreview,
   deriveSnippetPresentation,
   isTextSnippetFileName,
+  type StorageProvider,
   type User,
 } from "@plakk/shared";
 import { accountCanSyncWithConnection } from "@plakk/shared/PlakkApi";
-import {
-  ProductApp,
-  type ProductAppProps,
-  type ProductSnippet,
-} from "@plakk/ui/components/ProductApp";
+import type { SnippetRowItem } from "@plakk/ui/components/SnippetRow";
 import { useAuth, useAccessToken } from "@workos/authkit-tanstack-react-start/client";
 import { Effect, Layer, ManagedRuntime, Schema, Stream } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+import { useAppearance } from "./useAppearance.ts";
 
 const rpcUrl = import.meta.env.VITE_PLAKK_RPC_URL ?? "http://localhost:3100/api/rpc";
 const TEXT_PREVIEW_MAX_BYTES = 64 * 1024;
@@ -45,7 +44,7 @@ type RuntimeResource = {
 const messageFrom = (cause: unknown, fallback: string) =>
   cause instanceof Error && cause.message.trim() ? cause.message : fallback;
 
-const collectBytes = <E,>(stream: Stream.Stream<Uint8Array, E>) =>
+const collectBytes = <E>(stream: Stream.Stream<Uint8Array, E>) =>
   stream.pipe(
     Stream.runCollect,
     Effect.map((chunks) => {
@@ -90,7 +89,11 @@ const sweepTemporaryDownloads = async () => {
   }
 };
 
-const ensureBufferable = (snippet: Pick<ProductSnippet, "byteSize">) => {
+export type WebSnippet = SnippetRowItem & {
+  readonly presentation: ReturnType<typeof deriveSnippetPresentation>;
+};
+
+const ensureBufferable = (snippet: Pick<WebSnippet, "byteSize">) => {
   if (snippet.byteSize > BUFFERED_CONTENT_MAX_BYTES) {
     throw new Error("This snippet is too large to open in the browser.");
   }
@@ -101,7 +104,7 @@ const makeSqliteLayer = (databaseName: string) =>
     worker: Effect.acquireRelease(
       Effect.sync(
         () =>
-          new Worker(new URL("./sqlite-worker.ts", import.meta.url), {
+          new Worker(new URL("../runtime/sqlite-worker.ts", import.meta.url), {
             name: databaseName,
             type: "module",
           }),
@@ -110,7 +113,7 @@ const makeSqliteLayer = (databaseName: string) =>
     ),
   });
 
-const projectSnippet = (snippet: Snippet, preview: string | undefined): ProductSnippet => ({
+const projectSnippet = (snippet: Snippet, preview: string | undefined): WebSnippet => ({
   id: snippet.id,
   fileName: snippet.fileName,
   byteSize: snippet.byteSize,
@@ -135,34 +138,7 @@ const projectSnippet = (snippet: Snippet, preview: string | undefined): ProductS
         }),
 });
 
-const useAppearance = () => {
-  const [preference, setPreference] = useState<ProductAppProps["appearance"]>(() => {
-    if (typeof localStorage === "undefined") return "system";
-    const stored = localStorage.getItem("plakk-appearance");
-    return stored === "light" || stored === "dark" ? stored : "system";
-  });
-
-  useEffect(() => {
-    const media = window.matchMedia("(prefers-color-scheme: dark)");
-    const apply = () => {
-      const dark = preference === "dark" || (preference === "system" && media.matches);
-      document.documentElement.classList.toggle("dark", dark);
-    };
-    apply();
-    media.addEventListener("change", apply);
-    return () => media.removeEventListener("change", apply);
-  }, [preference]);
-
-  return {
-    preference,
-    set: async (next: ProductAppProps["appearance"]) => {
-      localStorage.setItem("plakk-appearance", next);
-      setPreference(next);
-    },
-  };
-};
-
-export function WebProduct() {
+export function usePlakk() {
   const auth = useAuth();
   const accessToken = useAccessToken();
   const tabIdRef = useRef(crypto.randomUUID());
@@ -394,7 +370,7 @@ export function WebProduct() {
   }, [previewRetryTick, previews, snapshot]);
 
   const withClient = useCallback(
-    async <A,>(run: (resource: RuntimeResource) => Promise<A>): Promise<A> => {
+    async <A>(run: (resource: RuntimeResource) => Promise<A>): Promise<A> => {
       const resource = resourceRef.current;
       if (resource === null) throw new Error("Plakk is still starting.");
       return run(resource);
@@ -411,7 +387,7 @@ export function WebProduct() {
   );
 
   const downloadRemote = useCallback(
-    (snippet: ProductSnippet) =>
+    (snippet: WebSnippet) =>
       withClient(async (resource) => {
         const root = await navigator.storage.getDirectory();
         const directory = await root.getDirectoryHandle("plakk-downloads", { create: true });
@@ -466,144 +442,138 @@ export function WebProduct() {
       ? capability.account.storageProvider
       : null;
 
-  return (
-    <ProductApp
-      appearance={appearance.preference}
-      capability={capability}
-      error={runtimeError ?? (accessToken.error === null ? null : accessToken.error.message)}
-      loading={auth.loading || runtimeLoading}
-      snippets={snippets}
-      syncStatus={snapshot?.syncStatus ?? null}
-      user={user}
-      onAppearanceChange={appearance.set}
-      onConnectStorage={(storageProvider) =>
-        withClient(async ({ client, runtime }) => {
-          const url = await runtime.runPromise(client.storage.beginLink(storageProvider));
-          window.location.assign(url);
-        })
-      }
-      onSignIn={() => {
-        window.location.href = "/api/auth/sign-in";
-      }}
-      onSignOut={() =>
-        (async () => {
-          try {
-            if (user !== null) {
-              const resource = resourceRef.current;
-              resourceRef.current = null;
-              if (resource !== null) await resource.runtime.dispose();
+  return {
+    appearance: appearance.preference,
+    capability,
+    error: runtimeError ?? (accessToken.error === null ? null : accessToken.error.message),
+    loading: auth.loading || runtimeLoading,
+    snippets,
+    syncStatus: snapshot?.syncStatus ?? null,
+    user,
+    changeAppearance: appearance.set,
+    connectStorage: (storageProvider: StorageProvider) =>
+      withClient(async ({ client, runtime }) => {
+        const url = await runtime.runPromise(client.storage.beginLink(storageProvider));
+        window.location.assign(url);
+      }),
+    signIn: () => {
+      window.location.href = "/api/auth/sign-in";
+    },
+    signOut: async () => {
+      try {
+        if (user !== null) {
+          const resource = resourceRef.current;
+          resourceRef.current = null;
+          if (resource !== null) await resource.runtime.dispose();
 
-              const runtimeChannel = new BroadcastChannel(runtimeChannelNameFor(user.id));
-              runtimeChannel.postMessage({
-                type: "release",
-                sourceTabId: tabIdRef.current,
-              });
-              runtimeChannel.close();
+          const runtimeChannel = new BroadcastChannel(runtimeChannelNameFor(user.id));
+          runtimeChannel.postMessage({
+            type: "release",
+            sourceTabId: tabIdRef.current,
+          });
+          runtimeChannel.close();
 
-              await navigator.locks.request(databaseLockNameFor(user.id), async () => {
-                await Effect.runPromise(
-                  clearClientMetadata(user.id).pipe(
-                    Effect.provide(makeSqliteLayer(databaseNameFor(user.id))),
-                  ),
-                );
-              });
-            }
-          } finally {
-            await auth.signOut({ returnTo: "/" });
-          }
-        })()
+          await navigator.locks.request(databaseLockNameFor(user.id), async () => {
+            await Effect.runPromise(
+              clearClientMetadata(user.id).pipe(
+                Effect.provide(makeSqliteLayer(databaseNameFor(user.id))),
+              ),
+            );
+          });
+        }
+      } finally {
+        await auth.signOut({ returnTo: "/" });
       }
-      onRefresh={() => {
-        const resource = resourceRef.current;
-        if (resource === null) {
-          setRuntimeAttempt((attempt) => attempt + 1);
-          return Promise.resolve();
-        }
-        return resource.runtime.runPromise(resource.client.refresh);
-      }}
-      onText={async (text) => {
-        if (provider === null) throw new Error("Connect storage before adding snippets.");
-        const bytes = new TextEncoder().encode(text);
-        if (bytes.byteLength > BUFFERED_CONTENT_MAX_BYTES) {
-          throw new Error("Web snippets cannot be larger than 64 MiB.");
-        }
-        const id = crypto.randomUUID();
-        await withClient(({ client, runtime }) =>
-          runtime.runPromise(
-            client.uploads.upload(
-              {
-                id,
-                fileName: `${id}.txt`,
-                byteSize: bytes.byteLength,
-                mediaType: "text/plain; charset=utf-8",
-                storageProvider: provider,
-              },
-              {
-                read: (offset, byteSize) => Effect.succeed(bytes.slice(offset, offset + byteSize)),
-              },
-            ),
+    },
+    refresh: () => {
+      const resource = resourceRef.current;
+      if (resource === null) {
+        setRuntimeAttempt((attempt) => attempt + 1);
+        return Promise.resolve();
+      }
+      return resource.runtime.runPromise(resource.client.refresh);
+    },
+    addText: async (text: string) => {
+      if (provider === null) throw new Error("Connect storage before adding snippets.");
+      const bytes = new TextEncoder().encode(text);
+      if (bytes.byteLength > BUFFERED_CONTENT_MAX_BYTES) {
+        throw new Error("Web snippets cannot be larger than 64 MiB.");
+      }
+      const id = crypto.randomUUID();
+      await withClient(({ client, runtime }) =>
+        runtime.runPromise(
+          client.uploads.upload(
+            {
+              id,
+              fileName: `${id}.txt`,
+              byteSize: bytes.byteLength,
+              mediaType: "text/plain; charset=utf-8",
+              storageProvider: provider,
+            },
+            {
+              read: (offset, byteSize) => Effect.succeed(bytes.slice(offset, offset + byteSize)),
+            },
           ),
-        );
-      }}
-      onFiles={async (files) => {
-        if (provider === null) throw new Error("Connect storage before adding snippets.");
-        await Promise.all(
-          files.map((file) =>
-            withClient(({ client, runtime }) =>
-              runtime.runPromise(
-                client.uploads.upload(
-                  {
-                    id: crypto.randomUUID(),
-                    fileName: file.name,
-                    byteSize: file.size,
-                    mediaType: file.type || null,
-                    storageProvider: provider,
-                  },
-                  {
-                    read: (offset, byteSize) =>
-                      Effect.tryPromise(() =>
-                        file
-                          .slice(offset, offset + byteSize)
-                          .arrayBuffer()
-                          .then((buffer) => new Uint8Array(buffer)),
-                      ),
-                  },
-                ),
+        ),
+      );
+    },
+    addFiles: async (files: ReadonlyArray<File>) => {
+      if (provider === null) throw new Error("Connect storage before adding snippets.");
+      await Promise.all(
+        files.map((file) =>
+          withClient(({ client, runtime }) =>
+            runtime.runPromise(
+              client.uploads.upload(
+                {
+                  id: crypto.randomUUID(),
+                  fileName: file.name,
+                  byteSize: file.size,
+                  mediaType: file.type || null,
+                  storageProvider: provider,
+                },
+                {
+                  read: (offset, byteSize) =>
+                    Effect.tryPromise(() =>
+                      file
+                        .slice(offset, offset + byteSize)
+                        .arrayBuffer()
+                        .then((buffer) => new Uint8Array(buffer)),
+                    ),
+                },
               ),
             ),
           ),
-        );
-      }}
-      onDelete={(snippet) =>
-        withClient(({ client, runtime }) =>
-          runtime.runPromise(
-            snippet.kind === "LOCAL"
-              ? client.snippets.dismissFailedUpload(snippet.id)
-              : client.snippets.delete(snippet.id),
-          ),
-        )
+        ),
+      );
+    },
+    deleteSnippet: (snippet: WebSnippet) =>
+      withClient(({ client, runtime }) =>
+        runtime.runPromise(
+          snippet.kind === "LOCAL"
+            ? client.snippets.dismissFailedUpload(snippet.id)
+            : client.snippets.delete(snippet.id),
+        ),
+      ),
+    copySnippet: async (snippet: WebSnippet) => {
+      const text = previews[snippet.id];
+      if (!isTextSnippetFileName(snippet.fileName)) {
+        throw new Error("This snippet is not ready to copy.");
       }
-      onCopy={async (snippet) => {
-        const text = previews[snippet.id];
-        if (!isTextSnippetFileName(snippet.fileName)) {
-          throw new Error("This snippet is not ready to copy.");
-        }
-        if (text !== undefined) {
-          await navigator.clipboard.writeText(text);
-          return;
-        }
-        ensureBufferable(snippet);
-        const content = readRemote(snippet.id).then((bytes) => {
-          const decoded = decodeSnippetText(bytes);
-          if (decoded === null) throw new Error("This snippet is not valid UTF-8 text.");
-          return new Blob([decoded], { type: "text/plain" });
-        });
-        await navigator.clipboard.write([new ClipboardItem({ "text/plain": content })]);
-      }}
-      onDownload={downloadRemote}
-      onOpenExternal={(url) => {
-        window.open(url, "_blank", "noopener,noreferrer");
-      }}
-    />
-  );
+      if (text !== undefined) {
+        await navigator.clipboard.writeText(text);
+        return;
+      }
+      ensureBufferable(snippet);
+      const content = readRemote(snippet.id).then((bytes) => {
+        const decoded = decodeSnippetText(bytes);
+        if (decoded === null) throw new Error("This snippet is not valid UTF-8 text.");
+        return new Blob([decoded], { type: "text/plain" });
+      });
+      await navigator.clipboard.write([new ClipboardItem({ "text/plain": content })]);
+    },
+    downloadSnippet: downloadRemote,
+    openExternal: (url: string) => {
+      window.open(url, "_blank", "noopener,noreferrer");
+    },
+  };
 }

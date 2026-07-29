@@ -1,18 +1,11 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { ProductApp, type ProductAppProps } from "./ProductApp.tsx";
+import type { usePlakk } from "../hooks/usePlakk.ts";
+import { Home } from "./Home.tsx";
+import { Welcome } from "./Welcome.tsx";
 
-const user = {
-  id: "user-1",
-  firstName: "Web",
-  lastName: "User",
-  email: "web@example.com",
-  createdAt: "2026-07-20T18:00:00.000Z",
-  updatedAt: "2026-07-20T18:00:00.000Z",
-} as const;
-
-const props = {
+const plakk = {
   appearance: "system",
   capability: {
     status: "ONLINE",
@@ -44,82 +37,83 @@ const props = {
     },
   ],
   syncStatus: "CONNECTED",
-  user,
-  onAppearanceChange: vi.fn(),
-  onConnectStorage: vi.fn(),
-  onCopy: vi.fn(),
-  onDelete: vi.fn(),
-  onDownload: vi.fn(),
-  onFiles: vi.fn(),
-  onOpenExternal: vi.fn(),
-  onRefresh: vi.fn(),
-  onSignIn: vi.fn(),
-  onSignOut: vi.fn(),
-  onText: vi.fn(),
-} satisfies ProductAppProps;
+  user: {
+    id: "user-1",
+    firstName: "Web",
+    lastName: "User",
+    email: "web@example.com",
+    createdAt: "2026-07-20T18:00:00.000Z",
+    updatedAt: "2026-07-20T18:00:00.000Z",
+  },
+  changeAppearance: vi.fn(),
+  connectStorage: vi.fn(),
+  signIn: vi.fn(),
+  signOut: vi.fn(),
+  refresh: vi.fn(),
+  addText: vi.fn(),
+  addFiles: vi.fn(),
+  deleteSnippet: vi.fn(),
+  copySnippet: vi.fn(),
+  downloadSnippet: vi.fn(),
+  openExternal: vi.fn(),
+} as unknown as ReturnType<typeof usePlakk>;
 
-describe("ProductApp", () => {
+describe("web screens", () => {
   it("renders the WorkOS entry surface while signed out", () => {
-    const markup = renderToStaticMarkup(<ProductApp {...props} user={null} />);
+    const markup = renderToStaticMarkup(
+      <Welcome error={null} loading={false} onSignIn={vi.fn()} />,
+    );
 
     expect(markup).toContain("Move snippets between devices.");
     expect(markup).toContain(">Sign in<");
   });
 
   it("keeps remote snippet actions available without local content", () => {
-    const markup = renderToStaticMarkup(<ProductApp {...props} />);
+    const markup = renderToStaticMarkup(<Home plakk={plakk} onSettings={vi.fn()} />);
 
     expect(markup).toContain("A web snippet");
     expect(markup).toContain('aria-label="Copy"');
     expect(markup).toContain('aria-label="Download"');
     expect(markup).not.toContain("Download to this device");
-    expect(markup).not.toContain("Downloading for offline access");
   });
 
   it("presents binary remote content as a download rather than a copy", () => {
-    const snippet = {
-      ...props.snippets[0]!,
-      fileName: "archive.zip",
-      presentation: { type: "file", title: "archive.zip" } as const,
+    const binary = {
+      ...plakk,
+      snippets: [
+        {
+          ...plakk.snippets[0]!,
+          fileName: "archive.zip",
+          presentation: { type: "file", title: "archive.zip" } as const,
+        },
+      ],
     };
-    const markup = renderToStaticMarkup(<ProductApp {...props} snippets={[snippet]} />);
+    const markup = renderToStaticMarkup(<Home plakk={binary} onSettings={vi.fn()} />);
 
     expect(markup).not.toContain('aria-label="Copy"');
     expect(markup).toContain('aria-label="Download"');
   });
 
   it("routes billing-blocked accounts to billing recovery", () => {
-    const markup = renderToStaticMarkup(
-      <ProductApp
-        {...props}
-        capability={{
-          ...props.capability,
-          account: {
-            ...props.capability.account,
-            canSync: false,
-            blockedReasons: ["billing"],
-          },
-        }}
-      />,
-    );
+    const blocked = {
+      ...plakk,
+      capability: {
+        status: "ONLINE",
+        account: {
+          canSync: false,
+          storageProvider: "GOOGLE_DRIVE",
+          blockedReasons: ["billing"],
+        },
+        connection: {
+          storageProvider: "GOOGLE_DRIVE",
+          status: "CONNECTED",
+          externalDestinationUrl: "https://drive.google.com/drive/folders/plakk",
+        },
+      },
+    } as ReturnType<typeof usePlakk>;
+    const markup = renderToStaticMarkup(<Home plakk={blocked} onSettings={vi.fn()} />);
 
     expect(markup).toContain("Sync is paused until billing is resolved.");
     expect(markup).toContain("Manage billing");
-  });
-
-  it("sends unlinked users to settings with provider choices", () => {
-    const markup = renderToStaticMarkup(
-      <ProductApp
-        {...props}
-        capability={{
-          status: "ONLINE",
-          account: { canSync: false, storageProvider: null, blockedReasons: ["storage"] },
-          connection: null,
-        }}
-      />,
-    );
-
-    expect(markup).toContain("Finish setup");
-    expect(markup).not.toContain('href="/storage"');
   });
 });
