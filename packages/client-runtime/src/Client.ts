@@ -10,6 +10,7 @@ import {
   Cause,
   Context,
   Effect,
+  Fiber,
   Layer,
   Option,
   Schedule,
@@ -157,7 +158,7 @@ export const clientLive = Layer.effect(
       storageProvider: cachedStorageProvider,
     });
     yield* uploads.initialize;
-    yield* snippets.subscribe().pipe(
+    const contentReconcileFiber = yield* snippets.subscribe().pipe(
       Stream.map((snapshot) =>
         snapshot
           .filter(isPublishedSnippet)
@@ -181,7 +182,7 @@ export const clientLive = Layer.effect(
       ),
       Effect.forkScoped,
     );
-    yield* content.reconcile.pipe(
+    const periodicContentReconcileFiber = yield* content.reconcile.pipe(
       Effect.catchCause((cause) =>
         Effect.logWarning("Periodic local content reconciliation failed", {
           cause: Cause.pretty(cause),
@@ -190,7 +191,7 @@ export const clientLive = Layer.effect(
       Effect.repeat(Schedule.spaced("30 seconds")),
       Effect.forkScoped,
     );
-    yield* sync.run.pipe(Effect.forkScoped);
+    const syncFiber = yield* sync.run.pipe(Effect.forkScoped);
 
     /** Refreshes account capability and retains the provider for offline display. */
     const refresh = Effect.gen(function* () {
@@ -296,7 +297,7 @@ export const clientLive = Layer.effect(
         })),
       );
 
-    yield* sync.subscribe().pipe(
+    const capabilityRefreshFiber = yield* sync.subscribe().pipe(
       Stream.filter((status) => status === "CONNECTED"),
       Stream.runForEach(() =>
         refresh.pipe(
@@ -345,6 +346,12 @@ export const clientLive = Layer.effect(
 
     /** Removes all local snippet state after the platform has revoked commands. */
     const clearLocalData = Effect.gen(function* () {
+      yield* Fiber.interruptAll([
+        contentReconcileFiber,
+        periodicContentReconcileFiber,
+        syncFiber,
+        capabilityRefreshFiber,
+      ]);
       if (contentStore !== undefined) {
         const entries = yield* contentStore.entries;
         yield* contentStore.remove(entries.map((entry) => entry.snippetId));

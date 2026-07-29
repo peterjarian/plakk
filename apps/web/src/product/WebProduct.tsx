@@ -135,6 +135,7 @@ export function WebProduct() {
   const [previews, setPreviews] = useState<Record<string, string>>({});
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const [runtimeLoading, setRuntimeLoading] = useState(false);
+  const [runtimeAttempt, setRuntimeAttempt] = useState(0);
   const appearance = useAppearance();
 
   const user: User | null =
@@ -190,50 +191,63 @@ export function WebProduct() {
     );
     let runtime: RuntimeResource["runtime"] | null = null;
     void navigator.locks
-      .request("plakk:sqlite:plakk.sqlite", { signal: lockAbort.signal }, async () => {
-        if (!active) return;
-        const sqliteLayer = SqliteClient.layer({
-          worker: Effect.acquireRelease(
-            Effect.sync(
-              () =>
-                new Worker(new URL("./sqlite-worker.ts", import.meta.url), {
-                  name: `plakk-${user.id}`,
-                  type: "module",
-                }),
-            ),
-            (worker) => Effect.sync(() => worker.terminate()),
-          ),
-        });
-        const protocolLayer = RpcClient.layerProtocolHttp({ url: rpcUrl }).pipe(
-          Layer.provideMerge(FetchHttpClient.layer),
-          Layer.provideMerge(RpcSerialization.layerNdjson),
-        );
-        const acquiredRuntime = ManagedRuntime.make(
-          clientLayer.pipe(Layer.provide(Layer.mergeAll(sessionLayer, sqliteLayer, protocolLayer))),
-        );
-        runtime = acquiredRuntime;
-        try {
-          await acquiredRuntime.runPromise(
-            Effect.gen(function* () {
-              const client = yield* Client;
-              if (active) resourceRef.current = { client, runtime: acquiredRuntime };
-              yield* client.subscribe().pipe(
-                Stream.runForEach((next) =>
-                  Effect.sync(() => {
-                    if (!active) return;
-                    setSnapshot(next);
-                    setRuntimeLoading(false);
+      .request(
+        "plakk:sqlite:plakk.sqlite",
+        { ifAvailable: true, signal: lockAbort.signal },
+        async (lock) => {
+          if (lock === null) {
+            if (active) {
+              setRuntimeLoading(false);
+              setRuntimeError("Plakk is already open in another browser tab.");
+            }
+            return;
+          }
+          if (!active) return;
+          const sqliteLayer = SqliteClient.layer({
+            worker: Effect.acquireRelease(
+              Effect.sync(
+                () =>
+                  new Worker(new URL("./sqlite-worker.ts", import.meta.url), {
+                    name: `plakk-${user.id}`,
+                    type: "module",
                   }),
-                ),
-              );
-            }),
+              ),
+              (worker) => Effect.sync(() => worker.terminate()),
+            ),
+          });
+          const protocolLayer = RpcClient.layerProtocolHttp({ url: rpcUrl }).pipe(
+            Layer.provideMerge(FetchHttpClient.layer),
+            Layer.provideMerge(RpcSerialization.layerNdjson),
           );
-        } finally {
-          if (resourceRef.current?.runtime === acquiredRuntime) resourceRef.current = null;
-          if (runtime === acquiredRuntime) runtime = null;
-          await acquiredRuntime.dispose();
-        }
-      })
+          const acquiredRuntime = ManagedRuntime.make(
+            clientLayer.pipe(
+              Layer.provide(Layer.mergeAll(sessionLayer, sqliteLayer, protocolLayer)),
+            ),
+          );
+          runtime = acquiredRuntime;
+          try {
+            await acquiredRuntime.runPromise(
+              Effect.gen(function* () {
+                const client = yield* Client;
+                if (active) resourceRef.current = { client, runtime: acquiredRuntime };
+                yield* client.subscribe().pipe(
+                  Stream.runForEach((next) =>
+                    Effect.sync(() => {
+                      if (!active) return;
+                      setSnapshot(next);
+                      setRuntimeLoading(false);
+                    }),
+                  ),
+                );
+              }),
+            );
+          } finally {
+            if (resourceRef.current?.runtime === acquiredRuntime) resourceRef.current = null;
+            if (runtime === acquiredRuntime) runtime = null;
+            await acquiredRuntime.dispose();
+          }
+        },
+      )
       .catch((cause) => {
         if (!active) return;
         setRuntimeLoading(false);
@@ -249,33 +263,45 @@ export function WebProduct() {
         void acquiredRuntime.dispose();
       }
     };
-  }, [user?.id]);
+  }, [runtimeAttempt, user?.id]);
 
   useEffect(() => {
     const resource = resourceRef.current;
     if (resource === null || snapshot === null) return;
-    for (const snippet of snapshot.snippets) {
-      if (
-        snippet.status !== "PUBLISHED" ||
-        !isTextSnippetFileName(snippet.fileName) ||
-        snippet.byteSize > TEXT_PREVIEW_MAX_BYTES ||
-        previews[snippet.id] !== undefined ||
-        previewingRef.current.has(snippet.id)
-      ) {
-        continue;
-      }
+    const candidates = snapshot.snippets.filter(
+      (snippet) =>
+        snippet.status === "PUBLISHED" &&
+        isTextSnippetFileName(snippet.fileName) &&
+        snippet.byteSize <= TEXT_PREVIEW_MAX_BYTES &&
+        previews[snippet.id] === undefined &&
+        !previewingRef.current.has(snippet.id),
+    );
+    for (const snippet of candidates) {
       previewingRef.current.add(snippet.id);
-      void resource.runtime
-        .runPromise(collectBytes(resource.client.content.readRemote(snippet.id)))
-        .then((bytes) => {
-          const preview = decodeSnippetTextPreview(bytes);
-          if (preview !== null) setPreviews((current) => ({ ...current, [snippet.id]: preview }));
-        })
-        .catch(() => {
-          // The generic text-snippet presentation remains if a preview cannot be read.
-        })
-        .finally(() => previewingRef.current.delete(snippet.id));
     }
+    void resource.runtime.runPromise(
+      Effect.forEach(
+        candidates,
+        (snippet) =>
+          collectBytes(resource.client.content.readRemote(snippet.id)).pipe(
+            Effect.tap((bytes) =>
+              Effect.sync(() => {
+                const preview = decodeSnippetTextPreview(bytes);
+                if (preview !== null) {
+                  setPreviews((current) => ({ ...current, [snippet.id]: preview }));
+                }
+              }),
+            ),
+            Effect.catchCause(() => Effect.void),
+            Effect.ensuring(
+              Effect.sync(() => {
+                previewingRef.current.delete(snippet.id);
+              }),
+            ),
+          ),
+        { concurrency: 4, discard: true },
+      ),
+    );
   }, [previews, snapshot]);
 
   const withClient = useCallback(
@@ -336,7 +362,14 @@ export function WebProduct() {
           }
         })()
       }
-      onRefresh={() => withClient(({ client, runtime }) => runtime.runPromise(client.refresh))}
+      onRefresh={() => {
+        const resource = resourceRef.current;
+        if (resource === null) {
+          setRuntimeAttempt((attempt) => attempt + 1);
+          return Promise.resolve();
+        }
+        return resource.runtime.runPromise(resource.client.refresh);
+      }}
       onText={async (text) => {
         if (provider === null) throw new Error("Connect storage before adding snippets.");
         const bytes = new TextEncoder().encode(text);
