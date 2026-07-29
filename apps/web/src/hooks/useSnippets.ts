@@ -1,168 +1,295 @@
 import type { ClientSnapshot, Snippet } from "@plakk/client-runtime";
 import {
-  decodeSnippetText,
+  decodeSnippetTextPreview,
   deriveSnippetPresentation,
   isTextSnippetFileName,
-  type StorageProvider,
+  SNIPPET_TEXT_PREVIEW_MAX_BYTES,
+  type LocalContentAvailability,
+  type SnippetPresentation,
 } from "@plakk/shared";
-import { accountCanSyncWithConnection } from "@plakk/shared/PlakkApi";
-import type { SnippetRowData } from "@plakk/ui/components/SnippetRow";
-import { Effect, Stream } from "effect";
-import { useCallback, useEffect, useMemo } from "react";
+import { Effect } from "effect";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-import { downloadFile, sweepTemporaryDownloads } from "../lib/browserDownloads.ts";
-import { collectBytes, type RunClient } from "../runtime/client.ts";
-import { useSnippetPreviews } from "./useSnippetPreviews.ts";
+import type { RunClient } from "../runtime/client.ts";
+import { collectBytes } from "../runtime/client.ts";
 
-const BUFFERED_CONTENT_MAX_BYTES = 64 * 1024 * 1024;
+const TEXT_PREVIEW_LIMIT = 50;
 
-export type WebSnippet = SnippetRowData & {
+export type SnippetReadModel = {
   readonly id: string;
-  readonly storageProvider: StorageProvider;
-  readonly updatedAt: string;
-  readonly presentation: ReturnType<typeof deriveSnippetPresentation>;
+  readonly fileName: string;
+  readonly byteSize: number;
+  readonly createdAt: string;
+  readonly kind: "LOCAL" | "PUBLISHED";
+  readonly localState: null | {
+    readonly status: "UPLOADING" | "FAILED";
+    readonly errorMessage: string | null;
+  };
+  readonly localContentAvailability: LocalContentAvailability;
+  readonly localTextPreview: string | null;
+  readonly presentation: SnippetPresentation;
+  readonly thumbnailUrl: string | null;
 };
 
-const projectSnippet = (snippet: Snippet, preview: string | undefined): WebSnippet => ({
-  id: snippet.id,
-  fileName: snippet.fileName,
-  byteSize: snippet.byteSize,
-  storageProvider: snippet.storageProvider,
-  createdAt: snippet.createdAt,
-  updatedAt: snippet.updatedAt,
-  kind: snippet.status === "PUBLISHED" ? "PUBLISHED" : "LOCAL",
-  localState:
-    snippet.status === "PUBLISHED"
-      ? null
-      : {
-          status: snippet.status === "FAILED" ? "FAILED" : "UPLOADING",
-          errorMessage: snippet.status === "FAILED" ? snippet.errorMessage : null,
-        },
-  localContentAvailability: snippet.localContentAvailability,
-  presentation:
-    preview === undefined && isTextSnippetFileName(snippet.fileName)
-      ? { type: "text", title: "Text snippet" }
-      : deriveSnippetPresentation({
-          fileName: snippet.fileName,
-          ...(preview === undefined ? {} : { content: preview }),
-        }),
-});
+type SnippetRowReadModel = Omit<
+  SnippetReadModel,
+  "localTextPreview" | "presentation" | "thumbnailUrl"
+>;
 
-export function useSnippets(snapshot: ClientSnapshot | null, run: RunClient) {
-  const previews = useSnippetPreviews(snapshot, run);
+export const projectSnippetReadModels = (
+  snippets: ReadonlyArray<Snippet>,
+  textPreviews: Readonly<Record<string, string>>,
+  thumbnailUrls: Readonly<Record<string, string>>,
+): ReadonlyArray<SnippetReadModel> =>
+  snippets.flatMap((snippet) => {
+    const localTextPreview = textPreviews[snippet.id] ?? null;
+    if (
+      snippet.status === "PUBLISHED" &&
+      isTextSnippetFileName(snippet.fileName) &&
+      localTextPreview === null &&
+      snippet.localContentAvailability.status === "DOWNLOADING"
+    ) {
+      return [];
+    }
+    const presentation = deriveSnippetPresentation({
+      fileName: snippet.fileName,
+      ...(localTextPreview === null ? {} : { content: localTextPreview }),
+    });
+    const row: SnippetRowReadModel =
+      snippet.status === "PUBLISHED"
+        ? {
+            id: snippet.id,
+            fileName: snippet.fileName,
+            byteSize: snippet.byteSize,
+            createdAt: snippet.createdAt,
+            kind: "PUBLISHED",
+            localState: null,
+            localContentAvailability: snippet.localContentAvailability,
+          }
+        : {
+            id: snippet.id,
+            fileName: snippet.fileName,
+            byteSize: snippet.byteSize,
+            createdAt: snippet.createdAt,
+            kind: "LOCAL",
+            localState: {
+              status: snippet.status === "FAILED" ? "FAILED" : "UPLOADING",
+              errorMessage: snippet.status === "FAILED" ? snippet.errorMessage : null,
+            },
+            localContentAvailability: snippet.localContentAvailability,
+          };
+
+    return [
+      {
+        ...row,
+        localTextPreview,
+        presentation,
+        thumbnailUrl: thumbnailUrls[row.id] ?? null,
+      },
+    ];
+  });
+
+export const createImageUrlRegistry = () => {
+  const urls = new Map<string, string>();
+
+  return {
+    create(id: string, bytes: Uint8Array): string {
+      const existing = urls.get(id);
+      if (existing !== undefined) return existing;
+      const url = URL.createObjectURL(
+        new Blob([Uint8Array.from(bytes)], { type: "application/octet-stream" }),
+      );
+      urls.set(id, url);
+      return url;
+    },
+    has(id: string): boolean {
+      return urls.has(id);
+    },
+    retain(ids: ReadonlySet<string>): ReadonlyArray<string> {
+      const removed: Array<string> = [];
+      for (const [id, url] of urls) {
+        if (ids.has(id)) continue;
+        URL.revokeObjectURL(url);
+        urls.delete(id);
+        removed.push(id);
+      }
+      return removed;
+    },
+    dispose(): void {
+      for (const url of urls.values()) URL.revokeObjectURL(url);
+      urls.clear();
+    },
+  };
+};
+
+const useSnippetTextPreviews = (snapshot: ClientSnapshot | null, run: RunClient) => {
+  const previewingRef = useRef(new Set<string>());
+  const transientFailuresRef = useRef(new Map<string, number>());
+  const terminalFailuresRef = useRef(new Map<string, string>());
+  const retryTimersRef = useRef(new Map<string, number>());
+  const [previews, setPreviews] = useState<Record<string, string>>({});
+  const [retryTick, setRetryTick] = useState(0);
 
   useEffect(() => {
-    void sweepTemporaryDownloads().catch(() => {});
-  }, []);
+    setPreviews({});
+    previewingRef.current.clear();
+    transientFailuresRef.current.clear();
+    terminalFailuresRef.current.clear();
+    for (const timer of retryTimersRef.current.values()) window.clearTimeout(timer);
+    retryTimersRef.current.clear();
+  }, [snapshot?.user.id]);
 
-  const snippets = useMemo(
-    () => snapshot?.snippets.map((snippet) => projectSnippet(snippet, previews[snippet.id])) ?? [],
-    [previews, snapshot],
+  useEffect(() => {
+    if (snapshot === null) return;
+    const candidates = snapshot.snippets
+      .slice(0, TEXT_PREVIEW_LIMIT)
+      .filter(
+        (snippet) =>
+          snippet.status === "PUBLISHED" &&
+          isTextSnippetFileName(snippet.fileName) &&
+          snippet.byteSize <= SNIPPET_TEXT_PREVIEW_MAX_BYTES &&
+          previews[snippet.id] === undefined &&
+          terminalFailuresRef.current.get(snippet.id) !== snippet.updatedAt &&
+          !previewingRef.current.has(snippet.id),
+      );
+    for (const snippet of candidates) previewingRef.current.add(snippet.id);
+
+    void run((client) =>
+      Effect.forEach(
+        candidates,
+        (snippet) =>
+          collectBytes(client.content.readRemote(snippet.id)).pipe(
+            Effect.tap((bytes) =>
+              Effect.sync(() => {
+                transientFailuresRef.current.delete(snippet.id);
+                const retryTimer = retryTimersRef.current.get(snippet.id);
+                if (retryTimer !== undefined) window.clearTimeout(retryTimer);
+                retryTimersRef.current.delete(snippet.id);
+                const preview = decodeSnippetTextPreview(bytes);
+                if (preview === null) {
+                  terminalFailuresRef.current.set(snippet.id, snippet.updatedAt);
+                  return;
+                }
+                terminalFailuresRef.current.delete(snippet.id);
+                setPreviews((current) => ({ ...current, [snippet.id]: preview }));
+              }),
+            ),
+            Effect.catch((error) =>
+              error._tag === "OfflineError" || error._tag === "ServerUnavailableError"
+                ? Effect.sync(() => {
+                    if (retryTimersRef.current.has(snippet.id)) return;
+                    const failures = (transientFailuresRef.current.get(snippet.id) ?? 0) + 1;
+                    transientFailuresRef.current.set(snippet.id, failures);
+                    const timer = window.setTimeout(
+                      () => {
+                        retryTimersRef.current.delete(snippet.id);
+                        setRetryTick((tick) => tick + 1);
+                      },
+                      Math.min(30_000, 1_000 * 2 ** Math.min(failures - 1, 5)),
+                    );
+                    retryTimersRef.current.set(snippet.id, timer);
+                  })
+                : Effect.sync(() => {
+                    terminalFailuresRef.current.set(snippet.id, snippet.updatedAt);
+                  }),
+            ),
+            Effect.ensuring(
+              Effect.sync(() => {
+                previewingRef.current.delete(snippet.id);
+              }),
+            ),
+          ),
+        { concurrency: 4, discard: true },
+      ),
+    ).catch(() => {
+      // Runtime disposal can interrupt an in-flight preview batch.
+    });
+  }, [previews, retryTick, run, snapshot]);
+
+  useEffect(
+    () => () => {
+      for (const timer of retryTimersRef.current.values()) window.clearTimeout(timer);
+      retryTimersRef.current.clear();
+    },
+    [],
   );
-  const capability =
-    snapshot?.capability ??
-    ({
-      status: "OFFLINE",
-      storageProvider: { known: false, value: null },
-    } as const);
-  const provider =
-    capability.status === "ONLINE" &&
-    accountCanSyncWithConnection(capability.account, capability.connection)
-      ? capability.account.storageProvider
-      : null;
 
-  const readRemote = useCallback(
-    (snippetId: string) => run((client) => collectBytes(client.content.readRemote(snippetId))),
-    [run],
+  return previews;
+};
+
+const useSnippetImageUrls = (snippets: ReadonlyArray<Snippet>, run: RunClient) => {
+  const [thumbnailUrls, setThumbnailUrls] = useState<Record<string, string>>({});
+  const registryRef = useRef<ReturnType<typeof createImageUrlRegistry> | null>(null);
+  if (registryRef.current === null) registryRef.current = createImageUrlRegistry();
+  const loadingIdsRef = useRef(new Set<string>());
+  const visibleIdsRef = useRef(new Set<string>());
+
+  useEffect(() => {
+    const images = snippets.filter(
+      (snippet) =>
+        snippet.status === "PUBLISHED" &&
+        deriveSnippetPresentation({ fileName: snippet.fileName }).type === "image",
+    );
+    const visibleIds = new Set(images.map((snippet) => snippet.id));
+    visibleIdsRef.current = visibleIds;
+
+    const registry = registryRef.current;
+    if (registry === null) return;
+    const removedIds = registry.retain(visibleIds);
+    if (removedIds.length > 0) {
+      setThumbnailUrls((current) => {
+        const next = { ...current };
+        for (const id of removedIds) delete next[id];
+        return next;
+      });
+    }
+
+    for (const snippet of images) {
+      if (registry.has(snippet.id) || loadingIdsRef.current.has(snippet.id)) continue;
+      loadingIdsRef.current.add(snippet.id);
+      void run((client) => collectBytes(client.content.readRemote(snippet.id)))
+        .then((bytes) => {
+          if (!visibleIdsRef.current.has(snippet.id)) return;
+          const url = registry.create(snippet.id, bytes);
+          setThumbnailUrls((current) => ({ ...current, [snippet.id]: url }));
+        })
+        .catch(() => {
+          // The file icon remains visible if a thumbnail cannot be read.
+        })
+        .finally(() => loadingIdsRef.current.delete(snippet.id));
+    }
+  }, [run, snippets]);
+
+  useEffect(
+    () => () => {
+      visibleIdsRef.current.clear();
+      loadingIdsRef.current.clear();
+      registryRef.current?.dispose();
+    },
+    [],
+  );
+
+  return thumbnailUrls;
+};
+
+export function useSnippets(state: {
+  readonly error: string | null;
+  readonly loading: boolean;
+  readonly snapshot: ClientSnapshot | null;
+  readonly run: RunClient;
+  readonly refresh: () => Promise<void>;
+}) {
+  const textPreviews = useSnippetTextPreviews(state.snapshot, state.run);
+  const thumbnailUrls = useSnippetImageUrls(state.snapshot?.snippets ?? [], state.run);
+  const items = useMemo(
+    () => projectSnippetReadModels(state.snapshot?.snippets ?? [], textPreviews, thumbnailUrls),
+    [state.snapshot, textPreviews, thumbnailUrls],
   );
 
   return {
-    capability,
-    snippets,
-    syncStatus: snapshot?.syncStatus ?? null,
-    addText: async (text: string) => {
-      if (provider === null) throw new Error("Connect storage before adding snippets.");
-      const bytes = new TextEncoder().encode(text);
-      if (bytes.byteLength > BUFFERED_CONTENT_MAX_BYTES) {
-        throw new Error("Web snippets cannot be larger than 64 MiB.");
-      }
-      const id = crypto.randomUUID();
-      await run((client) =>
-        client.uploads.upload(
-          {
-            id,
-            fileName: `${id}.txt`,
-            byteSize: bytes.byteLength,
-            mediaType: "text/plain; charset=utf-8",
-            storageProvider: provider,
-          },
-          {
-            read: (offset, byteSize) => Effect.succeed(bytes.slice(offset, offset + byteSize)),
-          },
-        ),
-      );
-    },
-    addFiles: async (files: ReadonlyArray<File>) => {
-      if (provider === null) throw new Error("Connect storage before adding snippets.");
-      await Promise.all(
-        files.map((file) =>
-          run((client) =>
-            client.uploads.upload(
-              {
-                id: crypto.randomUUID(),
-                fileName: file.name,
-                byteSize: file.size,
-                mediaType: file.type || null,
-                storageProvider: provider,
-              },
-              {
-                read: (offset, byteSize) =>
-                  Effect.tryPromise(() =>
-                    file
-                      .slice(offset, offset + byteSize)
-                      .arrayBuffer()
-                      .then((buffer) => new Uint8Array(buffer)),
-                  ),
-              },
-            ),
-          ),
-        ),
-      );
-    },
-    deleteSnippet: (snippet: WebSnippet) =>
-      run((client) =>
-        snippet.kind === "LOCAL"
-          ? client.snippets.dismissFailedUpload(snippet.id)
-          : client.snippets.delete(snippet.id),
-      ),
-    copySnippet: async (snippet: WebSnippet) => {
-      const text = previews[snippet.id];
-      if (!isTextSnippetFileName(snippet.fileName)) {
-        throw new Error("This snippet is not ready to copy.");
-      }
-      if (text !== undefined) {
-        await navigator.clipboard.writeText(text);
-        return;
-      }
-      if (snippet.byteSize > BUFFERED_CONTENT_MAX_BYTES) {
-        throw new Error("This snippet is too large to open in the browser.");
-      }
-      const content = readRemote(snippet.id).then((bytes) => {
-        const decoded = decodeSnippetText(bytes);
-        if (decoded === null) throw new Error("This snippet is not valid UTF-8 text.");
-        return new Blob([decoded], { type: "text/plain" });
-      });
-      await navigator.clipboard.write([new ClipboardItem({ "text/plain": content })]);
-    },
-    downloadSnippet: (snippet: WebSnippet) =>
-      downloadFile(snippet.fileName, (write) =>
-        run((client) =>
-          client.content
-            .readRemote(snippet.id)
-            .pipe(
-              Stream.runForEach((chunk) => Effect.tryPromise(() => write(Uint8Array.from(chunk)))),
-            ),
-        ),
-      ),
+    error: state.error,
+    isLoading: state.loading,
+    items,
+    reload: state.refresh,
   };
 }

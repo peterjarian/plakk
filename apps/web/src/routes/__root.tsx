@@ -4,6 +4,7 @@ import { getAuth } from "@workos/authkit-tanstack-react-start";
 import { AuthKitProvider } from "@workos/authkit-tanstack-react-start/client";
 import { TooltipProvider } from "@plakk/ui/primitives/tooltip";
 
+import { ThemeProvider } from "../hooks/useTheme.tsx";
 import appCss from "../styles.css?url";
 
 export const Route = createRootRoute({
@@ -36,9 +37,11 @@ function RootComponent() {
   return (
     <RootDocument>
       <AuthKitProvider initialAuth={initialAuth}>
-        <TooltipProvider>
-          <Outlet />
-        </TooltipProvider>
+        <ThemeProvider storageKey="plakk-appearance">
+          <TooltipProvider>
+            <Outlet />
+          </TooltipProvider>
+        </ThemeProvider>
       </AuthKitProvider>
     </RootDocument>
   );
