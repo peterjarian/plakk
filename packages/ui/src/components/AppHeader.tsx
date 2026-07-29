@@ -1,33 +1,44 @@
 import type { ReactNode } from "react";
 import type { User } from "@plakk/shared";
 import { SettingsIcon } from "lucide-react";
-import { Avatar, AvatarFallback } from "./primitives/avatar.tsx";
+
+import { Avatar, AvatarFallback } from "../primitives/avatar.tsx";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "./primitives/dropdown-menu.tsx";
+} from "../primitives/dropdown-menu.tsx";
 import { getInitials } from "../lib/getInitials.ts";
 import { cn } from "../lib/utils.ts";
 
-export function AppHeader(props: {
+export type AppHeaderProps = {
   user: User;
   storageAction: ReactNode;
   statusIndicator?: ReactNode;
   className?: string;
-  onSettingsClick?: () => void;
-  onSignOutClick?: () => void;
-}) {
-  const { user, storageAction, statusIndicator, className, onSettingsClick, onSignOutClick } =
-    props;
+  onSettingsClick: () => void;
+  onSignOutClick: () => void;
+};
+
+export function AppHeader({
+  user,
+  storageAction,
+  statusIndicator,
+  className,
+  onSettingsClick,
+  onSignOutClick,
+}: AppHeaderProps) {
   const name = [user.firstName, user.lastName].filter(Boolean).join(" ");
   const displayName = name || user.email || user.id;
   const fallback = user.email || user.id;
 
   return (
-    <header className={cn("drag-region flex h-9 items-center justify-between px-6", className)}>
+    <header
+      data-slot="app-header"
+      className={cn("flex h-9 items-center justify-between px-6", className)}
+    >
       <div className="flex items-center gap-2">
         <span className="text-lg leading-none font-semibold tracking-tight">Plakk</span>
         <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] leading-none font-semibold tracking-wide text-muted-foreground">

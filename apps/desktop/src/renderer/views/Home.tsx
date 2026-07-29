@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowUpRight, LoaderCircle, Plus, TriangleAlert } from "lucide-react";
 import { AppHeader } from "@plakk/ui/components/AppHeader";
+import { SnippetComposer } from "@plakk/ui/components/SnippetComposer";
 import { SnippetList } from "@plakk/ui/components/SnippetList";
 import { SnippetRow } from "@plakk/ui/components/SnippetRow";
-import { Button } from "@plakk/ui/components/primitives/button";
-import { Checkbox } from "@plakk/ui/components/primitives/checkbox";
+import { Button } from "@plakk/ui/primitives/button";
+import { Checkbox } from "@plakk/ui/primitives/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -12,8 +13,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@plakk/ui/components/primitives/dialog";
-import { SnippetComposer } from "../components/SnippetComposer.tsx";
+} from "@plakk/ui/primitives/dialog";
 import { SyncStatusIndicator, type SyncStatus } from "../components/SyncStatusIndicator.tsx";
 import { signOut, useAuth } from "../hooks/useAuth.ts";
 import { useSnippets } from "../hooks/useSnippets.ts";
@@ -331,6 +331,7 @@ export function Home({ active = true }: { active?: boolean }) {
       <div className="drag-region h-12" aria-hidden="true" />
 
       <AppHeader
+        className="drag-region"
         user={user}
         onSettingsClick={() => navigate("settings")}
         onSignOutClick={() =>
@@ -377,17 +378,23 @@ export function Home({ active = true }: { active?: boolean }) {
                 </Button>
               </div>
             )}
-          <SnippetComposer
-            disabled={accountBlocked}
-            onSubmit={addTextSnippet}
-            onFiles={(files) => {
-              if (accountBlocked) return;
-
-              for (const file of Array.from(files)) {
-                enqueueFileSnippet(file);
-              }
-            }}
-          />
+          <SnippetComposer.Root disabled={accountBlocked} onSubmit={addTextSnippet}>
+            <SnippetComposer.Input />
+            <SnippetComposer.Attachment>
+              <input
+                multiple
+                onChange={(event) => {
+                  if (!accountBlocked && event.currentTarget.files !== null) {
+                    for (const file of Array.from(event.currentTarget.files)) {
+                      enqueueFileSnippet(file);
+                    }
+                  }
+                  event.currentTarget.value = "";
+                }}
+              />
+            </SnippetComposer.Attachment>
+            <SnippetComposer.Submit />
+          </SnippetComposer.Root>
           {ingestionError !== null && (
             <p className="mt-2 text-xs text-destructive" role="alert">
               {ingestionError}
@@ -422,40 +429,49 @@ export function Home({ active = true }: { active?: boolean }) {
             <span className="sr-only">Loading snippets</span>
           </div>
         ) : snippetReadError !== null && snippets.length === 0 ? null : (
-          <SnippetList empty={snippets.length === 0}>
-            {snippets.map((snippet) => (
-              <SnippetRow
-                key={snippet.id}
-                snippet={snippet}
-                presentation={snippet.presentation}
-                now={now}
-                copied={copiedId === snippet.id}
-                copying={copyingId === snippet.id}
-                onCopy={() => void copySnippet(snippet)}
-                copyDisabled={
-                  snippet.kind !== "PUBLISHED" ||
-                  snippet.localContentAvailability.status !== "AVAILABLE"
-                }
-                copyError={copyErrors[snippet.id]}
-                onDelete={() => {
-                  void runSnippetAction(snippet.id, () =>
-                    snippet.kind === "LOCAL"
-                      ? window.ipc.snippets.discard(snippet.id)
-                      : window.ipc.snippets.delete(snippet.id),
-                  );
-                }}
-                onDownload={() =>
-                  void runSnippetAction(snippet.id, () => window.ipc.snippets.download(snippet.id))
-                }
-                onOpenLink={openLink}
-                {...(snippet.presentation.type === "image"
-                  ? {
-                      thumbnailUrl: snippet.thumbnailUrl,
+          <SnippetList.Root>
+            <SnippetList.Heading />
+            {snippets.length === 0 ? (
+              <SnippetList.Empty />
+            ) : (
+              <SnippetList.Items>
+                {snippets.map((snippet) => (
+                  <SnippetRow
+                    key={snippet.id}
+                    snippet={snippet}
+                    presentation={snippet.presentation}
+                    now={now}
+                    copied={copiedId === snippet.id}
+                    copying={copyingId === snippet.id}
+                    onCopy={() => void copySnippet(snippet)}
+                    copyDisabled={
+                      snippet.kind !== "PUBLISHED" ||
+                      snippet.localContentAvailability.status !== "AVAILABLE"
                     }
-                  : {})}
-              />
-            ))}
-          </SnippetList>
+                    copyError={copyErrors[snippet.id]}
+                    onDelete={() => {
+                      void runSnippetAction(snippet.id, () =>
+                        snippet.kind === "LOCAL"
+                          ? window.ipc.snippets.discard(snippet.id)
+                          : window.ipc.snippets.delete(snippet.id),
+                      );
+                    }}
+                    onDownload={() =>
+                      void runSnippetAction(snippet.id, () =>
+                        window.ipc.snippets.download(snippet.id),
+                      )
+                    }
+                    onOpenLink={openLink}
+                    {...(snippet.presentation.type === "image"
+                      ? {
+                          thumbnailUrl: snippet.thumbnailUrl,
+                        }
+                      : {})}
+                  />
+                ))}
+              </SnippetList.Items>
+            )}
+          </SnippetList.Root>
         )}
       </div>
 

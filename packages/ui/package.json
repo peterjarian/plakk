@@ -3,11 +3,26 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./globals.css": "./src/styles/globals.css",
-    "./components/*": "./src/components/*.tsx",
-    "./icons/*": "./src/icons/*.tsx",
-    "./hooks/*": "./src/hooks/*.ts",
-    "./lib/*": "./src/lib/*.ts"
+    "./foundation.css": "./src/styles/foundation.css",
+    "./components/AppHeader": "./src/components/AppHeader.tsx",
+    "./components/SnippetComposer": "./src/components/SnippetComposer.tsx",
+    "./components/SnippetList": "./src/components/SnippetList.tsx",
+    "./components/SnippetRow": "./src/components/SnippetRow.tsx",
+    "./components/settings": "./src/components/settings.tsx",
+    "./primitives/avatar": "./src/primitives/avatar.tsx",
+    "./primitives/button": "./src/primitives/button.tsx",
+    "./primitives/checkbox": "./src/primitives/checkbox.tsx",
+    "./primitives/dialog": "./src/primitives/dialog.tsx",
+    "./primitives/dropdown-menu": "./src/primitives/dropdown-menu.tsx",
+    "./primitives/empty": "./src/primitives/empty.tsx",
+    "./primitives/select": "./src/primitives/select.tsx",
+    "./primitives/switch": "./src/primitives/switch.tsx",
+    "./primitives/tooltip": "./src/primitives/tooltip.tsx",
+    "./icons/DropboxIcon": "./src/icons/DropboxIcon.tsx",
+    "./icons/GoogleDriveIcon": "./src/icons/GoogleDriveIcon.tsx",
+    "./icons/OneDriveIcon": "./src/icons/OneDriveIcon.tsx",
+    "./lib/getInitials": "./src/lib/getInitials.ts",
+    "./lib/utils": "./src/lib/utils.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit",
@@ -30,6 +45,7 @@
   "devDependencies": {
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
+    "happy-dom": "^20.11.1",
     "vite-plus": "catalog:"
   }
 }

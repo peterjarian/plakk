@@ -33,7 +33,7 @@ export default defineConfig({
     ],
     settings: {
       tailwindcss: {
-        entryPoint: "packages/ui/src/styles/globals.css",
+        entryPoint: "packages/ui/src/styles/foundation.css",
       },
     },
     rules: {

@@ -2,7 +2,9 @@ import { Switch as SwitchPrimitive } from "@base-ui/react/switch";
 
 import { cn } from "@plakk/ui/lib/utils";
 
-function Switch({ className, ...props }: SwitchPrimitive.Root.Props) {
+export type SwitchProps = SwitchPrimitive.Root.Props;
+
+function Switch({ className, ...props }: SwitchProps) {
   return (
     <SwitchPrimitive.Root
       data-slot="switch"

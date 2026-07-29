@@ -1,7 +1,7 @@
 import { LoaderCircle } from "lucide-react";
 import { useEffect, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
-import { TooltipProvider } from "@plakk/ui/components/primitives/tooltip";
+import { TooltipProvider } from "@plakk/ui/primitives/tooltip";
 import { Home } from "./views/Home.tsx";
 import { Settings } from "./views/Settings.tsx";
 import { Tray } from "./views/Tray.tsx";
@@ -18,7 +18,7 @@ import {
   subscribeToDesktopView,
 } from "./lib/navigate.ts";
 
-import "@plakk/ui/globals.css";
+import "./styles.css";
 
 startAppearanceSync();
 

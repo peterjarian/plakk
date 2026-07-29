@@ -12,8 +12,8 @@ import {
   SunMoon,
   SquareMenu,
 } from "lucide-react";
-import { Avatar, AvatarFallback } from "@plakk/ui/components/primitives/avatar";
-import { Button } from "@plakk/ui/components/primitives/button";
+import { Avatar, AvatarFallback } from "@plakk/ui/primitives/avatar";
+import { Button } from "@plakk/ui/primitives/button";
 import {
   Select,
   SelectContent,
@@ -21,17 +21,9 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@plakk/ui/components/primitives/select";
-import { Switch } from "@plakk/ui/components/primitives/switch";
-import {
-  SettingsRow,
-  SettingsRowIcon,
-  SettingsRowMain,
-  SettingsRowText,
-  SettingsSection,
-  SettingsSectionBody,
-  SettingsSectionTitle,
-} from "@plakk/ui/components/settings";
+} from "@plakk/ui/primitives/select";
+import { Switch } from "@plakk/ui/primitives/switch";
+import { Settings as SettingsUI } from "@plakk/ui/components/settings";
 import { getInitials } from "@plakk/ui/lib/getInitials";
 import { useAuth } from "../hooks/useAuth.ts";
 import { setAppearancePreference, useAppearance } from "../hooks/useAppearance.ts";
@@ -144,33 +136,33 @@ export function Settings() {
           Back
         </Button>
         <div className="grid gap-6">
-          <SettingsSection>
-            <SettingsSectionTitle>Account</SettingsSectionTitle>
-            <SettingsSectionBody>
-              <SettingsRow className="px-4">
-                <SettingsRowMain>
+          <SettingsUI.Section>
+            <SettingsUI.SectionTitle>Account</SettingsUI.SectionTitle>
+            <SettingsUI.SectionBody>
+              <SettingsUI.Row className="px-4">
+                <SettingsUI.RowMain>
                   <Avatar className="size-10">
                     <AvatarFallback className="text-sm font-medium">
                       {getInitials(name, fallback)}
                     </AvatarFallback>
                   </Avatar>
-                  <SettingsRowText
+                  <SettingsUI.RowText
                     title={name}
                     description={name === fallback ? undefined : fallback}
                   />
-                </SettingsRowMain>
+                </SettingsUI.RowMain>
                 <span className="rounded-full bg-muted px-2 py-1 text-[11px] leading-none font-medium text-muted-foreground">
                   Pro
                 </span>
-              </SettingsRow>
+              </SettingsUI.Row>
 
-              <SettingsRow className="px-4">
-                <SettingsRowMain>
-                  <SettingsRowIcon>
+              <SettingsUI.Row className="px-4">
+                <SettingsUI.RowMain>
+                  <SettingsUI.RowIcon>
                     <CreditCard className="size-4 text-muted-foreground" aria-hidden="true" />
-                  </SettingsRowIcon>
-                  <SettingsRowText title="Plakk Pro" description="Current plan" />
-                </SettingsRowMain>
+                  </SettingsUI.RowIcon>
+                  <SettingsUI.RowText title="Plakk Pro" description="Current plan" />
+                </SettingsUI.RowMain>
                 <Button
                   type="button"
                   variant="ghost"
@@ -180,17 +172,17 @@ export function Settings() {
                   Manage
                   <ArrowUpRight />
                 </Button>
-              </SettingsRow>
+              </SettingsUI.Row>
 
               {storageStatus.kind === "loading" ||
               storageStatus.kind === "failed" ||
               storageStatus.kind === "offline" ? (
-                <SettingsRow className="px-4">
-                  <SettingsRowMain>
-                    <SettingsRowIcon>
+                <SettingsUI.Row className="px-4">
+                  <SettingsUI.RowMain>
+                    <SettingsUI.RowIcon>
                       <CloudOff className="size-4 text-muted-foreground" aria-hidden="true" />
-                    </SettingsRowIcon>
-                    <SettingsRowText
+                    </SettingsUI.RowIcon>
+                    <SettingsUI.RowText
                       title={
                         storageStatus.kind === "loading"
                           ? "Checking storage"
@@ -206,19 +198,19 @@ export function Settings() {
                             : "Could not check storage. Try again shortly."
                       }
                     />
-                  </SettingsRowMain>
-                </SettingsRow>
+                  </SettingsUI.RowMain>
+                </SettingsUI.Row>
               ) : storageStatus.kind === "unlinked" ? (
-                <SettingsRow className="px-4">
-                  <SettingsRowMain>
-                    <SettingsRowIcon>
+                <SettingsUI.Row className="px-4">
+                  <SettingsUI.RowMain>
+                    <SettingsUI.RowIcon>
                       <CloudOff className="size-4 text-amber-600" aria-hidden="true" />
-                    </SettingsRowIcon>
-                    <SettingsRowText
+                    </SettingsUI.RowIcon>
+                    <SettingsUI.RowText
                       title="Storage not linked"
                       description="Connect storage to sync snippets."
                     />
-                  </SettingsRowMain>
+                  </SettingsUI.RowMain>
                   <Button
                     type="button"
                     variant="ghost"
@@ -228,18 +220,18 @@ export function Settings() {
                     Connect
                     <ArrowUpRight />
                   </Button>
-                </SettingsRow>
+                </SettingsUI.Row>
               ) : storageStatus.kind === "needs-reauthorization" ? (
-                <SettingsRow className="px-4">
-                  <SettingsRowMain>
-                    <SettingsRowIcon>
+                <SettingsUI.Row className="px-4">
+                  <SettingsUI.RowMain>
+                    <SettingsUI.RowIcon>
                       <StorageProviderIcon provider={storageStatus.provider} className="size-5" />
-                    </SettingsRowIcon>
-                    <SettingsRowText
+                    </SettingsUI.RowIcon>
+                    <SettingsUI.RowText
                       title={`${storageProviderLabel(storageStatus.provider)} needs reconnection`}
                       description="Reconnect storage to resume syncing snippets."
                     />
-                  </SettingsRowMain>
+                  </SettingsUI.RowMain>
                   <Button
                     type="button"
                     variant="ghost"
@@ -249,14 +241,14 @@ export function Settings() {
                     Reconnect
                     <ArrowUpRight />
                   </Button>
-                </SettingsRow>
+                </SettingsUI.Row>
               ) : (
-                <SettingsRow className="px-4">
-                  <SettingsRowMain>
-                    <SettingsRowIcon>
+                <SettingsUI.Row className="px-4">
+                  <SettingsUI.RowMain>
+                    <SettingsUI.RowIcon>
                       <StorageProviderIcon provider={storageStatus.provider} className="size-5" />
-                    </SettingsRowIcon>
-                    <SettingsRowText
+                    </SettingsUI.RowIcon>
+                    <SettingsUI.RowText
                       title={`${storageProviderLabel(storageStatus.provider)} connected`}
                       description={
                         storageStatus.canSync
@@ -266,7 +258,7 @@ export function Settings() {
                             : "Sync is currently paused."
                       }
                     />
-                  </SettingsRowMain>
+                  </SettingsUI.RowMain>
                   <Button
                     type="button"
                     variant="ghost"
@@ -276,26 +268,26 @@ export function Settings() {
                     Open
                     <ArrowUpRight />
                   </Button>
-                </SettingsRow>
+                </SettingsUI.Row>
               )}
-            </SettingsSectionBody>
-          </SettingsSection>
+            </SettingsUI.SectionBody>
+          </SettingsUI.Section>
 
-          <SettingsSection>
-            <SettingsSectionTitle>Device storage</SettingsSectionTitle>
-            <SettingsSectionBody>
-              <SettingsRow className="items-start">
-                <SettingsRowMain className="flex-1 items-start">
+          <SettingsUI.Section>
+            <SettingsUI.SectionTitle>Device storage</SettingsUI.SectionTitle>
+            <SettingsUI.SectionBody>
+              <SettingsUI.Row className="items-start">
+                <SettingsUI.RowMain className="flex-1 items-start">
                   <HardDrive
                     className="mt-0.5 size-4 shrink-0 text-muted-foreground"
                     aria-hidden="true"
                   />
-                  <SettingsRowText
+                  <SettingsUI.RowText
                     title={`${formatFileSize(storageUsageBytes)} used by Plakk`}
                     description="Freeing space keeps your newest 20 eligible snippets available and removes older device copies only."
                     descriptionClassName="overflow-visible text-clip whitespace-normal"
                   />
-                </SettingsRowMain>
+                </SettingsUI.RowMain>
                 <Button
                   type="button"
                   variant="outline"
@@ -340,7 +332,7 @@ export function Settings() {
                 >
                   {freeingStorage ? "Freeing…" : "Free up space"}
                 </Button>
-              </SettingsRow>
+              </SettingsUI.Row>
               {storageFeedback !== null && (
                 <p
                   className={
@@ -362,20 +354,20 @@ export function Settings() {
                       : storageFeedback.message}
                 </p>
               )}
-            </SettingsSectionBody>
-          </SettingsSection>
+            </SettingsUI.SectionBody>
+          </SettingsUI.Section>
 
-          <SettingsSection>
-            <SettingsSectionTitle>Desktop</SettingsSectionTitle>
-            <SettingsSectionBody>
-              <SettingsRow>
-                <SettingsRowMain>
+          <SettingsUI.Section>
+            <SettingsUI.SectionTitle>Desktop</SettingsUI.SectionTitle>
+            <SettingsUI.SectionBody>
+              <SettingsUI.Row>
+                <SettingsUI.RowMain>
                   <SunMoon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                  <SettingsRowText
+                  <SettingsUI.RowText
                     title="Appearance"
                     description="Choose a theme or follow your system."
                   />
-                </SettingsRowMain>
+                </SettingsUI.RowMain>
                 <Select
                   disabled={savingAppearance}
                   value={appearance.preference}
@@ -403,44 +395,44 @@ export function Settings() {
                     </SelectGroup>
                   </SelectContent>
                 </Select>
-              </SettingsRow>
+              </SettingsUI.Row>
               {appearanceError !== null && (
                 <p className="px-4 py-2 text-xs text-destructive" role="alert">
                   {appearanceError}
                 </p>
               )}
 
-              <SettingsRow>
-                <SettingsRowMain>
+              <SettingsUI.Row>
+                <SettingsUI.RowMain>
                   <SquareMenu
                     className="size-4 shrink-0 text-muted-foreground"
                     aria-hidden="true"
                   />
-                  <SettingsRowText
+                  <SettingsUI.RowText
                     title="Toolbar widget"
                     description={
                       toolbarWidgetError ?? "Show quick access from the desktop toolbar."
                     }
                   />
-                </SettingsRowMain>
+                </SettingsUI.RowMain>
                 <Switch
                   aria-label="Toolbar widget"
                   checked={toolbarWidget ?? false}
                   disabled={toolbarWidget === null || toolbarWidgetSaving}
                   onCheckedChange={updateToolbarWidget}
                 />
-              </SettingsRow>
-            </SettingsSectionBody>
-          </SettingsSection>
+              </SettingsUI.Row>
+            </SettingsUI.SectionBody>
+          </SettingsUI.Section>
 
-          <SettingsSection>
-            <SettingsSectionTitle>App</SettingsSectionTitle>
-            <SettingsSectionBody>
-              <SettingsRow>
-                <SettingsRowMain>
+          <SettingsUI.Section>
+            <SettingsUI.SectionTitle>App</SettingsUI.SectionTitle>
+            <SettingsUI.SectionBody>
+              <SettingsUI.Row>
+                <SettingsUI.RowMain>
                   <RefreshCw className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                  <SettingsRowText title="Plakk Desktop 0.1.0" description={updateStatus} />
-                </SettingsRowMain>
+                  <SettingsUI.RowText title="Plakk Desktop 0.1.0" description={updateStatus} />
+                </SettingsUI.RowMain>
                 <Button
                   type="button"
                   variant="outline"
@@ -449,39 +441,42 @@ export function Settings() {
                 >
                   Check
                 </Button>
-              </SettingsRow>
+              </SettingsUI.Row>
 
-              <SettingsRow>
-                <SettingsRowText
+              <SettingsUI.Row>
+                <SettingsUI.RowText
                   title="Auto update"
                   description="Install updates in the background."
                 />
                 <Switch checked={autoUpdate} onCheckedChange={setAutoUpdate} />
-              </SettingsRow>
+              </SettingsUI.Row>
 
-              <SettingsRow>
-                <SettingsRowMain>
+              <SettingsUI.Row>
+                <SettingsUI.RowMain>
                   <FileText className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                  <SettingsRowText title="Logs" description="Open diagnostic files." />
-                </SettingsRowMain>
+                  <SettingsUI.RowText title="Logs" description="Open diagnostic files." />
+                </SettingsUI.RowMain>
                 <Button type="button" variant="outline" size="sm">
                   Open
                 </Button>
-              </SettingsRow>
-            </SettingsSectionBody>
-          </SettingsSection>
+              </SettingsUI.Row>
+            </SettingsUI.SectionBody>
+          </SettingsUI.Section>
 
-          <SettingsSection>
-            <SettingsSectionTitle>Help</SettingsSectionTitle>
-            <SettingsSectionBody>
-              <SettingsRow>
-                <SettingsRowMain>
+          <SettingsUI.Section>
+            <SettingsUI.SectionTitle>Help</SettingsUI.SectionTitle>
+            <SettingsUI.SectionBody>
+              <SettingsUI.Row>
+                <SettingsUI.RowMain>
                   <MessageCircle
                     className="size-4 shrink-0 text-muted-foreground"
                     aria-hidden="true"
                   />
-                  <SettingsRowText title="Contact us" description="Get help from the Plakk team." />
-                </SettingsRowMain>
+                  <SettingsUI.RowText
+                    title="Contact us"
+                    description="Get help from the Plakk team."
+                  />
+                </SettingsUI.RowMain>
                 <Button
                   type="button"
                   variant="outline"
@@ -490,18 +485,18 @@ export function Settings() {
                 >
                   Open
                 </Button>
-              </SettingsRow>
-              <SettingsRow>
-                <SettingsRowMain>
+              </SettingsUI.Row>
+              <SettingsUI.Row>
+                <SettingsUI.RowMain>
                   <MessageCircle
                     className="size-4 shrink-0 text-muted-foreground"
                     aria-hidden="true"
                   />
-                  <SettingsRowText
+                  <SettingsUI.RowText
                     title="Give feedback"
                     description="Share what is working or missing."
                   />
-                </SettingsRowMain>
+                </SettingsUI.RowMain>
                 <Button
                   type="button"
                   variant="outline"
@@ -510,9 +505,9 @@ export function Settings() {
                 >
                   Open
                 </Button>
-              </SettingsRow>
-            </SettingsSectionBody>
-          </SettingsSection>
+              </SettingsUI.Row>
+            </SettingsUI.SectionBody>
+          </SettingsUI.Section>
         </div>
       </div>
     </main>

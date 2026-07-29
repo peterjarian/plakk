@@ -1,5 +1,5 @@
 import { ArrowRight } from "lucide-react";
-import { Button } from "@plakk/ui/components/primitives/button";
+import { Button } from "@plakk/ui/primitives/button";
 import { useEffect } from "react";
 import { SnippetFlowAnimation } from "../components/SnippetFlowAnimation/index.tsx";
 import { signIn, useAuth } from "../hooks/useAuth.ts";

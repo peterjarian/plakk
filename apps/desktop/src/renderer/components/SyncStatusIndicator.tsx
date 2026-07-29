@@ -1,4 +1,4 @@
-import { Tooltip, TooltipContent, TooltipTrigger } from "@plakk/ui/components/primitives/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@plakk/ui/primitives/tooltip";
 
 export type SyncStatus = "CHECKING" | "CONNECTED" | "OFFLINE" | "PAUSED" | "RECONNECTING";
 
