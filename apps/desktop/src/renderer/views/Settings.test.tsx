@@ -20,10 +20,12 @@ const state = vi.hoisted(() => {
     userConfigSet: vi.fn(),
     localState: {
       revision: 7,
-      account,
-      provider: { known: true, value: "GOOGLE_DRIVE" as const },
-      capability: { status: "OFFLINE" as const },
-      liveConnection: null,
+      user: account,
+      capability: {
+        status: "OFFLINE" as const,
+        storageProvider: { known: true, value: "GOOGLE_DRIVE" as const },
+      },
+      syncStatus: null,
       storageUsageBytes: 2048,
       snippets: [],
     },

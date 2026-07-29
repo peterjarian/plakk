@@ -7,7 +7,7 @@ import { useLocalState } from "./useLocalState.tsx";
 type AuthState = {
   readonly issue: AuthError | null;
   readonly isLoading: boolean;
-  readonly user: ReturnType<typeof useLocalState>["localState"]["account"];
+  readonly user: ReturnType<typeof useLocalState>["localState"]["user"];
 };
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -70,9 +70,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => ({
       issue,
       isLoading: state.isLoading,
-      user: state.localState.account,
+      user: state.localState.user,
     }),
-    [issue, state.isLoading, state.localState.account],
+    [issue, state.isLoading, state.localState.user],
   );
 
   return createElement(AuthContext.Provider, { value }, children);

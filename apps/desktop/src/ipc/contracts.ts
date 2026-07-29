@@ -1,10 +1,9 @@
-import { StorageProviderLiteral, UserSchema } from "@plakk/shared";
 import {
-  AccountStatusSchema,
-  SnippetIdSchema,
-  StorageProviderStatusSchema,
-} from "@plakk/shared/PlakkApi";
-import { LocalContentAvailabilitySchema } from "@plakk/shared";
+  ClientSnapshotSchema,
+  FreeUpSpaceResultSchema,
+  SnippetSchema,
+} from "@plakk/client-runtime";
+import { PrepareSnippetUploadPayloadSchema, SnippetIdSchema } from "@plakk/shared/PlakkApi";
 import { Schema } from "effect";
 
 export type IpcSchema = Schema.ConstraintCodec<unknown, unknown, never, never>;
@@ -103,13 +102,7 @@ export const TrayDroppedItemSchema = Schema.Union([
 
 export type TrayDroppedItem = typeof TrayDroppedItemSchema.Type;
 
-const SnippetIngestBaseSchema = {
-  id: SnippetIdSchema,
-  fileName: Schema.String,
-  byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-  mediaType: Schema.NullOr(Schema.String),
-  storageProvider: StorageProviderLiteral,
-};
+const SnippetIngestBaseSchema = PrepareSnippetUploadPayloadSchema.fields;
 
 export const SnippetIngestPayloadSchema = Schema.Union([
   Schema.Struct({ ...SnippetIngestBaseSchema, filePath: Schema.String }),
@@ -123,73 +116,27 @@ export type ResolvedSnippetIngestPayload = Exclude<
   { readonly sourceId: string }
 >;
 
-const SnippetIngestResultSchema = Schema.Union([
-  Schema.Struct({ status: Schema.Literal("ENQUEUED") }),
-  Schema.Struct({ status: Schema.Literal("FAILED"), message: Schema.String }),
-]);
-
-export type SnippetIngestResult = typeof SnippetIngestResultSchema.Type;
-
-export const DesktopSnippetLocalStateSchema = Schema.Struct({
-  status: Schema.Literals(["UPLOADING", "FAILED"] as const),
-  errorMessage: Schema.NullOr(Schema.String),
-});
-
-const DesktopSnippetBaseSchema = {
-  id: SnippetIdSchema,
-  fileName: Schema.String,
-  byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-  storageProvider: StorageProviderLiteral,
-  createdAt: Schema.String,
-  updatedAt: Schema.String,
+export const DesktopSnippetSchema = Schema.Struct({
+  snippet: SnippetSchema,
   localTextPreview: Schema.NullOr(Schema.String),
-  localContentAvailability: LocalContentAvailabilitySchema,
-};
-
-export const DesktopSnippetSchema = Schema.Union([
-  Schema.Struct({
-    ...DesktopSnippetBaseSchema,
-    kind: Schema.Literal("LOCAL"),
-    localState: DesktopSnippetLocalStateSchema,
-  }),
-  Schema.Struct({
-    ...DesktopSnippetBaseSchema,
-    kind: Schema.Literal("PUBLISHED"),
-    localState: Schema.Null,
-  }),
-]);
+});
 
 export type DesktopSnippet = typeof DesktopSnippetSchema.Type;
 
+const ClientSnapshotFields = ClientSnapshotSchema.fields;
+
 export const LocalStateSchema = Schema.Struct({
   revision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-  account: Schema.NullOr(UserSchema),
-  provider: Schema.Struct({
-    known: Schema.Boolean,
-    value: Schema.NullOr(StorageProviderLiteral),
-  }),
-  capability: Schema.Union([
-    Schema.Struct({ status: Schema.Literal("OFFLINE") }),
-    Schema.Struct({
-      status: Schema.Literal("ONLINE"),
-      account: AccountStatusSchema,
-      connection: Schema.NullOr(StorageProviderStatusSchema),
-    }),
-  ]),
-  liveConnection: Schema.NullOr(
-    Schema.Struct({ status: Schema.Literals(["CONNECTED", "RECONNECTING"] as const) }),
-  ),
-  storageUsageBytes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  user: Schema.NullOr(ClientSnapshotFields.user),
+  capability: ClientSnapshotFields.capability,
+  syncStatus: Schema.NullOr(ClientSnapshotFields.syncStatus),
+  storageUsageBytes: ClientSnapshotFields.storageUsageBytes,
   snippets: Schema.Array(DesktopSnippetSchema),
 });
 
 export type LocalState = typeof LocalStateSchema.Type;
 
-export const StorageFreeUpResultSchema = Schema.Struct({
-  reclaimedBytes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-  removedCopies: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-  storageUsageBytes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-});
+export const StorageFreeUpResultSchema = FreeUpSpaceResultSchema;
 
 export type StorageFreeUpResult = typeof StorageFreeUpResultSchema.Type;
 
@@ -227,7 +174,7 @@ export const ipcMethods = {
   snippetIngest: method({
     channel: "snippet:ingest",
     payload: SnippetIngestPayloadSchema,
-    result: SnippetIngestResultSchema,
+    result: Schema.Void,
   }),
   snippetDiscard: method({
     channel: "snippet:discard",

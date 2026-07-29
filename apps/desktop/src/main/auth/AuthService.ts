@@ -9,7 +9,7 @@ export type AuthSession = {
   readonly user: User;
 };
 
-export type AuthServiceFailure = AuthServiceError | Config.ConfigError;
+export type AuthServiceFailure = AuthServiceError | AuthSessionExpiredError | Config.ConfigError;
 
 export class AuthServiceError extends Schema.TaggedErrorClass<AuthServiceError>()(
   "AuthServiceError",
@@ -18,6 +18,24 @@ export class AuthServiceError extends Schema.TaggedErrorClass<AuthServiceError>(
     message: Schema.String,
   },
 ) {}
+
+export class AuthSessionExpiredError extends Schema.TaggedErrorClass<AuthSessionExpiredError>()(
+  "AuthSessionExpiredError",
+  {
+    cause: Schema.Defect(),
+    message: Schema.String,
+  },
+) {}
+
+/**
+ * A client-side or transient server failure cannot prove that the session is
+ * invalid. Only explicit authentication responses should expire it.
+ */
+export function authRefreshFailureExpiresSession(cause: unknown): boolean {
+  if (typeof cause !== "object" || cause === null || !("status" in cause)) return false;
+  const status = cause.status;
+  return status === 400 || status === 401;
+}
 
 export function deriveDesktopAuthCallbackUrl(configuredUrl: URL, isPackaged: boolean): URL {
   const protocol = isPackaged ? "plakk:" : "plakk-dev:";
@@ -61,6 +79,10 @@ export class AuthService extends Context.Service<
   AuthService,
   {
     readonly callbackUrl: Effect.Effect<string, Config.ConfigError>;
+    /** Returns the account whose local data must be cleared before activation. */
+    readonly cleanupOwner: Effect.Effect<User | null, AuthServiceError>;
+    /** Persists or clears the account owner for crash-safe local cleanup. */
+    readonly setCleanupOwner: (user: User | null) => Effect.Effect<void, AuthServiceError>;
     getStoredAccount(): Effect.Effect<User | null, AuthServiceError>;
     getSession(): Effect.Effect<AuthSession | null, AuthServiceFailure>;
     handleCallbackUrl(rawUrl: string): Effect.Effect<AuthSession | null, AuthServiceFailure>;

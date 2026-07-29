@@ -115,9 +115,31 @@ export const PublishSnippetPayloadSchema = Schema.Struct({
 
 export type PublishSnippetPayload = typeof PublishSnippetPayloadSchema.Type;
 
+export const PreparedSnippetDownloadSchema = Schema.Struct({
+  storageProvider: StorageProviderLiteral,
+  fileName: Schema.String,
+  byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  download: Schema.Struct({
+    url: Schema.String,
+    headers: Schema.Array(Schema.Struct({ name: Schema.String, value: Schema.String })),
+  }),
+});
+
+export type PreparedSnippetDownload = typeof PreparedSnippetDownloadSchema.Type;
+
 export class CurrentUser extends Context.Service<CurrentUser, { readonly id: string }>()(
   "@plakk/shared/api/PlakkApi/CurrentUser",
 ) {}
+
+/** Authentication is missing or no longer valid and needs user or platform action. */
+export class SessionError extends Schema.TaggedErrorClass<SessionError>()("SessionError", {
+  message: Schema.String,
+}) {}
+
+/** Authentication may be valid, but the client cannot currently reach the network. */
+export class OfflineError extends Schema.TaggedErrorClass<OfflineError>()("OfflineError", {
+  message: Schema.String,
+}) {}
 
 export class InternalServerErrorMiddleware extends RpcMiddleware.Service<InternalServerErrorMiddleware>()(
   "InternalServerErrorMiddleware",
@@ -126,7 +148,10 @@ export class InternalServerErrorMiddleware extends RpcMiddleware.Service<Interna
 
 export class AuthMiddleware extends RpcMiddleware.Service<
   AuthMiddleware,
-  { provides: CurrentUser }
+  {
+    provides: CurrentUser;
+    clientError: SessionError | OfflineError;
+  }
 >()("AuthMiddleware", { error: RpcError }) {}
 
 export const HealthRpcs = RpcGroup.make(
@@ -183,15 +208,7 @@ export const SnippetRpcs = RpcGroup.make(
   }),
   Rpc.make("PrepareSnippetDownload", {
     payload: { id: SnippetIdSchema },
-    success: Schema.Struct({
-      storageProvider: StorageProviderLiteral,
-      fileName: Schema.String,
-      byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-      download: Schema.Struct({
-        url: Schema.String,
-        headers: Schema.Array(Schema.Struct({ name: Schema.String, value: Schema.String })),
-      }),
-    }),
+    success: PreparedSnippetDownloadSchema,
     error: RpcError,
   }),
   Rpc.make("DeleteSnippet", {

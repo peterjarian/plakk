@@ -79,16 +79,13 @@ The focused suite maps to the contracted owners:
 - Backend publication, idempotency/conflict, snapshots, transaction notification ordering,
   streaming RPC filtering, deletion, and one-shot provider cleanup:
   `SnippetRpcsLive.test.ts` and `SnippetInvalidations.test.ts`.
-- Electron-main Device Snippet records, lost-response promotion, upload lifecycle, reconnect,
-  hydration, integrity, deletion, storage management, and account isolation:
-  `SnippetUploadEngineLive.test.ts`, `device-records.test.ts`, `sync.test.ts`,
-  `SnippetHydrationLive.test.ts`, `ManagedSnippetContentLive.test.ts`,
-  `SnippetDeletionLive.test.ts`, `DesktopSessionAuthorization.test.ts`, and
-  `LocalStateLive.test.ts`.
-- Thin IPC and common Home/Tray presentation:
-  `LocalStateIpc.test.ts`, `LocalStateViews.test.tsx`, and `SnippetRow.test.tsx`.
-- Profile isolation and rejection of the superseded authoritative upload-status persistence shape:
-  `lifecycle.test.ts` and `SnippetReplicaLive.test.ts`.
+- Shared local records, upload lifecycle, reconnect, content mirroring, deletion, and storage
+  management: the tests under `packages/client-runtime/src/`.
+- Electron-main filesystem integrity, runtime lifecycle, and account isolation:
+  `DesktopContentStore.test.ts` and `DesktopSessionLive.test.ts`.
+- Thin renderer transport and common Home/Tray presentation:
+  `useLocalState.test.ts`, `LocalStateViews.test.tsx`, and `SnippetRow.test.tsx`.
+- Profile isolation: `lifecycle.test.ts`.
 
 ## Evidence record: 2026-07-23
 

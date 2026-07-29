@@ -11,6 +11,7 @@ vi.mock("electron", () => ({
 
 import {
   accessTokenNeedsRefresh,
+  authRefreshFailureExpiresSession,
   deriveDesktopAuthCallbackUrl,
   parseTrustedAuthCallbackUrl,
   AuthService,
@@ -87,6 +88,18 @@ describe("desktop access token refresh", () => {
       Effect.runPromise(accessTokenNeedsRefresh(accessToken({ exp: "invalid" }), now)),
     ).resolves.toBe(true);
   });
+
+  it("expires only sessions whose refresh credentials were rejected", () => {
+    expect(authRefreshFailureExpiresSession({ status: 400 })).toBe(true);
+    expect(authRefreshFailureExpiresSession({ status: 401 })).toBe(true);
+
+    expect(authRefreshFailureExpiresSession(new TypeError("fetch failed"))).toBe(false);
+    expect(authRefreshFailureExpiresSession({ status: 403 })).toBe(false);
+    expect(authRefreshFailureExpiresSession({ status: 408 })).toBe(false);
+    expect(authRefreshFailureExpiresSession({ status: 429 })).toBe(false);
+    expect(authRefreshFailureExpiresSession({ status: 422 })).toBe(false);
+    expect(authRefreshFailureExpiresSession({ status: 500 })).toBe(false);
+  });
 });
 
 describe("desktop auth service configuration", () => {
@@ -116,16 +129,17 @@ describe("desktop auth service configuration", () => {
   });
 
   it("acquires and signs out without loading WorkOS configuration", async () => {
-    let cleared = false;
+    const clearedKeys: Array<string> = [];
     const storeLayer = Layer.succeed(
       AuthStore,
       AuthStore.of({
-        clear: Effect.sync(() => {
-          cleared = true;
-        }),
+        clear: Effect.void,
         get: () => Effect.succeed(null),
         isEncryptionAvailable: Effect.succeed(true),
-        set: () => Effect.void,
+        set: (key, value) =>
+          Effect.sync(() => {
+            if (value === null) clearedKeys.push(key);
+          }),
       }),
     );
 
@@ -135,7 +149,7 @@ describe("desktop auth service configuration", () => {
       ),
     );
 
-    expect(cleared).toBe(true);
+    expect(clearedKeys).toEqual(["credentials", "pkce"]);
     expect(workos.create).not.toHaveBeenCalled();
   });
 });

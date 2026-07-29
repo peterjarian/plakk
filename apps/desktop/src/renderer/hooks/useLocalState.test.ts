@@ -5,10 +5,12 @@ import { initialLocalStateSubscription, updateLocalStateSubscription } from "./u
 
 const localState = (revision: number): LocalState => ({
   revision,
-  account: null,
-  provider: { known: false, value: null },
-  capability: { status: "OFFLINE" },
-  liveConnection: null,
+  user: null,
+  capability: {
+    status: "OFFLINE",
+    storageProvider: { known: false, value: null },
+  },
+  syncStatus: null,
   storageUsageBytes: 0,
   snippets: [],
 });

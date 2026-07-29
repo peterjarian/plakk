@@ -8,8 +8,10 @@ import { app } from "electron";
 import { Clock, Config, Effect, Layer } from "effect";
 import {
   accessTokenNeedsRefresh,
+  authRefreshFailureExpiresSession,
   AuthService,
   AuthServiceError,
+  AuthSessionExpiredError,
   deriveDesktopAuthCallbackUrl,
   parseTrustedAuthCallbackUrl,
   type AuthSession,
@@ -82,10 +84,15 @@ export const AuthServiceLive = Layer.effect(
             refreshToken: credentials.refreshToken,
           }),
         catch: (cause) =>
-          new AuthServiceError({
-            cause,
-            message: "Could not refresh desktop auth credentials.",
-          }),
+          authRefreshFailureExpiresSession(cause)
+            ? new AuthSessionExpiredError({
+                cause,
+                message: "The desktop session is no longer valid.",
+              })
+            : new AuthServiceError({
+                cause,
+                message: "Could not refresh desktop auth credentials.",
+              }),
       });
 
       const nextCredentials = credentialsFromAuthenticationResponse(response);
@@ -107,6 +114,13 @@ export const AuthServiceLive = Layer.effect(
 
     return AuthService.of({
       callbackUrl: clientConfig.pipe(Effect.map(({ callbackUrl }) => callbackUrl.href)),
+      cleanupOwner: store
+        .get("cleanupOwner")
+        .pipe(Effect.mapError((cause) => new AuthServiceError({ cause, message: cause.reason }))),
+      setCleanupOwner: (user) =>
+        store
+          .set("cleanupOwner", user)
+          .pipe(Effect.mapError((cause) => new AuthServiceError({ cause, message: cause.reason }))),
       getStoredAccount: Effect.fn("AuthService.getStoredAccount")(function* () {
         return (yield* readStoredCredentials())?.user ?? null;
       }),
@@ -203,9 +217,12 @@ export const AuthServiceLive = Layer.effect(
         return request.url;
       }),
       signOut: Effect.fn("AuthService.signOut")(function* () {
-        yield* store.clear.pipe(
-          Effect.mapError((cause) => new AuthServiceError({ cause, message: cause.reason })),
-        );
+        yield* store
+          .set("credentials", null)
+          .pipe(Effect.mapError((cause) => new AuthServiceError({ cause, message: cause.reason })));
+        yield* store
+          .set("pkce", null)
+          .pipe(Effect.mapError((cause) => new AuthServiceError({ cause, message: cause.reason })));
       }),
     });
   }),

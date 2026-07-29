@@ -25,7 +25,7 @@ export function Tray() {
   const auth = useAuth();
   const provider = useLinkedStorageProvider();
   const storageStatus = useStorageStatus();
-  const liveConnection = useLocalState().localState.liveConnection;
+  const clientSyncStatus = useLocalState().localState.syncStatus;
   const ingestionAllowed = storageStatus.kind === "connected" && storageStatus.canSync;
   const syncStatus: SyncStatus =
     storageStatus.kind === "loading"
@@ -34,7 +34,7 @@ export function Tray() {
         ? "OFFLINE"
         : storageStatus.kind !== "connected" || !storageStatus.canSync
           ? "PAUSED"
-          : liveConnection?.status === "CONNECTED"
+          : clientSyncStatus === "CONNECTED"
             ? "CONNECTED"
             : "RECONNECTING";
   const ingestionProvider = storageStatus.kind === "connected" ? storageStatus.provider : null;
@@ -58,10 +58,8 @@ export function Tray() {
   const handleIngestion = (ingestion: ReturnType<typeof ingestFileSnippet>) => {
     setError(null);
     void ingestion.then(
-      (result) => {
-        if (result.status === "FAILED") setError(result.message);
-      },
-      () => setError("Plakk couldn’t save this snippet."),
+      () => {},
+      (cause) => setError(ipcActionErrorMessage(cause, "Plakk couldn’t save this snippet.")),
     );
   };
 

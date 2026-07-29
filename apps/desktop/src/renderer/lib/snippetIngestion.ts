@@ -1,6 +1,5 @@
 import type { StorageProvider } from "@plakk/shared";
 
-import type { SnippetIngestResult } from "../../ipc/contracts.ts";
 import { encodeTextSnippet } from "./textSnippetContent.ts";
 
 type IngestibleFile = Pick<File, "name" | "size" | "type">;
@@ -8,7 +7,7 @@ type IngestibleFile = Pick<File, "name" | "size" | "type">;
 export function ingestTextSnippet(
   storageProvider: StorageProvider,
   text: string,
-): Promise<SnippetIngestResult> | null {
+): Promise<void> | null {
   const bytes = encodeTextSnippet(text);
   if (bytes.byteLength === 0) return null;
 
@@ -27,7 +26,7 @@ export function ingestFileSnippet(
   storageProvider: StorageProvider,
   file: IngestibleFile,
   sourceId?: string,
-): Promise<SnippetIngestResult> {
+): Promise<void> {
   return window.ipc.snippets.ingest({
     id: crypto.randomUUID(),
     fileName: file.name,

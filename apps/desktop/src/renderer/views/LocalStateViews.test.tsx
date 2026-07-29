@@ -7,9 +7,12 @@ import { Settings } from "./Settings.tsx";
 import { Tray } from "./Tray.tsx";
 
 const state = vi.hoisted(() => {
-  let liveConnection: { readonly status: "CONNECTED" | "RECONNECTING" } | null = null;
+  let syncStatus: "CONNECTED" | "RECONNECTING" | null = null;
   let storageUsageBytes = 0;
-  let capability: LocalState["capability"] = { status: "OFFLINE" };
+  let capability: LocalState["capability"] = {
+    status: "OFFLINE",
+    storageProvider: { known: true, value: "GOOGLE_DRIVE" },
+  };
   const account = {
     id: "user_1",
     email: "reader@example.com",
@@ -20,37 +23,40 @@ const state = vi.hoisted(() => {
   } as const;
   const localState = {
     revision: 7,
-    account,
-    provider: { known: true, value: "GOOGLE_DRIVE" },
+    user: account,
     get capability() {
       return capability;
     },
-    get liveConnection() {
-      return liveConnection;
+    get syncStatus() {
+      return syncStatus;
     },
     get storageUsageBytes() {
       return storageUsageBytes;
     },
     snippets: [
       {
-        id: "0d1e2f3a-4567-4890-8abc-def012345678",
-        fileName: "same-local-state.txt",
-        byteSize: 4,
-        storageProvider: "GOOGLE_DRIVE",
-        kind: "PUBLISHED",
-        createdAt: "2026-07-16T00:00:00.000Z",
-        updatedAt: "2026-07-16T00:00:00.000Z",
-        localState: null,
+        snippet: {
+          id: "0d1e2f3a-4567-4890-8abc-def012345678",
+          fileName: "same-local-state.txt",
+          byteSize: 4,
+          storageProvider: "GOOGLE_DRIVE",
+          mediaType: "text/plain",
+          storageObjectId: "object-1",
+          status: "PUBLISHED",
+          errorMessage: null,
+          createdAt: "2026-07-16T00:00:00.000Z",
+          updatedAt: "2026-07-16T00:00:00.000Z",
+          localContentAvailability: { status: "AVAILABLE" },
+        },
         localTextPreview: "same",
-        localContentAvailability: { status: "AVAILABLE" },
       },
     ],
   } as const;
   return {
     account,
     localState,
-    setLiveConnection: (next: typeof liveConnection) => {
-      liveConnection = next;
+    setSyncStatus: (next: typeof syncStatus) => {
+      syncStatus = next;
     },
     setCapability: (next: LocalState["capability"]) => {
       capability = next;
@@ -106,7 +112,7 @@ describe("local state views", () => {
         externalDestinationUrl: "https://drive.google.com/drive/folders/plakk",
       },
     });
-    state.setLiveConnection({ status: "RECONNECTING" });
+    state.setSyncStatus("RECONNECTING");
 
     const reconnectingHome = renderToStaticMarkup(<Home />);
     const reconnectingTray = renderToStaticMarkup(<Tray />);
@@ -116,7 +122,7 @@ describe("local state views", () => {
     expect(reconnectingHome).not.toContain(">Live updates reconnecting…<");
     expect(reconnectingTray).not.toContain(">Reconnecting…<");
 
-    state.setLiveConnection({ status: "CONNECTED" });
+    state.setSyncStatus("CONNECTED");
     const connectedHome = renderToStaticMarkup(<Home />);
     const connectedTray = renderToStaticMarkup(<Tray />);
 
@@ -125,8 +131,11 @@ describe("local state views", () => {
     expect(connectedHome).not.toContain(">Live updates connected<");
     expect(connectedTray).not.toContain(">Live<");
 
-    state.setLiveConnection(null);
-    state.setCapability({ status: "OFFLINE" });
+    state.setSyncStatus(null);
+    state.setCapability({
+      status: "OFFLINE",
+      storageProvider: { known: true, value: "GOOGLE_DRIVE" },
+    });
   });
 
   it("warns above 30 GiB and links Home to the Settings storage controls", () => {
