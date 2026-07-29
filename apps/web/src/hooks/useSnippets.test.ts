@@ -21,12 +21,8 @@ const snippet = (input: Partial<Snippet> = {}): Snippet =>
 
 describe("snippet read-model projection", () => {
   it("returns the same stable read model used by the desktop", () => {
-    const source = snippet();
-    const [item] = projectSnippetReadModels(
-      [source],
-      { [source.id]: "https://plakk.app" },
-      { [source.id]: "blob:preview" },
-    );
+    const source = snippet({ title: "https://plakk.app" });
+    const [item] = projectSnippetReadModels([source], { [source.id]: "blob:preview" });
 
     expect(item).toEqual({
       id: source.id,
@@ -36,7 +32,6 @@ describe("snippet read-model projection", () => {
       kind: "PUBLISHED",
       localState: null,
       localContentAvailability: source.localContentAvailability,
-      localTextPreview: "https://plakk.app",
       presentation: {
         type: "hyperlink",
         title: "https://plakk.app",
@@ -46,46 +41,18 @@ describe("snippet read-model projection", () => {
     });
   });
 
-  it("keeps a published text row presentation-pending until its content is decoded", () => {
-    const source = snippet({ fileName: "private-notes.md" });
-    const [item] = projectSnippetReadModels([source], {}, {}, new Set([source.id]));
-
-    expect(item?.presentation).toBeNull();
-    expect(item?.localTextPreview).toBeNull();
-  });
-
-  it("uses a stored title immediately without waiting for content", () => {
+  it("uses a stored title immediately", () => {
     const source = snippet({ title: "A stable title" });
-    const [item] = projectSnippetReadModels([source], {}, {}, new Set([source.id]));
+    const [item] = projectSnippetReadModels([source], {});
 
     expect(item?.presentation).toEqual({ type: "text", title: "A stable title" });
-    expect(item?.localTextPreview).toBeNull();
   });
 
-  it("preserves a pulled text row while its presentation is downloading", () => {
-    const source = snippet({ localContentAvailability: { status: "DOWNLOADING" } });
-    const [item] = projectSnippetReadModels([source], {}, {}, new Set([source.id]));
+  it("uses the file name when a non-text snippet has no title", () => {
+    const source = snippet({ fileName: "archive.zip", mediaType: "application/zip" });
+    const [item] = projectSnippetReadModels([source], {});
 
-    expect(item?.presentation).toBeNull();
-  });
-
-  it("does not expose the fallback title while a new text upload is being prepared", () => {
-    const source = snippet({
-      status: "PREPARING",
-      storageObjectId: null,
-      localContentAvailability: { status: "NOT_AVAILABLE" },
-    });
-    const [item] = projectSnippetReadModels([source], {}, {}, new Set([source.id]));
-
-    expect(item?.presentation).toBeNull();
-  });
-
-  it("uses the fallback title only after presentation decoding has settled without text", () => {
-    const source = snippet();
-    const [item] = projectSnippetReadModels([source], {}, {});
-
-    expect(item?.presentation).toEqual({ type: "file", title: "Text snippet" });
-    expect(item?.localTextPreview).toBeNull();
+    expect(item?.presentation).toEqual({ type: "file", title: "archive.zip" });
   });
 });
 

@@ -1,19 +1,13 @@
 import type { ClientSnapshot, Snippet } from "@plakk/client-runtime";
 import {
-  decodeSnippetTextPreview,
   deriveSnippetPresentation,
-  isTextSnippetFileName,
-  SNIPPET_TEXT_PREVIEW_MAX_BYTES,
   type LocalContentAvailability,
   type SnippetPresentation,
 } from "@plakk/shared";
-import { Effect } from "effect";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { RunClient } from "../runtime/client.ts";
 import { collectBytes } from "../runtime/client.ts";
-
-const TEXT_PREVIEW_LIMIT = 50;
 
 export type SnippetReadModel = {
   readonly id: string;
@@ -26,32 +20,21 @@ export type SnippetReadModel = {
     readonly errorMessage: string | null;
   };
   readonly localContentAvailability: LocalContentAvailability;
-  readonly localTextPreview: string | null;
-  readonly presentation: SnippetPresentation | null;
+  readonly presentation: SnippetPresentation;
   readonly thumbnailUrl: string | null;
 };
 
-type SnippetRowReadModel = Omit<
-  SnippetReadModel,
-  "localTextPreview" | "presentation" | "thumbnailUrl"
->;
+type SnippetRowReadModel = Omit<SnippetReadModel, "presentation" | "thumbnailUrl">;
 
 export const projectSnippetReadModels = (
   snippets: ReadonlyArray<Snippet>,
-  textPreviews: Readonly<Record<string, string>>,
   thumbnailUrls: Readonly<Record<string, string>>,
-  pendingTextPreviewIds: ReadonlySet<string> = new Set(),
 ): ReadonlyArray<SnippetReadModel> =>
   snippets.map((snippet) => {
-    const localTextPreview = textPreviews[snippet.id] ?? null;
-    const presentationContent = localTextPreview ?? snippet.title;
-    const presentation =
-      pendingTextPreviewIds.has(snippet.id) && snippet.title === undefined
-        ? null
-        : deriveSnippetPresentation({
-            fileName: snippet.fileName,
-            ...(presentationContent === undefined ? {} : { content: presentationContent }),
-          });
+    const presentation = deriveSnippetPresentation({
+      fileName: snippet.fileName,
+      ...(snippet.title === undefined ? {} : { content: snippet.title }),
+    });
     const row: SnippetRowReadModel =
       snippet.status === "PUBLISHED"
         ? {
@@ -78,7 +61,6 @@ export const projectSnippetReadModels = (
 
     return {
       ...row,
-      localTextPreview,
       presentation,
       thumbnailUrl: thumbnailUrls[row.id] ?? null,
     };
@@ -114,127 +96,6 @@ export const createImageUrlRegistry = () => {
       for (const url of urls.values()) URL.revokeObjectURL(url);
       urls.clear();
     },
-  };
-};
-
-const useSnippetTextPreviews = (snapshot: ClientSnapshot | null, run: RunClient) => {
-  const previewingRef = useRef(new Set<string>());
-  const transientFailuresRef = useRef(new Map<string, number>());
-  const terminalFailuresRef = useRef(new Map<string, string>());
-  const retryTimersRef = useRef(new Map<string, number>());
-  const [previews, setPreviews] = useState<Record<string, string>>({});
-  const [retryTick, setRetryTick] = useState(0);
-
-  useEffect(() => {
-    setPreviews({});
-    previewingRef.current.clear();
-    transientFailuresRef.current.clear();
-    terminalFailuresRef.current.clear();
-    for (const timer of retryTimersRef.current.values()) window.clearTimeout(timer);
-    retryTimersRef.current.clear();
-  }, [snapshot?.user.id]);
-
-  useEffect(() => {
-    if (snapshot === null) return;
-    const candidates = snapshot.snippets
-      .slice(0, TEXT_PREVIEW_LIMIT)
-      .filter(
-        (snippet) =>
-          isTextSnippetFileName(snippet.fileName) &&
-          snippet.title === undefined &&
-          snippet.byteSize <= SNIPPET_TEXT_PREVIEW_MAX_BYTES &&
-          (snippet.status === "PUBLISHED" ||
-            snippet.localContentAvailability.status === "AVAILABLE") &&
-          previews[snippet.id] === undefined &&
-          terminalFailuresRef.current.get(snippet.id) !== snippet.updatedAt &&
-          !previewingRef.current.has(snippet.id),
-      );
-    for (const snippet of candidates) previewingRef.current.add(snippet.id);
-
-    void run((client) =>
-      Effect.forEach(
-        candidates,
-        (snippet) =>
-          collectBytes(
-            snippet.localContentAvailability.status === "AVAILABLE"
-              ? client.content.read(snippet.id)
-              : client.content.readRemote(snippet.id),
-          ).pipe(
-            Effect.tap((bytes) =>
-              Effect.sync(() => {
-                transientFailuresRef.current.delete(snippet.id);
-                const retryTimer = retryTimersRef.current.get(snippet.id);
-                if (retryTimer !== undefined) window.clearTimeout(retryTimer);
-                retryTimersRef.current.delete(snippet.id);
-                const preview = decodeSnippetTextPreview(bytes);
-                if (preview === null) {
-                  terminalFailuresRef.current.set(snippet.id, snippet.updatedAt);
-                  setRetryTick((tick) => tick + 1);
-                  return;
-                }
-                terminalFailuresRef.current.delete(snippet.id);
-                setPreviews((current) => ({ ...current, [snippet.id]: preview }));
-              }),
-            ),
-            Effect.catch((error) =>
-              error._tag === "OfflineError" || error._tag === "ServerUnavailableError"
-                ? Effect.sync(() => {
-                    if (retryTimersRef.current.has(snippet.id)) return;
-                    const failures = (transientFailuresRef.current.get(snippet.id) ?? 0) + 1;
-                    transientFailuresRef.current.set(snippet.id, failures);
-                    const timer = window.setTimeout(
-                      () => {
-                        retryTimersRef.current.delete(snippet.id);
-                        setRetryTick((tick) => tick + 1);
-                      },
-                      Math.min(30_000, 1_000 * 2 ** Math.min(failures - 1, 5)),
-                    );
-                    retryTimersRef.current.set(snippet.id, timer);
-                  })
-                : Effect.sync(() => {
-                    terminalFailuresRef.current.set(snippet.id, snippet.updatedAt);
-                    setRetryTick((tick) => tick + 1);
-                  }),
-            ),
-            Effect.ensuring(
-              Effect.sync(() => {
-                previewingRef.current.delete(snippet.id);
-              }),
-            ),
-          ),
-        { concurrency: 4, discard: true },
-      ),
-    ).catch(() => {
-      // The runtime can reject before the Effects start, so their finalizers may not run.
-      for (const snippet of candidates) previewingRef.current.delete(snippet.id);
-    });
-  }, [previews, retryTick, run, snapshot]);
-
-  useEffect(
-    () => () => {
-      for (const timer of retryTimersRef.current.values()) window.clearTimeout(timer);
-      retryTimersRef.current.clear();
-    },
-    [],
-  );
-
-  return {
-    previews,
-    pendingIds: new Set(
-      snapshot?.snippets
-        .slice(0, TEXT_PREVIEW_LIMIT)
-        .filter(
-          (snippet) =>
-            isTextSnippetFileName(snippet.fileName) &&
-            snippet.title === undefined &&
-            snippet.byteSize <= SNIPPET_TEXT_PREVIEW_MAX_BYTES &&
-            previews[snippet.id] === undefined &&
-            terminalFailuresRef.current.get(snippet.id) !== snippet.updatedAt &&
-            (snippet.status !== "FAILED" ||
-              snippet.localContentAvailability.status === "AVAILABLE"),
-        )
-        .map((snippet) => snippet.id),
-    ),
   };
 };
 
@@ -298,17 +159,10 @@ export function useSnippets(state: {
   readonly snapshot: ClientSnapshot | null;
   readonly run: RunClient;
 }) {
-  const textPreviews = useSnippetTextPreviews(state.snapshot, state.run);
   const thumbnailUrls = useSnippetImageUrls(state.snapshot?.snippets ?? [], state.run);
   const items = useMemo(
-    () =>
-      projectSnippetReadModels(
-        state.snapshot?.snippets ?? [],
-        textPreviews.previews,
-        thumbnailUrls,
-        textPreviews.pendingIds,
-      ),
-    [state.snapshot, textPreviews, thumbnailUrls],
+    () => projectSnippetReadModels(state.snapshot?.snippets ?? [], thumbnailUrls),
+    [state.snapshot, thumbnailUrls],
   );
 
   return {

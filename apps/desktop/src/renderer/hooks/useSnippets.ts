@@ -1,12 +1,11 @@
 import {
   deriveSnippetPresentation,
-  isTextSnippetFileName,
   type LocalContentAvailability,
   type SnippetPresentation,
 } from "@plakk/shared";
+import type { Snippet } from "@plakk/client-runtime";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import type { DesktopSnippet } from "../../ipc/contracts.ts";
 import { useLocalState } from "./useLocalState.tsx";
 
 export type SnippetReadModel = {
@@ -20,37 +19,20 @@ export type SnippetReadModel = {
     readonly errorMessage: string | null;
   };
   readonly localContentAvailability: LocalContentAvailability;
-  readonly localTextPreview: string | null;
   readonly presentation: SnippetPresentation;
   readonly thumbnailUrl: string | null;
 };
 
-type SnippetRowReadModel = Omit<
-  SnippetReadModel,
-  "localTextPreview" | "presentation" | "thumbnailUrl"
->;
+type SnippetRowReadModel = Omit<SnippetReadModel, "presentation" | "thumbnailUrl">;
 
 export const projectSnippetReadModels = (
-  replicaItems: ReadonlyArray<DesktopSnippet>,
+  snippets: ReadonlyArray<Snippet>,
   thumbnailUrls: Readonly<Record<string, string>>,
 ): ReadonlyArray<SnippetReadModel> =>
-  replicaItems.flatMap(({ snippet, localTextPreview }) => {
-    if (
-      isTextSnippetFileName(snippet.fileName) &&
-      snippet.title === undefined &&
-      localTextPreview === null &&
-      (snippet.status === "PREPARING" ||
-        snippet.status === "UPLOADING" ||
-        (snippet.status === "PUBLISHED" &&
-          (snippet.localContentAvailability.status === "NOT_AVAILABLE" ||
-            snippet.localContentAvailability.status === "DOWNLOADING")))
-    ) {
-      return [];
-    }
-    const presentationContent = localTextPreview ?? snippet.title;
+  snippets.map((snippet) => {
     const presentation = deriveSnippetPresentation({
       fileName: snippet.fileName,
-      ...(presentationContent === undefined ? {} : { content: presentationContent }),
+      ...(snippet.title === undefined ? {} : { content: snippet.title }),
     });
     const row: SnippetRowReadModel =
       snippet.status === "PUBLISHED"
@@ -75,14 +57,11 @@ export const projectSnippetReadModels = (
             },
             localContentAvailability: snippet.localContentAvailability,
           };
-    return [
-      {
-        ...row,
-        localTextPreview,
-        presentation,
-        thumbnailUrl: thumbnailUrls[row.id] ?? null,
-      },
-    ];
+    return {
+      ...row,
+      presentation,
+      thumbnailUrl: thumbnailUrls[row.id] ?? null,
+    };
   });
 
 export const createImageUrlRegistry = () => {
@@ -118,7 +97,7 @@ export const createImageUrlRegistry = () => {
   };
 };
 
-const useSnippetImageUrls = (snippets: ReadonlyArray<DesktopSnippet>) => {
+const useSnippetImageUrls = (snippets: ReadonlyArray<Snippet>) => {
   const [thumbnailUrls, setThumbnailUrls] = useState<Record<string, string>>({});
   const registryRef = useRef<ReturnType<typeof createImageUrlRegistry> | null>(null);
   if (registryRef.current === null) registryRef.current = createImageUrlRegistry();
@@ -127,11 +106,11 @@ const useSnippetImageUrls = (snippets: ReadonlyArray<DesktopSnippet>) => {
 
   useEffect(() => {
     const images = snippets.filter(
-      ({ snippet }) =>
+      (snippet) =>
         deriveSnippetPresentation({ fileName: snippet.fileName }).type === "image" &&
         snippet.localContentAvailability.status === "AVAILABLE",
     );
-    const visibleIds = new Set(images.map(({ snippet }) => snippet.id));
+    const visibleIds = new Set(images.map((snippet) => snippet.id));
     visibleIdsRef.current = visibleIds;
 
     const registry = registryRef.current;
@@ -145,7 +124,7 @@ const useSnippetImageUrls = (snippets: ReadonlyArray<DesktopSnippet>) => {
       });
     }
 
-    for (const { snippet } of images) {
+    for (const snippet of images) {
       if (registry.has(snippet.id) || loadingIdsRef.current.has(snippet.id)) continue;
       loadingIdsRef.current.add(snippet.id);
       void window.ipc.snippets

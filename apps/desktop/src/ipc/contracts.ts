@@ -116,13 +116,6 @@ export type ResolvedSnippetIngestPayload = Exclude<
   { readonly sourceId: string }
 >;
 
-export const DesktopSnippetSchema = Schema.Struct({
-  snippet: SnippetSchema,
-  localTextPreview: Schema.NullOr(Schema.String),
-});
-
-export type DesktopSnippet = typeof DesktopSnippetSchema.Type;
-
 const ClientSnapshotFields = ClientSnapshotSchema.fields;
 
 export const LocalStateSchema = Schema.Struct({
@@ -131,7 +124,7 @@ export const LocalStateSchema = Schema.Struct({
   capability: ClientSnapshotFields.capability,
   syncStatus: Schema.NullOr(ClientSnapshotFields.syncStatus),
   storageUsageBytes: ClientSnapshotFields.storageUsageBytes,
-  snippets: Schema.Array(DesktopSnippetSchema),
+  snippets: Schema.Array(SnippetSchema),
 });
 
 export type LocalState = typeof LocalStateSchema.Type;

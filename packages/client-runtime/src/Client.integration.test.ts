@@ -288,7 +288,7 @@ describe("shared client integration", () => {
     Effect.gen(function* () {
       const prepareStarted = yield* Deferred.make<void>();
       const releasePrepare = yield* Deferred.make<void>();
-      const uploaded = { ...published, id: localId, fileName: "note.txt" };
+      const uploaded = { ...published, id: localId, fileName: "note.txt", title: "note" };
       let publishInput: PublishInput | undefined;
       const layer = makeLayer(
         makeRpc({

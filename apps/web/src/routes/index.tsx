@@ -341,10 +341,6 @@ function IndexRoute() {
     if (!isTextSnippetFileName(snippet.fileName)) {
       throw new Error("This snippet is not ready to copy.");
     }
-    if (snippet.localTextPreview !== null) {
-      await navigator.clipboard.writeText(snippet.localTextPreview);
-      return;
-    }
     if (snippet.byteSize > BUFFERED_CONTENT_MAX_BYTES) {
       throw new Error("This snippet is too large to open in the browser.");
     }

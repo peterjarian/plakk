@@ -29,7 +29,7 @@ Complete or partial provider content that has no Snippet because an upload or pu
 _Avoid_: Snippet content, pending publication, cleanup queue
 
 **Snippet presentation**:
-The client-side interpretation of a snippet as text, a hyperlink, an image, or a general file. Presentation uses the Snippet title when present and otherwise derives from available file name and content without creating separate upload paths.
+The client-side interpretation of a snippet as text, a hyperlink, an image, or a general file. Presentation uses the Snippet title when present and otherwise the file name, without creating separate upload paths.
 _Avoid_: Snippet kind, link snippet, text upload, file upload, image upload
 
 **Snippet title**:

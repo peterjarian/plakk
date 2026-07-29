@@ -147,16 +147,14 @@ describe("DesktopSession", () => {
         Layer.succeed(
           DesktopContentStore,
           DesktopContentStore.of({
-            forUser: () => ({
-              store: ContentStore.of({
+            forUser: () =>
+              ContentStore.of({
                 entries: Effect.succeed([]),
                 write: () => Effect.void,
                 read: () => Stream.empty,
                 readRange: () => Effect.succeed(new Uint8Array()),
                 remove: () => Effect.void,
               }),
-              preview: () => Effect.succeed(null),
-            }),
           }),
         ),
         NodeFileSystem.layer,

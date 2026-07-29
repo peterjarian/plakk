@@ -13,7 +13,6 @@ const state = vi.hoisted(() => {
     createdAt: "2026-07-11T00:00:00.000Z",
     updatedAt: "2026-07-11T00:00:00.000Z",
     localState: null,
-    localTextPreview: null,
     localContentAvailability: { status: "AVAILABLE" },
     presentation: { type: "image", title: "Alfa Romeo.png" },
     thumbnailUrl: "blob:tray-preview",

@@ -57,7 +57,7 @@ export const applySnippetSnapshot = Effect.fn("ClientQueries.applySnippetSnapsho
           )
           ON CONFLICT (user_id, id) DO UPDATE SET
             file_name = excluded.file_name,
-            title = COALESCE(excluded.title, client_snippets.title),
+            title = excluded.title,
             byte_size = excluded.byte_size,
             storage_provider = excluded.storage_provider,
             storage_object_id = excluded.storage_object_id,

@@ -14,7 +14,6 @@ const snippet: SnippetReadModel = {
     status: "FAILED",
     errorMessage: "The storage upload did not complete.",
   },
-  localTextPreview: "A text snippet",
   localContentAvailability: { status: "AVAILABLE" },
   presentation: { type: "text", title: "A text snippet" },
   thumbnailUrl: null,
@@ -92,7 +91,6 @@ describe("TrayRecentItem", () => {
           ...snippet,
           kind: "PUBLISHED",
           localState: null,
-          localTextPreview: null,
           localContentAvailability: { status: "NOT_AVAILABLE" },
           presentation: { type: "text", title: "Text snippet" },
         }}
@@ -118,7 +116,6 @@ describe("TrayRecentItem", () => {
           ...snippet,
           kind: "PUBLISHED",
           localState: null,
-          localTextPreview: null,
           localContentAvailability: { status: "DOWNLOADING" },
           presentation: { type: "text", title: "Text snippet" },
         }}
@@ -142,7 +139,6 @@ describe("TrayRecentItem", () => {
           ...snippet,
           kind: "PUBLISHED",
           localState: null,
-          localTextPreview: "https://plakk.app/notes",
           presentation: {
             type: "hyperlink",
             title: "plakk.app/notes",

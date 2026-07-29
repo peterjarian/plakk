@@ -136,7 +136,7 @@ export const markSnippetPublished = Effect.fn("ClientQueries.markSnippetPublishe
     UPDATE client_snippets
     SET
       file_name = ${snippet.fileName},
-      title = COALESCE(${snippet.title ?? null}, title),
+      title = ${snippet.title ?? null},
       byte_size = ${snippet.byteSize},
       storage_provider = ${snippet.storageProvider},
       storage_object_id = ${snippet.storageObjectId},
