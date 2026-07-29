@@ -279,29 +279,33 @@ export function WebProduct() {
     for (const snippet of candidates) {
       previewingRef.current.add(snippet.id);
     }
-    void resource.runtime.runPromise(
-      Effect.forEach(
-        candidates,
-        (snippet) =>
-          collectBytes(resource.client.content.readRemote(snippet.id)).pipe(
-            Effect.tap((bytes) =>
-              Effect.sync(() => {
-                const preview = decodeSnippetTextPreview(bytes);
-                if (preview !== null) {
-                  setPreviews((current) => ({ ...current, [snippet.id]: preview }));
-                }
-              }),
+    void resource.runtime
+      .runPromise(
+        Effect.forEach(
+          candidates,
+          (snippet) =>
+            collectBytes(resource.client.content.readRemote(snippet.id)).pipe(
+              Effect.tap((bytes) =>
+                Effect.sync(() => {
+                  const preview = decodeSnippetTextPreview(bytes);
+                  if (preview !== null) {
+                    setPreviews((current) => ({ ...current, [snippet.id]: preview }));
+                  }
+                }),
+              ),
+              Effect.catchCause(() => Effect.void),
+              Effect.ensuring(
+                Effect.sync(() => {
+                  previewingRef.current.delete(snippet.id);
+                }),
+              ),
             ),
-            Effect.catchCause(() => Effect.void),
-            Effect.ensuring(
-              Effect.sync(() => {
-                previewingRef.current.delete(snippet.id);
-              }),
-            ),
-          ),
-        { concurrency: 4, discard: true },
-      ),
-    );
+          { concurrency: 4, discard: true },
+        ),
+      )
+      .catch(() => {
+        // Runtime disposal can interrupt an in-flight preview batch.
+      });
   }, [previews, snapshot]);
 
   const withClient = useCallback(
