@@ -413,6 +413,13 @@ function HomeView(props: ProductAppProps & { readonly onSettings: () => void }) 
       aria-label="Plakk"
       onPaste={(event) => {
         if (blocked) return;
+        const target = event.target;
+        if (
+          target instanceof HTMLElement &&
+          (target.isContentEditable || target.matches("input, textarea, select"))
+        ) {
+          return;
+        }
         const files = Array.from(event.clipboardData.files);
         if (files.length > 0) run(props.onFiles(files), "Could not add pasted files.");
         else {

@@ -11,7 +11,11 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { CurrentSession } from "./CurrentSession.ts";
 import { LocalStorageError } from "./models/ClientError.ts";
 import { RpcClient } from "./RpcClient.ts";
-import { ContentMirror, ContentStore } from "./snippets/ContentMirror.ts";
+import {
+  ContentMirror,
+  ContentStore,
+  DownloadedContentMismatchError,
+} from "./snippets/ContentMirror.ts";
 import { SnippetStore } from "./snippets/SnippetStore.ts";
 import { SyncEngine } from "./snippets/SyncEngine.ts";
 import { UploadEngine } from "./snippets/UploadEngine.ts";
@@ -742,6 +746,70 @@ describe("shared client integration", () => {
         Effect.map((chunks) => Uint8Array.from(chunks.flatMap((chunk) => Array.from(chunk)))),
       );
       expect(content).toEqual(bytes);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("rejects remote content that does not match the published byte size", () => {
+    const layer = makeLayer(
+      makeRpc({
+        GetSnippetSnapshot: () => Effect.succeed([published]),
+        PrepareSnippetDownload: () =>
+          Effect.succeed({
+            storageProvider: published.storageProvider,
+            fileName: published.fileName,
+            byteSize: published.byteSize,
+            download: { url: "https://download.example/published", headers: [] },
+          }),
+      }),
+      () => new Response(new Uint8Array([1, 2, 3]), { status: 200 }),
+      { localContent: false },
+    );
+
+    return Effect.gen(function* () {
+      yield* (yield* SyncEngine).pull;
+      const error = yield* (yield* ContentMirror)
+        .readRemote(publishedId)
+        .pipe(Stream.runDrain, Effect.flip);
+      expect(error).toEqual(
+        new DownloadedContentMismatchError({
+          snippetId: publishedId,
+          expectedByteSize: published.byteSize,
+          actualByteSize: 3,
+          message: "The downloaded content size does not match the snippet.",
+        }),
+      );
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("stops a remote stream that exceeds the published byte size", () => {
+    const layer = makeLayer(
+      makeRpc({
+        GetSnippetSnapshot: () => Effect.succeed([published]),
+        PrepareSnippetDownload: () =>
+          Effect.succeed({
+            storageProvider: published.storageProvider,
+            fileName: published.fileName,
+            byteSize: published.byteSize,
+            download: { url: "https://download.example/published", headers: [] },
+          }),
+      }),
+      () => new Response(new Uint8Array([1, 2, 3, 4, 5]), { status: 200 }),
+      { localContent: false },
+    );
+
+    return Effect.gen(function* () {
+      yield* (yield* SyncEngine).pull;
+      const error = yield* (yield* ContentMirror)
+        .readRemote(publishedId)
+        .pipe(Stream.runDrain, Effect.flip);
+      expect(error).toEqual(
+        new DownloadedContentMismatchError({
+          snippetId: publishedId,
+          expectedByteSize: published.byteSize,
+          actualByteSize: 5,
+          message: "The downloaded content size does not match the snippet.",
+        }),
+      );
     }).pipe(Effect.provide(layer));
   });
 

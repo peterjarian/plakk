@@ -29,6 +29,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const rpcUrl = import.meta.env.VITE_PLAKK_RPC_URL ?? "http://localhost:3100/api/rpc";
 const TEXT_PREVIEW_MAX_BYTES = 64 * 1024;
+const BUFFERED_CONTENT_MAX_BYTES = 64 * 1024 * 1024;
 
 type RuntimeResource = {
   readonly client: Client["Service"];
@@ -66,6 +67,12 @@ const downloadBytes = (bytes: Uint8Array, fileName: string) => {
     anchor.remove();
     URL.revokeObjectURL(url);
   }, 1_000);
+};
+
+const ensureBufferable = (snippet: Pick<ProductSnippet, "byteSize">) => {
+  if (snippet.byteSize > BUFFERED_CONTENT_MAX_BYTES) {
+    throw new Error("This snippet is too large to open in the browser.");
+  }
 };
 
 const projectSnippet = (snippet: Snippet, preview: string | undefined): ProductSnippet => ({
@@ -156,6 +163,7 @@ export function WebProduct() {
     setSnapshot(null);
     setPreviews({});
     previewingRef.current.clear();
+    const lockAbort = new AbortController();
 
     const sessionLayer = Layer.succeed(
       CurrentSession,
@@ -180,42 +188,52 @@ export function WebProduct() {
         }),
       }),
     );
-    const sqliteLayer = SqliteClient.layer({
-      worker: Effect.acquireRelease(
-        Effect.sync(
-          () =>
-            new Worker(new URL("./sqlite-worker.ts", import.meta.url), {
-              name: `plakk-${user.id}`,
-              type: "module",
-            }),
-        ),
-        (worker) => Effect.sync(() => worker.terminate()),
-      ),
-    });
-    const protocolLayer = RpcClient.layerProtocolHttp({ url: rpcUrl }).pipe(
-      Layer.provideMerge(FetchHttpClient.layer),
-      Layer.provideMerge(RpcSerialization.layerNdjson),
-    );
-    const runtime = ManagedRuntime.make(
-      clientLayer.pipe(Layer.provide(Layer.mergeAll(sessionLayer, sqliteLayer, protocolLayer))),
-    );
-
-    void runtime
-      .runPromise(
-        Effect.gen(function* () {
-          const client = yield* Client;
-          if (active) resourceRef.current = { client, runtime };
-          yield* client.subscribe().pipe(
-            Stream.runForEach((next) =>
-              Effect.sync(() => {
-                if (!active) return;
-                setSnapshot(next);
-                setRuntimeLoading(false);
-              }),
+    let runtime: RuntimeResource["runtime"] | null = null;
+    void navigator.locks
+      .request("plakk:sqlite:plakk.sqlite", { signal: lockAbort.signal }, async () => {
+        if (!active) return;
+        const sqliteLayer = SqliteClient.layer({
+          worker: Effect.acquireRelease(
+            Effect.sync(
+              () =>
+                new Worker(new URL("./sqlite-worker.ts", import.meta.url), {
+                  name: `plakk-${user.id}`,
+                  type: "module",
+                }),
             ),
+            (worker) => Effect.sync(() => worker.terminate()),
+          ),
+        });
+        const protocolLayer = RpcClient.layerProtocolHttp({ url: rpcUrl }).pipe(
+          Layer.provideMerge(FetchHttpClient.layer),
+          Layer.provideMerge(RpcSerialization.layerNdjson),
+        );
+        const acquiredRuntime = ManagedRuntime.make(
+          clientLayer.pipe(Layer.provide(Layer.mergeAll(sessionLayer, sqliteLayer, protocolLayer))),
+        );
+        runtime = acquiredRuntime;
+        try {
+          await acquiredRuntime.runPromise(
+            Effect.gen(function* () {
+              const client = yield* Client;
+              if (active) resourceRef.current = { client, runtime: acquiredRuntime };
+              yield* client.subscribe().pipe(
+                Stream.runForEach((next) =>
+                  Effect.sync(() => {
+                    if (!active) return;
+                    setSnapshot(next);
+                    setRuntimeLoading(false);
+                  }),
+                ),
+              );
+            }),
           );
-        }),
-      )
+        } finally {
+          if (resourceRef.current?.runtime === acquiredRuntime) resourceRef.current = null;
+          if (runtime === acquiredRuntime) runtime = null;
+          await acquiredRuntime.dispose();
+        }
+      })
       .catch((cause) => {
         if (!active) return;
         setRuntimeLoading(false);
@@ -224,8 +242,12 @@ export function WebProduct() {
 
     return () => {
       active = false;
-      if (resourceRef.current?.runtime === runtime) resourceRef.current = null;
-      void runtime.dispose();
+      lockAbort.abort();
+      const acquiredRuntime = runtime;
+      if (acquiredRuntime !== null) {
+        if (resourceRef.current?.runtime === acquiredRuntime) resourceRef.current = null;
+        void acquiredRuntime.dispose();
+      }
     };
   }, [user?.id]);
 
@@ -304,11 +326,14 @@ export function WebProduct() {
       }}
       onSignOut={() =>
         (async () => {
-          const resource = resourceRef.current;
-          if (resource !== null) {
-            await resource.runtime.runPromise(resource.client.clearLocalData);
+          try {
+            const resource = resourceRef.current;
+            if (resource !== null) {
+              await resource.runtime.runPromise(resource.client.clearLocalData);
+            }
+          } finally {
+            await auth.signOut({ returnTo: "/" });
           }
-          await auth.signOut({ returnTo: "/" });
         })()
       }
       onRefresh={() => withClient(({ client, runtime }) => runtime.runPromise(client.refresh))}
@@ -372,6 +397,7 @@ export function WebProduct() {
         )
       }
       onCopy={async (snippet) => {
+        ensureBufferable(snippet);
         const bytes = await readRemote(snippet.id);
         const text = decodeSnippetText(bytes);
         if (text !== null && isTextSnippetFileName(snippet.fileName)) {
@@ -381,6 +407,7 @@ export function WebProduct() {
         downloadBytes(bytes, snippet.fileName);
       }}
       onDownload={async (snippet) => {
+        ensureBufferable(snippet);
         downloadBytes(await readRemote(snippet.id), snippet.fileName);
       }}
       onOpenExternal={(url) => {

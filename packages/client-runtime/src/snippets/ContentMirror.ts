@@ -86,9 +86,20 @@ export class DownloadRejectedError extends Schema.TaggedErrorClass<DownloadRejec
   },
 ) {}
 
+export class DownloadedContentMismatchError extends Schema.TaggedErrorClass<DownloadedContentMismatchError>()(
+  "DownloadedContentMismatchError",
+  {
+    snippetId: Schema.String,
+    expectedByteSize: Schema.Int,
+    actualByteSize: Schema.Int,
+    message: Schema.String,
+  },
+) {}
+
 export type ContentMirrorFailure =
   | ActionNotAllowedError
   | DownloadRejectedError
+  | DownloadedContentMismatchError
   | InvalidResponseError
   | LocalStorageError
   | OfflineError
@@ -375,7 +386,32 @@ export class ContentMirror extends Context.Service<
                 message: "The storage provider rejected the download.",
               });
             }
-            return response.stream.pipe(Stream.mapError(httpClientFailure));
+            let receivedByteSize = 0;
+            const mismatch = () =>
+              new DownloadedContentMismatchError({
+                snippetId: snippet.id,
+                expectedByteSize: snippet.byteSize,
+                actualByteSize: receivedByteSize,
+                message: "The downloaded content size does not match the snippet.",
+              });
+            return response.stream.pipe(
+              Stream.mapEffect((chunk) => {
+                receivedByteSize += chunk.byteLength;
+                return receivedByteSize > snippet.byteSize
+                  ? Effect.fail(mismatch())
+                  : Effect.succeed(chunk);
+              }),
+              Stream.mapError((error) =>
+                Schema.is(DownloadedContentMismatchError)(error) ? error : httpClientFailure(error),
+              ),
+              Stream.concat(
+                Stream.fromEffect(
+                  Effect.suspend(() =>
+                    receivedByteSize === snippet.byteSize ? Effect.void : Effect.fail(mismatch()),
+                  ),
+                ).pipe(Stream.drain),
+              ),
+            );
           }).pipe(
             Effect.provideService(SqlClient.SqlClient, sql),
             Effect.catchTags({
