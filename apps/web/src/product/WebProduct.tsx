@@ -190,9 +190,10 @@ export function WebProduct() {
       }),
     );
     let runtime: RuntimeResource["runtime"] | null = null;
+    const databaseName = `plakk-${user.id}.sqlite`;
     void navigator.locks
       .request(
-        "plakk:sqlite:plakk.sqlite",
+        `plakk:sqlite:${databaseName}`,
         { ifAvailable: true, signal: lockAbort.signal },
         async (lock) => {
           if (lock === null) {
@@ -208,7 +209,7 @@ export function WebProduct() {
               Effect.sync(
                 () =>
                   new Worker(new URL("./sqlite-worker.ts", import.meta.url), {
-                    name: `plakk-${user.id}`,
+                    name: databaseName,
                     type: "module",
                   }),
               ),

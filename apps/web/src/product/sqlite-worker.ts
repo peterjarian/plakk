@@ -8,6 +8,6 @@ const worker = self as DedicatedWorkerGlobalScope;
 void Effect.runPromise(
   OpfsWorker.run({
     port: worker,
-    dbName: "plakk.sqlite",
+    dbName: worker.name,
   }),
 );

@@ -118,6 +118,8 @@ export function SnippetRow(props: {
     snippet.kind === "PUBLISHED" &&
     (snippet.localContentAvailability.status === "NOT_AVAILABLE" ||
       snippet.localContentAvailability.status === "FAILED");
+  const canCopy =
+    contentMode === "mirrored" || presentation.type === "text" || presentation.type === "hyperlink";
   const title = presentation.title;
   const time = formatSnippetDate(snippet.createdAt, now);
   const metadata =
@@ -199,7 +201,7 @@ export function SnippetRow(props: {
 
           {showActions && snippet.kind === "PUBLISHED" && (
             <div className="invisible flex items-center gap-0.5 group-hover:visible group-focus-within:visible">
-              {!needsDownload && !isDownloading && (
+              {!needsDownload && !isDownloading && canCopy && (
                 <Button
                   type="button"
                   variant="ghost"

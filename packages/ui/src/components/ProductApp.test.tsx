@@ -74,4 +74,16 @@ describe("ProductApp", () => {
     expect(markup).not.toContain("Download to this device");
     expect(markup).not.toContain("Downloading for offline access");
   });
+
+  it("presents binary remote content as a download rather than a copy", () => {
+    const snippet = {
+      ...props.snippets[0]!,
+      fileName: "archive.zip",
+      presentation: { type: "file", title: "archive.zip" } as const,
+    };
+    const markup = renderToStaticMarkup(<ProductApp {...props} snippets={[snippet]} />);
+
+    expect(markup).not.toContain('aria-label="Copy"');
+    expect(markup).toContain('aria-label="Download"');
+  });
 });

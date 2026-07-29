@@ -221,6 +221,36 @@ export class ContentMirror extends Context.Service<
         }),
       );
 
+      /** Prepares, validates, and executes one storage-provider download. */
+      const executePreparedDownload = Effect.fn("ContentMirror.executePreparedDownload")(function* (
+        snippet: PublishedSnippet,
+      ) {
+        const prepared = yield* rpc.PrepareSnippetDownload({ id: snippet.id });
+        if (
+          prepared.storageProvider !== snippet.storageProvider ||
+          prepared.fileName !== snippet.fileName ||
+          prepared.byteSize !== snippet.byteSize
+        ) {
+          return yield* new PreparedDownloadMismatchError({
+            snippetId: snippet.id,
+            message: "The storage provider returned unexpected download metadata.",
+          });
+        }
+
+        let request = HttpClientRequest.get(prepared.download.url);
+        for (const header of prepared.download.headers) {
+          request = HttpClientRequest.setHeader(request, header.name, header.value);
+        }
+        const response = yield* http.execute(request);
+        if (response.status < 200 || response.status >= 300) {
+          return yield* new DownloadRejectedError({
+            status: response.status,
+            message: "The storage provider rejected the download.",
+          });
+        }
+        return response;
+      });
+
       /** Downloads and stores one already-resolved published snippet. */
       const downloadSnippet = Effect.fn("ContentMirror.downloadSnippet")(
         function* (snippet: PublishedSnippet) {
@@ -249,30 +279,7 @@ export class ContentMirror extends Context.Service<
           const work = concurrency.withPermit(
             Effect.gen(function* () {
               yield* updateContentStatus(snippet.id, "DOWNLOADING", null);
-              const prepared = yield* rpc.PrepareSnippetDownload({ id: snippet.id });
-              if (
-                prepared.storageProvider !== snippet.storageProvider ||
-                prepared.fileName !== snippet.fileName ||
-                prepared.byteSize !== snippet.byteSize
-              ) {
-                return yield* new PreparedDownloadMismatchError({
-                  snippetId: snippet.id,
-                  message: "The storage provider returned unexpected download metadata.",
-                });
-              }
-
-              let request = HttpClientRequest.get(prepared.download.url);
-              for (const header of prepared.download.headers) {
-                request = HttpClientRequest.setHeader(request, header.name, header.value);
-              }
-              const response = yield* http.execute(request);
-              if (response.status < 200 || response.status >= 300) {
-                return yield* new DownloadRejectedError({
-                  status: response.status,
-                  message: "The storage provider rejected the download.",
-                });
-              }
-
+              const response = yield* executePreparedDownload(snippet);
               yield* content.write(snippet.id, snippet.byteSize, response.stream);
               yield* updateContentStatus(snippet.id, "AVAILABLE", null);
             }),
@@ -363,29 +370,7 @@ export class ContentMirror extends Context.Service<
               });
             }
 
-            const prepared = yield* rpc.PrepareSnippetDownload({ id: snippet.id });
-            if (
-              prepared.storageProvider !== snippet.storageProvider ||
-              prepared.fileName !== snippet.fileName ||
-              prepared.byteSize !== snippet.byteSize
-            ) {
-              return yield* new PreparedDownloadMismatchError({
-                snippetId: snippet.id,
-                message: "The storage provider returned unexpected download metadata.",
-              });
-            }
-
-            let request = HttpClientRequest.get(prepared.download.url);
-            for (const header of prepared.download.headers) {
-              request = HttpClientRequest.setHeader(request, header.name, header.value);
-            }
-            const response = yield* http.execute(request);
-            if (response.status < 200 || response.status >= 300) {
-              return yield* new DownloadRejectedError({
-                status: response.status,
-                message: "The storage provider rejected the download.",
-              });
-            }
+            const response = yield* executePreparedDownload(snippet);
             let receivedByteSize = 0;
             const mismatch = () =>
               new DownloadedContentMismatchError({
