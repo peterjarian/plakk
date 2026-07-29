@@ -120,10 +120,32 @@ function RuntimeIssueState({
   onRetry,
 }: {
   readonly issue: ClientRuntimeIssue;
-  readonly onRetry: () => void;
+  readonly onRetry: () => Promise<void>;
 }) {
   const presentation = runtimeIssuePresentation[issue];
   const anotherTab = issue === "another-tab";
+  const [isChecking, setIsChecking] = useState(false);
+  const retryTimer = useRef<number | null>(null);
+
+  useEffect(
+    () => () => {
+      if (retryTimer.current !== null) window.clearTimeout(retryTimer.current);
+    },
+    [],
+  );
+
+  const handleRetry = () => {
+    if (!anotherTab) {
+      void onRetry();
+      return;
+    }
+
+    setIsChecking(true);
+    retryTimer.current = window.setTimeout(() => {
+      retryTimer.current = null;
+      void onRetry().finally(() => setIsChecking(false));
+    }, 1_000);
+  };
 
   return (
     <Empty
@@ -146,8 +168,15 @@ function RuntimeIssueState({
         <EmptyDescription>{presentation.description}</EmptyDescription>
       </EmptyHeader>
       <EmptyContent>
-        <Button type="button" variant="outline" size="sm" onClick={onRetry}>
-          {anotherTab ? "Check again" : "Try again"}
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={isChecking}
+          onClick={handleRetry}
+        >
+          {isChecking && <LoaderCircle className="animate-spin" aria-hidden="true" />}
+          {isChecking ? "Checking…" : anotherTab ? "Check again" : "Try again"}
         </Button>
       </EmptyContent>
     </Empty>
@@ -648,7 +677,7 @@ function IndexRoute() {
         />
         <div className="flex min-h-0 flex-1 flex-col px-6 pb-6">
           {runtime.issue !== null ? (
-            <RuntimeIssueState issue={runtime.issue} onRetry={() => void runtime.refresh()} />
+            <RuntimeIssueState issue={runtime.issue} onRetry={runtime.refresh} />
           ) : (
             <>
               <div className="sticky top-0 z-20 bg-background pt-5 pb-4">
