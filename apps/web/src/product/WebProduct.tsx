@@ -335,30 +335,32 @@ export function WebProduct() {
       }}
       onFiles={async (files) => {
         if (provider === null) throw new Error("Connect storage before adding snippets.");
-        for (const file of files) {
-          await withClient(({ client, runtime }) =>
-            runtime.runPromise(
-              client.uploads.upload(
-                {
-                  id: crypto.randomUUID(),
-                  fileName: file.name,
-                  byteSize: file.size,
-                  mediaType: file.type || null,
-                  storageProvider: provider,
-                },
-                {
-                  read: (offset, byteSize) =>
-                    Effect.tryPromise(() =>
-                      file
-                        .slice(offset, offset + byteSize)
-                        .arrayBuffer()
-                        .then((buffer) => new Uint8Array(buffer)),
-                    ),
-                },
+        await Promise.all(
+          files.map((file) =>
+            withClient(({ client, runtime }) =>
+              runtime.runPromise(
+                client.uploads.upload(
+                  {
+                    id: crypto.randomUUID(),
+                    fileName: file.name,
+                    byteSize: file.size,
+                    mediaType: file.type || null,
+                    storageProvider: provider,
+                  },
+                  {
+                    read: (offset, byteSize) =>
+                      Effect.tryPromise(() =>
+                        file
+                          .slice(offset, offset + byteSize)
+                          .arrayBuffer()
+                          .then((buffer) => new Uint8Array(buffer)),
+                      ),
+                  },
+                ),
               ),
             ),
-          );
-        }
+          ),
+        );
       }}
       onDelete={(snippet) =>
         withClient(({ client, runtime }) =>
