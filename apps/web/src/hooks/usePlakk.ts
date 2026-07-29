@@ -149,6 +149,7 @@ export function usePlakk() {
   const resourceRef = useRef<RuntimeResource | null>(null);
   const previewingRef = useRef(new Set<string>());
   const previewFailuresRef = useRef(new Map<string, number>());
+  const previewTerminalFailuresRef = useRef(new Map<string, string>());
   const previewRetryTimersRef = useRef(new Map<string, number>());
   const [snapshot, setSnapshot] = useState<ClientSnapshot | null>(null);
   const [previews, setPreviews] = useState<Record<string, string>>({});
@@ -189,6 +190,7 @@ export function usePlakk() {
     setPreviews({});
     previewingRef.current.clear();
     previewFailuresRef.current.clear();
+    previewTerminalFailuresRef.current.clear();
     for (const timer of previewRetryTimersRef.current.values()) window.clearTimeout(timer);
     previewRetryTimersRef.current.clear();
     const lockAbort = new AbortController();
@@ -315,6 +317,7 @@ export function usePlakk() {
           isTextSnippetFileName(snippet.fileName) &&
           snippet.byteSize <= TEXT_PREVIEW_MAX_BYTES &&
           previews[snippet.id] === undefined &&
+          previewTerminalFailuresRef.current.get(snippet.id) !== snippet.updatedAt &&
           !previewingRef.current.has(snippet.id),
       );
     for (const snippet of candidates) {
@@ -333,9 +336,12 @@ export function usePlakk() {
                   if (retryTimer !== undefined) window.clearTimeout(retryTimer);
                   previewRetryTimersRef.current.delete(snippet.id);
                   const preview = decodeSnippetTextPreview(bytes);
-                  if (preview !== null) {
-                    setPreviews((current) => ({ ...current, [snippet.id]: preview }));
+                  if (preview === null) {
+                    previewTerminalFailuresRef.current.set(snippet.id, snippet.updatedAt);
+                    return;
                   }
+                  previewTerminalFailuresRef.current.delete(snippet.id);
+                  setPreviews((current) => ({ ...current, [snippet.id]: preview }));
                 }),
               ),
               Effect.catch((error) =>
@@ -353,7 +359,9 @@ export function usePlakk() {
                       );
                       previewRetryTimersRef.current.set(snippet.id, timer);
                     })
-                  : Effect.void,
+                  : Effect.sync(() => {
+                      previewTerminalFailuresRef.current.set(snippet.id, snippet.updatedAt);
+                    }),
               ),
               Effect.ensuring(
                 Effect.sync(() => {
