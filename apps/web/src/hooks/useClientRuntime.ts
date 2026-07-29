@@ -22,6 +22,7 @@ export function useClientRuntime(user: User | null) {
   const getAccessTokenRef = useRef(accessToken.getAccessToken);
   getAccessTokenRef.current = accessToken.getAccessToken;
   const resourceRef = useRef<ClientResource | null>(null);
+  const signingOutRef = useRef(false);
   const [snapshot, setSnapshot] = useState<ClientSnapshot | null>(null);
   const [runtimeIssue, setRuntimeIssue] = useState<ClientRuntimeIssue | null>(null);
   const [loading, setLoading] = useState(user !== null);
@@ -29,6 +30,7 @@ export function useClientRuntime(user: User | null) {
 
   useEffect(() => {
     if (user === null) {
+      signingOutRef.current = false;
       setSnapshot(null);
       setLoading(false);
       setRuntimeIssue(null);
@@ -36,6 +38,7 @@ export function useClientRuntime(user: User | null) {
     }
 
     let active = true;
+    signingOutRef.current = false;
     setLoading(true);
     setRuntimeIssue(null);
     setSnapshot(null);
@@ -91,7 +94,7 @@ export function useClientRuntime(user: User | null) {
         }
       })
       .catch(() => {
-        if (!active) return;
+        if (!active || signingOutRef.current) return;
         setLoading(false);
         setRuntimeIssue("startup");
       });
@@ -115,6 +118,8 @@ export function useClientRuntime(user: User | null) {
 
   const signOut = useCallback(async () => {
     if (user === null) return;
+    signingOutRef.current = true;
+    setRuntimeIssue(null);
     try {
       const resource = resourceRef.current;
       resourceRef.current = null;
