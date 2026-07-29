@@ -165,6 +165,7 @@ const useAppearance = () => {
 export function WebProduct() {
   const auth = useAuth();
   const accessToken = useAccessToken();
+  const tabIdRef = useRef(crypto.randomUUID());
   const getAccessTokenRef = useRef(accessToken.getAccessToken);
   getAccessTokenRef.current = accessToken.getAccessToken;
   const signOutRef = useRef(auth.signOut);
@@ -218,7 +219,9 @@ export function WebProduct() {
     let runtime: RuntimeResource["runtime"] | null = null;
     const runtimeChannel = new BroadcastChannel(runtimeChannelNameFor(user.id));
     runtimeChannel.addEventListener("message", (event) => {
-      if (event.data !== "release") return;
+      if (event.data?.type !== "release" || event.data.sourceTabId === tabIdRef.current) {
+        return;
+      }
       active = false;
       lockAbort.abort();
       const acquiredRuntime = runtime;
@@ -491,7 +494,10 @@ export function WebProduct() {
               if (resource !== null) await resource.runtime.dispose();
 
               const runtimeChannel = new BroadcastChannel(runtimeChannelNameFor(user.id));
-              runtimeChannel.postMessage("release");
+              runtimeChannel.postMessage({
+                type: "release",
+                sourceTabId: tabIdRef.current,
+              });
               runtimeChannel.close();
 
               await navigator.locks.request(databaseLockNameFor(user.id), async () => {
