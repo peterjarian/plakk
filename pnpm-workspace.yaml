@@ -5,12 +5,12 @@ packages:
   - packages/*
 
 catalog:
-  "@effect/language-service": 0.86.2
-  "@effect/tsgo": 0.15.0
+  "@effect/language-service": 0.87.1
+  "@effect/tsgo": 0.24.3
   "@types/node": 24.13.2
-  "@typescript/native-preview": 7.0.0-dev.20260701.1
+  "@typescript/native-preview": 7.0.0-dev.20260707.2
   effect: 4.0.0-beta.92
-  typescript: 6.0.3
+  typescript: 7.0.2
   vite: npm:@voidzero-dev/vite-plus-core@latest
   vitest: 4.1.9
   vite-plus: latest
