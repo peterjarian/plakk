@@ -79,8 +79,14 @@ export class DownloadedContentMismatchError extends Schema.TaggedErrorClass<Down
   },
 ) {}
 
+export class DownloadRejectedError extends Schema.TaggedErrorClass<DownloadRejectedError>()(
+  "DownloadRejectedError",
+  { message: Schema.String },
+) {}
+
 export type ContentMirrorFailure =
   | ActionNotAllowedError
+  | DownloadRejectedError
   | DownloadedContentMismatchError
   | InvalidResponseError
   | LocalStorageError
@@ -152,9 +158,13 @@ export class ContentMirror extends Context.Service<
               message: "The snippet changed elsewhere. Please try again.",
             });
           case "INTERNAL_SERVER_ERROR":
-            return new ServerUnavailableError({
-              message: "Plakk could not prepare the download. Please try again.",
-            });
+            return error.retryable === false
+              ? new DownloadRejectedError({
+                  message: "The storage provider rejected the download.",
+                })
+              : new ServerUnavailableError({
+                  message: "Plakk could not prepare the download. Please try again.",
+                });
         }
       };
 

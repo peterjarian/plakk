@@ -77,6 +77,12 @@ const toApiSnippet = (snippet: SnippetRow): ApiSnippet => ({
 
 const storageErrorToRpc = (error: StorageDownloadError): RpcError => {
   switch (error._tag) {
+    case "StorageDownloadRejectedError":
+      return new RpcError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: error.message,
+        retryable: error.status === 408 || error.status === 429 || error.status >= 500,
+      });
     case "StorageObjectNotFoundError":
       return new RpcError({ code: "NOT_FOUND", message: error.message });
     case "StorageNotConnectedError":

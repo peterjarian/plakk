@@ -729,6 +729,32 @@ describe("shared client integration", () => {
     }).pipe(Effect.provide(layer));
   });
 
+  it.effect("persists a terminal provider rejection for manual recovery", () => {
+    const layer = makeLayer(
+      makeRpc({
+        GetSnippetSnapshot: () => Effect.succeed([published]),
+        DownloadSnippetContent: () =>
+          Stream.fail(
+            new RpcError({
+              code: "INTERNAL_SERVER_ERROR",
+              message: "provider rejected download",
+              retryable: false,
+            }),
+          ),
+      }),
+    );
+
+    return Effect.gen(function* () {
+      yield* (yield* SyncEngine).pull;
+      yield* (yield* ContentMirror).download(publishedId).pipe(Effect.flip);
+
+      expect((yield* listSnippets(user.id))[0]).toMatchObject({
+        id: publishedId,
+        localContentAvailability: { status: "FAILED" },
+      });
+    }).pipe(Effect.provide(layer));
+  });
+
   it.effect("streams remote content without requiring a local content store", () => {
     const bytes = new TextEncoder().encode("note");
     const layer = makeLayer(

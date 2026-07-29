@@ -26,6 +26,7 @@ import {
   type PrepareStorageUploadInput,
   StorageCredentialsError,
   type StorageDeletionError,
+  StorageDownloadRejectedError,
   type StorageDownloadTarget,
   type StorageDownloadError,
   StorageNeedsReauthorizationError,
@@ -242,8 +243,9 @@ export const StorageProviderLive = Layer.effect(
             });
           }
           if (response.status < 200 || response.status >= 300) {
-            return yield* new StorageProviderError({
+            return yield* new StorageDownloadRejectedError({
               storageProvider: input.storageProvider,
+              status: response.status,
               message: `Stored object download failed: ${response.status}`,
             });
           }
@@ -262,7 +264,8 @@ export const StorageProviderLive = Layer.effect(
                 : Effect.succeed(chunk);
             }),
             Stream.mapError((cause) =>
-              Schema.is(StorageProviderError)(cause)
+              Schema.is(StorageProviderError)(cause) ||
+              Schema.is(StorageDownloadRejectedError)(cause)
                 ? cause
                 : new StorageProviderError({
                     storageProvider: input.storageProvider,

@@ -16,6 +16,7 @@ import { TestClock } from "effect/testing";
 
 import {
   StorageCredentialsError,
+  StorageDownloadRejectedError,
   type StorageDownloadError,
   StorageNeedsReauthorizationError,
   StorageNotConnectedError,
@@ -403,6 +404,28 @@ describe("stored snippet content download", () => {
       ),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
     expect(downloadStream).not.toHaveBeenCalled();
+  });
+
+  it("marks terminal provider rejections as non-retryable", async () => {
+    const downloadStream = () =>
+      Stream.fail(
+        new StorageDownloadRejectedError({
+          storageProvider: "GOOGLE_DRIVE",
+          status: 403,
+          message: "provider rejected download",
+        }),
+      );
+
+    await expect(
+      runSnippetEffect(
+        (rpcs) => rpcs.DownloadSnippetContent({ id: publication.id }).pipe(Stream.runDrain),
+        downloadDatabase([snippet()]),
+        storageService({ downloadStream }),
+      ),
+    ).rejects.toMatchObject({
+      code: "INTERNAL_SERVER_ERROR",
+      retryable: false,
+    });
   });
 
   it.each([

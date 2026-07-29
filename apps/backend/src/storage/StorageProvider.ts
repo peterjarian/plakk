@@ -26,6 +26,15 @@ export class StorageObjectNotFoundError extends Schema.TaggedErrorClass<StorageO
   },
 ) {}
 
+export class StorageDownloadRejectedError extends Schema.TaggedErrorClass<StorageDownloadRejectedError>()(
+  "StorageDownloadRejectedError",
+  {
+    storageProvider: StorageProviderLiteral,
+    status: Schema.Int,
+    message: Schema.String,
+  },
+) {}
+
 export type StorageProviderDestination = {
   readonly url: string;
 };
@@ -86,7 +95,10 @@ export type StorageProviderOperationError =
 
 export type StorageUploadError = StorageProviderOperationError;
 export type StorageDeletionError = StorageProviderOperationError;
-export type StorageDownloadError = StorageUploadError | StorageObjectNotFoundError;
+export type StorageDownloadError =
+  | StorageUploadError
+  | StorageDownloadRejectedError
+  | StorageObjectNotFoundError;
 
 export type StorageProviderAdapter = {
   readonly storageProvider: PrepareStorageUploadInput["storageProvider"];
