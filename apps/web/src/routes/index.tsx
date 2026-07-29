@@ -8,7 +8,7 @@ import {
 } from "@plakk/shared";
 import { accountCanSyncWithConnection } from "@plakk/shared/PlakkApi";
 import { AppHeader } from "@plakk/ui/components/AppHeader";
-import { ProductNotice, type ProductNoticeTone } from "@plakk/ui/components/ProductNotice";
+import { ProductNotice } from "@plakk/ui/components/ProductNotice";
 import { Settings as SettingsUI } from "@plakk/ui/components/settings";
 import { SnippetComposer } from "@plakk/ui/components/SnippetComposer";
 import { SnippetList } from "@plakk/ui/components/SnippetList";
@@ -18,6 +18,14 @@ import { getInitials } from "@plakk/ui/lib/getInitials";
 import { Avatar, AvatarFallback } from "@plakk/ui/primitives/avatar";
 import { Button } from "@plakk/ui/primitives/button";
 import { Dialog, DialogContent, DialogTitle } from "@plakk/ui/primitives/dialog";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@plakk/ui/primitives/empty";
 import {
   Select,
   SelectContent,
@@ -33,10 +41,12 @@ import * as DateTime from "effect/DateTime";
 import { Effect, Stream } from "effect";
 import {
   ArrowUpRight,
+  CircleAlert,
   CloudOff,
   CreditCard,
   LoaderCircle,
   MessageCircle,
+  PanelsTopLeft,
   Plus,
   SunMoon,
 } from "lucide-react";
@@ -89,27 +99,60 @@ const actionFailures = {
   },
 } satisfies Record<string, ProductFailure>;
 
-const runtimeIssuePresentation: Record<
-  ClientRuntimeIssue,
-  ProductFailure & { readonly tone: ProductNoticeTone }
-> = {
+const runtimeIssuePresentation: Record<ClientRuntimeIssue, ProductFailure> = {
   "another-tab": {
-    tone: "warning",
     title: "Plakk is open in another tab",
-    description: "Continue there, or close that tab and try again here.",
+    description: "Keep using Plakk there, or close that tab and check again here.",
   },
   session: {
-    tone: "danger",
     title: "Couldn’t verify your session",
     description: "Check your connection and try again. Sign in again if the problem continues.",
   },
   startup: {
-    tone: "danger",
     title: "Plakk couldn’t start in this tab",
     description:
       "Reload this tab and try again. Your snippets in connected storage are still safe.",
   },
 };
+
+function RuntimeIssueState({
+  issue,
+  onRetry,
+}: {
+  readonly issue: ClientRuntimeIssue;
+  readonly onRetry: () => void;
+}) {
+  const presentation = runtimeIssuePresentation[issue];
+  const anotherTab = issue === "another-tab";
+
+  return (
+    <Empty
+      role={anotherTab ? "status" : "alert"}
+      aria-live={anotherTab ? "polite" : undefined}
+      className="gap-5 p-0"
+    >
+      <EmptyHeader>
+        <EmptyMedia
+          variant="icon"
+          className={
+            anotherTab
+              ? "size-10 rounded-full bg-amber-500/10 text-amber-500"
+              : "size-10 rounded-full bg-destructive/10 text-destructive"
+          }
+        >
+          {anotherTab ? <PanelsTopLeft /> : <CircleAlert />}
+        </EmptyMedia>
+        <EmptyTitle className="text-base">{presentation.title}</EmptyTitle>
+        <EmptyDescription>{presentation.description}</EmptyDescription>
+      </EmptyHeader>
+      <EmptyContent>
+        <Button type="button" variant="outline" size="sm" onClick={onRetry}>
+          {anotherTab ? "Check again" : "Try again"}
+        </Button>
+      </EmptyContent>
+    </Empty>
+  );
+}
 
 const {
   Row: SettingsRow,
@@ -297,7 +340,7 @@ function IndexRoute() {
             <h1 className="text-2xl leading-tight font-semibold">Move snippets between devices.</h1>
           </div>
           {runtimeIssue !== null && (
-            <ProductNotice tone={runtimeIssue.tone} title={runtimeIssue.title}>
+            <ProductNotice tone="danger" title={runtimeIssue.title}>
               {runtimeIssue.description}
             </ProductNotice>
           )}
@@ -604,26 +647,8 @@ function IndexRoute() {
           }
         />
         <div className="flex min-h-0 flex-1 flex-col px-6 pb-6">
-          {runtimeIssue !== null ? (
-            <div className="grid flex-1 place-items-center py-12">
-              <ProductNotice
-                className="w-full max-w-md"
-                tone={runtimeIssue.tone}
-                title={runtimeIssue.title}
-                action={
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => void runtime.refresh()}
-                  >
-                    Try again
-                  </Button>
-                }
-              >
-                {runtimeIssue.description}
-              </ProductNotice>
-            </div>
+          {runtime.issue !== null ? (
+            <RuntimeIssueState issue={runtime.issue} onRetry={() => void runtime.refresh()} />
           ) : (
             <>
               <div className="sticky top-0 z-20 bg-background pt-5 pb-4">
