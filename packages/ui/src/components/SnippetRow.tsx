@@ -1,6 +1,8 @@
-import { formatFileSize, type SnippetPresentation } from "@plakk/shared";
-import type { ApiSnippet } from "@plakk/shared/PlakkApi";
-import type { LocalContentAvailability } from "@plakk/shared";
+import {
+  formatFileSize,
+  type LocalContentAvailability,
+  type SnippetPresentation,
+} from "@plakk/shared";
 import * as DateTime from "effect/DateTime";
 import {
   ArrowUpRight,
@@ -16,9 +18,12 @@ import {
   Type,
   X,
 } from "lucide-react";
-import { Button } from "./primitives/button.tsx";
+import { Button } from "../primitives/button.tsx";
 
-export type SnippetRowItem = Omit<ApiSnippet, "storageObjectId"> & {
+export type SnippetRowData = {
+  readonly fileName: string;
+  readonly byteSize: number;
+  readonly createdAt: string;
   readonly kind: "LOCAL" | "PUBLISHED";
   readonly localState: null | {
     readonly status: "UPLOADING" | "FAILED";
@@ -34,7 +39,7 @@ const presentationMeta: Record<SnippetPresentation["type"], { Icon: typeof Type 
   image: { Icon: ImageIcon },
 };
 
-const fileSubtitle = (snippet: Pick<ApiSnippet, "byteSize" | "fileName">) =>
+const fileSubtitle = (snippet: Pick<SnippetRowData, "byteSize" | "fileName">) =>
   `${snippet.fileName.split(".").pop()?.toUpperCase() ?? "FILE"} · ${formatFileSize(snippet.byteSize)}`;
 
 const relativeDateUnits = [
@@ -76,8 +81,8 @@ export function formatSnippetDate(
   return createdAt.slice(0, 10);
 }
 
-export function SnippetRow(props: {
-  snippet: SnippetRowItem;
+export type SnippetRowProps = {
+  snippet: SnippetRowData;
   presentation: SnippetPresentation;
   now: number;
   copied: boolean;
@@ -90,7 +95,9 @@ export function SnippetRow(props: {
   copying?: boolean;
   copyError?: string;
   showActions?: boolean;
-}) {
+};
+
+export function SnippetRow(props: SnippetRowProps) {
   const {
     snippet,
     presentation,

@@ -5,15 +5,15 @@
   "tsx": true,
   "tailwind": {
     "config": "",
-    "css": "./src/styles/foundation.css",
+    "css": "./src/styles.css",
     "baseColor": "neutral",
     "cssVariables": true
   },
   "iconLibrary": "lucide",
   "aliases": {
-    "components": "@plakk/ui/components",
-    "hooks": "@plakk/ui/hooks",
-    "lib": "@plakk/ui/lib",
+    "components": "@/components",
+    "hooks": "@/hooks",
+    "lib": "@/lib",
     "utils": "@plakk/ui/lib/utils",
     "ui": "@plakk/ui/primitives"
   }

@@ -8,10 +8,8 @@ const snippet: SnippetReadModel = {
   id: "8c72d6f6-9a25-4633-b72f-d8f83cf1c8e0",
   fileName: "snippet.txt",
   byteSize: 14,
-  storageProvider: "GOOGLE_DRIVE",
   kind: "LOCAL",
   createdAt: "2026-07-11T00:00:00.000Z",
-  updatedAt: "2026-07-11T00:00:00.000Z",
   localState: {
     status: "FAILED",
     errorMessage: "The storage upload did not complete.",

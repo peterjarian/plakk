@@ -1,5 +1,5 @@
 import { Check, ClipboardPaste, Copy, FileUp, LoaderCircle } from "lucide-react";
-import { Button } from "@plakk/ui/components/primitives/button";
+import { Button } from "@plakk/ui/primitives/button";
 
 export function TrayActions({
   copyDisabled,
