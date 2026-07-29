@@ -202,7 +202,8 @@ const useSnippetTextPreviews = (snapshot: ClientSnapshot | null, run: RunClient)
         { concurrency: 4, discard: true },
       ),
     ).catch(() => {
-      // Runtime disposal can interrupt an in-flight preview batch.
+      // The runtime can reject before the Effects start, so their finalizers may not run.
+      for (const snippet of candidates) previewingRef.current.delete(snippet.id);
     });
   }, [previews, retryTick, run, snapshot]);
 
