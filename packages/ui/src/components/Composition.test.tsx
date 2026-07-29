@@ -7,8 +7,10 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { AppHeader } from "./AppHeader.tsx";
 import { SnippetList } from "./SnippetList.tsx";
+import { SyncStatusIndicator } from "./SyncStatusIndicator.tsx";
 import { Settings } from "./settings.tsx";
 import { EmptyDescription } from "../primitives/empty.tsx";
+import { TooltipProvider } from "../primitives/tooltip.tsx";
 
 const mountedRoots: Array<ReturnType<typeof createRoot>> = [];
 
@@ -120,5 +122,18 @@ describe("shared composition", () => {
     expect(markup).toContain('data-slot="settings-row"');
     expect(markup).toContain("Plakk Pro");
     expect(markup).toContain("Manage");
+  });
+
+  it("presents synchronization as one accessible status dot", () => {
+    const markup = renderToStaticMarkup(
+      <TooltipProvider>
+        <SyncStatusIndicator status="CONNECTED" />
+      </TooltipProvider>,
+    );
+
+    expect(markup).toContain('role="status"');
+    expect(markup).toContain('aria-label="Up to date"');
+    expect(markup).toContain("bg-emerald-500/80");
+    expect(markup).not.toContain("Synced");
   });
 });

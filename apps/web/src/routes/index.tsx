@@ -12,9 +12,11 @@ import { Settings as SettingsUI } from "@plakk/ui/components/settings";
 import { SnippetComposer } from "@plakk/ui/components/SnippetComposer";
 import { SnippetList } from "@plakk/ui/components/SnippetList";
 import { SnippetRow } from "@plakk/ui/components/SnippetRow";
+import { SyncStatusIndicator, type SyncStatus } from "@plakk/ui/components/SyncStatusIndicator";
 import { getInitials } from "@plakk/ui/lib/getInitials";
 import { Avatar, AvatarFallback } from "@plakk/ui/primitives/avatar";
 import { Button } from "@plakk/ui/primitives/button";
+import { Dialog, DialogContent, DialogTitle } from "@plakk/ui/primitives/dialog";
 import {
   Select,
   SelectContent,
@@ -28,7 +30,6 @@ import type { User as AuthKitUser } from "@workos/authkit-tanstack-react-start";
 import * as DateTime from "effect/DateTime";
 import { Effect, Stream } from "effect";
 import {
-  ArrowLeft,
   ArrowUpRight,
   CloudOff,
   CreditCard,
@@ -41,7 +42,6 @@ import {
 import { useEffect, useRef, useState } from "react";
 
 import { StorageProviderIcon, storageProviderLabel } from "../components/StorageProviderIcon.tsx";
-import { SyncStatusIndicator, type SyncStatus } from "../components/SyncStatusIndicator.tsx";
 import { useClientRuntime } from "../hooks/useClientRuntime.ts";
 import { useSnippets, type SnippetReadModel } from "../hooks/useSnippets.ts";
 import { useTheme, type Theme } from "../hooks/useTheme.tsx";
@@ -87,7 +87,7 @@ function IndexRoute() {
   const runtime = useClientRuntime(user);
   const snippets = useSnippets(runtime);
   const { theme, setTheme } = useTheme();
-  const [screen, setScreen] = useState<"home" | "settings">("home");
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [storageError, setStorageError] = useState<string | null>(null);
@@ -255,43 +255,43 @@ function IndexRoute() {
     );
   }
 
-  if (screen === "settings") {
-    const fallback = user.email ?? user.id;
-    const name = [user.firstName, user.lastName].filter(Boolean).join(" ") || fallback;
-
-    return (
-      <main className="min-h-screen bg-background px-6 py-5 text-foreground">
-        <div className="mx-auto grid w-full max-w-2xl gap-6">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="w-fit"
-            onClick={() => setScreen("home")}
-          >
-            <ArrowLeft />
-            Back
-          </Button>
+  const fallback = user.email ?? user.id;
+  const name = [user.firstName, user.lastName].filter(Boolean).join(" ") || fallback;
+  const settingsDialog = (
+    <Dialog
+      open={settingsOpen}
+      onOpenChange={(open) => {
+        setSettingsOpen(open);
+      }}
+    >
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-6 sm:max-w-2xl">
+        <DialogTitle className="sr-only">Settings</DialogTitle>
+        <div className="grid gap-6">
           <SettingsSection>
             <SettingsSectionTitle>Account</SettingsSectionTitle>
             <SettingsSectionBody>
               <SettingsRow className="px-4">
                 <SettingsRowMain>
                   <Avatar className="size-10">
-                    <AvatarFallback>{getInitials(name, fallback)}</AvatarFallback>
+                    <AvatarFallback className="text-sm font-medium">
+                      {getInitials(name, fallback)}
+                    </AvatarFallback>
                   </Avatar>
                   <SettingsRowText
                     title={name}
                     description={name === fallback ? undefined : fallback}
                   />
                 </SettingsRowMain>
+                <span className="rounded-full bg-muted px-2 py-1 text-[11px] leading-none font-medium text-muted-foreground">
+                  Pro
+                </span>
               </SettingsRow>
               <SettingsRow className="px-4">
                 <SettingsRowMain>
                   <SettingsRowIcon>
-                    <CreditCard className="size-4" />
+                    <CreditCard className="size-4 text-muted-foreground" aria-hidden="true" />
                   </SettingsRowIcon>
-                  <SettingsRowText title="Billing" description="Manage subscription and invoices" />
+                  <SettingsRowText title="Plakk Pro" description="Current plan" />
                 </SettingsRowMain>
                 <Button
                   type="button"
@@ -307,9 +307,9 @@ function IndexRoute() {
                 <SettingsRowMain>
                   <SettingsRowIcon>
                     {storage.kind === "unlinked" || storage.kind === "offline" ? (
-                      <CloudOff className="size-4" />
+                      <CloudOff className="size-4 text-muted-foreground" aria-hidden="true" />
                     ) : (
-                      <StorageProviderIcon provider={storage.provider} />
+                      <StorageProviderIcon provider={storage.provider} className="size-5" />
                     )}
                   </SettingsRowIcon>
                   <SettingsRowText
@@ -362,7 +362,7 @@ function IndexRoute() {
                           );
                         }}
                       >
-                        <StorageProviderIcon provider={storageProvider} />
+                        <StorageProviderIcon provider={storageProvider} className="size-5" />
                         <span className="sr-only">
                           Connect {storageProviderLabel(storageProvider)}
                         </span>
@@ -395,9 +395,9 @@ function IndexRoute() {
             <SettingsSectionBody>
               <SettingsRow>
                 <SettingsRowMain>
-                  <SunMoon className="size-4 text-muted-foreground" />
+                  <SunMoon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
                   <SettingsRowText
-                    title="Theme"
+                    title="Appearance"
                     description="Choose a theme or follow your system."
                   />
                 </SettingsRowMain>
@@ -438,7 +438,10 @@ function IndexRoute() {
               ].map(([title, description, url]) => (
                 <SettingsRow key={title}>
                   <SettingsRowMain>
-                    <MessageCircle className="size-4 text-muted-foreground" />
+                    <MessageCircle
+                      className="size-4 shrink-0 text-muted-foreground"
+                      aria-hidden="true"
+                    />
                     <SettingsRowText title={title!} description={description} />
                   </SettingsRowMain>
                   <Button
@@ -454,9 +457,9 @@ function IndexRoute() {
             </SettingsSectionBody>
           </SettingsSection>
         </div>
-      </main>
-    );
-  }
+      </DialogContent>
+    </Dialog>
+  );
 
   const syncStatus: SyncStatus = runtime.loading
     ? "CHECKING"
@@ -511,7 +514,7 @@ function IndexRoute() {
         <AppHeader
           className="mt-3"
           user={user}
-          onSettingsClick={() => setScreen("settings")}
+          onSettingsClick={() => setSettingsOpen(true)}
           onSignOutClick={() => runAction(runtime.signOut(), "Could not sign out.")}
           statusIndicator={<SyncStatusIndicator status={syncStatus} />}
           storageAction={
@@ -520,10 +523,13 @@ function IndexRoute() {
                 type="button"
                 variant="ghost"
                 size="sm"
+                aria-label={`Open ${storageProviderLabel(storage.provider)} in browser`}
+                toolTip={`Open ${storageProviderLabel(storage.provider)}`}
                 onClick={() => openExternal(storage.destinationUrl)}
               >
-                <StorageProviderIcon provider={storage.provider} />
+                <StorageProviderIcon provider={storage.provider} className="size-4" />
                 {storageProviderLabel(storage.provider)}
+                <ArrowUpRight className="text-muted-foreground" />
               </Button>
             ) : null
           }
@@ -547,7 +553,7 @@ function IndexRoute() {
                   onClick={() =>
                     billingBlocked
                       ? openExternal("https://app.plakk.io/billing")
-                      : setScreen("settings")
+                      : setSettingsOpen(true)
                   }
                 >
                   {billingBlocked ? "Manage billing" : "Finish setup"}
@@ -627,9 +633,10 @@ function IndexRoute() {
           )}
         </div>
       </div>
+      {settingsDialog}
       {isDragging && (
-        <div className="pointer-events-none fixed inset-0 z-50 grid place-items-center bg-blue-500/15">
-          <div className="grid size-9 place-items-center rounded-full bg-blue-500 text-white">
+        <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-blue-500/15">
+          <div className="flex size-8 items-center justify-center rounded-full bg-blue-500 text-white shadow-sm">
             <Plus className="size-5" />
           </div>
         </div>

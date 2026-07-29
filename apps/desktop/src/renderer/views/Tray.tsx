@@ -1,4 +1,5 @@
 import { useEffect, useState, type DragEvent } from "react";
+import { SyncStatusIndicator, type SyncStatus } from "@plakk/ui/components/SyncStatusIndicator";
 import type { ClipboardContent, TrayDroppedItem } from "../../ipc/contracts.ts";
 import { useAuth } from "../hooks/useAuth.ts";
 import { useSnippets } from "../hooks/useSnippets.ts";
@@ -11,7 +12,6 @@ import {
 } from "../hooks/useStorageStatus.tsx";
 import { ipcActionErrorMessage } from "../lib/ipcActionErrorMessage.ts";
 import { ingestFileSnippet, ingestTextSnippet } from "../lib/snippetIngestion.ts";
-import { SyncStatusIndicator, type SyncStatus } from "../components/SyncStatusIndicator.tsx";
 import { TrayActions } from "./tray/TrayActions.tsx";
 import { TrayRecentItem } from "./tray/TrayRecentItem.tsx";
 import { TrayShell } from "./tray/TrayShell.tsx";

@@ -2,6 +2,7 @@ import type { StorageProvider } from "@plakk/shared";
 import { DropboxIcon } from "@plakk/ui/icons/DropboxIcon";
 import { GoogleDriveIcon } from "@plakk/ui/icons/GoogleDriveIcon";
 import { OneDriveIcon } from "@plakk/ui/icons/OneDriveIcon";
+import type { ComponentProps } from "react";
 
 export function storageProviderLabel(provider: StorageProvider) {
   switch (provider) {
@@ -14,13 +15,16 @@ export function storageProviderLabel(provider: StorageProvider) {
   }
 }
 
-export function StorageProviderIcon({ provider }: { readonly provider: StorageProvider }) {
+export function StorageProviderIcon({
+  provider,
+  ...props
+}: { readonly provider: StorageProvider } & ComponentProps<"svg">) {
   switch (provider) {
     case "GOOGLE_DRIVE":
-      return <GoogleDriveIcon className="size-5" />;
+      return <GoogleDriveIcon {...props} />;
     case "ONE_DRIVE":
-      return <OneDriveIcon className="size-5" />;
+      return <OneDriveIcon {...props} />;
     case "DROPBOX":
-      return <DropboxIcon className="size-5" />;
+      return <DropboxIcon {...props} />;
   }
 }
