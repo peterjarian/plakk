@@ -11,6 +11,7 @@ const root = fileURLToPath(new URL(".", import.meta.url));
 const config = defineConfig({
   root,
   resolve: { tsconfigPaths: true },
+  server: { allowedHosts: true },
   plugins: [tailwindcss(), tanstackStart(), viteReact(), nitro()],
 });
 
