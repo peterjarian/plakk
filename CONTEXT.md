@@ -29,8 +29,12 @@ Complete or partial provider content that has no Snippet because an upload or pu
 _Avoid_: Snippet content, pending publication, cleanup queue
 
 **Snippet presentation**:
-The client-side interpretation of a snippet as text, a hyperlink, an image, or a general file, including its display title. Presentation is derived from the file name and content; it is not authoritative snippet metadata and does not create separate upload paths.
-_Avoid_: Snippet kind, stored title, link snippet, text upload, file upload, image upload
+The client-side interpretation of a snippet as text, a hyperlink, an image, or a general file. Presentation uses the Snippet title when present and otherwise derives from available file name and content without creating separate upload paths.
+_Avoid_: Snippet kind, link snippet, text upload, file upload, image upload
+
+**Snippet title**:
+An optional, immutable label derived from text content when a Snippet is created. It is synchronized with a published Snippet so every device can display it without first reading the content.
+_Avoid_: Editable name, file name
 
 **File name**:
 The name under which a snippet's file content is stored in the linked storage provider, such as `file.md`. It is authoritative snippet metadata but is neither a display title nor a local source path.

@@ -5,6 +5,12 @@ import type {
 } from "@plakk/shared/PlakkApi";
 import type { RpcError } from "@plakk/shared/RpcError";
 import {
+  decodeSnippetTextPreview,
+  deriveSnippetPresentation,
+  isTextSnippetFileName,
+  SNIPPET_TEXT_PREVIEW_MAX_BYTES,
+} from "@plakk/shared";
+import {
   Context,
   DateTime,
   Duration,
@@ -99,6 +105,8 @@ type UploadAttemptFailure =
   | UploadSourceChangedError
   | UploadSourceUnavailableError;
 
+type TitledUploadInput = PrepareSnippetUploadPayload & { readonly title?: string };
+
 export class UploadEngine extends Context.Service<
   UploadEngine,
   {
@@ -175,6 +183,28 @@ export class UploadEngine extends Context.Service<
           );
         });
 
+      /** Derives the immutable title once from the beginning of text content. */
+      const deriveTitle = Effect.fn("UploadEngine.deriveTitle")(function* <E>(
+        input: PrepareSnippetUploadPayload,
+        source: UploadSource<E>,
+      ) {
+        if (!isTextSnippetFileName(input.fileName)) return undefined;
+
+        const byteSize = Math.min(input.byteSize, SNIPPET_TEXT_PREVIEW_MAX_BYTES);
+        const bytes = yield* source.read(0, byteSize);
+        if (bytes.byteLength !== byteSize) {
+          return yield* new UploadSourceChangedError({
+            expectedByteSize: byteSize,
+            actualByteSize: bytes.byteLength,
+            message: "The selected file changed while it was being uploaded.",
+          });
+        }
+        const content = decodeSnippetTextPreview(bytes, input.byteSize > byteSize);
+        return content === null
+          ? undefined
+          : deriveSnippetPresentation({ fileName: input.fileName, content }).title;
+      });
+
       /** Changes one preparing snippet to its active transfer state. */
       const setUploading = Effect.fn("UploadEngine.setUploading")(
         function* (snippetId: string) {
@@ -208,10 +238,16 @@ export class UploadEngine extends Context.Service<
       /** Transfers and publishes one already-persisted preparing snippet. */
       const transfer = Effect.fn("UploadEngine.transfer")(
         function* (
-          input: PrepareSnippetUploadPayload,
+          input: TitledUploadInput,
           source: UploadSource<LocalStorageError | UploadSourceUnavailableError>,
         ) {
-          const prepared = yield* rpc.PrepareSnippetUpload(input);
+          const prepared = yield* rpc.PrepareSnippetUpload({
+            id: input.id,
+            fileName: input.fileName,
+            byteSize: input.byteSize,
+            storageProvider: input.storageProvider,
+            mediaType: input.mediaType,
+          });
           if (prepared.storageProvider !== input.storageProvider) {
             return yield* new InvalidUploadResponseError({
               message: "The prepared upload uses a different storage provider.",
@@ -351,6 +387,7 @@ export class UploadEngine extends Context.Service<
           const published = yield* rpc.PublishSnippet({
             id: input.id,
             fileName: input.fileName,
+            ...(input.title === undefined ? {} : { title: input.title }),
             byteSize: input.byteSize,
             storageProvider: input.storageProvider,
             storageObjectId,
@@ -364,7 +401,7 @@ export class UploadEngine extends Context.Service<
 
       /** Starts one deduplicated background upload with typed retry behavior. */
       const launch = Effect.fn("UploadEngine.launch")(function* (
-        input: PrepareSnippetUploadPayload,
+        input: TitledUploadInput,
         source: UploadSource<LocalStorageError | UploadSourceUnavailableError>,
       ) {
         if (activeSnippetIds.has(input.id)) return;
@@ -496,8 +533,10 @@ export class UploadEngine extends Context.Service<
           input: PrepareSnippetUploadPayload,
           source: UploadSource<UploadSourceUnavailableError>,
         ) {
+          const title = yield* deriveTitle(input, source);
+          const titledInput: TitledUploadInput = title === undefined ? input : { ...input, title };
           const createdAt = DateTime.formatIso(yield* DateTime.now);
-          yield* createPreparingSnippet(session.user.id, input, createdAt);
+          yield* createPreparingSnippet(session.user.id, titledInput, createdAt);
           yield* snippets.refresh;
 
           let uploadSource: UploadSource<LocalStorageError | UploadSourceUnavailableError> = {
@@ -535,7 +574,7 @@ export class UploadEngine extends Context.Service<
             };
           }
 
-          yield* launch(input, uploadSource);
+          yield* launch(titledInput, uploadSource);
         },
         Effect.provideService(SqlClient.SqlClient, sql),
         Effect.catchTags({

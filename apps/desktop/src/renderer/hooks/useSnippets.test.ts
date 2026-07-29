@@ -47,6 +47,21 @@ describe("snippet read-model projection", () => {
     expect(items).toEqual([]);
   });
 
+  it("uses a stored title without waiting for a local preview", () => {
+    const remoteText = snippet({
+      title: "A stable title",
+      localTextPreview: null,
+      status: "PUBLISHED",
+      storageObjectId: "object-1",
+      localContentAvailability: { status: "NOT_AVAILABLE" },
+    });
+
+    const [item] = projectSnippetReadModels([remoteText], {});
+
+    expect(item?.presentation).toEqual({ type: "text", title: "A stable title" });
+    expect(item?.localTextPreview).toBeNull();
+  });
+
   it("withholds remote text until its local content can provide the title", () => {
     const remoteText = snippet({
       fileName: "private-notes.md",

@@ -54,6 +54,14 @@ describe("snippet read-model projection", () => {
     expect(item?.localTextPreview).toBeNull();
   });
 
+  it("uses a stored title immediately without waiting for content", () => {
+    const source = snippet({ title: "A stable title" });
+    const [item] = projectSnippetReadModels([source], {}, {}, new Set([source.id]));
+
+    expect(item?.presentation).toEqual({ type: "text", title: "A stable title" });
+    expect(item?.localTextPreview).toBeNull();
+  });
+
   it("preserves a pulled text row while its presentation is downloading", () => {
     const source = snippet({ localContentAvailability: { status: "DOWNLOADING" } });
     const [item] = projectSnippetReadModels([source], {}, {}, new Set([source.id]));

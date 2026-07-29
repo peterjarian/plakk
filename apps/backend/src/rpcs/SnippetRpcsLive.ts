@@ -68,6 +68,7 @@ const snippetInvalidationStream = <E>(
 const toApiSnippet = (snippet: SnippetRow): ApiSnippet => ({
   id: snippet.id,
   fileName: snippet.fileName,
+  ...(snippet.title === null ? {} : { title: snippet.title }),
   byteSize: snippet.byteSize,
   storageProvider: snippet.storageProvider,
   storageObjectId: snippet.storageObjectId,
@@ -140,6 +141,7 @@ const publishSnippet = Effect.fn("SnippetRpcs.publish")(function* (
           .insert(snippets)
           .values({
             ...input,
+            title: input.title ?? null,
             ownerWorkosUserId,
             createdAt: now,
             updatedAt: now,

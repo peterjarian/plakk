@@ -93,6 +93,7 @@ export const SnippetIdSchema = Schema.String.check(Schema.isUUID());
 export const ApiSnippetSchema = Schema.Struct({
   id: SnippetIdSchema,
   fileName: Schema.String,
+  title: Schema.optionalKey(Schema.String),
   byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   storageProvider: StorageProviderLiteral,
   storageObjectId: Schema.String,
@@ -125,6 +126,7 @@ export type PrepareSnippetUploadPayload = typeof PrepareSnippetUploadPayloadSche
 export const PublishSnippetPayloadSchema = Schema.Struct({
   id: SnippetIdSchema,
   fileName: Schema.String,
+  title: Schema.optionalKey(Schema.String),
   byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   storageProvider: StorageProviderLiteral,
   storageObjectId: Schema.String,

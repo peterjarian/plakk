@@ -194,15 +194,17 @@ const makeDesktopSession = (sharedClientLayer: SharedClientLayer) =>
       preview: ReturnType<DesktopContentStore["Service"]["forUser"]>["preview"],
     ) {
       const projected = yield* Effect.forEach(snapshot.snippets, (snippet) =>
-        preview(snippet).pipe(
-          Effect.catchCause((cause) =>
-            Effect.logWarning("Could not read a desktop snippet preview", {
-              snippetId: snippet.id,
-              cause: Cause.pretty(cause),
-            }).pipe(Effect.as(null)),
-          ),
-          Effect.map((localTextPreview) => ({ snippet, localTextPreview })),
-        ),
+        snippet.title === undefined
+          ? preview(snippet).pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning("Could not read a desktop snippet preview", {
+                  snippetId: snippet.id,
+                  cause: Cause.pretty(cause),
+                }).pipe(Effect.as(null)),
+              ),
+              Effect.map((localTextPreview) => ({ snippet, localTextPreview })),
+            )
+          : Effect.succeed({ snippet, localTextPreview: null }),
       );
       yield* publish({
         user: snapshot.user,

@@ -7,6 +7,7 @@ import { SnippetSchema } from "../../models/Snippet.ts";
 const SnippetRowSchema = Schema.Struct({
   id: Schema.String,
   fileName: Schema.String,
+  title: Schema.NullOr(Schema.String),
   byteSize: Schema.Finite,
   storageProvider: Schema.String,
   mediaType: Schema.NullOr(Schema.String),
@@ -29,6 +30,7 @@ export const listSnippets = Effect.fn("ClientQueries.listSnippets")(function* (u
       SELECT
         snippets.id,
         snippets.file_name AS "fileName",
+        snippets.title,
         snippets.byte_size AS "byteSize",
         snippets.storage_provider AS "storageProvider",
         snippets.media_type AS "mediaType",
@@ -50,7 +52,7 @@ export const listSnippets = Effect.fn("ClientQueries.listSnippets")(function* (u
 
   const rows = yield* select(userId);
   return yield* Effect.forEach(rows, (row) => {
-    const { localContentStatus, localContentErrorMessage, ...snippet } = row;
+    const { title, localContentStatus, localContentErrorMessage, ...snippet } = row;
     const localContentAvailability =
       localContentStatus === "FAILED"
         ? {
@@ -63,6 +65,7 @@ export const listSnippets = Effect.fn("ClientQueries.listSnippets")(function* (u
 
     return Schema.decodeUnknownEffect(SnippetSchema)({
       ...snippet,
+      ...(title === null ? {} : { title }),
       localContentAvailability,
     });
   });

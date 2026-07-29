@@ -37,6 +37,7 @@ export const projectSnippetReadModels = (
   replicaItems.flatMap(({ snippet, localTextPreview }) => {
     if (
       isTextSnippetFileName(snippet.fileName) &&
+      snippet.title === undefined &&
       localTextPreview === null &&
       (snippet.status === "PREPARING" ||
         snippet.status === "UPLOADING" ||
@@ -46,9 +47,10 @@ export const projectSnippetReadModels = (
     ) {
       return [];
     }
+    const presentationContent = localTextPreview ?? snippet.title;
     const presentation = deriveSnippetPresentation({
       fileName: snippet.fileName,
-      ...(localTextPreview === null ? {} : { content: localTextPreview }),
+      ...(presentationContent === undefined ? {} : { content: presentationContent }),
     });
     const row: SnippetRowReadModel =
       snippet.status === "PUBLISHED"

@@ -44,12 +44,14 @@ export const projectSnippetReadModels = (
 ): ReadonlyArray<SnippetReadModel> =>
   snippets.map((snippet) => {
     const localTextPreview = textPreviews[snippet.id] ?? null;
-    const presentation = pendingTextPreviewIds.has(snippet.id)
-      ? null
-      : deriveSnippetPresentation({
-          fileName: snippet.fileName,
-          ...(localTextPreview === null ? {} : { content: localTextPreview }),
-        });
+    const presentationContent = localTextPreview ?? snippet.title;
+    const presentation =
+      pendingTextPreviewIds.has(snippet.id) && snippet.title === undefined
+        ? null
+        : deriveSnippetPresentation({
+            fileName: snippet.fileName,
+            ...(presentationContent === undefined ? {} : { content: presentationContent }),
+          });
     const row: SnippetRowReadModel =
       snippet.status === "PUBLISHED"
         ? {
@@ -139,6 +141,7 @@ const useSnippetTextPreviews = (snapshot: ClientSnapshot | null, run: RunClient)
       .filter(
         (snippet) =>
           isTextSnippetFileName(snippet.fileName) &&
+          snippet.title === undefined &&
           snippet.byteSize <= SNIPPET_TEXT_PREVIEW_MAX_BYTES &&
           (snippet.status === "PUBLISHED" ||
             snippet.localContentAvailability.status === "AVAILABLE") &&
@@ -223,6 +226,7 @@ const useSnippetTextPreviews = (snapshot: ClientSnapshot | null, run: RunClient)
         .filter(
           (snippet) =>
             isTextSnippetFileName(snippet.fileName) &&
+            snippet.title === undefined &&
             snippet.byteSize <= SNIPPET_TEXT_PREVIEW_MAX_BYTES &&
             previews[snippet.id] === undefined &&
             terminalFailuresRef.current.get(snippet.id) !== snippet.updatedAt &&

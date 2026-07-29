@@ -5,6 +5,7 @@ import * as Schema from "effect/Schema";
 const SnippetFields = {
   id: SnippetIdSchema,
   fileName: Schema.String,
+  title: Schema.optionalKey(Schema.String),
   byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   storageProvider: StorageProviderLiteral,
   mediaType: Schema.NullOr(Schema.String),

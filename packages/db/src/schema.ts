@@ -25,6 +25,7 @@ export const snippets = pgTable(
     storageProvider: storageProvider("storage_provider").notNull(),
     storageObjectId: text("storage_object_id").notNull(),
     fileName: text("file_name").notNull(),
+    title: text("title"),
     byteSize: bigint("byte_size", { mode: "number" }).notNull(),
     ...timestamps,
   },

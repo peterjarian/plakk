@@ -5,11 +5,13 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { LocalStorageError } from "../models/ClientError.ts";
 import Initial from "./migrations/001_initial.ts";
 import Account from "./migrations/002_account.ts";
+import SnippetTitle from "./migrations/003_snippet_title.ts";
 
 const migrate = Migrator.make({});
 const loader = Migrator.fromRecord({
   "1_initial": Initial,
   "2_account": Account,
+  "3_snippet_title": SnippetTitle,
 });
 
 /**

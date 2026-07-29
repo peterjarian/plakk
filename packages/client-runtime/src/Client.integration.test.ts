@@ -208,6 +208,7 @@ describe("shared client integration", () => {
       expect(migrations).toEqual([
         { migration_id: 1, name: "initial" },
         { migration_id: 2, name: "account" },
+        { migration_id: 3, name: "snippet_title" },
       ]);
     }).pipe(Effect.provide(layer));
   });
@@ -288,6 +289,7 @@ describe("shared client integration", () => {
       const prepareStarted = yield* Deferred.make<void>();
       const releasePrepare = yield* Deferred.make<void>();
       const uploaded = { ...published, id: localId, fileName: "note.txt" };
+      let publishInput: PublishInput | undefined;
       const layer = makeLayer(
         makeRpc({
           PrepareSnippetUpload: (_input: PrepareUploadInput) => {
@@ -306,7 +308,10 @@ describe("shared client integration", () => {
               }),
             );
           },
-          PublishSnippet: (_input: PublishInput) => Effect.succeed(uploaded),
+          PublishSnippet: (input: PublishInput) => {
+            publishInput = input;
+            return Effect.succeed(uploaded);
+          },
         }),
       );
 
@@ -330,6 +335,7 @@ describe("shared client integration", () => {
         const pending = (yield* listSnippets(user.id)).find((snippet) => snippet.id === localId);
         expect(pending).toMatchObject({
           id: localId,
+          title: "note",
           status: "UPLOADING",
           storageObjectId: null,
           localContentAvailability: { status: "AVAILABLE" },
@@ -348,9 +354,11 @@ describe("shared client integration", () => {
         const complete = (yield* listSnippets(user.id)).find((snippet) => snippet.id === localId);
         expect(complete).toMatchObject({
           id: localId,
+          title: "note",
           status: "PUBLISHED",
           storageObjectId: "drive-object",
         });
+        expect(publishInput).toMatchObject({ id: localId, title: "note" });
       }).pipe(Effect.provide(layer));
     }),
   );

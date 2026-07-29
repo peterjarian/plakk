@@ -46,6 +46,7 @@ const publication = {
 };
 const snippet = (overrides: Partial<SnippetRow> = {}): SnippetRow => ({
   ...publication,
+  title: null,
   ownerWorkosUserId: currentUser.id,
   createdAt: timestamp,
   updatedAt: timestamp,
@@ -298,18 +299,22 @@ describe("completed Snippet publication", () => {
   });
 
   it("inserts only the completed Snippet and notifies before commit", async () => {
-    const stored = snippet();
+    const titledPublication = { ...publication, title: "A stable title" };
+    const stored = snippet({ title: titledPublication.title });
     const store = publicationDatabase({ inserted: [stored] });
 
-    const result = await runSnippetEffect((rpcs) => rpcs.PublishSnippet(publication), store.db);
+    const result = await runSnippetEffect(
+      (rpcs) => rpcs.PublishSnippet(titledPublication),
+      store.db,
+    );
 
     expect(result).toEqual({
-      ...publication,
+      ...titledPublication,
       createdAt: timestamp.toISOString(),
       updatedAt: timestamp.toISOString(),
     });
     expect(store.insertedValues[0]).toMatchObject({
-      ...publication,
+      ...titledPublication,
       ownerWorkosUserId: currentUser.id,
     });
     expect(store.events).toEqual(["insert", "notify", "commit"]);
