@@ -47,7 +47,7 @@ describe("snippet read-model projection", () => {
     expect(items).toEqual([]);
   });
 
-  it("does not expose a user-named text file before its content is decoded", () => {
+  it("withholds remote text until its local content can provide the title", () => {
     const remoteText = snippet({
       fileName: "private-notes.md",
       localTextPreview: null,
@@ -56,10 +56,9 @@ describe("snippet read-model projection", () => {
       localContentAvailability: { status: "NOT_AVAILABLE" },
     });
 
-    const [item] = projectSnippetReadModels([remoteText], {});
+    const items = projectSnippetReadModels([remoteText], {});
 
-    expect(item?.presentation).toEqual({ type: "file", title: "Text snippet" });
-    expect(item?.presentation.title).not.toContain("private-notes.md");
+    expect(items).toEqual([]);
   });
 
   it("projects decoded managed content atomically without a filename intermediate", () => {
@@ -109,14 +108,14 @@ describe("snippet read-model projection", () => {
     expect(item?.presentation.title).not.toContain(remoteText.snippet.id);
   });
 
-  it("keeps a local in-progress text row honest without inventing decoded content", () => {
+  it("withholds a local in-progress text row until its decoded content is available", () => {
     const remoteText = snippet({
       localTextPreview: null,
       localContentAvailability: { status: "NOT_AVAILABLE" },
     });
-    const [item] = projectSnippetReadModels([remoteText], {});
+    const items = projectSnippetReadModels([remoteText], {});
 
-    expect(item?.presentation).toEqual({ type: "file", title: "Text snippet" });
+    expect(items).toEqual([]);
   });
 });
 

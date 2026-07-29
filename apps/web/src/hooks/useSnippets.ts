@@ -27,7 +27,7 @@ export type SnippetReadModel = {
   };
   readonly localContentAvailability: LocalContentAvailability;
   readonly localTextPreview: string | null;
-  readonly presentation: SnippetPresentation;
+  readonly presentation: SnippetPresentation | null;
   readonly thumbnailUrl: string | null;
 };
 
@@ -40,21 +40,16 @@ export const projectSnippetReadModels = (
   snippets: ReadonlyArray<Snippet>,
   textPreviews: Readonly<Record<string, string>>,
   thumbnailUrls: Readonly<Record<string, string>>,
+  pendingTextPreviewIds: ReadonlySet<string> = new Set(),
 ): ReadonlyArray<SnippetReadModel> =>
-  snippets.flatMap((snippet) => {
+  snippets.map((snippet) => {
     const localTextPreview = textPreviews[snippet.id] ?? null;
-    if (
-      snippet.status === "PUBLISHED" &&
-      isTextSnippetFileName(snippet.fileName) &&
-      localTextPreview === null &&
-      snippet.localContentAvailability.status === "DOWNLOADING"
-    ) {
-      return [];
-    }
-    const presentation = deriveSnippetPresentation({
-      fileName: snippet.fileName,
-      ...(localTextPreview === null ? {} : { content: localTextPreview }),
-    });
+    const presentation = pendingTextPreviewIds.has(snippet.id)
+      ? null
+      : deriveSnippetPresentation({
+          fileName: snippet.fileName,
+          ...(localTextPreview === null ? {} : { content: localTextPreview }),
+        });
     const row: SnippetRowReadModel =
       snippet.status === "PUBLISHED"
         ? {
@@ -79,14 +74,12 @@ export const projectSnippetReadModels = (
             localContentAvailability: snippet.localContentAvailability,
           };
 
-    return [
-      {
-        ...row,
-        localTextPreview,
-        presentation,
-        thumbnailUrl: thumbnailUrls[row.id] ?? null,
-      },
-    ];
+    return {
+      ...row,
+      localTextPreview,
+      presentation,
+      thumbnailUrl: thumbnailUrls[row.id] ?? null,
+    };
   });
 
 export const createImageUrlRegistry = () => {
@@ -145,9 +138,10 @@ const useSnippetTextPreviews = (snapshot: ClientSnapshot | null, run: RunClient)
       .slice(0, TEXT_PREVIEW_LIMIT)
       .filter(
         (snippet) =>
-          snippet.status === "PUBLISHED" &&
           isTextSnippetFileName(snippet.fileName) &&
           snippet.byteSize <= SNIPPET_TEXT_PREVIEW_MAX_BYTES &&
+          (snippet.status === "PUBLISHED" ||
+            snippet.localContentAvailability.status === "AVAILABLE") &&
           previews[snippet.id] === undefined &&
           terminalFailuresRef.current.get(snippet.id) !== snippet.updatedAt &&
           !previewingRef.current.has(snippet.id),
@@ -158,7 +152,11 @@ const useSnippetTextPreviews = (snapshot: ClientSnapshot | null, run: RunClient)
       Effect.forEach(
         candidates,
         (snippet) =>
-          collectBytes(client.content.readRemote(snippet.id)).pipe(
+          collectBytes(
+            snippet.localContentAvailability.status === "AVAILABLE"
+              ? client.content.read(snippet.id)
+              : client.content.readRemote(snippet.id),
+          ).pipe(
             Effect.tap((bytes) =>
               Effect.sync(() => {
                 transientFailuresRef.current.delete(snippet.id);
@@ -168,6 +166,7 @@ const useSnippetTextPreviews = (snapshot: ClientSnapshot | null, run: RunClient)
                 const preview = decodeSnippetTextPreview(bytes);
                 if (preview === null) {
                   terminalFailuresRef.current.set(snippet.id, snippet.updatedAt);
+                  setRetryTick((tick) => tick + 1);
                   return;
                 }
                 terminalFailuresRef.current.delete(snippet.id);
@@ -191,6 +190,7 @@ const useSnippetTextPreviews = (snapshot: ClientSnapshot | null, run: RunClient)
                   })
                 : Effect.sync(() => {
                     terminalFailuresRef.current.set(snippet.id, snippet.updatedAt);
+                    setRetryTick((tick) => tick + 1);
                   }),
             ),
             Effect.ensuring(
@@ -215,7 +215,23 @@ const useSnippetTextPreviews = (snapshot: ClientSnapshot | null, run: RunClient)
     [],
   );
 
-  return previews;
+  return {
+    previews,
+    pendingIds: new Set(
+      snapshot?.snippets
+        .slice(0, TEXT_PREVIEW_LIMIT)
+        .filter(
+          (snippet) =>
+            isTextSnippetFileName(snippet.fileName) &&
+            snippet.byteSize <= SNIPPET_TEXT_PREVIEW_MAX_BYTES &&
+            previews[snippet.id] === undefined &&
+            terminalFailuresRef.current.get(snippet.id) !== snippet.updatedAt &&
+            (snippet.status !== "FAILED" ||
+              snippet.localContentAvailability.status === "AVAILABLE"),
+        )
+        .map((snippet) => snippet.id),
+    ),
+  };
 };
 
 const useSnippetImageUrls = (snippets: ReadonlyArray<Snippet>, run: RunClient) => {
@@ -281,7 +297,13 @@ export function useSnippets(state: {
   const textPreviews = useSnippetTextPreviews(state.snapshot, state.run);
   const thumbnailUrls = useSnippetImageUrls(state.snapshot?.snippets ?? [], state.run);
   const items = useMemo(
-    () => projectSnippetReadModels(state.snapshot?.snippets ?? [], textPreviews, thumbnailUrls),
+    () =>
+      projectSnippetReadModels(
+        state.snapshot?.snippets ?? [],
+        textPreviews.previews,
+        thumbnailUrls,
+        textPreviews.pendingIds,
+      ),
     [state.snapshot, textPreviews, thumbnailUrls],
   );
 

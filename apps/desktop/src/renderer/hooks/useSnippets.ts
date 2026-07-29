@@ -36,10 +36,13 @@ export const projectSnippetReadModels = (
 ): ReadonlyArray<SnippetReadModel> =>
   replicaItems.flatMap(({ snippet, localTextPreview }) => {
     if (
-      snippet.status === "PUBLISHED" &&
       isTextSnippetFileName(snippet.fileName) &&
       localTextPreview === null &&
-      snippet.localContentAvailability.status === "DOWNLOADING"
+      (snippet.status === "PREPARING" ||
+        snippet.status === "UPLOADING" ||
+        (snippet.status === "PUBLISHED" &&
+          (snippet.localContentAvailability.status === "NOT_AVAILABLE" ||
+            snippet.localContentAvailability.status === "DOWNLOADING")))
     ) {
       return [];
     }

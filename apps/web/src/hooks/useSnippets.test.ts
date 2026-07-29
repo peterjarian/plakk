@@ -46,21 +46,38 @@ describe("snippet read-model projection", () => {
     });
   });
 
-  it("does not expose a user-named text file before its content is decoded", () => {
-    const [item] = projectSnippetReadModels([snippet({ fileName: "private-notes.md" })], {}, {});
+  it("keeps a published text row presentation-pending until its content is decoded", () => {
+    const source = snippet({ fileName: "private-notes.md" });
+    const [item] = projectSnippetReadModels([source], {}, {}, new Set([source.id]));
 
-    expect(item?.presentation).toEqual({ type: "file", title: "Text snippet" });
+    expect(item?.presentation).toBeNull();
     expect(item?.localTextPreview).toBeNull();
   });
 
-  it("withholds pulled text while its presentation is downloading", () => {
-    const items = projectSnippetReadModels(
-      [snippet({ localContentAvailability: { status: "DOWNLOADING" } })],
-      {},
-      {},
-    );
+  it("preserves a pulled text row while its presentation is downloading", () => {
+    const source = snippet({ localContentAvailability: { status: "DOWNLOADING" } });
+    const [item] = projectSnippetReadModels([source], {}, {}, new Set([source.id]));
 
-    expect(items).toEqual([]);
+    expect(item?.presentation).toBeNull();
+  });
+
+  it("does not expose the fallback title while a new text upload is being prepared", () => {
+    const source = snippet({
+      status: "PREPARING",
+      storageObjectId: null,
+      localContentAvailability: { status: "NOT_AVAILABLE" },
+    });
+    const [item] = projectSnippetReadModels([source], {}, {}, new Set([source.id]));
+
+    expect(item?.presentation).toBeNull();
+  });
+
+  it("uses the fallback title only after presentation decoding has settled without text", () => {
+    const source = snippet();
+    const [item] = projectSnippetReadModels([source], {}, {});
+
+    expect(item?.presentation).toEqual({ type: "file", title: "Text snippet" });
+    expect(item?.localTextPreview).toBeNull();
   });
 });
 

@@ -183,6 +183,20 @@ function RuntimeIssueState({
   );
 }
 
+function SnippetRowSkeleton() {
+  return (
+    <li aria-hidden="true">
+      <div className="flex items-center gap-2.5 px-2 py-2">
+        <span className="size-8 shrink-0 animate-pulse rounded-md bg-muted" />
+        <div className="grid flex-1 gap-1.5">
+          <span className="h-3.5 w-32 animate-pulse rounded bg-muted" />
+          <span className="h-3 w-24 animate-pulse rounded bg-muted" />
+        </div>
+      </div>
+    </li>
+  );
+}
+
 const {
   Row: SettingsRow,
   RowIcon: SettingsRowIcon,
@@ -218,6 +232,7 @@ function IndexRoute() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copyingId, setCopyingId] = useState<string | null>(null);
   const [now, setNow] = useState(() => DateTime.toEpochMillis(DateTime.nowUnsafe()));
+  const [offlineConfirmed, setOfflineConfirmed] = useState(false);
   const copiedTimer = useRef<number | undefined>(undefined);
   const capability = runtime.snapshot?.capability ?? offlineCapability;
   const storage = storageState(capability);
@@ -248,6 +263,15 @@ function IndexRoute() {
     },
     [],
   );
+
+  useEffect(() => {
+    if (runtime.loading || capability.status !== "OFFLINE") {
+      setOfflineConfirmed(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setOfflineConfirmed(true), 1_000);
+    return () => window.clearTimeout(timer);
+  }, [capability.status, runtime.loading]);
 
   const openExternal = (url: string) => window.open(url, "_blank", "noopener,noreferrer");
   const runAction = (operation: Promise<void>, fallback: ProductFailure) => {
@@ -602,7 +626,7 @@ function IndexRoute() {
   const syncStatus: SyncStatus =
     runtime.issue !== null
       ? "PAUSED"
-      : runtime.loading
+      : runtime.loading || (capability.status === "OFFLINE" && !offlineConfirmed)
         ? "CHECKING"
         : capability.status === "OFFLINE"
           ? "OFFLINE"
@@ -681,32 +705,28 @@ function IndexRoute() {
           ) : (
             <>
               <div className="sticky top-0 z-20 bg-background pt-5 pb-4">
-                {blocked && !runtime.loading && (
+                {blocked && !runtime.loading && capability.status === "ONLINE" && (
                   <ProductNotice
                     className="mb-2"
                     tone="warning"
                     action={
-                      capability.status === "OFFLINE" ? undefined : (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="xs"
-                          onClick={() =>
-                            billingBlocked
-                              ? openExternal("https://app.plakk.io/billing")
-                              : setSettingsOpen(true)
-                          }
-                        >
-                          {billingBlocked ? "Manage billing" : "Finish setup"}
-                        </Button>
-                      )
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="xs"
+                        onClick={() =>
+                          billingBlocked
+                            ? openExternal("https://app.plakk.io/billing")
+                            : setSettingsOpen(true)
+                        }
+                      >
+                        {billingBlocked ? "Manage billing" : "Finish setup"}
+                      </Button>
                     }
                   >
-                    {capability.status === "OFFLINE"
-                      ? "You’re offline. Your saved snippet list remains available."
-                      : billingBlocked
-                        ? "Sync is paused until billing is resolved."
-                        : "Sync is paused until account storage is ready."}
+                    {billingBlocked
+                      ? "Sync is paused until billing is resolved."
+                      : "Sync is paused until account storage is ready."}
                   </ProductNotice>
                 )}
                 <SnippetComposer.Root
@@ -736,19 +756,32 @@ function IndexRoute() {
                   </ProductNotice>
                 )}
               </div>
-              {snippets.isLoading && snippets.items.length === 0 ? (
-                <div className="grid flex-1 place-items-center text-muted-foreground" role="status">
-                  <LoaderCircle className="size-5 animate-spin" aria-hidden="true" />
-                  <span className="sr-only">Loading snippets</span>
-                </div>
-              ) : (
-                <SnippetList.Root>
-                  <SnippetList.Heading />
-                  {snippets.items.length === 0 ? (
-                    <SnippetList.Empty />
-                  ) : (
+              <SnippetList.Root
+                aria-busy={
+                  snippets.isLoading ||
+                  snippets.items.some((snippet) => snippet.presentation === null)
+                }
+              >
+                <SnippetList.Heading />
+                {snippets.isLoading && snippets.items.length === 0 ? (
+                  <>
+                    <span className="sr-only" role="status">
+                      Loading snippets
+                    </span>
                     <SnippetList.Items>
-                      {snippets.items.map((snippet) => (
+                      {Array.from({ length: 4 }, (_, index) => (
+                        <SnippetRowSkeleton key={index} />
+                      ))}
+                    </SnippetList.Items>
+                  </>
+                ) : snippets.items.length === 0 ? (
+                  <SnippetList.Empty />
+                ) : (
+                  <SnippetList.Items>
+                    {snippets.items.map((snippet) =>
+                      snippet.presentation === null ? (
+                        <SnippetRowSkeleton key={snippet.id} />
+                      ) : (
                         <SnippetRow
                           key={snippet.id}
                           snippet={snippet}
@@ -768,11 +801,11 @@ function IndexRoute() {
                           onOpenLink={openExternal}
                           contentMode="remote"
                         />
-                      ))}
-                    </SnippetList.Items>
-                  )}
-                </SnippetList.Root>
-              )}
+                      ),
+                    )}
+                  </SnippetList.Items>
+                )}
+              </SnippetList.Root>
             </>
           )}
         </div>
