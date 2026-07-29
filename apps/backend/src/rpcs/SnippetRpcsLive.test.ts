@@ -428,6 +428,28 @@ describe("stored snippet content download", () => {
     });
   });
 
+  it("marks provider integrity failures as non-retryable", async () => {
+    const downloadStream = () =>
+      Stream.fail(
+        new StorageProviderError({
+          storageProvider: "GOOGLE_DRIVE",
+          message: "Stored object size does not match snippet metadata.",
+          retryable: false,
+        }),
+      );
+
+    await expect(
+      runSnippetEffect(
+        (rpcs) => rpcs.DownloadSnippetContent({ id: publication.id }).pipe(Stream.runDrain),
+        downloadDatabase([snippet()]),
+        storageService({ downloadStream }),
+      ),
+    ).rejects.toMatchObject({
+      code: "INTERNAL_SERVER_ERROR",
+      retryable: false,
+    });
+  });
+
   it.each([
     [
       new StorageObjectNotFoundError({

@@ -94,6 +94,7 @@ const storageErrorToRpc = (error: StorageDownloadError): RpcError => {
       return new RpcError({
         code: "INTERNAL_SERVER_ERROR",
         message: `${error.storageProvider}: ${error.message}`,
+        ...(error.retryable === undefined ? {} : { retryable: error.retryable }),
       });
   }
 };

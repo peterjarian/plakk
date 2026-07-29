@@ -255,6 +255,7 @@ export const StorageProviderLive = Layer.effect(
             new StorageProviderError({
               storageProvider: input.storageProvider,
               message: "Stored object size does not match snippet metadata.",
+              retryable: false,
             });
           return response.stream.pipe(
             Stream.mapEffect((chunk) => {

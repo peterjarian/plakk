@@ -14,6 +14,7 @@ export class StorageProviderError extends Schema.TaggedErrorClass<StorageProvide
   {
     storageProvider: StorageProviderLiteral,
     message: Schema.String,
+    retryable: Schema.optionalKey(Schema.Boolean),
     cause: Schema.optionalKey(Schema.Defect()),
   },
 ) {}
@@ -150,6 +151,7 @@ export const readStorageObjectBytes = Effect.fn("readStorageObjectBytes")(functi
     return yield* new StorageProviderError({
       storageProvider: input.storageProvider,
       message: "Stored object size does not match snippet metadata.",
+      retryable: false,
     });
   }
 
@@ -163,6 +165,7 @@ export const readStorageObjectBytes = Effect.fn("readStorageObjectBytes")(functi
           new StorageProviderError({
             storageProvider: input.storageProvider,
             message: "Stored object size does not match snippet metadata.",
+            retryable: false,
           }),
         );
       }
@@ -184,6 +187,7 @@ export const readStorageObjectBytes = Effect.fn("readStorageObjectBytes")(functi
     return yield* new StorageProviderError({
       storageProvider: input.storageProvider,
       message: "Stored object size does not match snippet metadata.",
+      retryable: false,
     });
   }
 
