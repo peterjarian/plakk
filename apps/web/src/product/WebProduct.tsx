@@ -2,6 +2,7 @@ import { SqliteClient } from "@effect/sql-sqlite-wasm";
 import {
   Client,
   type ClientSnapshot,
+  clearClientMetadata,
   clientLayer,
   CurrentSession,
   OfflineError,
@@ -30,6 +31,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 const rpcUrl = import.meta.env.VITE_PLAKK_RPC_URL ?? "http://localhost:3100/api/rpc";
 const TEXT_PREVIEW_MAX_BYTES = 64 * 1024;
 const BUFFERED_CONTENT_MAX_BYTES = 64 * 1024 * 1024;
+const databaseNameFor = (userId: string) => `plakk-${userId}.sqlite`;
+const databaseLockNameFor = (userId: string) => `plakk:sqlite:${databaseNameFor(userId)}`;
+const runtimeChannelNameFor = (userId: string) => `plakk:runtime:${userId}`;
 
 type RuntimeResource = {
   readonly client: Client["Service"];
@@ -74,6 +78,20 @@ const ensureBufferable = (snippet: Pick<ProductSnippet, "byteSize">) => {
     throw new Error("This snippet is too large to open in the browser.");
   }
 };
+
+const makeSqliteLayer = (databaseName: string) =>
+  SqliteClient.layer({
+    worker: Effect.acquireRelease(
+      Effect.sync(
+        () =>
+          new Worker(new URL("./sqlite-worker.ts", import.meta.url), {
+            name: databaseName,
+            type: "module",
+          }),
+      ),
+      (worker) => Effect.sync(() => worker.terminate()),
+    ),
+  });
 
 const projectSnippet = (snippet: Snippet, preview: string | undefined): ProductSnippet => ({
   id: snippet.id,
@@ -165,6 +183,13 @@ export function WebProduct() {
     setPreviews({});
     previewingRef.current.clear();
     const lockAbort = new AbortController();
+    let runtime: RuntimeResource["runtime"] | null = null;
+    const runtimeChannel = new BroadcastChannel(runtimeChannelNameFor(user.id));
+    runtimeChannel.addEventListener("message", (event) => {
+      if (event.data !== "release") return;
+      const acquiredRuntime = runtime;
+      if (acquiredRuntime !== null) void acquiredRuntime.dispose();
+    });
 
     const sessionLayer = Layer.succeed(
       CurrentSession,
@@ -189,11 +214,10 @@ export function WebProduct() {
         }),
       }),
     );
-    let runtime: RuntimeResource["runtime"] | null = null;
-    const databaseName = `plakk-${user.id}.sqlite`;
+    const databaseName = databaseNameFor(user.id);
     void navigator.locks
       .request(
-        `plakk:sqlite:${databaseName}`,
+        databaseLockNameFor(user.id),
         { ifAvailable: true, signal: lockAbort.signal },
         async (lock) => {
           if (lock === null) {
@@ -204,18 +228,7 @@ export function WebProduct() {
             return;
           }
           if (!active) return;
-          const sqliteLayer = SqliteClient.layer({
-            worker: Effect.acquireRelease(
-              Effect.sync(
-                () =>
-                  new Worker(new URL("./sqlite-worker.ts", import.meta.url), {
-                    name: databaseName,
-                    type: "module",
-                  }),
-              ),
-              (worker) => Effect.sync(() => worker.terminate()),
-            ),
-          });
+          const sqliteLayer = makeSqliteLayer(databaseName);
           const protocolLayer = RpcClient.layerProtocolHttp({ url: rpcUrl }).pipe(
             Layer.provideMerge(FetchHttpClient.layer),
             Layer.provideMerge(RpcSerialization.layerNdjson),
@@ -258,6 +271,7 @@ export function WebProduct() {
     return () => {
       active = false;
       lockAbort.abort();
+      runtimeChannel.close();
       const acquiredRuntime = runtime;
       if (acquiredRuntime !== null) {
         if (resourceRef.current?.runtime === acquiredRuntime) resourceRef.current = null;
@@ -358,9 +372,22 @@ export function WebProduct() {
       onSignOut={() =>
         (async () => {
           try {
-            const resource = resourceRef.current;
-            if (resource !== null) {
-              await resource.runtime.runPromise(resource.client.clearLocalData);
+            if (user !== null) {
+              const resource = resourceRef.current;
+              resourceRef.current = null;
+              if (resource !== null) await resource.runtime.dispose();
+
+              const runtimeChannel = new BroadcastChannel(runtimeChannelNameFor(user.id));
+              runtimeChannel.postMessage("release");
+              runtimeChannel.close();
+
+              await navigator.locks.request(databaseLockNameFor(user.id), async () => {
+                await Effect.runPromise(
+                  clearClientMetadata(user.id).pipe(
+                    Effect.provide(makeSqliteLayer(databaseNameFor(user.id))),
+                  ),
+                );
+              });
             }
           } finally {
             await auth.signOut({ returnTo: "/" });

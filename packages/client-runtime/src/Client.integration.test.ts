@@ -9,6 +9,7 @@ import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { CurrentSession } from "./CurrentSession.ts";
+import { clearClientMetadata } from "./Client.ts";
 import { LocalStorageError } from "./models/ClientError.ts";
 import { RpcClient } from "./RpcClient.ts";
 import {
@@ -160,6 +161,13 @@ const makeLayer = (
 };
 
 describe("shared client integration", () => {
+  it.effect("can initialize and clear browser metadata without starting the client", () =>
+    Effect.gen(function* () {
+      yield* clearClientMetadata(user.id);
+      expect(yield* listSnippets(user.id)).toEqual([]);
+    }).pipe(Effect.provide(SqliteClient.layer({ filename: ":memory:" }))),
+  );
+
   it.effect("reports backend snippet-sync connection state", () => {
     const layer = makeLayer(
       makeRpc({

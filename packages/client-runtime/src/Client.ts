@@ -122,6 +122,28 @@ export class Client extends Context.Service<
   }
 >()("@plakk/client-runtime/Client") {}
 
+const clearMetadataRows = (userId: string) =>
+  Effect.gen(function* () {
+    yield* clearAccount(userId);
+    yield* clearSnippets(userId);
+  });
+
+/** Opens the client schema if needed and removes one user's persisted metadata. */
+export const clearClientMetadata = Effect.fn("Client.clearClientMetadata")(
+  function* (userId: string) {
+    yield* runMigrations();
+    yield* clearMetadataRows(userId);
+  },
+  Effect.catchTags({
+    SqlError: () =>
+      Effect.fail(
+        new LocalStorageError({
+          message: "Plakk could not remove its local snippet data.",
+        }),
+      ),
+  }),
+);
+
 /** Implements the Client façade using focused runtime modules. */
 export const clientLive = Layer.effect(
   Client,
@@ -356,8 +378,7 @@ export const clientLive = Layer.effect(
         const entries = yield* contentStore.entries;
         yield* contentStore.remove(entries.map((entry) => entry.snippetId));
       }
-      yield* clearAccount(session.user.id);
-      yield* clearSnippets(session.user.id);
+      yield* clearMetadataRows(session.user.id);
       yield* snippets.refresh;
     }).pipe(
       Effect.provideService(SqlClient.SqlClient, sql),
