@@ -156,7 +156,15 @@ describe("storage upload providers", () => {
       GoogleDriveStorageProvider.prepareUpload({
         ...input,
         storageProvider: "GOOGLE_DRIVE",
-      }).pipe(Effect.provide(FetchHttpClient.layer)),
+      }).pipe(
+        Effect.provide(FetchHttpClient.layer),
+        Effect.provideService(
+          ConfigProvider.ConfigProvider,
+          ConfigProvider.fromEnv({
+            env: { PLAKK_WEB_ORIGIN: "https://web.plakk.example" },
+          }),
+        ),
+      ),
     );
 
     expect(upload).toMatchObject({
@@ -175,7 +183,9 @@ describe("storage upload providers", () => {
     expect(new URL(fetchRequest(0).url).searchParams.get("q")).toBe(
       "mimeType = 'application/vnd.google-apps.folder' and name = 'Plakk' and 'root' in parents and trashed = false",
     );
-    expect(await fetchRequest(1).json()).toEqual({
+    const sessionRequest = fetchRequest(1);
+    expect(sessionRequest.headers.get("origin")).toBe("https://web.plakk.example");
+    expect(await sessionRequest.json()).toEqual({
       name: "folder/file.txt",
       mimeType: "text/plain",
       parents: ["plakk-folder"],
