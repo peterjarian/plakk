@@ -61,7 +61,13 @@ export function SnippetComposer(props: {
           }}
         />
       </Button>
-      <Button type="submit" size="sm" disabled={disabled || !trimmed}>
+      <Button
+        type="submit"
+        size="sm"
+        disabled={disabled || !trimmed}
+        className="disabled:border-border disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100"
+        toolTip="Add this text or link"
+      >
         Add
       </Button>
     </form>

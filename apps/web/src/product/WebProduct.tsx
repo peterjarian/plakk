@@ -59,7 +59,7 @@ const collectBytes = <E,>(stream: Stream.Stream<Uint8Array, E>) =>
     }),
   );
 
-const downloadBlob = (blob: Blob, fileName: string, cleanup?: () => void) => {
+const downloadBlob = (blob: Blob, fileName: string) => {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.hidden = true;
@@ -71,7 +71,6 @@ const downloadBlob = (blob: Blob, fileName: string, cleanup?: () => void) => {
   window.setTimeout(() => {
     anchor.remove();
     URL.revokeObjectURL(url);
-    cleanup?.();
   }, 60_000);
 };
 
@@ -408,9 +407,8 @@ export function WebProduct() {
           );
           await writable.close();
           const file = await handle.getFile();
-          downloadBlob(file, snippet.fileName, () => {
-            void directory.removeEntry(temporaryName);
-          });
+          await directory.removeEntry(temporaryName);
+          downloadBlob(file, snippet.fileName);
         } catch (cause) {
           await writable.abort().catch(() => {});
           await directory.removeEntry(temporaryName).catch(() => {});

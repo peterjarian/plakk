@@ -13,7 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@plakk/ui/components/primitives/dialog";
-import { SnippetComposer } from "../components/SnippetComposer.tsx";
+import { SnippetComposer } from "@plakk/ui/components/SnippetComposer";
 import { SyncStatusIndicator, type SyncStatus } from "../components/SyncStatusIndicator.tsx";
 import { signOut, useAuth } from "../hooks/useAuth.ts";
 import { useSnippets } from "../hooks/useSnippets.ts";
