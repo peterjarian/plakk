@@ -1,11 +1,14 @@
 import type { ClientSnapshot } from "@plakk/client-runtime";
-import { decodeSnippetTextPreview, isTextSnippetFileName } from "@plakk/shared";
+import {
+  decodeSnippetTextPreview,
+  isTextSnippetFileName,
+  SNIPPET_TEXT_PREVIEW_MAX_BYTES,
+} from "@plakk/shared";
 import { Effect } from "effect";
 import { useEffect, useRef, useState } from "react";
 
 import { collectBytes, type RunClient } from "../runtime/client.ts";
 
-const TEXT_PREVIEW_MAX_BYTES = 64 * 1024;
 const TEXT_PREVIEW_LIMIT = 50;
 
 export function useSnippetPreviews(snapshot: ClientSnapshot | null, run: RunClient) {
@@ -33,7 +36,7 @@ export function useSnippetPreviews(snapshot: ClientSnapshot | null, run: RunClie
         (snippet) =>
           snippet.status === "PUBLISHED" &&
           isTextSnippetFileName(snippet.fileName) &&
-          snippet.byteSize <= TEXT_PREVIEW_MAX_BYTES &&
+          snippet.byteSize <= SNIPPET_TEXT_PREVIEW_MAX_BYTES &&
           previews[snippet.id] === undefined &&
           terminalFailuresRef.current.get(snippet.id) !== snippet.updatedAt &&
           !previewingRef.current.has(snippet.id),
