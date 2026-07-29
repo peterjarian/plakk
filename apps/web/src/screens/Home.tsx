@@ -1,4 +1,5 @@
 import { AppHeader } from "@plakk/ui/components/AppHeader";
+import { SnippetComposer } from "@plakk/ui/components/SnippetComposer";
 import { SnippetList } from "@plakk/ui/components/SnippetList";
 import { SnippetRow } from "@plakk/ui/components/SnippetRow";
 import { Button } from "@plakk/ui/primitives/button";
@@ -6,7 +7,6 @@ import * as DateTime from "effect/DateTime";
 import { LoaderCircle, Plus, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { SnippetComposer } from "../components/SnippetComposer.tsx";
 import { StorageProviderIcon, storageProviderLabel } from "../components/StorageProviderIcon.tsx";
 import { SyncStatusIndicator, type SyncStatus } from "../components/SyncStatusIndicator.tsx";
 import type { WebAppModel } from "../App.tsx";
@@ -158,13 +158,27 @@ export function Home(props: { readonly plakk: WebAppModel; readonly onSettings: 
                 </Button>
               </div>
             )}
-            <SnippetComposer
+            <SnippetComposer.Root
               disabled={blocked}
               onSubmit={(text) => run(plakk.addText(text), "Could not add this snippet.")}
-              onFiles={(files) =>
-                run(plakk.addFiles(Array.from(files)), "Could not add these files.")
-              }
-            />
+            >
+              <SnippetComposer.Input />
+              <SnippetComposer.Attachment>
+                <input
+                  multiple
+                  onChange={(event) => {
+                    if (event.currentTarget.files?.length) {
+                      run(
+                        plakk.addFiles(Array.from(event.currentTarget.files)),
+                        "Could not add these files.",
+                      );
+                    }
+                    event.currentTarget.value = "";
+                  }}
+                />
+              </SnippetComposer.Attachment>
+              <SnippetComposer.Submit />
+            </SnippetComposer.Root>
             {(actionError ?? plakk.error) && (
               <p className="mt-2 text-xs text-destructive" role="alert">
                 {actionError ?? plakk.error}
