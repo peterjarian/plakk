@@ -43,7 +43,7 @@ import {
   type UploadSource,
   UploadSourceUnavailableError,
 } from "./snippets/UploadEngine.ts";
-import { runMigrations } from "./sqlite/Migrations.ts";
+import { clientDatabaseLayer, runMigrations } from "./sqlite/Migrations.ts";
 import { clearAccount, getStorageProvider, setStorageProvider } from "./sqlite/queries/account.ts";
 import { clearSnippets } from "./sqlite/queries/snippets.ts";
 
@@ -459,4 +459,7 @@ const enginesLayer = Layer.mergeAll(ContentMirror.Live, SyncEngine.Live, UploadE
  * omitting it leaves uploads remote-only. This layer owns all focused-module
  * wiring and exposes only the `Client` façade.
  */
-export const clientLayer = clientLive.pipe(Layer.provide(enginesLayer));
+export const clientLayer = clientLive.pipe(
+  Layer.provide(enginesLayer),
+  Layer.provide(clientDatabaseLayer),
+);

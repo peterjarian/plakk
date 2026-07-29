@@ -5,7 +5,7 @@ import { Effect, Fiber, Layer, Option, Stream } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { CurrentSession } from "../CurrentSession.ts";
-import { clientMigrationsLayer } from "../sqlite/Migrations.ts";
+import { clientDatabaseLayer, clientMigrationsLayer } from "../sqlite/Migrations.ts";
 import { SnippetStore } from "./SnippetStore.ts";
 
 const user: User = {
@@ -17,6 +17,26 @@ const user: User = {
   updatedAt: "2026-07-20T18:00:00.000Z",
 };
 const snippetId = "0d1e2f3a-4567-4890-8abc-def012345678";
+
+it.effect("migrates a fresh database before hydrating its initial snapshot", () => {
+  const layer = SnippetStore.Live.pipe(
+    Layer.provide(clientDatabaseLayer),
+    Layer.provide(SqliteClient.layer({ filename: ":memory:" })),
+    Layer.provide(
+      Layer.succeed(
+        CurrentSession,
+        CurrentSession.of({ user, accessToken: Effect.succeed("token") }),
+      ),
+    ),
+  );
+
+  return SnippetStore.use((snippets) => snippets.subscribe().pipe(Stream.runHead)).pipe(
+    Effect.map((snapshot) => {
+      expect(Option.getOrThrow(snapshot)).toEqual([]);
+    }),
+    Effect.provide(layer),
+  );
+});
 
 it.effect("hydrates its initial snapshot from SQLite", () => {
   const sqliteLayer = SqliteClient.layer({ filename: ":memory:" });
