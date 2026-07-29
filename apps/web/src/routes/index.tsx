@@ -25,6 +25,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@plakk/ui/primitives/select";
+import { useHotkey } from "@tanstack/react-hotkeys";
 import { createFileRoute, getRouteApi } from "@tanstack/react-router";
 import type { User as AuthKitUser } from "@workos/authkit-tanstack-react-start";
 import * as DateTime from "effect/DateTime";
@@ -105,6 +106,9 @@ function IndexRoute() {
     accountCanSyncWithConnection(capability.account, capability.connection)
       ? capability.account.storageProvider
       : null;
+
+  useHotkey({ key: ",", mod: true }, () => setSettingsOpen(true), { enabled: user !== null });
+  useHotkey("Escape", () => setSettingsOpen(false), { enabled: settingsOpen });
 
   useEffect(() => {
     void sweepTemporaryDownloads().catch(() => {});
