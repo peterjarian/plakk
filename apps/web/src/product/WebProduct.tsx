@@ -35,6 +35,7 @@ const BUFFERED_CONTENT_MAX_BYTES = 64 * 1024 * 1024;
 const databaseNameFor = (userId: string) => `plakk-${userId}.sqlite`;
 const databaseLockNameFor = (userId: string) => `plakk:sqlite:${databaseNameFor(userId)}`;
 const runtimeChannelNameFor = (userId: string) => `plakk:runtime:${userId}`;
+const downloadLockNameFor = (temporaryName: string) => `plakk:download:${temporaryName}`;
 
 type RuntimeResource = {
   readonly client: Client["Service"];
@@ -59,7 +60,7 @@ const collectBytes = <E,>(stream: Stream.Stream<Uint8Array, E>) =>
     }),
   );
 
-const downloadBlob = (blob: Blob, fileName: string) => {
+const downloadBlob = (blob: Blob, fileName: string, onRevoke: () => void) => {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.hidden = true;
@@ -71,7 +72,22 @@ const downloadBlob = (blob: Blob, fileName: string) => {
   window.setTimeout(() => {
     anchor.remove();
     URL.revokeObjectURL(url);
+    onRevoke();
   }, 60_000);
+};
+
+const sweepTemporaryDownloads = async () => {
+  const root = await navigator.storage.getDirectory();
+  const directory = await root.getDirectoryHandle("plakk-downloads", { create: true });
+  for await (const temporaryName of directory.keys()) {
+    await navigator.locks.request(
+      downloadLockNameFor(temporaryName),
+      { ifAvailable: true },
+      async (lock) => {
+        if (lock !== null) await directory.removeEntry(temporaryName).catch(() => {});
+      },
+    );
+  }
 };
 
 const ensureBufferable = (snippet: Pick<ProductSnippet, "byteSize">) => {
@@ -164,6 +180,10 @@ export function WebProduct() {
   const [runtimeAttempt, setRuntimeAttempt] = useState(0);
   const [previewRetryTick, setPreviewRetryTick] = useState(0);
   const appearance = useAppearance();
+
+  useEffect(() => {
+    void sweepTemporaryDownloads().catch(() => {});
+  }, []);
 
   const user: User | null =
     auth.user === null
@@ -393,27 +413,36 @@ export function WebProduct() {
         const root = await navigator.storage.getDirectory();
         const directory = await root.getDirectoryHandle("plakk-downloads", { create: true });
         const temporaryName = crypto.randomUUID();
-        const handle = await directory.getFileHandle(temporaryName, { create: true });
-        const writable = await handle.createWritable();
-        try {
-          await resource.runtime.runPromise(
-            resource.client.content
-              .readRemote(snippet.id)
-              .pipe(
-                Stream.runForEach((chunk) =>
-                  Effect.tryPromise(() => writable.write(Uint8Array.from(chunk))),
-                ),
-              ),
-          );
-          await writable.close();
-          const file = await handle.getFile();
-          await directory.removeEntry(temporaryName);
-          downloadBlob(file, snippet.fileName);
-        } catch (cause) {
-          await writable.abort().catch(() => {});
-          await directory.removeEntry(temporaryName).catch(() => {});
-          throw cause;
-        }
+        await new Promise<void>((resolve, reject) => {
+          void navigator.locks
+            .request(downloadLockNameFor(temporaryName), async () => {
+              const handle = await directory.getFileHandle(temporaryName, { create: true });
+              const writable = await handle.createWritable();
+              try {
+                await resource.runtime.runPromise(
+                  resource.client.content
+                    .readRemote(snippet.id)
+                    .pipe(
+                      Stream.runForEach((chunk) =>
+                        Effect.tryPromise(() => writable.write(Uint8Array.from(chunk))),
+                      ),
+                    ),
+                );
+                await writable.close();
+                const file = await handle.getFile();
+                await new Promise<void>((revoke) => {
+                  downloadBlob(file, snippet.fileName, revoke);
+                  resolve();
+                });
+                await directory.removeEntry(temporaryName).catch(() => {});
+              } catch (cause) {
+                await writable.abort().catch(() => {});
+                await directory.removeEntry(temporaryName).catch(() => {});
+                reject(cause);
+              }
+            })
+            .catch(reject);
+        });
       }),
     [withClient],
   );

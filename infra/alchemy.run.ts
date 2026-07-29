@@ -89,6 +89,7 @@ export default Alchemy.Stack(
         DATABASE_URL: database.pooledConnectionUri,
         NODE_ENV: "production",
         PLAKK_BACKEND_HOST: "0.0.0.0",
+        PLAKK_WEB_ORIGIN: "https://app.plakk.io",
         WORKOS_API_KEY: workosApiKey,
         WORKOS_CLIENT_ID: workosClientId,
         OTEL_SERVICE_NAME: "plakk-backend",
