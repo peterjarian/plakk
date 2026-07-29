@@ -10,7 +10,6 @@ import {
   type Snippet,
 } from "@plakk/client-runtime";
 import {
-  decodeSnippetText,
   decodeSnippetTextPreview,
   deriveSnippetPresentation,
   isTextSnippetFileName,
@@ -405,6 +404,9 @@ export function WebProduct() {
       onText={async (text) => {
         if (provider === null) throw new Error("Connect storage before adding snippets.");
         const bytes = new TextEncoder().encode(text);
+        if (bytes.byteLength > BUFFERED_CONTENT_MAX_BYTES) {
+          throw new Error("Web snippets cannot be larger than 64 MiB.");
+        }
         const id = crypto.randomUUID();
         await withClient(({ client, runtime }) =>
           runtime.runPromise(
@@ -425,6 +427,9 @@ export function WebProduct() {
       }}
       onFiles={async (files) => {
         if (provider === null) throw new Error("Connect storage before adding snippets.");
+        if (files.some((file) => file.size > BUFFERED_CONTENT_MAX_BYTES)) {
+          throw new Error("Web uploads cannot be larger than 64 MiB.");
+        }
         await Promise.all(
           files.map((file) =>
             withClient(({ client, runtime }) =>
@@ -462,14 +467,11 @@ export function WebProduct() {
         )
       }
       onCopy={async (snippet) => {
-        ensureBufferable(snippet);
-        const bytes = await readRemote(snippet.id);
-        const text = decodeSnippetText(bytes);
-        if (text !== null && isTextSnippetFileName(snippet.fileName)) {
-          await navigator.clipboard.writeText(text);
-          return;
+        const text = previews[snippet.id];
+        if (text === undefined || !isTextSnippetFileName(snippet.fileName)) {
+          throw new Error("This snippet is not ready to copy.");
         }
-        downloadBytes(bytes, snippet.fileName);
+        await navigator.clipboard.writeText(text);
       }}
       onDownload={async (snippet) => {
         ensureBufferable(snippet);

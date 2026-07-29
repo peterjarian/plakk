@@ -56,7 +56,7 @@ const BackendRoutes = Layer.mergeAll(
   HttpRouter.cors({
     allowedOrigins: ["plakk-app://renderer", webOrigin],
     allowedMethods: ["GET", "POST", "OPTIONS"],
-    allowedHeaders: ["authorization", "content-type"],
+    allowedHeaders: ["authorization", "b3", "content-type", "traceparent"],
     maxAge: 86_400,
   }),
 );
