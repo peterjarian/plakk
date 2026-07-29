@@ -35,8 +35,8 @@ import {
   SelectValue,
 } from "@plakk/ui/primitives/select";
 import { useHotkey } from "@tanstack/react-hotkeys";
-import { createFileRoute, getRouteApi } from "@tanstack/react-router";
-import type { User as AuthKitUser } from "@workos/authkit-tanstack-react-start";
+import { createFileRoute, redirect } from "@tanstack/react-router";
+import { getAuth, type User as AuthKitUser } from "@workos/authkit-tanstack-react-start";
 import * as DateTime from "effect/DateTime";
 import { Effect, Stream } from "effect";
 import {
@@ -61,7 +61,6 @@ import { productFailureFrom, type ProductFailure } from "../lib/productFailure.t
 import { storageState } from "../lib/storageState.ts";
 import { collectBytes } from "../runtime/client.ts";
 
-const rootRoute = getRouteApi("__root__");
 const BUFFERED_CONTENT_MAX_BYTES = 64 * 1024 * 1024;
 const offlineCapability: ClientCapability = {
   status: "OFFLINE",
@@ -207,20 +206,17 @@ const {
   SectionTitle: SettingsSectionTitle,
 } = SettingsUI;
 
-const toUser = (user: AuthKitUser | null): User | null =>
-  user === null
-    ? null
-    : {
-        id: user.id,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        email: user.email,
-        createdAt: user.createdAt,
-        updatedAt: user.updatedAt,
-      };
+const toUser = (user: AuthKitUser): User => ({
+  id: user.id,
+  firstName: user.firstName,
+  lastName: user.lastName,
+  email: user.email,
+  createdAt: user.createdAt,
+  updatedAt: user.updatedAt,
+});
 
 function IndexRoute() {
-  const { user: initialUser } = rootRoute.useLoaderData();
+  const { user: initialUser } = Route.useLoaderData();
   const user = toUser(initialUser);
   const runtime = useClientRuntime(user);
   const snippets = useSnippets(runtime);
@@ -245,7 +241,7 @@ function IndexRoute() {
       ? capability.account.storageProvider
       : null;
 
-  useHotkey({ key: ",", mod: true }, () => setSettingsOpen(true), { enabled: user !== null });
+  useHotkey({ key: ",", mod: true }, () => setSettingsOpen(true));
   useHotkey("Escape", () => setSettingsOpen(false), { enabled: settingsOpen });
 
   useEffect(() => {
@@ -376,37 +372,6 @@ function IndexRoute() {
           ),
       ),
     );
-  const runtimeIssue = runtime.issue === null ? null : runtimeIssuePresentation[runtime.issue];
-
-  if (user === null) {
-    return (
-      <main className="grid min-h-screen place-items-center bg-background p-6 text-foreground">
-        <section className="grid w-full max-w-md gap-5 text-center">
-          <div className="grid gap-1">
-            <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-              Plakk
-            </p>
-            <h1 className="text-2xl leading-tight font-semibold">Move snippets between devices.</h1>
-          </div>
-          {runtimeIssue !== null && (
-            <ProductNotice tone="danger" title={runtimeIssue.title}>
-              {runtimeIssue.description}
-            </ProductNotice>
-          )}
-          <Button
-            type="button"
-            className="h-10 w-full"
-            disabled={runtime.loading}
-            onClick={() => window.location.assign("/api/auth/sign-in")}
-          >
-            {runtime.loading ? "Checking session…" : "Sign in"}
-            <ArrowUpRight />
-          </Button>
-        </section>
-      </main>
-    );
-  }
-
   const fallback = user.email ?? user.id;
   const name = [user.firstName, user.lastName].filter(Boolean).join(" ") || fallback;
   const settingsDialog = (
@@ -818,4 +783,11 @@ function IndexRoute() {
   );
 }
 
-export const Route = createFileRoute("/")({ component: IndexRoute });
+export const Route = createFileRoute("/")({
+  loader: async () => {
+    const { user } = await getAuth();
+    if (user === null) throw redirect({ href: "/api/auth/sign-in" });
+    return { user };
+  },
+  component: IndexRoute,
+});
