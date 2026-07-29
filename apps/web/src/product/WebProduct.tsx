@@ -339,20 +339,22 @@ export function WebProduct() {
                   }
                 }),
               ),
-              Effect.catchCause(() =>
-                Effect.sync(() => {
-                  if (previewRetryTimersRef.current.has(snippet.id)) return;
-                  const failures = (previewFailuresRef.current.get(snippet.id) ?? 0) + 1;
-                  previewFailuresRef.current.set(snippet.id, failures);
-                  const timer = window.setTimeout(
-                    () => {
-                      previewRetryTimersRef.current.delete(snippet.id);
-                      setPreviewRetryTick((tick) => tick + 1);
-                    },
-                    Math.min(30_000, 1_000 * 2 ** Math.min(failures - 1, 5)),
-                  );
-                  previewRetryTimersRef.current.set(snippet.id, timer);
-                }),
+              Effect.catch((error) =>
+                error._tag === "OfflineError" || error._tag === "ServerUnavailableError"
+                  ? Effect.sync(() => {
+                      if (previewRetryTimersRef.current.has(snippet.id)) return;
+                      const failures = (previewFailuresRef.current.get(snippet.id) ?? 0) + 1;
+                      previewFailuresRef.current.set(snippet.id, failures);
+                      const timer = window.setTimeout(
+                        () => {
+                          previewRetryTimersRef.current.delete(snippet.id);
+                          setPreviewRetryTick((tick) => tick + 1);
+                        },
+                        Math.min(30_000, 1_000 * 2 ** Math.min(failures - 1, 5)),
+                      );
+                      previewRetryTimersRef.current.set(snippet.id, timer);
+                    })
+                  : Effect.void,
               ),
               Effect.ensuring(
                 Effect.sync(() => {
