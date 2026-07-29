@@ -37,11 +37,7 @@ const RpcRoutes = RpcServer.layerHttp({
   Layer.provide(InfrastructureLive),
 );
 
-const HealthRoute = HttpRouter.add(
-  "GET",
-  "/health",
-  Effect.succeed(HttpServerResponse.text("ok")),
-).pipe(HttpRouter.serve);
+const HealthRoute = HttpRouter.add("GET", "/health", Effect.succeed(HttpServerResponse.text("ok")));
 
 const webOrigin = Effect.runSync(
   Config.url("PLAKK_WEB_ORIGIN").pipe(
