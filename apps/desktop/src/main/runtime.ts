@@ -36,6 +36,7 @@ const desktopContentLayer = makeDesktopContentStoreLayer(desktopContentRoot).pip
 );
 const plakkRpcProtocolLayer = Layer.unwrap(
   Config.url("PLAKK_RPC_URL").pipe(
+    Config.withDefault(new URL("http://localhost:3100/api/rpc")),
     Effect.orDie,
     Effect.map((url) =>
       RpcClient.layerProtocolHttp({ url: url.toString() }).pipe(

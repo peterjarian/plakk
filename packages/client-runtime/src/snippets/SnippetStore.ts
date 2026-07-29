@@ -27,7 +27,6 @@ export class SnippetStore extends Context.Service<
     Effect.gen(function* () {
       const session = yield* CurrentSession;
       const sql = yield* SqlClient.SqlClient;
-      const snapshots = yield* SubscriptionRef.make<ReadonlyArray<Snippet>>([]);
       const current = listSnippets(session.user.id).pipe(
         Effect.provideService(SqlClient.SqlClient, sql),
         Effect.catchTags({
@@ -45,6 +44,7 @@ export class SnippetStore extends Context.Service<
             ),
         }),
       );
+      const snapshots = yield* SubscriptionRef.make<ReadonlyArray<Snippet>>(yield* current);
 
       /** Returns the current snapshot followed by every committed refresh. */
       const subscribe = (): Stream.Stream<ReadonlyArray<Snippet>, SnippetSubscriptionFailure> =>

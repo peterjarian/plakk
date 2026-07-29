@@ -7,6 +7,7 @@ import type { RpcError } from "@plakk/shared/RpcError";
 import {
   Context,
   DateTime,
+  Duration,
   Effect,
   FiberSet,
   Layer,
@@ -39,6 +40,7 @@ import { ContentStore } from "./ContentMirror.ts";
 import { SnippetStore } from "./SnippetStore.ts";
 
 const CONTENT_COPY_CHUNK_BYTES = 4 * 1024 * 1024;
+const MAX_UPLOAD_RETRIES = 5;
 
 const NextExpectedRangesSchema = Schema.Struct({
   nextExpectedRanges: Schema.Array(Schema.String),
@@ -367,10 +369,17 @@ export class UploadEngine extends Context.Service<
       ) {
         if (activeSnippetIds.has(input.id)) return;
         activeSnippetIds.add(input.id);
+        let retryCount = 0;
 
         /** Waits before re-running a temporarily blocked upload. */
-        const retry = (reason: "offline" | "server" | "session"): Effect.Effect<void> =>
-          setPreparing(input.id).pipe(
+        const retry = (
+          reason: "offline" | "server" | "session",
+          error: UploadAttemptFailure,
+        ): Effect.Effect<void> => {
+          if (retryCount >= MAX_UPLOAD_RETRIES) return fail(error);
+          const delay = Duration.seconds(2 ** retryCount);
+          retryCount += 1;
+          return setPreparing(input.id).pipe(
             Effect.catchCause((cause) =>
               Effect.logWarning("Could not return an upload to preparing", {
                 snippetId: input.id,
@@ -383,9 +392,10 @@ export class UploadEngine extends Context.Service<
                 reason,
               }),
             ),
-            Effect.andThen(Effect.sleep("5 seconds")),
+            Effect.andThen(Effect.sleep(delay)),
             Effect.andThen(runAttempt()),
           );
+        };
 
         /** Marks failures that cannot be recovered without a new user action. */
         const fail = (error: UploadAttemptFailure): Effect.Effect<void> =>
@@ -410,8 +420,8 @@ export class UploadEngine extends Context.Service<
             .withPermit(setUploading(input.id).pipe(Effect.andThen(transfer(input, source))))
             .pipe(
               Effect.catchTags({
-                SessionError: () => retry("session"),
-                OfflineError: () => retry("offline"),
+                SessionError: (error) => retry("session", error),
+                OfflineError: (error) => retry("offline", error),
                 RpcClientError: (error) =>
                   error.reason._tag === "RpcClientDefect"
                     ? Effect.fail(
@@ -419,10 +429,10 @@ export class UploadEngine extends Context.Service<
                           message: "Plakk received an unexpected upload response.",
                         }),
                       )
-                    : retry("offline"),
+                    : retry("offline", error),
                 HttpClientError: (error) =>
                   error.reason._tag === "TransportError"
-                    ? retry("offline")
+                    ? retry("offline", error)
                     : Effect.fail(
                         new InvalidUploadResponseError({
                           message: "The storage provider returned an unexpected response.",
@@ -430,13 +440,13 @@ export class UploadEngine extends Context.Service<
                       ),
                 RpcError: (error) =>
                   error.code === "UNAUTHENTICATED"
-                    ? retry("session")
+                    ? retry("session", error)
                     : error.code === "INTERNAL_SERVER_ERROR"
-                      ? retry("server")
+                      ? retry("server", error)
                       : Effect.fail(error),
                 UploadRejectedError: (error) =>
                   error.status === 408 || error.status === 429 || error.status >= 500
-                    ? retry("server")
+                    ? retry("server", error)
                     : Effect.fail(error),
               }),
               Effect.catch(fail),
@@ -455,7 +465,11 @@ export class UploadEngine extends Context.Service<
             }),
           ),
         );
-        yield* FiberSet.run(activeUploads, background, { propagateInterruption: false });
+        if (content === undefined) {
+          yield* background;
+        } else {
+          yield* FiberSet.run(activeUploads, background, { propagateInterruption: false });
+        }
       });
 
       /** Marks uploads left by a previous process as failed and refreshes local state. */

@@ -226,13 +226,13 @@ export function createTrayWindowController({
     disabledTray.destroy();
   }
 
-  function reconcileOwnership() {
+  function reconcileOwnership(accountStateChanged = false) {
     if (!enabled || !signedIn) {
       disable();
       return;
     }
     setup();
-    applyAccountState(true, accountCanIngest);
+    if (accountStateChanged) applyAccountState(true, accountCanIngest);
   }
 
   function setup() {
@@ -302,7 +302,7 @@ export function createTrayWindowController({
     setAccountState(accountSignedIn: boolean, canIngest: boolean) {
       signedIn = accountSignedIn;
       accountCanIngest = canIngest;
-      reconcileOwnership();
+      reconcileOwnership(true);
     },
     setEnabled(value: boolean) {
       enabled = value;

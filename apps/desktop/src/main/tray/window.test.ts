@@ -244,6 +244,31 @@ describe("tray window lifecycle", () => {
     expect(window.visible).toBe(true);
   });
 
+  it("does not make stale account state fresh when the tray is re-enabled", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const onAccountRefreshRequested = vi.fn();
+    const controller = createTrayWindowController({
+      getBackgroundColor: () => "#ffffff",
+      guardExternalWindows: vi.fn(),
+      loadTrayRenderer: vi.fn(),
+      onAccountRefreshRequested,
+      platform: "win32",
+      preloadPath: "/preload.cjs",
+    });
+
+    controller.setEnabled(true);
+    controller.setAccountState(true, true);
+    vi.advanceTimersByTime(5 * 60 * 1000 + 1);
+    controller.setEnabled(false);
+    controller.setEnabled(true);
+
+    expect(controller.isIngestionEnabled()).toBe(false);
+    const tray = electron.Tray.instances.at(-1)!;
+    tray.emit("click", {}, tray.getBounds());
+    expect(onAccountRefreshRequested).toHaveBeenCalledOnce();
+  });
+
   it("keeps repeated enable and disable transitions idempotent", () => {
     const loadTrayRenderer = vi.fn();
     const controller = createTrayWindowController({

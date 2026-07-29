@@ -1,7 +1,7 @@
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { expect, it } from "@effect/vitest";
 import type { User } from "@plakk/shared";
-import { Effect, Fiber, Layer, Stream } from "effect";
+import { Effect, Fiber, Layer, Option, Stream } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { CurrentSession } from "../CurrentSession.ts";
@@ -17,6 +17,59 @@ const user: User = {
   updatedAt: "2026-07-20T18:00:00.000Z",
 };
 const snippetId = "0d1e2f3a-4567-4890-8abc-def012345678";
+
+it.effect("hydrates its initial snapshot from SQLite", () => {
+  const sqliteLayer = SqliteClient.layer({ filename: ":memory:" });
+  const databaseLayer = clientMigrationsLayer.pipe(Layer.provideMerge(sqliteLayer));
+  const seededDatabaseLayer = Layer.effectDiscard(
+    SqlClient.SqlClient.use(
+      (sql) => sql`
+      INSERT INTO client_snippets (
+        user_id,
+        id,
+        file_name,
+        byte_size,
+        storage_provider,
+        storage_object_id,
+        status,
+        error_message,
+        created_at,
+        updated_at
+      )
+      VALUES (
+        ${user.id},
+        ${snippetId},
+        'stored.txt',
+        4,
+        'GOOGLE_DRIVE',
+        NULL,
+        'UPLOADING',
+        NULL,
+        '2026-07-20T20:00:00.000Z',
+        '2026-07-20T20:00:00.000Z'
+      )
+    `,
+    ),
+  ).pipe(Layer.provideMerge(databaseLayer));
+  const layer = SnippetStore.Live.pipe(
+    Layer.provideMerge(seededDatabaseLayer),
+    Layer.provide(
+      Layer.succeed(
+        CurrentSession,
+        CurrentSession.of({ user, accessToken: Effect.succeed("token") }),
+      ),
+    ),
+  );
+
+  return SnippetStore.use((snippets) => snippets.subscribe().pipe(Stream.runHead)).pipe(
+    Effect.map((snapshot) => {
+      expect(Option.getOrThrow(snapshot).map(({ id, status }) => ({ id, status }))).toEqual([
+        { id: snippetId, status: "UPLOADING" },
+      ]);
+    }),
+    Effect.provide(layer),
+  );
+});
 
 it.effect("subscribes with the current snapshot and publishes committed changes", () => {
   const sqliteLayer = SqliteClient.layer({ filename: ":memory:" });

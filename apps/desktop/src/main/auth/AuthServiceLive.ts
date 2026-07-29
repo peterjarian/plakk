@@ -217,9 +217,12 @@ export const AuthServiceLive = Layer.effect(
         return request.url;
       }),
       signOut: Effect.fn("AuthService.signOut")(function* () {
-        yield* store.clear.pipe(
-          Effect.mapError((cause) => new AuthServiceError({ cause, message: cause.reason })),
-        );
+        yield* store
+          .set("credentials", null)
+          .pipe(Effect.mapError((cause) => new AuthServiceError({ cause, message: cause.reason })));
+        yield* store
+          .set("pkce", null)
+          .pipe(Effect.mapError((cause) => new AuthServiceError({ cause, message: cause.reason })));
       }),
     });
   }),

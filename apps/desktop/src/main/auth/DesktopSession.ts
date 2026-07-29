@@ -154,12 +154,39 @@ const makeDesktopSession = (sharedClientLayer: SharedClientLayer) =>
             message: "Your Plakk session is no longer available. Sign in again to continue.",
           });
         }
-        if (current.accessToken === null) {
+
+        const refreshed = yield* auth.getSession().pipe(Effect.result);
+        if (Result.isFailure(refreshed)) {
+          const expired = refreshed.failure._tag === "AuthSessionExpiredError";
+          yield* Ref.set(status, {
+            accessToken: null,
+            user: current.user,
+            commandsAuthorized: !expired,
+          });
+          if (expired) {
+            return yield* new SessionError({
+              message: "Your Plakk session is no longer available. Sign in again to continue.",
+            });
+          }
           return yield* new OfflineError({
             message: "Plakk is offline. Your local snippets remain available.",
           });
         }
-        return current.accessToken;
+
+        const session = refreshed.success;
+        const latest = yield* Ref.get(status);
+        if (
+          session === null ||
+          session.user.id !== userId ||
+          latest.user?.id !== userId ||
+          !latest.commandsAuthorized
+        ) {
+          return yield* new SessionError({
+            message: "Your Plakk session is no longer available. Sign in again to continue.",
+          });
+        }
+        yield* Ref.set(status, statusFrom(session));
+        return session.accessToken;
       });
 
     const publishClientSnapshot = Effect.fn("DesktopSession.publishClientSnapshot")(function* (
@@ -229,18 +256,23 @@ const makeDesktopSession = (sharedClientLayer: SharedClientLayer) =>
     ) {
       const active = yield* ScopedRef.get(activeClient);
       if (Option.isNone(active) || active.value.userId !== userId) {
-        return yield* new SessionError({
-          message: "Plakk could not access the local account data.",
-        });
+        yield* deactivateClient;
+        return false;
       }
-      yield* active.value.client.clearLocalData;
+      const client = active.value.client;
+      yield* deactivateClient;
+      yield* client.clearLocalData;
+      return true;
     });
 
     const clearOwner = Effect.fn("DesktopSession.clearOwner")(function* (user: User) {
       yield* auth.setCleanupOwner(user);
       yield* clearFileSources;
-      yield* purgeActiveClient(user.id);
-      yield* deactivateClient;
+      if (!(yield* purgeActiveClient(user.id))) {
+        return yield* new SessionError({
+          message: "Plakk could not access the local account data.",
+        });
+      }
       yield* auth.setCleanupOwner(null);
     });
 
@@ -314,10 +346,19 @@ const makeDesktopSession = (sharedClientLayer: SharedClientLayer) =>
           if (current.user !== null) {
             yield* auth.setCleanupOwner(current.user);
             yield* clearFileSources;
-            yield* purgeActiveClient(current.user.id);
+            const localDataCleared = yield* purgeActiveClient(current.user.id).pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning("Could not remove local account data during sign-out", {
+                  cause: Cause.pretty(cause),
+                }).pipe(Effect.as(false)),
+              ),
+            );
+            yield* auth.signOut();
+            if (localDataCleared) yield* auth.setCleanupOwner(null);
+          } else {
+            yield* deactivateClient;
+            yield* auth.signOut();
           }
-          yield* auth.signOut();
-          yield* deactivateClient;
           yield* Ref.set(status, {
             accessToken: null,
             user: null,

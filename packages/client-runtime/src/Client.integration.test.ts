@@ -374,18 +374,20 @@ describe("shared client integration", () => {
 
       yield* Effect.gen(function* () {
         const bytes = new TextEncoder().encode("note");
-        yield* (yield* UploadEngine).upload(
-          {
-            id: localId,
-            fileName: "web-note.txt",
-            byteSize: bytes.byteLength,
-            storageProvider: "GOOGLE_DRIVE",
-            mediaType: "text/plain",
-          },
-          {
-            read: (offset, byteSize) => Effect.succeed(bytes.slice(offset, offset + byteSize)),
-          },
-        );
+        const uploadFiber = yield* (yield* UploadEngine)
+          .upload(
+            {
+              id: localId,
+              fileName: "web-note.txt",
+              byteSize: bytes.byteLength,
+              storageProvider: "GOOGLE_DRIVE",
+              mediaType: "text/plain",
+            },
+            {
+              read: (offset, byteSize) => Effect.succeed(bytes.slice(offset, offset + byteSize)),
+            },
+          )
+          .pipe(Effect.forkChild);
 
         yield* Deferred.await(prepareStarted);
         expect((yield* listSnippets(user.id))[0]).toMatchObject({
@@ -394,15 +396,13 @@ describe("shared client integration", () => {
           localContentAvailability: { status: "NOT_AVAILABLE" },
         });
 
-        const publishedSnapshot = yield* (yield* SnippetStore).subscribe().pipe(
-          Stream.filter((snapshot) =>
-            snapshot.some((snippet) => snippet.id === localId && snippet.status === "PUBLISHED"),
-          ),
-          Stream.runHead,
-          Effect.forkChild,
-        );
         yield* Deferred.succeed(releasePrepare, undefined);
-        yield* Fiber.join(publishedSnapshot);
+        yield* Fiber.join(uploadFiber);
+        expect((yield* listSnippets(user.id))[0]).toMatchObject({
+          id: localId,
+          status: "PUBLISHED",
+          localContentAvailability: { status: "NOT_AVAILABLE" },
+        });
       }).pipe(Effect.provide(layer));
     }),
   );
@@ -518,13 +518,71 @@ describe("shared client integration", () => {
           Stream.runHead,
           Effect.forkChild,
         );
-        yield* TestClock.adjust("5 seconds");
+        yield* TestClock.adjust("1 second");
         yield* Fiber.join(publishedSnapshot);
 
         expect(attempts).toBe(2);
         expect((yield* listSnippets(user.id))[0]).toMatchObject({
           id: localId,
           status: "PUBLISHED",
+        });
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("stops retrying an upload after the retry budget is exhausted", () =>
+    Effect.gen(function* () {
+      const firstAttempt = yield* Deferred.make<void>();
+      let attempts = 0;
+      const layer = makeLayer(
+        makeRpc({
+          PrepareSnippetUpload: () => {
+            attempts += 1;
+            const attempted =
+              attempts === 1 ? Deferred.succeed(firstAttempt, undefined) : Effect.void;
+            return attempted.pipe(
+              Effect.andThen(
+                Effect.fail(
+                  new OfflineError({
+                    message: "The test client is offline.",
+                  }),
+                ),
+              ),
+            );
+          },
+        }),
+      );
+
+      yield* Effect.gen(function* () {
+        const bytes = new TextEncoder().encode("note");
+        yield* (yield* UploadEngine).upload(
+          {
+            id: localId,
+            fileName: "offline-note.txt",
+            byteSize: bytes.byteLength,
+            storageProvider: "GOOGLE_DRIVE",
+            mediaType: "text/plain",
+          },
+          {
+            read: (offset, byteSize) => Effect.succeed(bytes.slice(offset, offset + byteSize)),
+          },
+        );
+
+        const failedSnapshot = yield* (yield* SnippetStore).subscribe().pipe(
+          Stream.filter((snapshot) =>
+            snapshot.some((snippet) => snippet.id === localId && snippet.status === "FAILED"),
+          ),
+          Stream.runHead,
+          Effect.forkChild,
+        );
+        yield* Deferred.await(firstAttempt);
+        yield* TestClock.adjust("31 seconds");
+        yield* Fiber.join(failedSnapshot);
+
+        expect(attempts).toBe(6);
+        expect((yield* listSnippets(user.id))[0]).toMatchObject({
+          id: localId,
+          status: "FAILED",
         });
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.provide(TestClock.layer())),
@@ -567,6 +625,7 @@ describe("shared client integration", () => {
       `;
 
       yield* (yield* UploadEngine).initialize;
+      yield* (yield* ContentMirror).reconcile;
 
       const snapshot = Option.getOrThrow(
         yield* (yield* SnippetStore).subscribe().pipe(Stream.runHead),

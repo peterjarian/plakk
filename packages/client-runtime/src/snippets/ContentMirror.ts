@@ -15,8 +15,9 @@ import {
   SnippetNotFoundError,
 } from "../models/ClientError.ts";
 import { RpcClient } from "../RpcClient.ts";
+import { isPublishedSnippet, type PublishedSnippet } from "../models/Snippet.ts";
 import { listPublishedSnippets, setContentStatus } from "../sqlite/queries/content.ts";
-import type { PublishedSnippet } from "../models/Snippet.ts";
+import { listSnippets } from "../sqlite/queries/snippets.ts";
 import { SnippetStore } from "./SnippetStore.ts";
 
 export const AUTOMATIC_CONTENT_LIMIT = 20;
@@ -340,9 +341,10 @@ export class ContentMirror extends Context.Service<
       const reconcile = Effect.gen(function* () {
         if (content === undefined) return;
 
-        const publishedSnippets = yield* listPublishedSnippets(session.user.id);
+        const localSnippets = yield* listSnippets(session.user.id);
+        const publishedSnippets = localSnippets.filter(isPublishedSnippet);
         const stored = yield* content.entries;
-        const snippetsById = new Map(publishedSnippets.map((snippet) => [snippet.id, snippet]));
+        const snippetsById = new Map(localSnippets.map((snippet) => [snippet.id, snippet]));
         const invalid = stored
           .filter((entry) => {
             const snippet = snippetsById.get(entry.snippetId);

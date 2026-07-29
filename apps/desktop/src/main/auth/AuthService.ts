@@ -29,15 +29,12 @@ export class AuthSessionExpiredError extends Schema.TaggedErrorClass<AuthSession
 
 /**
  * A client-side or transient server failure cannot prove that the session is
- * invalid. A non-retryable 4xx response does: WorkOS was reachable and rejected
- * the refresh request.
+ * invalid. Only explicit authentication responses should expire it.
  */
 export function authRefreshFailureExpiresSession(cause: unknown): boolean {
   if (typeof cause !== "object" || cause === null || !("status" in cause)) return false;
   const status = cause.status;
-  return (
-    typeof status === "number" && status >= 400 && status < 500 && status !== 408 && status !== 429
-  );
+  return status === 400 || status === 401;
 }
 
 export function deriveDesktopAuthCallbackUrl(configuredUrl: URL, isPackaged: boolean): URL {

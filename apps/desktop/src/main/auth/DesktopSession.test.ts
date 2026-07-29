@@ -52,6 +52,7 @@ describe("DesktopSession", () => {
       let cleanupOwner: User | null = null;
       let storedUser: User | null = firstUser;
       let sessionUser: User | null = firstUser;
+      let sessionAccessToken = "fresh-token";
       let sessionFailure: AuthServiceFailure | null = null;
 
       const fakeClientLayer = Layer.effect(
@@ -112,12 +113,15 @@ describe("DesktopSession", () => {
             getSession: () =>
               sessionFailure === null
                 ? Effect.sync(() =>
-                    sessionUser === null ? null : { user: sessionUser, accessToken: "fresh-token" },
+                    sessionUser === null
+                      ? null
+                      : { user: sessionUser, accessToken: sessionAccessToken },
                   )
                 : Effect.fail(sessionFailure),
             handleCallbackUrl: () => {
               storedUser = secondUser;
               sessionUser = secondUser;
+              sessionAccessToken = "second-token";
               return Effect.succeed({ user: secondUser, accessToken: "second-token" });
             },
             signOut: () =>
@@ -163,6 +167,8 @@ describe("DesktopSession", () => {
         yield* desktopSession.start;
         yield* desktopSession.refresh;
         const firstToken = yield* accessTokens.get(firstUser.id)!;
+        sessionAccessToken = "background-refreshed-token";
+        const refreshedToken = yield* accessTokens.get(firstUser.id)!;
 
         sessionFailure = new AuthServiceError({
           cause: new TypeError("fetch failed"),
@@ -191,6 +197,7 @@ describe("DesktopSession", () => {
           expiredState,
           firstToken,
           offlineState,
+          refreshedToken,
           secondToken,
           state: yield* desktopSession.current,
         };
@@ -199,6 +206,7 @@ describe("DesktopSession", () => {
       );
 
       expect(result.firstToken).toBe("fresh-token");
+      expect(result.refreshedToken).toBe("background-refreshed-token");
       expect(result.offlineState.user).toEqual(firstUser);
       expect(result.expiredState.user).toBeNull();
       expect(result.expiredCommand).toMatchObject({
@@ -221,6 +229,12 @@ describe("DesktopSession", () => {
           `deactivate:${secondUser.id}`,
           "credentials:clear",
         ]),
+      );
+      expect(events.indexOf(`deactivate:${firstUser.id}`)).toBeLessThan(
+        events.indexOf(`purge:${firstUser.id}`),
+      );
+      expect(events.lastIndexOf(`deactivate:${secondUser.id}`)).toBeLessThan(
+        events.lastIndexOf(`purge:${secondUser.id}`),
       );
       expect(cleanupOwner).toBeNull();
     }),
