@@ -473,6 +473,12 @@ export function WebProduct() {
       syncStatus={snapshot?.syncStatus ?? null}
       user={user}
       onAppearanceChange={appearance.set}
+      onConnectStorage={(storageProvider) =>
+        withClient(async ({ client, runtime }) => {
+          const url = await runtime.runPromise(client.storage.beginLink(storageProvider));
+          window.location.assign(url);
+        })
+      }
       onSignIn={() => {
         window.location.href = "/api/auth/sign-in";
       }}

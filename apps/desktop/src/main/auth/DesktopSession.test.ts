@@ -76,6 +76,7 @@ describe("DesktopSession", () => {
               subscribe: () => Stream.make(snapshot),
               refresh: Effect.void,
               clearLocalData: Effect.sync(() => void events.push(`purge:${session.user.id}`)),
+              storage: { beginLink: () => Effect.die("not used") },
               content: {
                 download: () => Effect.void,
                 read: () => Stream.empty,

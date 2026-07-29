@@ -45,6 +45,12 @@ const makeLayer = (options?: {
         Layer.succeed(
           RpcClient,
           RpcClient.of({
+            BeginStorageProviderLink: ({
+              storageProvider,
+            }: Parameters<RpcClient["Service"]["BeginStorageProviderLink"]>[0]) =>
+              Effect.succeed({
+                url: `https://connect.example/${storageProvider.toLowerCase()}`,
+              }),
             GetAccountStatus: () =>
               Effect.succeed({
                 canSync: true,
@@ -169,6 +175,7 @@ describe("Client", () => {
           externalDestinationUrl: "https://drive.google.com/drive/folders/plakk",
         },
       });
+      expect(yield* client.storage.beginLink("DROPBOX")).toBe("https://connect.example/dropbox");
 
       yield* client.uploads.upload(
         {

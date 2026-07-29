@@ -1,4 +1,9 @@
-import type { SnippetPresentation, StorageProvider, User } from "@plakk/shared";
+import {
+  type SnippetPresentation,
+  STORAGE_PROVIDERS,
+  type StorageProvider,
+  type User,
+} from "@plakk/shared";
 import {
   accountCanSyncWithConnection,
   type AccountStatus,
@@ -60,6 +65,7 @@ export type ProductAppProps = {
   readonly syncStatus: "CONNECTED" | "RECONNECTING" | null;
   readonly user: User | null;
   readonly onAppearanceChange: (appearance: "light" | "dark" | "system") => Promise<void>;
+  readonly onConnectStorage: (storageProvider: StorageProvider) => Promise<void>;
   readonly onCopy: (snippet: ProductSnippet) => Promise<void>;
   readonly onDelete: (snippet: ProductSnippet) => Promise<void>;
   readonly onDownload: (snippet: ProductSnippet) => Promise<void>;
@@ -163,6 +169,7 @@ function SettingsView(props: ProductAppProps & { readonly onBack: () => void }) 
   const { capability, user } = props;
   const storage = storageState(capability);
   const [appearanceError, setAppearanceError] = useState<string | null>(null);
+  const [storageError, setStorageError] = useState<string | null>(null);
   if (user === null) return null;
   const fallback = user.email ?? user.id;
   const name = [user.firstName, user.lastName].filter(Boolean).join(" ") || fallback;
@@ -247,18 +254,51 @@ function SettingsView(props: ProductAppProps & { readonly onBack: () => void }) 
                   Open
                   <ArrowUpRight />
                 </Button>
+              ) : storage.kind === "unlinked" ||
+                (storage.kind === "offline" && storage.provider === null) ? (
+                <div className="flex items-center gap-1">
+                  {STORAGE_PROVIDERS.map((provider) => (
+                    <Button
+                      key={provider}
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      toolTip={`Connect ${providerLabel(provider)}`}
+                      onClick={() => {
+                        setStorageError(null);
+                        void props
+                          .onConnectStorage(provider)
+                          .catch((cause) =>
+                            setStorageError(messageFrom(cause, "Could not connect storage.")),
+                          );
+                      }}
+                    >
+                      <ProviderIcon provider={provider} />
+                      <span className="sr-only">Connect {providerLabel(provider)}</span>
+                    </Button>
+                  ))}
+                </div>
               ) : (
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
-                  onClick={() => props.onOpenExternal("https://app.plakk.io/storage")}
+                  onClick={() => {
+                    if (storage.provider === null) return;
+                    setStorageError(null);
+                    void props
+                      .onConnectStorage(storage.provider)
+                      .catch((cause) =>
+                        setStorageError(messageFrom(cause, "Could not connect storage.")),
+                      );
+                  }}
                 >
                   {storage.kind === "reauthorize" ? "Reconnect" : "Connect"}
                   <ArrowUpRight />
                 </Button>
               )}
             </SettingsRow>
+            {storageError && <p className="px-4 pb-3 text-xs text-destructive">{storageError}</p>}
           </SettingsSectionBody>
         </SettingsSection>
         <SettingsSection>
@@ -470,11 +510,9 @@ function HomeView(props: ProductAppProps & { readonly onSettings: () => void }) 
                   variant="ghost"
                   size="xs"
                   onClick={() =>
-                    props.onOpenExternal(
-                      billingBlocked
-                        ? "https://app.plakk.io/billing"
-                        : "https://app.plakk.io/storage",
-                    )
+                    billingBlocked
+                      ? props.onOpenExternal("https://app.plakk.io/billing")
+                      : props.onSettings()
                   }
                 >
                   {billingBlocked ? "Manage billing" : "Finish setup"}

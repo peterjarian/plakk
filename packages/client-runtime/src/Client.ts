@@ -1,4 +1,4 @@
-import { UserSchema } from "@plakk/shared";
+import { type StorageProvider, UserSchema } from "@plakk/shared";
 import type { PrepareSnippetUploadPayload } from "@plakk/shared/PlakkApi";
 import {
   ClientCapabilitySchema,
@@ -75,6 +75,10 @@ export class Client extends Context.Service<
     readonly refresh: Effect.Effect<void, ClientError>;
     /** Removes all snippet records and managed content owned by the current user. */
     readonly clearLocalData: Effect.Effect<void, ClientError>;
+    readonly storage: {
+      /** Starts the provider-owned authorization flow and returns its destination URL. */
+      readonly beginLink: (storageProvider: StorageProvider) => Effect.Effect<string, ClientError>;
+    };
     readonly content: {
       /** Downloads and stores one published snippet on this device. */
       readonly download: (snippetId: string) => Effect.Effect<void, ClientError>;
@@ -318,6 +322,48 @@ export const clientLive = Layer.effect(
       Effect.forkScoped,
     );
 
+    const beginStorageLink = Effect.fn("Client.storage.beginLink")(function* (
+      storageProvider: StorageProvider,
+    ) {
+      return yield* rpc.BeginStorageProviderLink({ storageProvider }).pipe(
+        Effect.map((result) => result.url),
+        Effect.catchTags({
+          SessionError: (error) => Effect.fail(error),
+          OfflineError: (error) => Effect.fail(error),
+          RpcClientError: (error) =>
+            error.reason._tag === "RpcClientDefect"
+              ? Effect.fail(
+                  new InvalidResponseError({
+                    message: "Plakk received an unexpected storage response.",
+                  }),
+                )
+              : Effect.fail(
+                  new OfflineError({
+                    message: "Plakk could not connect. Check your connection and try again.",
+                  }),
+                ),
+          RpcError: (error) =>
+            error.code === "UNAUTHENTICATED"
+              ? Effect.fail(
+                  new SessionError({
+                    message: "Your session expired. Sign in again to continue.",
+                  }),
+                )
+              : error.code === "FORBIDDEN"
+                ? Effect.fail(
+                    new ActionNotAllowedError({
+                      message: "You do not have permission to connect this storage provider.",
+                    }),
+                  )
+                : Effect.fail(
+                    new ServerUnavailableError({
+                      message: "Plakk could not start storage setup. Please try again.",
+                    }),
+                  ),
+        }),
+      );
+    });
+
     /** Runs the complete remote-first snippet deletion procedure. */
     const deleteSnippet = Effect.fn("Client.snippets.delete")(function* (snippetId: string) {
       yield* sync.delete(snippetId);
@@ -382,6 +428,7 @@ export const clientLive = Layer.effect(
       subscribe,
       refresh,
       clearLocalData,
+      storage: { beginLink: beginStorageLink },
       content: {
         download: content.download,
         read: content.read,

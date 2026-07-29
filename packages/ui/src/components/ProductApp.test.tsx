@@ -46,6 +46,7 @@ const props = {
   syncStatus: "CONNECTED",
   user,
   onAppearanceChange: vi.fn(),
+  onConnectStorage: vi.fn(),
   onCopy: vi.fn(),
   onDelete: vi.fn(),
   onDownload: vi.fn(),
@@ -104,5 +105,21 @@ describe("ProductApp", () => {
 
     expect(markup).toContain("Sync is paused until billing is resolved.");
     expect(markup).toContain("Manage billing");
+  });
+
+  it("sends unlinked users to settings with provider choices", () => {
+    const markup = renderToStaticMarkup(
+      <ProductApp
+        {...props}
+        capability={{
+          status: "ONLINE",
+          account: { canSync: false, storageProvider: null, blockedReasons: ["storage"] },
+          connection: null,
+        }}
+      />,
+    );
+
+    expect(markup).toContain("Finish setup");
+    expect(markup).not.toContain('href="/storage"');
   });
 });
