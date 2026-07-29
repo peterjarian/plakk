@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowUpRight, LoaderCircle, Plus, TriangleAlert } from "lucide-react";
 import { AppHeader } from "@plakk/ui/components/AppHeader";
-import { SnippetComposer } from "@plakk/ui/components/SnippetComposer";
 import { SnippetList } from "@plakk/ui/components/SnippetList";
 import { SnippetRow } from "@plakk/ui/components/SnippetRow";
 import { Button } from "@plakk/ui/primitives/button";
@@ -15,6 +14,7 @@ import {
   DialogTitle,
 } from "@plakk/ui/primitives/dialog";
 import { SyncStatusIndicator, type SyncStatus } from "../components/SyncStatusIndicator.tsx";
+import { SnippetComposer } from "../components/SnippetComposer.tsx";
 import { signOut, useAuth } from "../hooks/useAuth.ts";
 import { useSnippets } from "../hooks/useSnippets.ts";
 import { useLocalState } from "../hooks/useLocalState.tsx";

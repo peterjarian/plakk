@@ -9,8 +9,8 @@ import {
 } from "react";
 import { Paperclip } from "lucide-react";
 
-import { cn } from "../lib/utils.ts";
-import { Button } from "../primitives/button.tsx";
+import { cn } from "@plakk/ui/lib/utils";
+import { Button } from "@plakk/ui/primitives/button";
 
 type ComposerContextValue = {
   disabled: boolean;

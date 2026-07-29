@@ -6,7 +6,6 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { AppHeader } from "./AppHeader.tsx";
-import { SnippetComposer } from "./SnippetComposer.tsx";
 import { SnippetList } from "./SnippetList.tsx";
 import { Settings } from "./settings.tsx";
 import { EmptyDescription } from "../primitives/empty.tsx";
@@ -100,25 +99,6 @@ describe("shared composition", () => {
     expect(renderToStaticMarkup(<EmptyDescription>No snippets yet.</EmptyDescription>)).toMatch(
       /^<p /,
     );
-  });
-
-  it("keeps composer product copy and styling in the shared component", () => {
-    const markup = renderToStaticMarkup(
-      <SnippetComposer.Root onSubmit={() => {}}>
-        <SnippetComposer.Input />
-        <SnippetComposer.Attachment>
-          <input multiple onChange={() => {}} />
-        </SnippetComposer.Attachment>
-        <SnippetComposer.Submit />
-      </SnippetComposer.Root>,
-    );
-
-    expect(markup).toContain('data-slot="snippet-composer"');
-    expect(markup).toContain('placeholder="Paste or write whatever you want"');
-    expect(markup).toContain("Choose file");
-    expect(markup).toContain(">Add</button>");
-    expect(markup).toContain('type="file"');
-    expect(markup).toContain("sr-only");
   });
 
   it("standardizes settings composition through named parts", () => {
