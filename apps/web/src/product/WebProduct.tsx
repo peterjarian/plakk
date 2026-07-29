@@ -30,6 +30,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const rpcUrl = import.meta.env.VITE_PLAKK_RPC_URL ?? "http://localhost:3100/api/rpc";
 const TEXT_PREVIEW_MAX_BYTES = 64 * 1024;
+const TEXT_PREVIEW_LIMIT = 50;
 const BUFFERED_CONTENT_MAX_BYTES = 64 * 1024 * 1024;
 const databaseNameFor = (userId: string) => `plakk-${userId}.sqlite`;
 const databaseLockNameFor = (userId: string) => `plakk:sqlite:${databaseNameFor(userId)}`;
@@ -150,6 +151,8 @@ export function WebProduct() {
   const accessToken = useAccessToken();
   const getAccessTokenRef = useRef(accessToken.getAccessToken);
   getAccessTokenRef.current = accessToken.getAccessToken;
+  const signOutRef = useRef(auth.signOut);
+  signOutRef.current = auth.signOut;
   const resourceRef = useRef<RuntimeResource | null>(null);
   const previewingRef = useRef(new Set<string>());
   const previewFailuresRef = useRef(new Map<string, number>());
@@ -196,8 +199,19 @@ export function WebProduct() {
     const runtimeChannel = new BroadcastChannel(runtimeChannelNameFor(user.id));
     runtimeChannel.addEventListener("message", (event) => {
       if (event.data !== "release") return;
+      active = false;
+      lockAbort.abort();
       const acquiredRuntime = runtime;
-      if (acquiredRuntime !== null) void acquiredRuntime.dispose();
+      runtime = null;
+      if (resourceRef.current?.runtime === acquiredRuntime) resourceRef.current = null;
+      setSnapshot(null);
+      setPreviews({});
+      setRuntimeLoading(false);
+      setRuntimeError(null);
+      void (async () => {
+        if (acquiredRuntime !== null) await acquiredRuntime.dispose();
+        await signOutRef.current({ returnTo: "/" });
+      })();
     });
 
     const sessionLayer = Layer.succeed(
@@ -294,14 +308,16 @@ export function WebProduct() {
   useEffect(() => {
     const resource = resourceRef.current;
     if (resource === null || snapshot === null) return;
-    const candidates = snapshot.snippets.filter(
-      (snippet) =>
-        snippet.status === "PUBLISHED" &&
-        isTextSnippetFileName(snippet.fileName) &&
-        snippet.byteSize <= TEXT_PREVIEW_MAX_BYTES &&
-        previews[snippet.id] === undefined &&
-        !previewingRef.current.has(snippet.id),
-    );
+    const candidates = snapshot.snippets
+      .slice(0, TEXT_PREVIEW_LIMIT)
+      .filter(
+        (snippet) =>
+          snippet.status === "PUBLISHED" &&
+          isTextSnippetFileName(snippet.fileName) &&
+          snippet.byteSize <= TEXT_PREVIEW_MAX_BYTES &&
+          previews[snippet.id] === undefined &&
+          !previewingRef.current.has(snippet.id),
+      );
     for (const snippet of candidates) {
       previewingRef.current.add(snippet.id);
     }

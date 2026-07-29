@@ -2,7 +2,7 @@ import type { SnippetPresentation, StorageProvider, User } from "@plakk/shared";
 import {
   accountCanSyncWithConnection,
   type AccountStatus,
-  type StorageProviderStatus,
+  type ClientCapability,
 } from "@plakk/shared/PlakkApi";
 import * as DateTime from "effect/DateTime";
 import {
@@ -51,23 +51,9 @@ export type ProductSnippet = SnippetRowItem & {
   readonly presentation: SnippetPresentation;
 };
 
-export type ProductCapability =
-  | {
-      readonly status: "OFFLINE";
-      readonly storageProvider: {
-        readonly known: boolean;
-        readonly value: StorageProvider | null;
-      };
-    }
-  | {
-      readonly status: "ONLINE";
-      readonly account: AccountStatus;
-      readonly connection: StorageProviderStatus | null;
-    };
-
 export type ProductAppProps = {
   readonly appearance: "light" | "dark" | "system";
-  readonly capability: ProductCapability;
+  readonly capability: ClientCapability;
   readonly error: string | null;
   readonly loading: boolean;
   readonly snippets: ReadonlyArray<ProductSnippet>;
@@ -120,7 +106,7 @@ type StorageState =
       readonly account: AccountStatus;
     };
 
-const storageState = (capability: ProductCapability): StorageState => {
+const storageState = (capability: ClientCapability): StorageState => {
   if (capability.status === "OFFLINE") {
     return {
       kind: "offline" as const,
@@ -201,16 +187,13 @@ function SettingsView(props: ProductAppProps & { readonly onBack: () => void }) 
                   description={name === fallback ? undefined : fallback}
                 />
               </SettingsRowMain>
-              <span className="rounded-full bg-muted px-2 py-1 text-[11px] text-muted-foreground">
-                Pro
-              </span>
             </SettingsRow>
             <SettingsRow className="px-4">
               <SettingsRowMain>
                 <SettingsRowIcon>
                   <CreditCard className="size-4" />
                 </SettingsRowIcon>
-                <SettingsRowText title="Plakk Pro" description="Current plan" />
+                <SettingsRowText title="Billing" description="Manage subscription and invoices" />
               </SettingsRowMain>
               <Button
                 type="button"

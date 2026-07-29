@@ -1,10 +1,10 @@
-import { StorageProviderLiteral, UserSchema } from "@plakk/shared";
+import { UserSchema } from "@plakk/shared";
 import type { PrepareSnippetUploadPayload } from "@plakk/shared/PlakkApi";
 import {
-  AccountStatusSchema,
+  ClientCapabilitySchema,
+  type ClientCapability as SharedClientCapability,
   OfflineError,
   SessionError,
-  StorageProviderStatusSchema,
 } from "@plakk/shared/PlakkApi";
 import {
   Cause,
@@ -49,22 +49,7 @@ import { clearSnippets } from "./sqlite/queries/snippets.ts";
 
 export type ClientError = ContentMirrorFailure | LocalStorageError | SyncFailure | UploadFailure;
 
-const ClientCapabilitySchema = Schema.Union([
-  Schema.Struct({
-    status: Schema.Literal("OFFLINE"),
-    storageProvider: Schema.Struct({
-      known: Schema.Boolean,
-      value: Schema.NullOr(StorageProviderLiteral),
-    }),
-  }),
-  Schema.Struct({
-    status: Schema.Literal("ONLINE"),
-    account: AccountStatusSchema,
-    connection: Schema.NullOr(StorageProviderStatusSchema),
-  }),
-]);
-
-export type ClientCapability = typeof ClientCapabilitySchema.Type;
+export type ClientCapability = SharedClientCapability;
 
 export const ClientSnapshotSchema = Schema.Struct({
   user: UserSchema,

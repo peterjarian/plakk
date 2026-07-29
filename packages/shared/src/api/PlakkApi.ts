@@ -50,6 +50,23 @@ export const accountCanSyncWithConnection = (
   connection: StorageProviderStatus | null,
 ): boolean => accountCanSync(account) && connection?.status === "CONNECTED";
 
+export const ClientCapabilitySchema = Schema.Union([
+  Schema.Struct({
+    status: Schema.Literal("OFFLINE"),
+    storageProvider: Schema.Struct({
+      known: Schema.Boolean,
+      value: Schema.NullOr(StorageProviderLiteral),
+    }),
+  }),
+  Schema.Struct({
+    status: Schema.Literal("ONLINE"),
+    account: AccountStatusSchema,
+    connection: Schema.NullOr(StorageProviderStatusSchema),
+  }),
+]);
+
+export type ClientCapability = typeof ClientCapabilitySchema.Type;
+
 export const PreparedStorageUploadSchema = Schema.Struct({
   storageProvider: StorageProviderLiteral,
   storageObjectId: Schema.NullOr(Schema.String),
