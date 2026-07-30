@@ -415,10 +415,23 @@ function spawnProcess(input: {
   return { name: input.name, child, exit };
 }
 
-function signalProcess(managed: ManagedProcess, signal: NodeJS.Signals): void {
+async function signalProcess(managed: ManagedProcess, signal: NodeJS.Signals): Promise<void> {
   if (managed.child.exitCode !== null) return;
-  if (process.platform === "win32" || managed.child.pid === undefined) {
+  if (managed.child.pid === undefined) {
     managed.child.kill(signal);
+    return;
+  }
+  if (process.platform === "win32") {
+    try {
+      await commandOutput("taskkill.exe", [
+        "/pid",
+        String(managed.child.pid),
+        "/T",
+        ...(signal === "SIGKILL" ? ["/F"] : []),
+      ]);
+    } catch {
+      if (managed.child.exitCode === null) managed.child.kill(signal);
+    }
     return;
   }
 
@@ -436,15 +449,23 @@ async function waitForHttp(input: {
   readonly name: string;
   readonly url: string;
   readonly process?: ManagedProcess;
+  readonly abortSignal?: AbortSignal;
 }): Promise<void> {
   const startedAt = performance.now();
   while (performance.now() - startedAt < STARTUP_TIMEOUT_MS) {
+    input.abortSignal?.throwIfAborted();
+    const timeoutSignal = AbortSignal.timeout(1_000);
     const probe = fetch(input.url, {
       redirect: "manual",
-      signal: AbortSignal.timeout(1_000),
+      signal: input.abortSignal
+        ? AbortSignal.any([input.abortSignal, timeoutSignal])
+        : timeoutSignal,
     })
       .then((response) => response.status < 500)
-      .catch(() => false);
+      .catch((cause) => {
+        if (input.abortSignal?.aborted) throw cause;
+        return false;
+      });
     const result = input.process
       ? await Promise.race([
           probe.then((ready) => ({ type: "probe" as const, ready })),
@@ -456,9 +477,29 @@ async function waitForHttp(input: {
       throw new Error(`${input.process?.name ?? input.name} exited before becoming ready.`);
     }
     if (result.ready) return;
-    await delay(250);
+    await delay(250, undefined, { signal: input.abortSignal });
   }
   throw new Error(`${input.name} did not become ready at ${input.url} within 30 seconds.`);
+}
+
+export async function waitForReadinessOrSignal(
+  checks: ReadonlyArray<{
+    readonly name: string;
+    readonly url: string;
+    readonly process?: ManagedProcess;
+  }>,
+  signal: Promise<NodeJS.Signals>,
+): Promise<boolean> {
+  const controller = new AbortController();
+  const readiness = Promise.all(
+    checks.map((check) => waitForHttp({ ...check, abortSignal: controller.signal })),
+  );
+  const ready = await Promise.race([readiness.then(() => true), signal.then(() => false)]);
+  if (ready) return true;
+
+  controller.abort();
+  await readiness.catch(() => undefined);
+  return false;
 }
 
 function formatExit(managed: ManagedProcess, exit: ProcessExit): string {
@@ -468,9 +509,7 @@ function formatExit(managed: ManagedProcess, exit: ProcessExit): string {
 }
 
 async function stopProcesses(processes: ReadonlyArray<ManagedProcess>): Promise<void> {
-  for (const managed of processes) {
-    signalProcess(managed, "SIGTERM");
-  }
+  await Promise.all(processes.map((managed) => signalProcess(managed, "SIGTERM")));
 
   const allExited = Promise.all(processes.map((managed) => managed.exit));
   const completed = await Promise.race([
@@ -479,9 +518,7 @@ async function stopProcesses(processes: ReadonlyArray<ManagedProcess>): Promise<
   ]);
   if (completed) return;
 
-  for (const managed of processes) {
-    signalProcess(managed, "SIGKILL");
-  }
+  await Promise.all(processes.map((managed) => signalProcess(managed, "SIGKILL")));
   await Promise.all(processes.map((managed) => managed.exit));
 }
 
@@ -525,11 +562,9 @@ async function runDevelopment(): Promise<void> {
   });
 
   const processes: ManagedProcess[] = [];
-  let receivedSignal: NodeJS.Signals | null = null;
   const signal = new Promise<NodeJS.Signals>((resolveSignal) => {
     for (const name of ["SIGINT", "SIGTERM"] as const) {
       process.once(name, () => {
-        receivedSignal = name;
         resolveSignal(name);
       });
     }
@@ -552,27 +587,31 @@ async function runDevelopment(): Promise<void> {
     });
     processes.push(backend, web);
 
-    await Promise.race([
-      Promise.all([
-        waitForHttp({
+    const localReady = await waitForReadinessOrSignal(
+      [
+        {
           name: "backend",
           url: `http://${LOOPBACK_HOST}:${BACKEND_PORT}/health`,
           process: backend,
-        }),
-        waitForHttp({
+        },
+        {
           name: "web",
           url: `http://${LOOPBACK_HOST}:${WEB_PORT}`,
           process: web,
-        }),
-      ]),
+        },
+      ],
       signal,
-    ]);
-    if (receivedSignal) return;
+    );
+    if (!localReady) return;
 
-    await Promise.all([
-      waitForHttp({ name: "Tailnet backend", url: `${topology.backendOrigin}/health` }),
-      waitForHttp({ name: "Tailnet web", url: topology.webOrigin }),
-    ]);
+    const tailnetReady = await waitForReadinessOrSignal(
+      [
+        { name: "Tailnet backend", url: `${topology.backendOrigin}/health` },
+        { name: "Tailnet web", url: topology.webOrigin },
+      ],
+      signal,
+    );
+    if (!tailnetReady) return;
 
     const desktop = spawnProcess({
       name: "desktop",

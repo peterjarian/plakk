@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import {
   inspectServeRoute,
@@ -6,6 +6,7 @@ import {
   resolveApplicationEnvironments,
   resolveDeveloperEnvironment,
   resolveDevelopmentTopology,
+  waitForReadinessOrSignal,
 } from "./dev.ts";
 
 const developerEnvironment = {
@@ -169,5 +170,32 @@ describe("Tailscale Serve reconciliation", () => {
         input,
       ),
     ).toEqual({ type: "conflict", proxy: "http://127.0.0.1:4100" });
+  });
+});
+
+describe("readiness cancellation", () => {
+  it("aborts outstanding probes when shutdown is requested", async () => {
+    const fetchMock = vi.fn(
+      (_url: string | URL | Request, init?: RequestInit): Promise<Response> =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), {
+            once: true,
+          });
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      await expect(
+        waitForReadinessOrSignal(
+          [{ name: "Tailnet web", url: "https://unreachable.example.test" }],
+          Promise.resolve("SIGINT"),
+        ),
+      ).resolves.toBe(false);
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(fetchMock.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
