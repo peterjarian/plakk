@@ -25,6 +25,7 @@
     "./icons/GoogleDriveIcon": "./src/icons/GoogleDriveIcon.tsx",
     "./icons/OneDriveIcon": "./src/icons/OneDriveIcon.tsx",
     "./lib/getInitials": "./src/lib/getInitials.ts",
+    "./lib/billingPresentation": "./src/lib/billingPresentation.ts",
     "./lib/utils": "./src/lib/utils.ts"
   },
   "scripts": {

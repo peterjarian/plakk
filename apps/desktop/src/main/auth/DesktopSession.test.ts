@@ -74,6 +74,7 @@ describe("DesktopSession", () => {
             };
             return Client.of({
               subscribe: () => Stream.make(snapshot),
+              billing: { open: Effect.succeed("https://checkout.example") },
               refresh: Effect.void,
               clearLocalData: Effect.sync(() => void events.push(`purge:${session.user.id}`)),
               storage: { beginLink: () => Effect.die("not used") },

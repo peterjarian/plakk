@@ -2,7 +2,7 @@ import { SqliteClient } from "@effect/sql-sqlite-node";
 import { describe, expect, it } from "@effect/vitest";
 import type { User } from "@plakk/shared";
 import { SessionError } from "@plakk/shared/PlakkApi";
-import { Effect, Layer, Option, Stream } from "effect";
+import { DateTime, Effect, Layer, Option, Stream } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { Client, clientLive } from "./Client.ts";
@@ -51,11 +51,16 @@ const makeLayer = (options?: {
               Effect.succeed({
                 url: `https://connect.example/${storageProvider.toLowerCase()}`,
               }),
+            OpenBilling: () => Effect.succeed({ url: "https://checkout.example" }),
             GetAccountStatus: () =>
               Effect.succeed({
                 canSync: true,
                 storageProvider: "GOOGLE_DRIVE",
                 blockedReasons: [],
+                billing: {
+                  status: "FREE_PERIOD",
+                  freeUntil: DateTime.makeUnsafe("2099-01-01T00:00:00.000Z"),
+                },
               }),
             GetStorageProviderStatus: () =>
               Effect.succeed({
@@ -168,6 +173,10 @@ describe("Client", () => {
           canSync: true,
           storageProvider: "GOOGLE_DRIVE",
           blockedReasons: [],
+          billing: {
+            status: "FREE_PERIOD",
+            freeUntil: DateTime.makeUnsafe("2099-01-01T00:00:00.000Z"),
+          },
         },
         connection: {
           storageProvider: "GOOGLE_DRIVE",
@@ -176,6 +185,7 @@ describe("Client", () => {
         },
       });
       expect(yield* client.storage.beginLink("DROPBOX")).toBe("https://connect.example/dropbox");
+      expect(yield* client.billing.open).toBe("https://checkout.example");
 
       yield* client.uploads.upload(
         {

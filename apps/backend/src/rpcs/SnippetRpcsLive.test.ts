@@ -14,6 +14,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { DateTime, Effect, Fiber, Stream } from "effect";
 import { TestClock } from "effect/testing";
 
+import { Billing, PaymentRequiredError } from "../billing/Billing.ts";
 import {
   StorageCredentialsError,
   StorageDownloadRejectedError,
@@ -79,6 +80,16 @@ const storageService = (
     ...overrides,
   });
 
+const billingService = Billing.of({
+  status: () =>
+    Effect.succeed({
+      status: "FREE_PERIOD",
+      freeUntil: DateTime.makeUnsafe("2099-01-01T00:00:00.000Z"),
+    }),
+  open: () => Effect.succeed("https://checkout.example"),
+  requireAccess: () => Effect.void,
+});
+
 const withSnippetRpcs = <A, E, R>(
   use: (rpcs: SnippetRpcsHandlers) => Effect.Effect<A, E, R>,
   listen: PostgresNotifications["Service"]["listen"] = () => Stream.never,
@@ -92,16 +103,20 @@ const withSnippetRpcs = <A, E, R>(
   );
 
 const runSnippetEffect = <A, E>(
-  use: (rpcs: SnippetRpcsHandlers) => Effect.Effect<A, E, CurrentUser | Drizzle | StorageProvider>,
+  use: (
+    rpcs: SnippetRpcsHandlers,
+  ) => Effect.Effect<A, E, Billing | CurrentUser | Drizzle | StorageProvider>,
   db: DrizzleService["db"],
   storage: StorageProvider["Service"] = storageService(),
   user: CurrentUser["Service"] = currentUser,
+  billing: Billing["Service"] = billingService,
 ) =>
   Effect.runPromise(
     withSnippetRpcs(use).pipe(
       Effect.provideService(CurrentUser, user),
       Effect.provideService(Drizzle, { db }),
       Effect.provideService(StorageProvider, storage),
+      Effect.provideService(Billing, billing),
     ),
   );
 
@@ -298,6 +313,35 @@ describe("completed Snippet publication", () => {
       workosUserId: currentUser.id,
     });
     expect(store.insertedValues).toEqual([]);
+  });
+
+  it("rejects a new upload when billing requires payment", async () => {
+    const store = publicationDatabase();
+    const prepareUpload = vi.fn(storageService().prepareUpload);
+    const { storageObjectId: _storageObjectId, ...prepareInput } = publication;
+
+    await expect(
+      runSnippetEffect(
+        (rpcs) => rpcs.PrepareSnippetUpload({ ...prepareInput, mediaType: "text/plain" }),
+        store.db,
+        storageService({ prepareUpload }),
+        currentUser,
+        Billing.of({
+          status: () => Effect.succeed({ status: "PAYMENT_REQUIRED" }),
+          open: () => Effect.succeed("https://checkout.example"),
+          requireAccess: () =>
+            Effect.fail(
+              new PaymentRequiredError({
+                message: "Subscribe to continue syncing snippets.",
+              }),
+            ),
+        }),
+      ),
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "Subscribe to continue syncing snippets.",
+    });
+    expect(prepareUpload).not.toHaveBeenCalled();
   });
 
   it("inserts only the completed Snippet and notifies before commit", async () => {

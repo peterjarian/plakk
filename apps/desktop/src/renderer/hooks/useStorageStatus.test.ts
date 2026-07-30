@@ -35,7 +35,12 @@ describe("storage status from the local state", () => {
       localState({
         capability: {
           status: "ONLINE",
-          account: { canSync: true, storageProvider: "GOOGLE_DRIVE", blockedReasons: [] },
+          account: {
+            canSync: true,
+            storageProvider: "GOOGLE_DRIVE",
+            blockedReasons: [],
+            billing: { status: "SUBSCRIBED", cancelAtPeriodEnd: false },
+          },
           connection: {
             storageProvider: "GOOGLE_DRIVE",
             status: "CONNECTED",
@@ -58,7 +63,12 @@ describe("storage status from the local state", () => {
       localState({
         capability: {
           status: "ONLINE",
-          account: { canSync: false, storageProvider: null, blockedReasons: ["storage"] },
+          account: {
+            canSync: false,
+            storageProvider: null,
+            blockedReasons: ["storage"],
+            billing: { status: "PAYMENT_REQUIRED" },
+          },
           connection: null,
         },
       }),

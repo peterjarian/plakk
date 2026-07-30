@@ -10,6 +10,8 @@ import { FetchHttpClient, HttpRouter, HttpServerResponse } from "effect/unstable
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 import { createServer } from "node:http";
 
+import { Billing, PolarBilling } from "./billing/Billing.ts";
+import { BillingPersistenceLive } from "./billing/BillingPersistenceLive.ts";
 import { AuthMiddlewareLive } from "./middleware/AuthMiddlewareLive.ts";
 import { InternalServerErrorMiddlewareLive } from "./middleware/InternalServerErrorMiddlewareLive.ts";
 import { PlakkApiLive } from "./rpcs/PlakkApiLive.ts";
@@ -21,6 +23,7 @@ const InfrastructureLive = Layer.mergeAll(
   PgClientLive,
   PostgresNotificationsLive,
   StorageProviderLive,
+  Billing.layer.pipe(Layer.provide(PolarBilling.layer), Layer.provide(BillingPersistenceLive)),
 ).pipe(Layer.provideMerge(FetchHttpClient.layer));
 
 const RpcRoutes = RpcServer.layerHttp({

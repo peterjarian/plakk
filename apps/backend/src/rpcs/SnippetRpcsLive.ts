@@ -25,6 +25,7 @@ import * as Effect from "effect/Effect";
 import * as Schedule from "effect/Schedule";
 import * as Stream from "effect/Stream";
 
+import { Billing } from "../billing/Billing.ts";
 import { type StorageDownloadError, StorageProvider } from "../storage/StorageProvider.ts";
 
 const SNIPPET_INVALIDATION_CHANNEL = "plakk_snippet_invalidations";
@@ -278,6 +279,16 @@ export const SnippetRpcsLive = Effect.gen(function* () {
     PrepareSnippetUpload: Effect.fn("rpc.PrepareSnippetUpload")(function* (input) {
       const storage = yield* StorageProvider;
       const currentUser = yield* CurrentUser;
+      const billing = yield* Billing;
+      yield* billing.requireAccess(currentUser).pipe(
+        Effect.mapError(
+          (error) =>
+            new RpcError({
+              code: error._tag === "PaymentRequiredError" ? "FORBIDDEN" : "INTERNAL_SERVER_ERROR",
+              message: error.message,
+            }),
+        ),
+      );
       return yield* prepareSnippetUpload(storage, currentUser, input).pipe(
         Effect.annotateSpans({ id: input.id }),
       );

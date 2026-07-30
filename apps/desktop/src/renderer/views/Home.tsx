@@ -66,6 +66,8 @@ export function Home({ active = true }: { active?: boolean }) {
     reload: reloadSnippets,
   } = useSnippets();
   const accountBlocked = !storageStatus.canSync;
+  const billingBlocked =
+    storageStatus.kind === "connected" && storageStatus.account.blockedReasons.includes("billing");
   const syncStatus: SyncStatus =
     storageStatus.kind === "loading"
       ? "CHECKING"
@@ -229,6 +231,15 @@ export function Home({ active = true }: { active?: boolean }) {
       .catch(() => setExternalActionError("Plakk couldn’t open this link."));
   }
 
+  function openBilling() {
+    setExternalActionError(null);
+    void window.ipc.billing
+      .open()
+      .catch((cause) =>
+        setExternalActionError(ipcActionErrorMessage(cause, "Could not open billing.")),
+      );
+  }
+
   async function confirmExternalLink() {
     if (!pendingExternalUrl) return;
 
@@ -383,9 +394,11 @@ export function Home({ active = true }: { active?: boolean }) {
                     type="button"
                     variant="ghost"
                     size="xs"
-                    onClick={() => openStorageSetup(syncSetupUrl)}
+                    onClick={() =>
+                      billingBlocked ? openBilling() : openStorageSetup(syncSetupUrl)
+                    }
                   >
-                    Finish on web
+                    {billingBlocked ? "Subscribe" : "Finish on web"}
                     <ArrowUpRight />
                   </Button>
                 }

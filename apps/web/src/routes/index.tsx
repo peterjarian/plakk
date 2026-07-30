@@ -14,6 +14,7 @@ import { SnippetComposer } from "@plakk/ui/components/SnippetComposer";
 import { SnippetList } from "@plakk/ui/components/SnippetList";
 import { SnippetRow } from "@plakk/ui/components/SnippetRow";
 import { SyncStatusIndicator, type SyncStatus } from "@plakk/ui/components/SyncStatusIndicator";
+import { billingPresentation } from "@plakk/ui/lib/billingPresentation";
 import { getInitials } from "@plakk/ui/lib/getInitials";
 import { Avatar, AvatarFallback } from "@plakk/ui/primitives/avatar";
 import { Button } from "@plakk/ui/primitives/button";
@@ -83,6 +84,10 @@ const actionFailures = {
   connectStorage: {
     title: "Couldn’t connect storage",
     description: "Your storage setup was not changed. Try again.",
+  },
+  openBilling: {
+    title: "Couldn’t open billing",
+    description: "Check your connection and try again.",
   },
   copySnippet: {
     title: "Couldn’t copy this snippet",
@@ -274,6 +279,12 @@ function IndexRoute() {
   }, [capability.status, runtime.loading]);
 
   const openExternal = (url: string) => window.open(url, "_blank", "noopener,noreferrer");
+  const billing = capability.status === "ONLINE" ? capability.account.billing : null;
+  const billingCopy = billingPresentation(billing);
+  const openBilling = async () => {
+    const url = await runtime.run((client) => client.billing.open);
+    window.location.assign(url);
+  };
   const runAction = (operation: Promise<void>, fallback: ProductFailure) => {
     setActionError(null);
     void operation.catch((cause) => setActionError(productFailureFrom(cause, fallback)));
@@ -421,18 +432,16 @@ function IndexRoute() {
                   <SettingsRowIcon>
                     <CreditCard className="size-4 text-muted-foreground" aria-hidden="true" />
                   </SettingsRowIcon>
-                  <SettingsRowText
-                    title="Billing"
-                    description="Manage your plan and payment details."
-                  />
+                  <SettingsRowText title="Billing" description={billingCopy.description} />
                 </SettingsRowMain>
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
-                  onClick={() => openExternal("https://app.plakk.io/billing")}
+                  disabled={billing === null}
+                  onClick={() => runAction(openBilling(), actionFailures.openBilling)}
                 >
-                  Manage
+                  {billingCopy.action}
                   <ArrowUpRight />
                 </Button>
               </SettingsRow>
@@ -693,7 +702,7 @@ function IndexRoute() {
                         size="xs"
                         onClick={() =>
                           billingBlocked
-                            ? openExternal("https://app.plakk.io/billing")
+                            ? runAction(openBilling(), actionFailures.openBilling)
                             : setSettingsOpen(true)
                         }
                       >

@@ -75,6 +75,10 @@ export class Client extends Context.Service<
     readonly refresh: Effect.Effect<void, ClientError>;
     /** Removes all snippet records and managed content owned by the current user. */
     readonly clearLocalData: Effect.Effect<void, ClientError>;
+    readonly billing: {
+      /** Opens either Polar Checkout or the authenticated customer portal. */
+      readonly open: Effect.Effect<string, ClientError>;
+    };
     readonly storage: {
       /** Starts the provider-owned authorization flow and returns its destination URL. */
       readonly beginLink: (storageProvider: StorageProvider) => Effect.Effect<string, ClientError>;
@@ -364,6 +368,45 @@ export const clientLive = Layer.effect(
       );
     });
 
+    const openBilling = rpc.OpenBilling(undefined).pipe(
+      Effect.map((result) => result.url),
+      Effect.catchTags({
+        SessionError: (error) => Effect.fail(error),
+        OfflineError: (error) => Effect.fail(error),
+        RpcClientError: (error) =>
+          error.reason._tag === "RpcClientDefect"
+            ? Effect.fail(
+                new InvalidResponseError({
+                  message: "Plakk received an unexpected billing response.",
+                }),
+              )
+            : Effect.fail(
+                new OfflineError({
+                  message: "Plakk could not connect. Check your connection and try again.",
+                }),
+              ),
+        RpcError: (error) =>
+          error.code === "UNAUTHENTICATED"
+            ? Effect.fail(
+                new SessionError({
+                  message: "Your session expired. Sign in again to continue.",
+                }),
+              )
+            : error.code === "FORBIDDEN"
+              ? Effect.fail(
+                  new ActionNotAllowedError({
+                    message: error.message,
+                  }),
+                )
+              : Effect.fail(
+                  new ServerUnavailableError({
+                    message: "Plakk could not open billing. Please try again.",
+                  }),
+                ),
+      }),
+      Effect.withSpan("Client.billing.open"),
+    );
+
     /** Runs the complete remote-first snippet deletion procedure. */
     const deleteSnippet = Effect.fn("Client.snippets.delete")(function* (snippetId: string) {
       yield* sync.delete(snippetId);
@@ -428,6 +471,7 @@ export const clientLive = Layer.effect(
       subscribe,
       refresh,
       clearLocalData,
+      billing: { open: openBilling },
       storage: { beginLink: beginStorageLink },
       content: {
         download: content.download,

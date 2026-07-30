@@ -69,6 +69,18 @@ handle(ipcMethods.openExternal, (url) =>
       }),
 );
 
+handle(ipcMethods.billingOpen, () =>
+  DesktopSession.use((session) => session.withClient((client) => client.billing.open)).pipe(
+    Effect.flatMap((url) =>
+      Effect.tryPromise({
+        try: () => shell.openExternal(url),
+        catch: (cause) => new IpcHandlerError({ cause, message: "Could not open Polar billing." }),
+      }),
+    ),
+    asIpcError,
+  ),
+);
+
 const getLocalState = DesktopSession.use((session) => session.current);
 
 const applyUserConfigToTray = (config: UserConfig) =>

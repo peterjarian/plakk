@@ -154,6 +154,11 @@ export const ipcMethods = {
     payload: AppearancePreferenceSchema,
     result: AppearanceStateSchema,
   }),
+  billingOpen: method({
+    channel: "billing:open",
+    payload: Schema.Void,
+    result: Schema.Void,
+  }),
   localStateGet: method({
     channel: "local-state:get",
     payload: Schema.Void,

@@ -50,6 +50,9 @@ export type DesktopApi = {
     readonly signIn: () => Promise<void>;
     readonly signOut: () => Promise<void>;
   };
+  readonly billing: {
+    readonly open: () => Promise<void>;
+  };
   readonly clipboard: {
     readonly read: () => Promise<ClipboardContent>;
     readonly onPaste: (callback: (content: ClipboardContent) => void) => () => void;
@@ -102,6 +105,9 @@ export const desktopApi = {
     onError: (callback: (error: AuthError) => void) => on(ipcEvents.authError, callback),
     signIn: () => invoke(ipcMethods.authSignIn, undefined),
     signOut: () => invoke(ipcMethods.authSignOut, undefined),
+  },
+  billing: {
+    open: () => invoke(ipcMethods.billingOpen, undefined),
   },
   clipboard: {
     read: () => invoke(ipcMethods.clipboardRead, undefined),
