@@ -26,7 +26,23 @@ const RedisUrl = Schema.URLFromString.check(
 );
 
 const redisOptions = Config.redacted("REDIS_URL").pipe(
-  Effect.flatMap((value) => Schema.decodeUnknownEffect(RedisUrl)(Redacted.value(value))),
+  Effect.mapError(
+    () =>
+      new RedisConfigurationError({
+        message: "REDIS_URL is required.",
+      }),
+  ),
+  Effect.flatMap((value) =>
+    Schema.decodeUnknownEffect(RedisUrl)(Redacted.value(value)).pipe(
+      Effect.mapError(
+        () =>
+          new RedisConfigurationError({
+            message:
+              "REDIS_URL must be a redis: or rediss: URL with an optional numeric database path.",
+          }),
+      ),
+    ),
+  ),
   Effect.flatMap((url) =>
     Effect.try({
       try: (): RedisOptions => {
@@ -45,14 +61,6 @@ const redisOptions = Config.redacted("REDIS_URL").pipe(
           message: "REDIS_URL contains invalid encoded credentials.",
         }),
     }),
-  ),
-  Effect.mapError((error) =>
-    error instanceof RedisConfigurationError
-      ? error
-      : new RedisConfigurationError({
-          message:
-            "REDIS_URL must be a redis: or rediss: URL with an optional numeric database path.",
-        }),
   ),
 );
 

@@ -11,6 +11,11 @@ import {
 
 const developerEnvironment = {
   DATABASE_URL: "postgres://localhost/plakk",
+  POLAR_ACCESS_BENEFIT_ID: "benefit_test",
+  POLAR_ACCESS_TOKEN: "polar_test",
+  POLAR_ENVIRONMENT: "sandbox",
+  POLAR_PRODUCT_IDS: "product_monthly,product_yearly",
+  REDIS_URL: "redis://localhost:6379",
   WORKOS_API_KEY: "sk_test",
   WORKOS_CLIENT_ID: "client_test",
   WORKOS_COOKIE_PASSWORD: "a-secure-cookie-password-over-32-chars",
@@ -51,6 +56,11 @@ describe("development topology", () => {
       },
       backend: {
         DATABASE_URL: "postgres://localhost/plakk",
+        POLAR_ACCESS_BENEFIT_ID: "benefit_test",
+        POLAR_ACCESS_TOKEN: "polar_test",
+        POLAR_ENVIRONMENT: "sandbox",
+        POLAR_PRODUCT_IDS: "product_monthly,product_yearly",
+        REDIS_URL: "redis://localhost:6379",
         WORKOS_API_KEY: "sk_test",
         WORKOS_CLIENT_ID: "client_test",
         PLAKK_BACKEND_HOST: "127.0.0.1",
@@ -96,6 +106,11 @@ describe("developer environment", () => {
         { WORKOS_API_KEY: "local-key", WORKOS_CLIENT_ID: "local-client" },
         {
           DATABASE_URL: "postgres://root/plakk",
+          POLAR_ACCESS_BENEFIT_ID: "benefit_root",
+          POLAR_ACCESS_TOKEN: "polar_root",
+          POLAR_ENVIRONMENT: "sandbox",
+          POLAR_PRODUCT_IDS: "product_monthly,product_yearly",
+          REDIS_URL: "redis://root",
           WORKOS_API_KEY: "root-key",
           WORKOS_CLIENT_ID: "root-client",
           WORKOS_COOKIE_PASSWORD: "root-cookie-password-with-32-characters",
@@ -107,6 +122,11 @@ describe("developer environment", () => {
       ]),
     ).toEqual({
       DATABASE_URL: "postgres://root/plakk",
+      POLAR_ACCESS_BENEFIT_ID: "benefit_root",
+      POLAR_ACCESS_TOKEN: "polar_root",
+      POLAR_ENVIRONMENT: "sandbox",
+      POLAR_PRODUCT_IDS: "product_monthly,product_yearly",
+      REDIS_URL: "redis://root",
       WORKOS_API_KEY: "shell-key",
       WORKOS_CLIENT_ID: "local-client",
       WORKOS_COOKIE_PASSWORD: "root-cookie-password-with-32-characters",
@@ -115,7 +135,7 @@ describe("developer environment", () => {
 
   it("reports every missing human-owned value", () => {
     expect(() => resolveDeveloperEnvironment([{ WORKOS_CLIENT_ID: "client_test" }])).toThrow(
-      "DATABASE_URL, WORKOS_API_KEY, WORKOS_COOKIE_PASSWORD",
+      "DATABASE_URL, POLAR_ACCESS_BENEFIT_ID, POLAR_ACCESS_TOKEN, POLAR_ENVIRONMENT, POLAR_PRODUCT_IDS, REDIS_URL, WORKOS_API_KEY, WORKOS_COOKIE_PASSWORD",
     );
   });
 

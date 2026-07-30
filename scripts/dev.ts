@@ -19,6 +19,11 @@ type EnvironmentSource = Readonly<Record<string, string | undefined>>;
 
 const DEVELOPER_ENVIRONMENT_KEYS = [
   "DATABASE_URL",
+  "POLAR_ACCESS_BENEFIT_ID",
+  "POLAR_ACCESS_TOKEN",
+  "POLAR_ENVIRONMENT",
+  "POLAR_PRODUCT_IDS",
+  "REDIS_URL",
   "WORKOS_API_KEY",
   "WORKOS_CLIENT_ID",
   "WORKOS_COOKIE_PASSWORD",
@@ -26,6 +31,11 @@ const DEVELOPER_ENVIRONMENT_KEYS = [
 
 export interface DeveloperEnvironment {
   readonly DATABASE_URL: string;
+  readonly POLAR_ACCESS_BENEFIT_ID: string;
+  readonly POLAR_ACCESS_TOKEN: string;
+  readonly POLAR_ENVIRONMENT: string;
+  readonly POLAR_PRODUCT_IDS: string;
+  readonly REDIS_URL: string;
   readonly WORKOS_API_KEY: string;
   readonly WORKOS_CLIENT_ID: string;
   readonly WORKOS_COOKIE_PASSWORD: string;
@@ -82,6 +92,11 @@ export function resolveDeveloperEnvironment(
 
   return {
     DATABASE_URL: read("DATABASE_URL")!,
+    POLAR_ACCESS_BENEFIT_ID: read("POLAR_ACCESS_BENEFIT_ID")!,
+    POLAR_ACCESS_TOKEN: read("POLAR_ACCESS_TOKEN")!,
+    POLAR_ENVIRONMENT: read("POLAR_ENVIRONMENT")!,
+    POLAR_PRODUCT_IDS: read("POLAR_PRODUCT_IDS")!,
+    REDIS_URL: read("REDIS_URL")!,
     WORKOS_API_KEY: read("WORKOS_API_KEY")!,
     WORKOS_CLIENT_ID: read("WORKOS_CLIENT_ID")!,
     WORKOS_COOKIE_PASSWORD: cookiePassword,
@@ -102,6 +117,11 @@ export function resolveApplicationEnvironments(
     },
     backend: {
       DATABASE_URL: developer.DATABASE_URL,
+      POLAR_ACCESS_BENEFIT_ID: developer.POLAR_ACCESS_BENEFIT_ID,
+      POLAR_ACCESS_TOKEN: developer.POLAR_ACCESS_TOKEN,
+      POLAR_ENVIRONMENT: developer.POLAR_ENVIRONMENT,
+      POLAR_PRODUCT_IDS: developer.POLAR_PRODUCT_IDS,
+      REDIS_URL: developer.REDIS_URL,
       WORKOS_API_KEY: developer.WORKOS_API_KEY,
       WORKOS_CLIENT_ID: developer.WORKOS_CLIENT_ID,
       ...topology.backendEnvironment,
