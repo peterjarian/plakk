@@ -1,5 +1,5 @@
 import { type StorageProvider, UserSchema } from "@plakk/shared";
-import type { PrepareSnippetUploadPayload } from "@plakk/shared/PlakkApi";
+import type { BillingReturnTarget, PrepareSnippetUploadPayload } from "@plakk/shared/PlakkApi";
 import {
   ClientCapabilitySchema,
   type ClientCapability as SharedClientCapability,
@@ -77,7 +77,7 @@ export class Client extends Context.Service<
     readonly clearLocalData: Effect.Effect<void, ClientError>;
     readonly billing: {
       /** Opens either Polar Checkout or the authenticated customer portal. */
-      readonly open: Effect.Effect<string, ClientError>;
+      readonly open: (returnTarget: BillingReturnTarget) => Effect.Effect<string, ClientError>;
     };
     readonly storage: {
       /** Starts the provider-owned authorization flow and returns its destination URL. */
@@ -368,44 +368,47 @@ export const clientLive = Layer.effect(
       );
     });
 
-    const openBilling = rpc.OpenBilling(undefined).pipe(
-      Effect.map((result) => result.url),
-      Effect.catchTags({
-        SessionError: (error) => Effect.fail(error),
-        OfflineError: (error) => Effect.fail(error),
-        RpcClientError: (error) =>
-          error.reason._tag === "RpcClientDefect"
-            ? Effect.fail(
-                new InvalidResponseError({
-                  message: "Plakk received an unexpected billing response.",
-                }),
-              )
-            : Effect.fail(
-                new OfflineError({
-                  message: "Plakk could not connect. Check your connection and try again.",
-                }),
-              ),
-        RpcError: (error) =>
-          error.code === "UNAUTHENTICATED"
-            ? Effect.fail(
-                new SessionError({
-                  message: "Your session expired. Sign in again to continue.",
-                }),
-              )
-            : error.code === "FORBIDDEN"
+    const openBilling = Effect.fn("Client.billing.open")(function* (
+      returnTarget: BillingReturnTarget,
+    ) {
+      return yield* rpc.OpenBilling({ returnTarget }).pipe(
+        Effect.map((result) => result.url),
+        Effect.catchTags({
+          SessionError: (error) => Effect.fail(error),
+          OfflineError: (error) => Effect.fail(error),
+          RpcClientError: (error) =>
+            error.reason._tag === "RpcClientDefect"
               ? Effect.fail(
-                  new ActionNotAllowedError({
-                    message: error.message,
+                  new InvalidResponseError({
+                    message: "Plakk received an unexpected billing response.",
                   }),
                 )
               : Effect.fail(
-                  new ServerUnavailableError({
-                    message: "Plakk could not open billing. Please try again.",
+                  new OfflineError({
+                    message: "Plakk could not connect. Check your connection and try again.",
                   }),
                 ),
-      }),
-      Effect.withSpan("Client.billing.open"),
-    );
+          RpcError: (error) =>
+            error.code === "UNAUTHENTICATED"
+              ? Effect.fail(
+                  new SessionError({
+                    message: "Your session expired. Sign in again to continue.",
+                  }),
+                )
+              : error.code === "FORBIDDEN"
+                ? Effect.fail(
+                    new ActionNotAllowedError({
+                      message: error.message,
+                    }),
+                  )
+                : Effect.fail(
+                    new ServerUnavailableError({
+                      message: "Plakk could not open billing. Please try again.",
+                    }),
+                  ),
+        }),
+      );
+    });
 
     /** Runs the complete remote-first snippet deletion procedure. */
     const deleteSnippet = Effect.fn("Client.snippets.delete")(function* (snippetId: string) {

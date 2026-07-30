@@ -282,7 +282,7 @@ function IndexRoute() {
   const billing = capability.status === "ONLINE" ? capability.account.billing : null;
   const billingCopy = billingPresentation(billing);
   const openBilling = async () => {
-    const url = await runtime.run((client) => client.billing.open);
+    const url = await runtime.run((client) => client.billing.open("WEB"));
     window.location.assign(url);
   };
   const runAction = (operation: Promise<void>, fallback: ProductFailure) => {

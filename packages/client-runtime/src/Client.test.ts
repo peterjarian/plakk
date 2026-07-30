@@ -185,7 +185,7 @@ describe("Client", () => {
         },
       });
       expect(yield* client.storage.beginLink("DROPBOX")).toBe("https://connect.example/dropbox");
-      expect(yield* client.billing.open).toBe("https://checkout.example");
+      expect(yield* client.billing.open("DESKTOP")).toBe("https://checkout.example");
 
       yield* client.uploads.upload(
         {

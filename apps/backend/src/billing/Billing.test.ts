@@ -3,6 +3,7 @@ import * as ConfigProvider from "effect/ConfigProvider";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as TestClock from "effect/testing/TestClock";
 import { Persistence } from "effect/unstable/persistence";
 import { expect } from "vite-plus/test";
 
@@ -46,19 +47,22 @@ const runBilling = <A, E>(
   polar: PolarBilling["Service"],
   effect: Effect.Effect<A, E, Billing>,
   configLayer = config(),
-) =>
-  Effect.runPromise(
-    effect.pipe(
-      Effect.provide(
-        Billing.layer.pipe(
-          Layer.provide(Layer.succeed(PolarBilling, polar)),
-          Layer.provide(Persistence.layerMemory),
-        ),
+  useTestClock = false,
+) => {
+  const program = effect.pipe(
+    Effect.provide(
+      Billing.layer.pipe(
+        Layer.provide(Layer.succeed(PolarBilling, polar)),
+        Layer.provide(Persistence.layerMemory),
       ),
-      Effect.provide(configLayer),
-      Effect.scoped,
     ),
+    Effect.provide(configLayer),
+    Effect.scoped,
   );
+  return Effect.runPromise(
+    useTestClock ? program.pipe(Effect.provide(TestClock.layer())) : program,
+  );
+};
 
 it("reuses the cached full customer state", async () => {
   let requests = 0;
@@ -169,6 +173,8 @@ it("opens checkout, invalidates stale state, and detects payment without a succe
   let paid = false;
   let requests = 0;
   let checkoutProductIds: ReadonlyArray<string> = [];
+  let checkoutReturnUrl = "";
+  let checkoutSuccessUrl = "";
   const polar = PolarBilling.of({
     getCustomerState: () =>
       Effect.sync(() => {
@@ -178,6 +184,8 @@ it("opens checkout, invalidates stale state, and detects payment without a succe
     createCheckout: (input) =>
       Effect.sync(() => {
         checkoutProductIds = input.productIds;
+        checkoutReturnUrl = input.returnUrl;
+        checkoutSuccessUrl = input.successUrl;
         paid = true;
         return "https://checkout.example";
       }),
@@ -189,8 +197,10 @@ it("opens checkout, invalidates stale state, and detects payment without a succe
     Effect.gen(function* () {
       const billing = yield* Billing;
       const user = { id: "user_1", email: "user@example.com" };
-      expect(yield* billing.open(user)).toBe("https://checkout.example");
+      expect(yield* billing.open(user, "DESKTOP")).toBe("https://checkout.example");
       expect(checkoutProductIds).toEqual(["product_plakk_monthly", "product_plakk_yearly"]);
+      expect(checkoutReturnUrl).toBe("https://app.plakk.test/billing/desktop-return");
+      expect(checkoutSuccessUrl).toBe("https://app.plakk.test/billing/desktop-return");
       expect(yield* billing.status(user)).toEqual({
         status: "SUBSCRIBED",
         cancelAtPeriodEnd: false,
@@ -198,6 +208,30 @@ it("opens checkout, invalidates stale state, and detects payment without a succe
       expect(requests).toBe(2);
     }),
   );
+});
+
+it("returns desktop portal sessions through the desktop browser bridge", async () => {
+  let portalReturnUrl = "";
+  const polar = PolarBilling.of({
+    getCustomerState: () => Effect.succeed(state([subscription], [accessBenefit])),
+    createCheckout: () => Effect.succeed("https://checkout.example"),
+    createPortalSession: (input) =>
+      Effect.sync(() => {
+        portalReturnUrl = input.returnUrl;
+        return "https://portal.example";
+      }),
+  });
+
+  const result = await runBilling(
+    polar,
+    Effect.gen(function* () {
+      const billing = yield* Billing;
+      return yield* billing.open({ id: "user_1" }, "DESKTOP");
+    }),
+  );
+
+  expect(result).toBe("https://portal.example");
+  expect(portalReturnUrl).toBe("https://app.plakk.test/billing/desktop-return");
 });
 
 it("authorizes a shared feature flag benefit independently of the subscribed product", async () => {
@@ -304,10 +338,44 @@ it("throttles repeated pending-checkout refreshes", async () => {
     Effect.gen(function* () {
       const billing = yield* Billing;
       const user = { id: "user_1", email: "user@example.com" };
-      yield* billing.open(user);
+      yield* billing.open(user, "WEB");
       yield* billing.status(user);
       yield* billing.status(user);
       expect(requests).toBe(2);
     }),
+  );
+});
+
+it("returns to the normal customer-state cache after the checkout refresh window", async () => {
+  let requests = 0;
+  const polar = PolarBilling.of({
+    getCustomerState: () =>
+      Effect.sync(() => {
+        requests += 1;
+        return state();
+      }),
+    createCheckout: () => Effect.succeed("https://checkout.example"),
+    createPortalSession: () => Effect.succeed("https://portal.example"),
+  });
+
+  await runBilling(
+    polar,
+    Effect.gen(function* () {
+      const billing = yield* Billing;
+      const user = { id: "user_1", email: "user@example.com" };
+      yield* billing.open(user, "DESKTOP");
+      yield* billing.status(user);
+      expect(requests).toBe(2);
+
+      yield* TestClock.adjust("3 seconds");
+      yield* billing.status(user);
+      expect(requests).toBe(3);
+
+      yield* TestClock.adjust("30 seconds");
+      yield* billing.status(user);
+      expect(requests).toBe(3);
+    }),
+    config(),
+    true,
   );
 });

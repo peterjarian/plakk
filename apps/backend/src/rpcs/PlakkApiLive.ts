@@ -57,10 +57,10 @@ const AccountRpcsLive = AccountRpcs.of({
 });
 
 const BillingRpcsLive = BillingRpcs.of({
-  OpenBilling: Effect.fn("rpc.OpenBilling")(function* () {
+  OpenBilling: Effect.fn("rpc.OpenBilling")(function* ({ returnTarget }) {
     const currentUser = yield* CurrentUser;
     const billing = yield* Billing;
-    const url = yield* billing.open(currentUser).pipe(
+    const url = yield* billing.open(currentUser, returnTarget).pipe(
       Effect.mapError(
         (error) =>
           new RpcError({

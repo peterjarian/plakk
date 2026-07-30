@@ -28,6 +28,10 @@ export const BillingStatusSchema = Schema.Union([
 
 export type BillingStatus = typeof BillingStatusSchema.Type;
 
+export const BillingReturnTargetSchema = Schema.Literals(["WEB", "DESKTOP"] as const);
+
+export type BillingReturnTarget = typeof BillingReturnTargetSchema.Type;
+
 export const AccountStatusSchema = Schema.Struct({
   canSync: Schema.Boolean,
   storageProvider: Schema.NullOr(StorageProviderLiteral),
@@ -204,6 +208,7 @@ export const AccountRpcs = RpcGroup.make(
 
 export const BillingRpcs = RpcGroup.make(
   Rpc.make("OpenBilling", {
+    payload: { returnTarget: BillingReturnTargetSchema },
     success: Schema.Struct({ url: Schema.String }),
     error: RpcError,
   }),

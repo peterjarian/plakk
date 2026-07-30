@@ -1,4 +1,4 @@
-import type { BillingStatus, CurrentUser } from "@plakk/shared/PlakkApi";
+import type { BillingReturnTarget, BillingStatus, CurrentUser } from "@plakk/shared/PlakkApi";
 import { createPolar, errors, type Polar } from "@polar-sh/sdk/2026-04";
 import * as Clock from "effect/Clock";
 import * as Config from "effect/Config";
@@ -14,7 +14,8 @@ import { Persistable, PersistedCache, Persistence } from "effect/unstable/persis
 
 const CUSTOMER_STATE_TTL = Duration.minutes(5);
 const CHECKOUT_PENDING_TTL = Duration.minutes(30);
-const CHECKOUT_REFRESH_THROTTLE_TTL = Duration.seconds(30);
+const CHECKOUT_REFRESH_WINDOW = Duration.seconds(30);
+const CHECKOUT_REFRESH_THROTTLE_TTL = Duration.seconds(2);
 
 const CheckoutProductIdsSchema = Config.Array(Schema.Trim.check(Schema.isNonEmpty())).pipe(
   Schema.check(Schema.isMinLength(2)),
@@ -80,7 +81,9 @@ class CheckoutPendingRequest extends Persistable.Class<{
   payload: { readonly externalCustomerId: string };
 }>()("CheckoutPendingRequest", {
   primaryKey: ({ externalCustomerId }) => externalCustomerId,
-  success: Schema.Boolean,
+  success: Schema.Struct({
+    refreshStartedAt: Schema.NullOr(Schema.Finite),
+  }),
   error: Schema.Never,
 }) {}
 
@@ -179,7 +182,10 @@ export class Billing extends Context.Service<
   Billing,
   {
     readonly status: (user: CurrentUser["Service"]) => Effect.Effect<BillingStatus, BillingFailure>;
-    readonly open: (user: CurrentUser["Service"]) => Effect.Effect<string, BillingFailure>;
+    readonly open: (
+      user: CurrentUser["Service"],
+      returnTarget: BillingReturnTarget,
+    ) => Effect.Effect<string, BillingFailure>;
     readonly requireAccess: (user: CurrentUser["Service"]) => Effect.Effect<void, BillingFailure>;
   }
 >()("@plakk/backend/billing/Billing") {
@@ -220,11 +226,22 @@ export class Billing extends Context.Service<
 
       const readCustomerState = Effect.fn("Billing.readCustomerState")(function* (userId: string) {
         const pending = yield* pendingStore.get(pendingRequest(userId));
-        if (pending !== undefined) {
-          const recentlyRefreshed = yield* refreshStore.get(refreshRequest(userId));
-          if (recentlyRefreshed === undefined) {
-            yield* customerStates.invalidate(customerRequest(userId));
-            yield* refreshStore.set(refreshRequest(userId), Exit.succeed(true));
+        if (pending !== undefined && Exit.isSuccess(pending)) {
+          const pendingState = pending.value;
+          const now = yield* Clock.currentTimeMillis;
+          const refreshStartedAt = pendingState.refreshStartedAt ?? now;
+          if (pendingState.refreshStartedAt === null) {
+            yield* pendingStore.set(pendingRequest(userId), Exit.succeed({ refreshStartedAt }));
+          }
+          if (now - refreshStartedAt < Duration.toMillis(CHECKOUT_REFRESH_WINDOW)) {
+            const recentlyRefreshed = yield* refreshStore.get(refreshRequest(userId));
+            if (recentlyRefreshed === undefined) {
+              yield* customerStates.invalidate(customerRequest(userId));
+              yield* refreshStore.set(refreshRequest(userId), Exit.succeed(true));
+            }
+          } else {
+            yield* pendingStore.remove(pendingRequest(userId));
+            yield* refreshStore.remove(refreshRequest(userId));
           }
         }
         return yield* customerStates.get(customerRequest(userId));
@@ -278,12 +295,17 @@ export class Billing extends Context.Service<
         return freePeriod ?? { status: "PAYMENT_REQUIRED" as const };
       });
 
-      const open = Effect.fn("Billing.open")(function* (user: CurrentUser["Service"]) {
+      const open = Effect.fn("Billing.open")(function* (
+        user: CurrentUser["Service"],
+        returnTarget: BillingReturnTarget,
+      ) {
+        const returnUrl =
+          returnTarget === "DESKTOP" ? `${webOrigin}/billing/desktop-return` : webOrigin;
         const current = yield* status(user);
         if (current.status === "SUBSCRIBED") {
           return yield* polar.createPortalSession({
             externalCustomerId: user.id,
-            returnUrl: webOrigin,
+            returnUrl,
           });
         }
         if (typeof user.email !== "string" || user.email === "") {
@@ -297,10 +319,10 @@ export class Billing extends Context.Service<
           email: user.email,
           ...(user.name === undefined ? {} : { name: user.name }),
           productIds,
-          successUrl: `${webOrigin}/?billing=success`,
-          returnUrl: webOrigin,
+          successUrl: returnTarget === "DESKTOP" ? returnUrl : `${webOrigin}/?billing=success`,
+          returnUrl,
         });
-        yield* pendingStore.set(pendingRequest(user.id), Exit.succeed(true));
+        yield* pendingStore.set(pendingRequest(user.id), Exit.succeed({ refreshStartedAt: null }));
         yield* refreshStore.remove(refreshRequest(user.id));
         yield* customerStates.invalidate(customerRequest(user.id));
         return url;
