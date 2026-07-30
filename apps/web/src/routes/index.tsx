@@ -73,11 +73,12 @@ const offlineCapability: ClientCapability = {
 const actionFailures = {
   addSnippet: {
     title: "Couldn’t add this snippet",
-    description: "Nothing was added. Try again with content under 64 MiB.",
+    description: "Nothing was added. Try again with non-empty content under 64 MiB.",
   },
   addFiles: {
     title: "Couldn’t add these files",
-    description: "Some files may have been added. Check the list before retrying failed files.",
+    description:
+      "Some files may have been added. Check the list, then retry only non-empty files totaling under 64 MiB.",
   },
   connectStorage: {
     title: "Couldn’t connect storage",
@@ -284,6 +285,9 @@ function IndexRoute() {
   const addText = async (text: string) => {
     if (provider === null) throw new Error("Connect storage before adding snippets.");
     const bytes = new TextEncoder().encode(text);
+    if (bytes.byteLength === 0) {
+      throw new Error("Web snippets cannot be empty.");
+    }
     if (bytes.byteLength > BUFFERED_CONTENT_MAX_BYTES) {
       throw new Error("Web snippets cannot be larger than 64 MiB.");
     }
@@ -305,6 +309,9 @@ function IndexRoute() {
   };
   const addFiles = async (files: ReadonlyArray<File>) => {
     if (provider === null) throw new Error("Connect storage before adding snippets.");
+    if (files.some((file) => file.size === 0)) {
+      throw new Error("Web files cannot be empty.");
+    }
     if (files.some((file) => file.size > BUFFERED_CONTENT_MAX_BYTES)) {
       throw new Error("Web files cannot be larger than 64 MiB.");
     }

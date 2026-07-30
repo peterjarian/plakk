@@ -17,6 +17,7 @@ type SnippetRowReadModel = SnippetRowData & { readonly id: string };
 export const REMOTE_THUMBNAIL_MAX_BYTES = 5 * 1024 * 1024;
 export const REMOTE_THUMBNAIL_MAX_COUNT = 12;
 const REMOTE_THUMBNAIL_CONCURRENCY = 2;
+export const REMOTE_THUMBNAIL_RETRY_DELAY_MS = 30_000;
 
 export const selectRemoteThumbnailSnippets = (
   snippets: ReadonlyArray<Snippet>,
@@ -105,10 +106,12 @@ export const createImageUrlRegistry = () => {
 
 const useSnippetImageUrls = (snippets: ReadonlyArray<Snippet>, run: RunClient) => {
   const [thumbnailUrls, setThumbnailUrls] = useState<Record<string, string>>({});
+  const [retryRevision, setRetryRevision] = useState(0);
   const registryRef = useRef<ReturnType<typeof createImageUrlRegistry> | null>(null);
   if (registryRef.current === null) registryRef.current = createImageUrlRegistry();
   const loadingIdsRef = useRef(new Set<string>());
   const failedIdsRef = useRef(new Set<string>());
+  const retryTimersRef = useRef(new Map<string, number>());
   const visibleIdsRef = useRef(new Set<string>());
 
   useEffect(() => {
@@ -117,7 +120,11 @@ const useSnippetImageUrls = (snippets: ReadonlyArray<Snippet>, run: RunClient) =
     const visibleIds = new Set(images.map((snippet) => snippet.id));
     visibleIdsRef.current = visibleIds;
     for (const id of failedIdsRef.current) {
-      if (!visibleIds.has(id)) failedIdsRef.current.delete(id);
+      if (visibleIds.has(id)) continue;
+      failedIdsRef.current.delete(id);
+      const timer = retryTimersRef.current.get(id);
+      if (timer !== undefined) window.clearTimeout(timer);
+      retryTimersRef.current.delete(id);
     }
 
     const registry = registryRef.current;
@@ -149,7 +156,18 @@ const useSnippetImageUrls = (snippets: ReadonlyArray<Snippet>, run: RunClient) =
             setThumbnailUrls((current) => ({ ...current, [snippet.id]: url }));
           })
           .catch(() => {
+            if (!visibleIdsRef.current.has(snippet.id)) return;
             failedIdsRef.current.add(snippet.id);
+            if (!retryTimersRef.current.has(snippet.id)) {
+              retryTimersRef.current.set(
+                snippet.id,
+                window.setTimeout(() => {
+                  retryTimersRef.current.delete(snippet.id);
+                  failedIdsRef.current.delete(snippet.id);
+                  setRetryRevision((current) => current + 1);
+                }, REMOTE_THUMBNAIL_RETRY_DELAY_MS),
+              );
+            }
           })
           .finally(() => {
             loadingIdsRef.current.delete(snippet.id);
@@ -161,13 +179,15 @@ const useSnippetImageUrls = (snippets: ReadonlyArray<Snippet>, run: RunClient) =
     return () => {
       active = false;
     };
-  }, [run, snippets]);
+  }, [retryRevision, run, snippets]);
 
   useEffect(
     () => () => {
       visibleIdsRef.current.clear();
       loadingIdsRef.current.clear();
       failedIdsRef.current.clear();
+      for (const timer of retryTimersRef.current.values()) window.clearTimeout(timer);
+      retryTimersRef.current.clear();
       registryRef.current?.dispose();
     },
     [],

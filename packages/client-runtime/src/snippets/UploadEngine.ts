@@ -49,7 +49,15 @@ import { SnippetStore } from "./SnippetStore.ts";
 
 const CONTENT_COPY_CHUNK_BYTES = 4 * 1024 * 1024;
 const MAX_UPLOAD_RETRIES = 5;
-const UPLOAD_ATTEMPT_TIMEOUT = Duration.minutes(2);
+const UPLOAD_CONTROL_PLANE_TIMEOUT = Duration.minutes(2);
+const UPLOAD_REQUEST_BASE_TIMEOUT_MILLIS = 2 * 60 * 1_000;
+const MIN_UPLOAD_BYTES_PER_SECOND = 128 * 1_024;
+
+/** Gives each storage request a finite deadline scaled to the bytes it sends. */
+const uploadRequestTimeout = (byteSize: number) =>
+  Duration.millis(
+    UPLOAD_REQUEST_BASE_TIMEOUT_MILLIS + Math.ceil(byteSize / MIN_UPLOAD_BYTES_PER_SECOND) * 1_000,
+  );
 
 const NextExpectedRangesSchema = Schema.Struct({
   nextExpectedRanges: Schema.Array(Schema.String),
@@ -256,13 +264,15 @@ export class UploadEngine extends Context.Service<
           input: TitledUploadInput,
           source: UploadSource<LocalStorageError | UploadSourceUnavailableError>,
         ) {
-          const prepared = yield* rpc.PrepareSnippetUpload({
-            id: input.id,
-            fileName: input.fileName,
-            byteSize: input.byteSize,
-            storageProvider: input.storageProvider,
-            mediaType: input.mediaType,
-          });
+          const prepared = yield* rpc
+            .PrepareSnippetUpload({
+              id: input.id,
+              fileName: input.fileName,
+              byteSize: input.byteSize,
+              storageProvider: input.storageProvider,
+              mediaType: input.mediaType,
+            })
+            .pipe(Effect.timeout(UPLOAD_CONTROL_PLANE_TIMEOUT));
           if (prepared.storageProvider !== input.storageProvider) {
             return yield* new InvalidUploadResponseError({
               message: "The prepared upload uses a different storage provider.",
@@ -297,7 +307,9 @@ export class UploadEngine extends Context.Service<
                 `bytes ${offset}-${offset + byteSize - 1}/${input.byteSize}`,
               );
             }
-            return yield* http.execute(HttpClientRequest.bodyUint8Array(request, bytes));
+            return yield* http
+              .execute(HttpClientRequest.bodyUint8Array(request, bytes))
+              .pipe(Effect.timeout(uploadRequestTimeout(byteSize)));
           });
 
           let storageObjectId = prepared.storageObjectId;
@@ -313,6 +325,7 @@ export class UploadEngine extends Context.Service<
             if (storageObjectId === null) {
               const uploaded = yield* response.json.pipe(
                 Effect.flatMap(Schema.decodeUnknownEffect(UploadedObjectSchema)),
+                Effect.timeout(UPLOAD_CONTROL_PLANE_TIMEOUT),
               );
               storageObjectId = uploaded.id;
             }
@@ -354,6 +367,7 @@ export class UploadEngine extends Context.Service<
               if (response.status === 202) {
                 const body = yield* response.json.pipe(
                   Effect.flatMap(Schema.decodeUnknownEffect(NextExpectedRangesSchema)),
+                  Effect.timeout(UPLOAD_CONTROL_PLANE_TIMEOUT),
                 );
                 const nextRange = body.nextExpectedRanges[0];
                 const next = nextRange === undefined ? null : Number(/^\d+/.exec(nextRange)?.[0]);
@@ -386,6 +400,7 @@ export class UploadEngine extends Context.Service<
               if (storageObjectId === null) {
                 const uploaded = yield* response.json.pipe(
                   Effect.flatMap(Schema.decodeUnknownEffect(UploadedObjectSchema)),
+                  Effect.timeout(UPLOAD_CONTROL_PLANE_TIMEOUT),
                 );
                 storageObjectId = uploaded.id;
               }
@@ -399,14 +414,16 @@ export class UploadEngine extends Context.Service<
             });
           }
 
-          const published = yield* rpc.PublishSnippet({
-            id: input.id,
-            fileName: input.fileName,
-            ...(input.title === undefined ? {} : { title: input.title }),
-            byteSize: input.byteSize,
-            storageProvider: input.storageProvider,
-            storageObjectId,
-          });
+          const published = yield* rpc
+            .PublishSnippet({
+              id: input.id,
+              fileName: input.fileName,
+              ...(input.title === undefined ? {} : { title: input.title }),
+              byteSize: input.byteSize,
+              storageProvider: input.storageProvider,
+              storageObjectId,
+            })
+            .pipe(Effect.timeout(UPLOAD_CONTROL_PLANE_TIMEOUT));
 
           yield* markSnippetPublished(session.user.id, published);
           yield* snippets.refresh;
@@ -469,13 +486,7 @@ export class UploadEngine extends Context.Service<
         /** Runs one attempt and exhaustively chooses retry or permanent failure. */
         function runAttempt(): Effect.Effect<void> {
           return concurrency
-            .withPermit(
-              setUploading(input.id).pipe(
-                Effect.andThen(
-                  transfer(input, source).pipe(Effect.timeout(UPLOAD_ATTEMPT_TIMEOUT)),
-                ),
-              ),
-            )
+            .withPermit(setUploading(input.id).pipe(Effect.andThen(transfer(input, source))))
             .pipe(
               Effect.catchTags({
                 SessionError: (error) => retry("session", error),

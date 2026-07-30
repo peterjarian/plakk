@@ -74,6 +74,7 @@ const makeLayer = (
     }),
   options?: {
     readonly contentRemoveError?: LocalStorageError;
+    readonly httpDelayMilliseconds?: number;
     readonly localContent?: Map<string, Uint8Array> | false;
   },
 ) => {
@@ -82,7 +83,9 @@ const makeLayer = (
   const httpLayer = Layer.succeed(
     HttpClient.HttpClient,
     HttpClient.make((request) =>
-      Effect.succeed(HttpClientResponse.fromWeb(request, response(request))),
+      Effect.sleep(options?.httpDelayMilliseconds ?? 0).pipe(
+        Effect.andThen(Effect.sync(() => HttpClientResponse.fromWeb(request, response(request)))),
+      ),
     ),
   );
   const contentLayer =
@@ -772,6 +775,64 @@ describe("shared client integration", () => {
         yield* Fiber.join(failedSnapshot);
 
         expect(attempts).toBe(6);
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("allows a healthy transfer to exceed two minutes overall", () =>
+    Effect.gen(function* () {
+      const uploaded = { ...published, id: localId, fileName: "large-note.txt" };
+      const layer = makeLayer(
+        makeRpc({
+          PrepareSnippetUpload: () =>
+            Effect.sleep("90 seconds").pipe(
+              Effect.as({
+                storageProvider: "GOOGLE_DRIVE",
+                storageObjectId: null,
+                upload: {
+                  method: "PUT",
+                  url: "https://upload.example",
+                  headers: [],
+                  strategy: { type: "single_request" },
+                },
+                expiresAt: null,
+              }),
+            ),
+          PublishSnippet: () => Effect.succeed(uploaded),
+        }),
+        undefined,
+        { httpDelayMilliseconds: 90_000 },
+      );
+
+      yield* Effect.gen(function* () {
+        const bytes = new TextEncoder().encode("note");
+        yield* (yield* UploadEngine).upload(
+          {
+            id: localId,
+            fileName: "large-note.txt",
+            byteSize: bytes.byteLength,
+            storageProvider: "GOOGLE_DRIVE",
+            mediaType: "text/plain",
+          },
+          {
+            read: (offset, byteSize) => Effect.succeed(bytes.slice(offset, offset + byteSize)),
+          },
+        );
+
+        const publishedSnapshot = yield* (yield* SnippetStore).subscribe().pipe(
+          Stream.filter((snapshot) =>
+            snapshot.some((snippet) => snippet.id === localId && snippet.status === "PUBLISHED"),
+          ),
+          Stream.runHead,
+          Effect.forkChild,
+        );
+        yield* TestClock.adjust("3 minutes");
+        yield* Fiber.join(publishedSnapshot);
+
+        expect((yield* listSnippets(user.id))[0]).toMatchObject({
+          id: localId,
+          status: "PUBLISHED",
+        });
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.provide(TestClock.layer())),
   );
