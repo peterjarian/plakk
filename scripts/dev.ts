@@ -515,15 +515,15 @@ async function runDevelopment(): Promise<void> {
   try {
     const backend = spawnProcess({
       name: "backend",
-      command: "vp",
-      args: ["run", "--filter", "./apps/backend", "dev"],
+      command: "pnpm",
+      args: ["--filter", "@plakk/backend", "run", "dev"],
       cwd: repoRoot,
       environment: applicationEnvironments.backend,
     });
     const web = spawnProcess({
       name: "web",
-      command: "vp",
-      args: ["run", "--filter", "./apps/web", "dev"],
+      command: "pnpm",
+      args: ["--filter", "@plakk/web", "run", "dev"],
       cwd: repoRoot,
       environment: applicationEnvironments.web,
     });
@@ -553,8 +553,8 @@ async function runDevelopment(): Promise<void> {
 
     const desktop = spawnProcess({
       name: "desktop",
-      command: "vp",
-      args: ["run", "--filter", "./apps/desktop", "dev"],
+      command: "pnpm",
+      args: ["--filter", "@plakk/desktop", "run", "dev"],
       cwd: repoRoot,
       environment: applicationEnvironments.desktop,
     });
