@@ -11,7 +11,11 @@ import { Effect, Layer, ManagedRuntime, Schema, Stream } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 
-const rpcUrl = import.meta.env.VITE_PLAKK_RPC_URL ?? "http://localhost:3100/api/rpc";
+const configuredRpcUrl = import.meta.env.VITE_PLAKK_RPC_URL;
+if (configuredRpcUrl === undefined && !import.meta.env.DEV) {
+  throw new Error("VITE_PLAKK_RPC_URL must be set for production builds.");
+}
+const rpcUrl = configuredRpcUrl ?? "http://localhost:3100/api/rpc";
 
 export type ClientResource = {
   readonly client: Client["Service"];

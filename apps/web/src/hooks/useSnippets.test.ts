@@ -3,7 +3,14 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { createImageUrlRegistry, projectSnippetReadModels, useSnippets } from "./useSnippets.ts";
+import {
+  createImageUrlRegistry,
+  projectSnippetReadModels,
+  REMOTE_THUMBNAIL_MAX_BYTES,
+  REMOTE_THUMBNAIL_MAX_COUNT,
+  selectRemoteThumbnailSnippets,
+  useSnippets,
+} from "./useSnippets.ts";
 
 const snippet = (input: Partial<Snippet> = {}): Snippet =>
   ({
@@ -90,6 +97,30 @@ describe("snippet read-model projection", () => {
     const [item] = projectSnippetReadModels([source], {});
 
     expect(item?.presentation).toEqual({ type: "file", title: "archive.zip" });
+  });
+
+  it("uses the file name when a legacy text snippet has no title", () => {
+    const source = snippet({ fileName: "legacy-note.txt" });
+    const [item] = projectSnippetReadModels([source], {});
+
+    expect(item?.presentation).toEqual({ type: "text", title: "legacy-note.txt" });
+  });
+});
+
+describe("remote thumbnail selection", () => {
+  it("bounds automatic image downloads by byte size and count", () => {
+    const images = Array.from({ length: REMOTE_THUMBNAIL_MAX_COUNT + 3 }, (_, index) =>
+      snippet({
+        id: `image-${index}`,
+        fileName: `${index}.png`,
+        byteSize: index === 0 ? REMOTE_THUMBNAIL_MAX_BYTES + 1 : 1,
+      }),
+    );
+
+    const selected = selectRemoteThumbnailSnippets(images);
+
+    expect(selected).toHaveLength(REMOTE_THUMBNAIL_MAX_COUNT);
+    expect(selected.some(({ id }) => id === "image-0")).toBe(false);
   });
 });
 

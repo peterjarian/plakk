@@ -107,13 +107,14 @@ const mapStorageErrorsToRpc = <A, R>(
 const samePublication = (snippet: SnippetRow, input: PublishSnippetPayload) =>
   snippet.id === input.id &&
   snippet.fileName === input.fileName &&
+  snippet.title === (input.title ?? null) &&
   snippet.byteSize === input.byteSize &&
   snippet.storageProvider === input.storageProvider &&
   snippet.storageObjectId === input.storageObjectId;
 
 const prepareSnippetUpload = Effect.fn("SnippetRpcs.prepareUpload")(function* (
   storage: StorageProvider["Service"],
-  ownerWorkosUserId: string,
+  currentUser: CurrentUser["Service"],
   input: PrepareSnippetUploadPayload,
 ) {
   return yield* storage
@@ -123,7 +124,8 @@ const prepareSnippetUpload = Effect.fn("SnippetRpcs.prepareUpload")(function* (
       fileName: input.fileName,
       byteSize: input.byteSize,
       contentType: input.mediaType,
-      workosUserId: ownerWorkosUserId,
+      ...(currentUser.requestOrigin === undefined ? {} : { origin: currentUser.requestOrigin }),
+      workosUserId: currentUser.id,
     })
     .pipe(mapStorageErrorsToRpc);
 });
@@ -276,7 +278,7 @@ export const SnippetRpcsLive = Effect.gen(function* () {
     PrepareSnippetUpload: Effect.fn("rpc.PrepareSnippetUpload")(function* (input) {
       const storage = yield* StorageProvider;
       const currentUser = yield* CurrentUser;
-      return yield* prepareSnippetUpload(storage, currentUser.id, input).pipe(
+      return yield* prepareSnippetUpload(storage, currentUser, input).pipe(
         Effect.annotateSpans({ id: input.id }),
       );
     }),

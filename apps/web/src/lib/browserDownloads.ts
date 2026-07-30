@@ -1,6 +1,6 @@
 const downloadLockNameFor = (temporaryName: string) => `plakk:download:${temporaryName}`;
 
-const startDownload = (blob: Blob, fileName: string, onRevoke: () => void) => {
+const startDownload = (blob: Blob, fileName: string) => {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.hidden = true;
@@ -12,7 +12,6 @@ const startDownload = (blob: Blob, fileName: string, onRevoke: () => void) => {
   window.setTimeout(() => {
     anchor.remove();
     URL.revokeObjectURL(url);
-    onRevoke();
   }, 60_000);
 };
 
@@ -44,7 +43,7 @@ export async function downloadFile(
       await stream((chunk) => writable.write(Uint8Array.from(chunk)));
       await writable.close();
       const file = await handle.getFile();
-      await new Promise<void>((resolve) => startDownload(file, fileName, resolve));
+      startDownload(file, fileName);
       await directory.removeEntry(temporaryName).catch(() => {});
     } catch (cause) {
       await writable.abort().catch(() => {});

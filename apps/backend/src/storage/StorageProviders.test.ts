@@ -155,6 +155,7 @@ describe("storage upload providers", () => {
     const upload = await Effect.runPromise(
       GoogleDriveStorageProvider.prepareUpload({
         ...input,
+        origin: "https://web.plakk.example",
         storageProvider: "GOOGLE_DRIVE",
       }).pipe(
         Effect.provide(FetchHttpClient.layer),
@@ -190,6 +191,35 @@ describe("storage upload providers", () => {
       mimeType: "text/plain",
       parents: ["plakk-folder"],
     });
+  });
+
+  it("does not pin desktop Google Drive sessions to the web origin", async () => {
+    fetchMock
+      .mockResolvedValueOnce(Response.json({ files: [{ id: "plakk-folder" }] }))
+      .mockResolvedValueOnce(
+        new Response(null, {
+          status: 200,
+          headers: { Location: "https://google-upload.example" },
+        }),
+      );
+
+    await Effect.runPromise(
+      GoogleDriveStorageProvider.prepareUpload({
+        ...input,
+        origin: "plakk-app://renderer",
+        storageProvider: "GOOGLE_DRIVE",
+      }).pipe(
+        Effect.provide(FetchHttpClient.layer),
+        Effect.provideService(
+          ConfigProvider.ConfigProvider,
+          ConfigProvider.fromEnv({
+            env: { PLAKK_WEB_ORIGIN: "https://web.plakk.example" },
+          }),
+        ),
+      ),
+    );
+
+    expect(fetchRequest(1).headers.has("origin")).toBe(false);
   });
 
   it("creates the Plakk folder when Google Drive does not have one", async () => {

@@ -22,6 +22,7 @@ export function useClientRuntime(user: User | null) {
   const getAccessTokenRef = useRef(accessToken.getAccessToken);
   getAccessTokenRef.current = accessToken.getAccessToken;
   const resourceRef = useRef<ClientResource | null>(null);
+  const disposalRef = useRef<Promise<void>>(Promise.resolve());
   const signingOutRef = useRef(false);
   const [snapshot, setSnapshot] = useState<ClientSnapshot | null>(null);
   const [runtimeIssue, setRuntimeIssue] = useState<ClientRuntimeIssue | null>(null);
@@ -38,75 +39,95 @@ export function useClientRuntime(user: User | null) {
     }
 
     let active = true;
+    const abortController = new AbortController();
     signingOutRef.current = false;
     setLoading(true);
     setRuntimeIssue(null);
     setSnapshot(null);
     let runtime: ClientResource["runtime"] | null = null;
+    let runtimeDisposal: Promise<void> | null = null;
+    const disposeRuntime = () => {
+      if (runtimeDisposal !== null) return runtimeDisposal;
+      const acquiredRuntime = runtime;
+      if (acquiredRuntime === null) return Promise.resolve();
+      runtime = null;
+      if (resourceRef.current?.runtime === acquiredRuntime) resourceRef.current = null;
+      runtimeDisposal = acquiredRuntime.dispose();
+      disposalRef.current = runtimeDisposal.catch(() => {});
+      return runtimeDisposal;
+    };
     const runtimeChannel = new BroadcastChannel(runtimeChannelNameFor(user.id));
     runtimeChannel.addEventListener("message", (event) => {
       if (event.data?.type !== "release" || event.data.sourceTabId === tabIdRef.current) return;
       active = false;
-      const acquiredRuntime = runtime;
-      runtime = null;
-      if (resourceRef.current?.runtime === acquiredRuntime) resourceRef.current = null;
+      abortController.abort();
       setSnapshot(null);
       setLoading(false);
       setRuntimeIssue(null);
       void (async () => {
-        if (acquiredRuntime !== null) await acquiredRuntime.dispose();
+        await disposeRuntime();
         window.location.assign("/api/auth/sign-out");
       })();
     });
 
-    void navigator.locks
-      .request(databaseLockNameFor(user.id), { ifAvailable: true }, async (lock) => {
-        if (lock === null) {
-          if (active) {
-            setLoading(false);
-            setRuntimeIssue("another-tab");
-          }
-          return;
-        }
-        if (!active) return;
+    const runWithLock = async () => {
+      if (!active) return;
+      setLoading(true);
+      setRuntimeIssue(null);
+      try {
         const acquiredRuntime = makeClientRuntime(user, () => getAccessTokenRef.current());
         runtime = acquiredRuntime;
-        try {
-          await acquiredRuntime.runPromise(
-            Effect.gen(function* () {
-              const client = yield* Client;
-              if (active) resourceRef.current = { client, runtime: acquiredRuntime };
-              yield* client.subscribe().pipe(
-                Stream.runForEach((next) =>
-                  Effect.sync(() => {
-                    if (!active) return;
-                    setSnapshot(next);
-                    setLoading(false);
-                  }),
-                ),
-              );
-            }),
-          );
-        } finally {
-          if (resourceRef.current?.runtime === acquiredRuntime) resourceRef.current = null;
-          if (runtime === acquiredRuntime) runtime = null;
-          await acquiredRuntime.dispose();
-        }
-      })
-      .catch(() => {
-        if (!active || signingOutRef.current) return;
-        setLoading(false);
-        setRuntimeIssue("startup");
-      });
+        await acquiredRuntime.runPromise(
+          Effect.gen(function* () {
+            const client = yield* Client;
+            if (active) resourceRef.current = { client, runtime: acquiredRuntime };
+            yield* client.subscribe().pipe(
+              Stream.runForEach((next) =>
+                Effect.sync(() => {
+                  if (!active) return;
+                  setSnapshot(next);
+                  setLoading(false);
+                }),
+              ),
+            );
+          }),
+        );
+      } finally {
+        await disposeRuntime();
+      }
+    };
+
+    void (async () => {
+      await disposalRef.current;
+      if (!active) return;
+      const acquiredImmediately = await navigator.locks.request(
+        databaseLockNameFor(user.id),
+        { ifAvailable: true },
+        async (lock) => {
+          if (lock === null) return false;
+          await runWithLock();
+          return true;
+        },
+      );
+      if (acquiredImmediately || !active) return;
+      setLoading(false);
+      setRuntimeIssue("another-tab");
+      await navigator.locks.request(
+        databaseLockNameFor(user.id),
+        { signal: abortController.signal },
+        runWithLock,
+      );
+    })().catch(() => {
+      if (!active || signingOutRef.current) return;
+      setLoading(false);
+      setRuntimeIssue("startup");
+    });
 
     return () => {
       active = false;
+      abortController.abort();
       runtimeChannel.close();
-      const acquiredRuntime = runtime;
-      if (acquiredRuntime !== null) {
-        if (resourceRef.current?.runtime === acquiredRuntime) resourceRef.current = null;
-        void acquiredRuntime.dispose();
-      }
+      void disposeRuntime().catch(() => {});
     };
   }, [attempt, user?.id]);
 
@@ -123,7 +144,11 @@ export function useClientRuntime(user: User | null) {
     try {
       const resource = resourceRef.current;
       resourceRef.current = null;
-      if (resource !== null) await resource.runtime.dispose();
+      if (resource !== null) {
+        const disposal = resource.runtime.dispose();
+        disposalRef.current = disposal.catch(() => {});
+        await disposal;
+      }
 
       const runtimeChannel = new BroadcastChannel(runtimeChannelNameFor(user.id));
       runtimeChannel.postMessage({ type: "release", sourceTabId: tabIdRef.current });
@@ -136,14 +161,18 @@ export function useClientRuntime(user: User | null) {
           ),
         );
       });
-    } finally {
       window.location.assign("/api/auth/sign-out");
+    } catch (cause) {
+      signingOutRef.current = false;
+      setAttempt((current) => current + 1);
+      throw cause;
     }
   }, [user?.id]);
 
   return {
     issue:
       runtimeIssue ??
+      (snapshot?.syncStatus === "SESSION_ERROR" ? "session" : null) ??
       (accessToken.error === null || accessToken.error === undefined ? null : "session"),
     loading,
     snapshot,

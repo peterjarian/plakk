@@ -19,7 +19,7 @@ import {
 } from "./snippets/ContentMirror.ts";
 import { SnippetStore } from "./snippets/SnippetStore.ts";
 import { SyncEngine } from "./snippets/SyncEngine.ts";
-import { UploadEngine } from "./snippets/UploadEngine.ts";
+import { UploadEngine, UploadSourceUnavailableError } from "./snippets/UploadEngine.ts";
 import { clientMigrationsLayer, runMigrations } from "./sqlite/Migrations.ts";
 import { listSnippets } from "./sqlite/queries/snippets.ts";
 
@@ -206,6 +206,31 @@ describe("shared client integration", () => {
       const syncFiber = yield* sync.run.pipe(Effect.forkChild);
 
       expect(Array.from(yield* Fiber.join(statusesFiber))).toEqual(["STARTING", "RECONNECTING"]);
+      yield* Fiber.interrupt(syncFiber);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("surfaces backend authentication rejection in sync state", () => {
+    const layer = makeLayer(
+      makeRpc({
+        GetSnippetSnapshot: () =>
+          Effect.fail(
+            new RpcError({
+              code: "UNAUTHENTICATED",
+              message: "The access token expired.",
+            }),
+          ),
+      }),
+    );
+
+    return Effect.gen(function* () {
+      const sync = yield* SyncEngine;
+      const statusesFiber = yield* sync
+        .subscribe()
+        .pipe(Stream.take(2), Stream.runCollect, Effect.forkChild);
+      const syncFiber = yield* sync.run.pipe(Effect.forkChild);
+
+      expect(Array.from(yield* Fiber.join(statusesFiber))).toEqual(["STARTING", "SESSION_ERROR"]);
       yield* Fiber.interrupt(syncFiber);
     }).pipe(Effect.provide(layer));
   });
@@ -446,6 +471,86 @@ describe("shared client integration", () => {
     }),
   );
 
+  it.effect("keeps a failed row when title inspection cannot read the web source", () => {
+    const layer = makeLayer(makeRpc(), undefined, { localContent: false });
+
+    return Effect.gen(function* () {
+      yield* (yield* UploadEngine).upload(
+        {
+          id: localId,
+          fileName: "unavailable.txt",
+          byteSize: 4,
+          storageProvider: "GOOGLE_DRIVE",
+          mediaType: "text/plain",
+        },
+        {
+          read: () =>
+            Effect.fail(
+              new UploadSourceUnavailableError({
+                message: "The browser file is no longer readable.",
+              }),
+            ),
+        },
+      );
+
+      expect((yield* listSnippets(user.id))[0]).toMatchObject({
+        id: localId,
+        status: "FAILED",
+        errorMessage: "Plakk could not read the selected file.",
+      });
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("does not derive a title unless the complete text source is valid UTF-8", () => {
+    const bytes = new Uint8Array(64 * 1024 + 1).fill(0x61);
+    bytes[bytes.byteLength - 1] = 0xff;
+    let publishInput: PublishInput | undefined;
+    const layer = makeLayer(
+      makeRpc({
+        PrepareSnippetUpload: () =>
+          Effect.succeed({
+            storageProvider: "GOOGLE_DRIVE",
+            storageObjectId: null,
+            upload: {
+              method: "PUT",
+              url: "https://upload.example",
+              headers: [],
+              strategy: { type: "single_request" },
+            },
+            expiresAt: null,
+          }),
+        PublishSnippet: (input: PublishInput) => {
+          publishInput = input;
+          return Effect.succeed({
+            ...published,
+            id: localId,
+            fileName: "invalid-tail.txt",
+            byteSize: bytes.byteLength,
+          });
+        },
+      }),
+      undefined,
+      { localContent: false },
+    );
+
+    return Effect.gen(function* () {
+      yield* (yield* UploadEngine).upload(
+        {
+          id: localId,
+          fileName: "invalid-tail.txt",
+          byteSize: bytes.byteLength,
+          storageProvider: "GOOGLE_DRIVE",
+          mediaType: "text/plain",
+        },
+        {
+          read: (offset, byteSize) => Effect.succeed(bytes.slice(offset, offset + byteSize)),
+        },
+      );
+
+      expect(publishInput).not.toHaveProperty("title");
+    }).pipe(Effect.provide(layer));
+  });
+
   it.effect("removes managed content with a deleted snippet", () => {
     const stored = new Map([[publishedId, new Uint8Array([1, 2, 3, 4])]]);
     const layer = makeLayer(
@@ -623,6 +728,50 @@ describe("shared client integration", () => {
           id: localId,
           status: "FAILED",
         });
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("times out stalled transfer attempts and exhausts the retry budget", () =>
+    Effect.gen(function* () {
+      const firstAttempt = yield* Deferred.make<void>();
+      let attempts = 0;
+      const layer = makeLayer(
+        makeRpc({
+          PrepareSnippetUpload: () => {
+            attempts += 1;
+            return Deferred.succeed(firstAttempt, undefined).pipe(Effect.andThen(Effect.never));
+          },
+        }),
+      );
+
+      yield* Effect.gen(function* () {
+        const bytes = new TextEncoder().encode("note");
+        yield* (yield* UploadEngine).upload(
+          {
+            id: localId,
+            fileName: "stalled-note.txt",
+            byteSize: bytes.byteLength,
+            storageProvider: "GOOGLE_DRIVE",
+            mediaType: "text/plain",
+          },
+          {
+            read: (offset, byteSize) => Effect.succeed(bytes.slice(offset, offset + byteSize)),
+          },
+        );
+
+        const failedSnapshot = yield* (yield* SnippetStore).subscribe().pipe(
+          Stream.filter((snapshot) =>
+            snapshot.some((snippet) => snippet.id === localId && snippet.status === "FAILED"),
+          ),
+          Stream.runHead,
+          Effect.forkChild,
+        );
+        yield* Deferred.await(firstAttempt);
+        yield* TestClock.adjust("13 minutes");
+        yield* Fiber.join(failedSnapshot);
+
+        expect(attempts).toBe(6);
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.provide(TestClock.layer())),
   );

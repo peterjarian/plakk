@@ -47,6 +47,7 @@ export type PrepareStorageUploadInput = {
   readonly fileName: string;
   readonly byteSize: number;
   readonly contentType: string | null;
+  readonly origin?: string;
 };
 
 export type DownloadStorageObjectInput = {

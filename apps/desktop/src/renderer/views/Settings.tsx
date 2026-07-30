@@ -154,9 +154,6 @@ export function Settings() {
                     description={name === fallback ? undefined : fallback}
                   />
                 </SettingsUI.RowMain>
-                <span className="rounded-full bg-muted px-2 py-1 text-[11px] leading-none font-medium text-muted-foreground">
-                  Pro
-                </span>
               </SettingsUI.Row>
 
               <SettingsUI.Row className="px-4">
@@ -164,7 +161,10 @@ export function Settings() {
                   <SettingsUI.RowIcon>
                     <CreditCard className="size-4 text-muted-foreground" aria-hidden="true" />
                   </SettingsUI.RowIcon>
-                  <SettingsUI.RowText title="Plakk Pro" description="Current plan" />
+                  <SettingsUI.RowText
+                    title="Billing"
+                    description="Manage your plan and payment details."
+                  />
                 </SettingsUI.RowMain>
                 <Button
                   type="button"
@@ -338,7 +338,8 @@ export function Settings() {
               </SettingsUI.Row>
               {storageFeedback?.kind === "failed" ? (
                 <ProductNotice className="mx-4 my-2" tone="danger" title={storageFeedback.message}>
-                  No device copies were removed. Try again.
+                  Some device copies may already have been removed. Check your available space, then
+                  try again.
                 </ProductNotice>
               ) : storageFeedback !== null ? (
                 <p

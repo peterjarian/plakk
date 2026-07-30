@@ -72,6 +72,20 @@ export const createPreparingSnippet = Effect.fn("ClientQueries.createPreparingSn
   );
 });
 
+/** Stores the immutable title derived from the upload's validated bytes. */
+export const setPreparingSnippetTitle = Effect.fn("ClientQueries.setPreparingSnippetTitle")(
+  function* (userId: string, snippetId: string, title: string) {
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`
+      UPDATE client_snippets
+      SET title = ${title}
+      WHERE user_id = ${userId}
+        AND id = ${snippetId}
+        AND status = 'PREPARING'
+    `;
+  },
+);
+
 /** Marks a preparing upload as actively transferring. */
 export const markSnippetUploading = Effect.fn("ClientQueries.markSnippetUploading")(function* (
   userId: string,

@@ -1,11 +1,15 @@
-import { LocalContentAvailabilitySchema, StorageProviderLiteral } from "@plakk/shared";
+import {
+  LocalContentAvailabilitySchema,
+  SNIPPET_TITLE_MAX_CHARACTERS,
+  StorageProviderLiteral,
+} from "@plakk/shared";
 import { SnippetIdSchema } from "@plakk/shared/PlakkApi";
 import * as Schema from "effect/Schema";
 
 const SnippetFields = {
   id: SnippetIdSchema,
   fileName: Schema.String,
-  title: Schema.optionalKey(Schema.String),
+  title: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(SNIPPET_TITLE_MAX_CHARACTERS))),
   byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   storageProvider: StorageProviderLiteral,
   mediaType: Schema.NullOr(Schema.String),

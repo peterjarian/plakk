@@ -77,7 +77,7 @@ const actionFailures = {
   },
   addFiles: {
     title: "Couldn’t add these files",
-    description: "Nothing was added. Choose the files again and retry.",
+    description: "Some files may have been added. Check the list before retrying failed files.",
   },
   connectStorage: {
     title: "Couldn’t connect storage",
@@ -305,6 +305,12 @@ function IndexRoute() {
   };
   const addFiles = async (files: ReadonlyArray<File>) => {
     if (provider === null) throw new Error("Connect storage before adding snippets.");
+    if (files.some((file) => file.size > BUFFERED_CONTENT_MAX_BYTES)) {
+      throw new Error("Web files cannot be larger than 64 MiB.");
+    }
+    if (files.reduce((total, file) => total + file.size, 0) > BUFFERED_CONTENT_MAX_BYTES) {
+      throw new Error("Add file batches totaling no more than 64 MiB.");
+    }
     await Promise.all(
       files.map((file) =>
         runtime.run((client) =>
@@ -402,16 +408,16 @@ function IndexRoute() {
                     description={name === fallback ? undefined : fallback}
                   />
                 </SettingsRowMain>
-                <span className="rounded-full bg-muted px-2 py-1 text-[11px] leading-none font-medium text-muted-foreground">
-                  Pro
-                </span>
               </SettingsRow>
               <SettingsRow className="px-4">
                 <SettingsRowMain>
                   <SettingsRowIcon>
                     <CreditCard className="size-4 text-muted-foreground" aria-hidden="true" />
                   </SettingsRowIcon>
-                  <SettingsRowText title="Plakk Pro" description="Current plan" />
+                  <SettingsRowText
+                    title="Billing"
+                    description="Manage your plan and payment details."
+                  />
                 </SettingsRowMain>
                 <Button
                   type="button"

@@ -47,7 +47,12 @@ export function ThemeProvider({
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    const stored = localStorage.getItem(storageKey);
+    let stored: string | null = null;
+    try {
+      stored = localStorage.getItem(storageKey);
+    } catch {
+      // Keep the in-memory default when browser storage is unavailable.
+    }
     setThemeState(
       stored === "light" || stored === "dark" || stored === "system" ? stored : defaultTheme,
     );
@@ -69,7 +74,11 @@ export function ThemeProvider({
   }, [theme, mounted]);
 
   const setTheme = (next: Theme) => {
-    localStorage.setItem(storageKey, next);
+    try {
+      localStorage.setItem(storageKey, next);
+    } catch {
+      // The selected theme still applies for the current page.
+    }
     setThemeState(next);
   };
 

@@ -63,6 +63,12 @@ describe("snippet read-model projection", () => {
 
     expect(item?.presentation).toEqual({ type: "file", title: "archive.zip" });
   });
+
+  it("uses the file name when a legacy text snippet has no title", () => {
+    const [item] = projectSnippetReadModels([snippet({ fileName: "legacy-note.txt" })], {});
+
+    expect(item?.presentation).toEqual({ type: "text", title: "legacy-note.txt" });
+  });
 });
 
 describe("image URL registry", () => {

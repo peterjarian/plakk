@@ -5,12 +5,12 @@ import type {
 } from "@plakk/shared/PlakkApi";
 import type { RpcError } from "@plakk/shared/RpcError";
 import {
-  decodeSnippetTextPreview,
-  deriveSnippetPresentation,
+  deriveSnippetTitle,
   isTextSnippetFileName,
   SNIPPET_TEXT_PREVIEW_MAX_BYTES,
 } from "@plakk/shared";
 import {
+  Cause,
   Context,
   DateTime,
   Duration,
@@ -18,6 +18,7 @@ import {
   FiberSet,
   Layer,
   Option,
+  Result,
   Schema,
   Semaphore,
   Stream,
@@ -40,6 +41,7 @@ import {
   markSnippetPreparing,
   markSnippetUploadFailed,
   markSnippetUploading,
+  setPreparingSnippetTitle,
   SnippetAlreadyExistsError,
 } from "../sqlite/queries/uploads.ts";
 import { ContentStore } from "./ContentMirror.ts";
@@ -47,6 +49,7 @@ import { SnippetStore } from "./SnippetStore.ts";
 
 const CONTENT_COPY_CHUNK_BYTES = 4 * 1024 * 1024;
 const MAX_UPLOAD_RETRIES = 5;
+const UPLOAD_ATTEMPT_TIMEOUT = Duration.minutes(2);
 
 const NextExpectedRangesSchema = Schema.Struct({
   nextExpectedRanges: Schema.Array(Schema.String),
@@ -101,6 +104,7 @@ type UploadAttemptFailure =
   | Schema.SchemaError
   | SessionError
   | SqlError.SqlError
+  | Cause.TimeoutError
   | UploadRejectedError
   | UploadSourceChangedError
   | UploadSourceUnavailableError;
@@ -183,26 +187,37 @@ export class UploadEngine extends Context.Service<
           );
         });
 
-      /** Derives the immutable title once from the beginning of text content. */
+      /** Validates the complete text source while retaining only a bounded title preview. */
       const deriveTitle = Effect.fn("UploadEngine.deriveTitle")(function* <E>(
         input: PrepareSnippetUploadPayload,
         source: UploadSource<E>,
       ) {
         if (!isTextSnippetFileName(input.fileName)) return undefined;
 
-        const byteSize = Math.min(input.byteSize, SNIPPET_TEXT_PREVIEW_MAX_BYTES);
-        const bytes = yield* source.read(0, byteSize);
-        if (bytes.byteLength !== byteSize) {
-          return yield* new UploadSourceChangedError({
-            expectedByteSize: byteSize,
-            actualByteSize: bytes.byteLength,
-            message: "The selected file changed while it was being uploaded.",
-          });
+        const decoder = new TextDecoder("utf-8", { fatal: true });
+        let preview = "";
+        let offset = 0;
+        while (offset < input.byteSize) {
+          const byteSize = Math.min(CONTENT_COPY_CHUNK_BYTES, input.byteSize - offset);
+          const bytes = yield* source.read(offset, byteSize);
+          if (bytes.byteLength !== byteSize) {
+            return yield* new UploadSourceChangedError({
+              expectedByteSize: byteSize,
+              actualByteSize: bytes.byteLength,
+              message: "The selected file changed while it was being uploaded.",
+            });
+          }
+          const decoded = Result.try(() => decoder.decode(bytes, { stream: true }));
+          if (Result.isFailure(decoded)) return undefined;
+          if (preview.length < SNIPPET_TEXT_PREVIEW_MAX_BYTES) {
+            preview += decoded.success.slice(0, SNIPPET_TEXT_PREVIEW_MAX_BYTES - preview.length);
+          }
+          offset += byteSize;
         }
-        const content = decodeSnippetTextPreview(bytes, input.byteSize > byteSize);
-        return content === null
-          ? undefined
-          : deriveSnippetPresentation({ fileName: input.fileName, content }).title;
+        const final = Result.try(() => decoder.decode());
+        if (Result.isFailure(final)) return undefined;
+        if (preview.length < SNIPPET_TEXT_PREVIEW_MAX_BYTES) preview += final.success;
+        return deriveSnippetTitle(preview);
       });
 
       /** Changes one preparing snippet to its active transfer state. */
@@ -454,7 +469,13 @@ export class UploadEngine extends Context.Service<
         /** Runs one attempt and exhaustively chooses retry or permanent failure. */
         function runAttempt(): Effect.Effect<void> {
           return concurrency
-            .withPermit(setUploading(input.id).pipe(Effect.andThen(transfer(input, source))))
+            .withPermit(
+              setUploading(input.id).pipe(
+                Effect.andThen(
+                  transfer(input, source).pipe(Effect.timeout(UPLOAD_ATTEMPT_TIMEOUT)),
+                ),
+              ),
+            )
             .pipe(
               Effect.catchTags({
                 SessionError: (error) => retry("session", error),
@@ -481,6 +502,7 @@ export class UploadEngine extends Context.Service<
                     : error.code === "INTERNAL_SERVER_ERROR"
                       ? retry("server", error)
                       : Effect.fail(error),
+                TimeoutError: (error) => retry("server", error),
                 UploadRejectedError: (error) =>
                   error.status === 408 || error.status === 429 || error.status >= 500
                     ? retry("server", error)
@@ -533,10 +555,8 @@ export class UploadEngine extends Context.Service<
           input: PrepareSnippetUploadPayload,
           source: UploadSource<UploadSourceUnavailableError>,
         ) {
-          const title = yield* deriveTitle(input, source);
-          const titledInput: TitledUploadInput = title === undefined ? input : { ...input, title };
           const createdAt = DateTime.formatIso(yield* DateTime.now);
-          yield* createPreparingSnippet(session.user.id, titledInput, createdAt);
+          yield* createPreparingSnippet(session.user.id, input, createdAt);
           yield* snippets.refresh;
 
           let uploadSource: UploadSource<LocalStorageError | UploadSourceUnavailableError> = {
@@ -574,6 +594,25 @@ export class UploadEngine extends Context.Service<
             };
           }
 
+          let title: string | undefined;
+          let sourceReadable = true;
+          yield* deriveTitle(input, uploadSource).pipe(
+            Effect.tap((derivedTitle) =>
+              Effect.sync(() => {
+                title = derivedTitle;
+              }),
+            ),
+            Effect.catch(() => {
+              sourceReadable = false;
+              return setFailed(input.id, "Plakk could not read the selected file.");
+            }),
+          );
+          if (!sourceReadable) return;
+          if (title !== undefined) {
+            yield* setPreparingSnippetTitle(session.user.id, input.id, title);
+            yield* snippets.refresh;
+          }
+          const titledInput: TitledUploadInput = title === undefined ? input : { ...input, title };
           yield* launch(titledInput, uploadSource);
         },
         Effect.provideService(SqlClient.SqlClient, sql),

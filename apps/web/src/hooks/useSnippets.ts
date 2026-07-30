@@ -1,30 +1,34 @@
 import type { ClientSnapshot, Snippet } from "@plakk/client-runtime";
-import {
-  deriveSnippetPresentation,
-  type LocalContentAvailability,
-  type SnippetPresentation,
-} from "@plakk/shared";
+import { deriveSnippetPresentation, type SnippetPresentation } from "@plakk/shared";
+import type { SnippetRowData } from "@plakk/ui/components/SnippetRow";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { RunClient } from "../runtime/client.ts";
 import { collectBytes } from "../runtime/client.ts";
 
-export type SnippetReadModel = {
+export type SnippetReadModel = SnippetRowData & {
   readonly id: string;
-  readonly fileName: string;
-  readonly byteSize: number;
-  readonly createdAt: string;
-  readonly kind: "LOCAL" | "PUBLISHED";
-  readonly localState: null | {
-    readonly status: "UPLOADING" | "FAILED";
-    readonly errorMessage: string | null;
-  };
-  readonly localContentAvailability: LocalContentAvailability;
   readonly presentation: SnippetPresentation;
   readonly thumbnailUrl: string | null;
 };
 
-type SnippetRowReadModel = Omit<SnippetReadModel, "presentation" | "thumbnailUrl">;
+type SnippetRowReadModel = SnippetRowData & { readonly id: string };
+
+export const REMOTE_THUMBNAIL_MAX_BYTES = 5 * 1024 * 1024;
+export const REMOTE_THUMBNAIL_MAX_COUNT = 12;
+const REMOTE_THUMBNAIL_CONCURRENCY = 2;
+
+export const selectRemoteThumbnailSnippets = (
+  snippets: ReadonlyArray<Snippet>,
+): ReadonlyArray<Snippet> =>
+  snippets
+    .filter(
+      (snippet) =>
+        snippet.status === "PUBLISHED" &&
+        snippet.byteSize <= REMOTE_THUMBNAIL_MAX_BYTES &&
+        deriveSnippetPresentation({ fileName: snippet.fileName }).type === "image",
+    )
+    .slice(0, REMOTE_THUMBNAIL_MAX_COUNT);
 
 export const projectSnippetReadModels = (
   snippets: ReadonlyArray<Snippet>,
@@ -104,16 +108,17 @@ const useSnippetImageUrls = (snippets: ReadonlyArray<Snippet>, run: RunClient) =
   const registryRef = useRef<ReturnType<typeof createImageUrlRegistry> | null>(null);
   if (registryRef.current === null) registryRef.current = createImageUrlRegistry();
   const loadingIdsRef = useRef(new Set<string>());
+  const failedIdsRef = useRef(new Set<string>());
   const visibleIdsRef = useRef(new Set<string>());
 
   useEffect(() => {
-    const images = snippets.filter(
-      (snippet) =>
-        snippet.status === "PUBLISHED" &&
-        deriveSnippetPresentation({ fileName: snippet.fileName }).type === "image",
-    );
+    let active = true;
+    const images = selectRemoteThumbnailSnippets(snippets);
     const visibleIds = new Set(images.map((snippet) => snippet.id));
     visibleIdsRef.current = visibleIds;
+    for (const id of failedIdsRef.current) {
+      if (!visibleIds.has(id)) failedIdsRef.current.delete(id);
+    }
 
     const registry = registryRef.current;
     if (registry === null) return;
@@ -126,26 +131,43 @@ const useSnippetImageUrls = (snippets: ReadonlyArray<Snippet>, run: RunClient) =
       });
     }
 
-    for (const snippet of images) {
-      if (registry.has(snippet.id) || loadingIdsRef.current.has(snippet.id)) continue;
-      loadingIdsRef.current.add(snippet.id);
-      void run((client) => collectBytes(client.content.readRemote(snippet.id)))
-        .then((bytes) => {
-          if (!visibleIdsRef.current.has(snippet.id)) return;
-          const url = registry.create(snippet.id, bytes);
-          setThumbnailUrls((current) => ({ ...current, [snippet.id]: url }));
-        })
-        .catch(() => {
-          // The file icon remains visible if a thumbnail cannot be read.
-        })
-        .finally(() => loadingIdsRef.current.delete(snippet.id));
-    }
+    const loadNext = () => {
+      if (!active) return;
+      while (loadingIdsRef.current.size < REMOTE_THUMBNAIL_CONCURRENCY) {
+        const snippet = images.find(
+          (candidate) =>
+            !registry.has(candidate.id) &&
+            !loadingIdsRef.current.has(candidate.id) &&
+            !failedIdsRef.current.has(candidate.id),
+        );
+        if (snippet === undefined) return;
+        loadingIdsRef.current.add(snippet.id);
+        void run((client) => collectBytes(client.content.readRemote(snippet.id)))
+          .then((bytes) => {
+            if (!visibleIdsRef.current.has(snippet.id)) return;
+            const url = registry.create(snippet.id, bytes);
+            setThumbnailUrls((current) => ({ ...current, [snippet.id]: url }));
+          })
+          .catch(() => {
+            failedIdsRef.current.add(snippet.id);
+          })
+          .finally(() => {
+            loadingIdsRef.current.delete(snippet.id);
+            loadNext();
+          });
+      }
+    };
+    loadNext();
+    return () => {
+      active = false;
+    };
   }, [run, snippets]);
 
   useEffect(
     () => () => {
       visibleIdsRef.current.clear();
       loadingIdsRef.current.clear();
+      failedIdsRef.current.clear();
       registryRef.current?.dispose();
     },
     [],

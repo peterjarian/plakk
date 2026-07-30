@@ -285,6 +285,7 @@ describe("completed Snippet publication", () => {
       (rpcs) => rpcs.PrepareSnippetUpload(prepareInput),
       store.db,
       storageService({ prepareUpload }),
+      { ...currentUser, requestOrigin: "https://web.plakk.example" },
     );
 
     expect(prepareUpload).toHaveBeenCalledWith({
@@ -293,6 +294,7 @@ describe("completed Snippet publication", () => {
       fileName: publication.fileName,
       byteSize: publication.byteSize,
       contentType: "text/plain",
+      origin: "https://web.plakk.example",
       workosUserId: currentUser.id,
     });
     expect(store.insertedValues).toEqual([]);
@@ -318,6 +320,17 @@ describe("completed Snippet publication", () => {
       ownerWorkosUserId: currentUser.id,
     });
     expect(store.events).toEqual(["insert", "notify", "commit"]);
+  });
+
+  it("rejects an idempotent replay when its immutable title differs", async () => {
+    const stored = snippet({ title: "Original title" });
+
+    await expect(
+      runSnippetEffect(
+        (rpcs) => rpcs.PublishSnippet({ ...publication, title: "Different title" }),
+        publicationDatabase({ selected: [stored] }).db,
+      ),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
   });
 
   it("returns an identical publication idempotently without another notification", async () => {

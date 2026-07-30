@@ -169,13 +169,15 @@ export const GoogleDriveStorageProvider = {
         providerError(input, "Google Drive upload session request was invalid.", cause),
       ),
     );
-    const request = HttpClientRequest.post(GOOGLE_DRIVE_RESUMABLE_UPLOAD_URL).pipe(
+    let request = HttpClientRequest.post(GOOGLE_DRIVE_RESUMABLE_UPLOAD_URL).pipe(
       HttpClientRequest.bearerToken(input.accessToken),
-      HttpClientRequest.setHeader("Origin", webOrigin),
       HttpClientRequest.setHeader("X-Upload-Content-Length", String(input.byteSize)),
       HttpClientRequest.setHeader("X-Upload-Content-Type", contentType),
       HttpClientRequest.bodyText(body, "application/json; charset=UTF-8"),
     );
+    if (input.origin === webOrigin) {
+      request = HttpClientRequest.setHeader(request, "Origin", webOrigin);
+    }
     const response = yield* HttpClient.execute(request).pipe(
       Effect.mapError((cause) =>
         providerError(input, "Google Drive upload session request failed.", cause),

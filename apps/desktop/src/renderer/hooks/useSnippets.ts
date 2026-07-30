@@ -1,29 +1,17 @@
-import {
-  deriveSnippetPresentation,
-  type LocalContentAvailability,
-  type SnippetPresentation,
-} from "@plakk/shared";
+import { deriveSnippetPresentation, type SnippetPresentation } from "@plakk/shared";
 import type { Snippet } from "@plakk/client-runtime";
+import type { SnippetRowData } from "@plakk/ui/components/SnippetRow";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useLocalState } from "./useLocalState.tsx";
 
-export type SnippetReadModel = {
+export type SnippetReadModel = SnippetRowData & {
   readonly id: string;
-  readonly fileName: string;
-  readonly byteSize: number;
-  readonly createdAt: string;
-  readonly kind: "LOCAL" | "PUBLISHED";
-  readonly localState: null | {
-    readonly status: "UPLOADING" | "FAILED";
-    readonly errorMessage: string | null;
-  };
-  readonly localContentAvailability: LocalContentAvailability;
   readonly presentation: SnippetPresentation;
   readonly thumbnailUrl: string | null;
 };
 
-type SnippetRowReadModel = Omit<SnippetReadModel, "presentation" | "thumbnailUrl">;
+type SnippetRowReadModel = SnippetRowData & { readonly id: string };
 
 export const projectSnippetReadModels = (
   snippets: ReadonlyArray<Snippet>,
