@@ -706,12 +706,12 @@ function IndexRoute() {
                             : setSettingsOpen(true)
                         }
                       >
-                        {billingBlocked ? "Manage billing" : "Finish setup"}
+                        {billingBlocked ? billingCopy.action : "Finish setup"}
                       </Button>
                     }
                   >
                     {billingBlocked
-                      ? "Sync is paused until billing is resolved."
+                      ? billingCopy.description
                       : "Sync is paused until account storage is ready."}
                   </ProductNotice>
                 )}

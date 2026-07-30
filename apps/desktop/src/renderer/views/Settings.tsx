@@ -277,7 +277,7 @@ export function Settings() {
                         storageStatus.canSync
                           ? "Syncing snippets to this storage provider."
                           : storageStatus.account.blockedReasons.includes("billing")
-                            ? "Sync paused until billing is resolved."
+                            ? billingCopy.description
                             : "Sync is currently paused."
                       }
                     />
