@@ -1,8 +1,9 @@
 import type { StorageProvider } from "@plakk/shared";
-import { DropboxIcon } from "@plakk/ui/icons/DropboxIcon";
-import { GoogleDriveIcon } from "@plakk/ui/icons/GoogleDriveIcon";
-import { OneDriveIcon } from "@plakk/ui/icons/OneDriveIcon";
 import type { ComponentProps } from "react";
+
+import { DropboxIcon } from "../icons/DropboxIcon.tsx";
+import { GoogleDriveIcon } from "../icons/GoogleDriveIcon.tsx";
+import { OneDriveIcon } from "../icons/OneDriveIcon.tsx";
 
 export function storageProviderLabel(provider: StorageProvider) {
   switch (provider) {

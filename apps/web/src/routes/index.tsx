@@ -52,7 +52,10 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { StorageProviderIcon, storageProviderLabel } from "../components/StorageProviderIcon.tsx";
+import {
+  StorageProviderIcon,
+  storageProviderLabel,
+} from "@plakk/ui/components/StorageProviderIcon";
 import { useClientRuntime, type ClientRuntimeIssue } from "../hooks/useClientRuntime.ts";
 import { useSnippets, type SnippetReadModel } from "../hooks/useSnippets.ts";
 import { useTheme, type Theme } from "../hooks/useTheme.tsx";

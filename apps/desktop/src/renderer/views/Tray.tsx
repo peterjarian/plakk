@@ -1,16 +1,15 @@
 import { useEffect, useState, type DragEvent } from "react";
 import { ProductNotice } from "@plakk/ui/components/ProductNotice";
+import {
+  StorageProviderIcon,
+  storageProviderLabel,
+} from "@plakk/ui/components/StorageProviderIcon";
 import { SyncStatusIndicator, type SyncStatus } from "@plakk/ui/components/SyncStatusIndicator";
 import type { ClipboardContent, TrayDroppedItem } from "../../ipc/contracts.ts";
 import { useAuth } from "../hooks/useAuth.ts";
 import { useSnippets } from "../hooks/useSnippets.ts";
 import { useLocalState } from "../hooks/useLocalState.tsx";
-import {
-  StorageProviderIcon,
-  storageProviderLabel,
-  useLinkedStorageProvider,
-  useStorageStatus,
-} from "../hooks/useStorageStatus.tsx";
+import { useLinkedStorageProvider, useStorageStatus } from "../hooks/useStorageStatus.tsx";
 import { ipcActionErrorMessage } from "../lib/ipcActionErrorMessage.ts";
 import { ingestFileSnippet, ingestTextSnippet } from "../lib/snippetIngestion.ts";
 import { TrayActions } from "./tray/TrayActions.tsx";

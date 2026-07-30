@@ -9,6 +9,7 @@
     "./components/SnippetComposer": "./src/components/SnippetComposer.tsx",
     "./components/SnippetList": "./src/components/SnippetList.tsx",
     "./components/SnippetRow": "./src/components/SnippetRow.tsx",
+    "./components/StorageProviderIcon": "./src/components/StorageProviderIcon.tsx",
     "./components/SyncStatusIndicator": "./src/components/SyncStatusIndicator.tsx",
     "./components/settings": "./src/components/settings.tsx",
     "./primitives/avatar": "./src/primitives/avatar.tsx",

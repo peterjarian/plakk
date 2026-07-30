@@ -38,8 +38,6 @@ vi.mock("../hooks/useLocalState.tsx", () => ({
 }));
 
 vi.mock("../hooks/useStorageStatus.tsx", () => ({
-  StorageProviderIcon: () => null,
-  storageProviderLabel: () => "Google Drive",
   useLinkedStorageProvider: () => "GOOGLE_DRIVE",
   useStorageStatus: () => ({
     kind: "connected",

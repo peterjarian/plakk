@@ -5,6 +5,10 @@ import { ProductNotice } from "@plakk/ui/components/ProductNotice";
 import { SnippetList } from "@plakk/ui/components/SnippetList";
 import { SnippetRow } from "@plakk/ui/components/SnippetRow";
 import { SnippetComposer } from "@plakk/ui/components/SnippetComposer";
+import {
+  StorageProviderIcon,
+  storageProviderLabel,
+} from "@plakk/ui/components/StorageProviderIcon";
 import { SyncStatusIndicator, type SyncStatus } from "@plakk/ui/components/SyncStatusIndicator";
 import { Button } from "@plakk/ui/primitives/button";
 import { Checkbox } from "@plakk/ui/primitives/checkbox";
@@ -20,8 +24,6 @@ import { signOut, useAuth } from "../hooks/useAuth.ts";
 import { useSnippets } from "../hooks/useSnippets.ts";
 import { useLocalState } from "../hooks/useLocalState.tsx";
 import {
-  StorageProviderIcon,
-  storageProviderLabel,
   openStorageSetup,
   useLinkedStorageProvider,
   useStorageStatus,

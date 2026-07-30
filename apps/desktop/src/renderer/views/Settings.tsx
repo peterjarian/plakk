@@ -24,14 +24,16 @@ import {
 } from "@plakk/ui/primitives/select";
 import { Switch } from "@plakk/ui/primitives/switch";
 import { ProductNotice } from "@plakk/ui/components/ProductNotice";
+import {
+  StorageProviderIcon,
+  storageProviderLabel,
+} from "@plakk/ui/components/StorageProviderIcon";
 import { Settings as SettingsUI } from "@plakk/ui/components/settings";
 import { getInitials } from "@plakk/ui/lib/getInitials";
 import { useAuth } from "../hooks/useAuth.ts";
 import { setAppearancePreference, useAppearance } from "../hooks/useAppearance.ts";
 import { useLocalState } from "../hooks/useLocalState.tsx";
 import {
-  StorageProviderIcon,
-  storageProviderLabel,
   openStorageSetup,
   useLinkedStorageProvider,
   useStorageStatus,
