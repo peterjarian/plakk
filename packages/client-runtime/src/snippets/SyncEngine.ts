@@ -29,7 +29,12 @@ export type SyncFailure =
   | SnippetConflictError
   | SnippetNotFoundError;
 
-export const SyncStatusSchema = Schema.Literals(["CONNECTED", "RECONNECTING"] as const);
+export const SyncStatusSchema = Schema.Literals([
+  "STARTING",
+  "CONNECTED",
+  "RECONNECTING",
+  "SESSION_ERROR",
+] as const);
 export type SyncStatus = typeof SyncStatusSchema.Type;
 
 export class SyncEngine extends Context.Service<
@@ -53,7 +58,22 @@ export class SyncEngine extends Context.Service<
       const sql = yield* SqlClient.SqlClient;
       const snippets = yield* SnippetStore;
       const content = Option.getOrUndefined(yield* Effect.serviceOption(ContentStore));
-      const status = yield* SubscriptionRef.make<SyncStatus>("RECONNECTING");
+      const status = yield* SubscriptionRef.make<SyncStatus>("STARTING");
+
+      const reportSyncFailure = (cause: Cause.Cause<unknown>) => {
+        const error = Cause.findErrorOption(cause);
+        const nextStatus =
+          Option.isSome(error) && Schema.is(SessionError)(error.value)
+            ? "SESSION_ERROR"
+            : "RECONNECTING";
+        return SubscriptionRef.set(status, nextStatus).pipe(
+          Effect.andThen(
+            Effect.logWarning("Snippet sync disconnected", {
+              cause: Cause.pretty(cause),
+            }),
+          ),
+        );
+      };
 
       /** Converts a backend-declared failure into a safe runtime error. */
       const failRpc = (error: RpcError): Effect.Effect<never, SyncFailure> => {
@@ -138,24 +158,18 @@ export class SyncEngine extends Context.Service<
         while (true) {
           yield* pull.pipe(
             Effect.tap(() => SubscriptionRef.set(status, "CONNECTED")),
-            Effect.catchCause((cause) =>
-              Effect.logWarning("Initial snippet sync failed", {
-                cause: Cause.pretty(cause),
-              }),
-            ),
+            Effect.catchCause(reportSyncFailure),
           );
 
           yield* rpc.WatchSnippetInvalidations(undefined).pipe(
             Stream.filter((event) => event === SNIPPETS_CHANGED),
             Stream.runForEach(() => pull),
-            Effect.catchCause((cause) =>
-              Effect.logWarning("Snippet sync disconnected", {
-                cause: Cause.pretty(cause),
-              }),
-            ),
+            Effect.catchCause(reportSyncFailure),
           );
 
-          yield* SubscriptionRef.set(status, "RECONNECTING");
+          if ((yield* SubscriptionRef.get(status)) !== "SESSION_ERROR") {
+            yield* SubscriptionRef.set(status, "RECONNECTING");
+          }
           yield* Effect.sleep("5 seconds");
         }
       }).pipe(Effect.withSpan("SyncEngine.run"));

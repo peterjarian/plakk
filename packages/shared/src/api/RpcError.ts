@@ -14,5 +14,6 @@ export type RpcErrorCode = typeof RpcErrorCodeSchema.Type;
 export class RpcError extends Schema.TaggedErrorClass<RpcError>()("RpcError", {
   code: RpcErrorCodeSchema,
   message: Schema.String,
+  retryable: Schema.optionalKey(Schema.Boolean),
   traceId: Schema.String.pipe(Schema.withConstructorDefault(Effect.succeed("untraced"))),
 }) {}

@@ -16,6 +16,7 @@ import { TestClock } from "effect/testing";
 
 import {
   StorageCredentialsError,
+  StorageDownloadRejectedError,
   type StorageDownloadError,
   StorageNeedsReauthorizationError,
   StorageNotConnectedError,
@@ -45,6 +46,7 @@ const publication = {
 };
 const snippet = (overrides: Partial<SnippetRow> = {}): SnippetRow => ({
   ...publication,
+  title: null,
   ownerWorkosUserId: currentUser.id,
   createdAt: timestamp,
   updatedAt: timestamp,
@@ -56,7 +58,7 @@ const storageService = (
 ): StorageProvider["Service"] =>
   StorageProvider.of({
     deleteObject: () => Effect.void,
-    downloadObject: () => Effect.succeed(new Uint8Array()),
+    downloadStream: () => Stream.empty,
     ensureConnected: () => Effect.void,
     getDestinationUrl: () => Effect.succeed("https://drive.example/folder"),
     getLinkedProvider: () => Effect.succeed("GOOGLE_DRIVE"),
@@ -283,6 +285,7 @@ describe("completed Snippet publication", () => {
       (rpcs) => rpcs.PrepareSnippetUpload(prepareInput),
       store.db,
       storageService({ prepareUpload }),
+      { ...currentUser, requestOrigin: "https://web.plakk.example" },
     );
 
     expect(prepareUpload).toHaveBeenCalledWith({
@@ -291,27 +294,43 @@ describe("completed Snippet publication", () => {
       fileName: publication.fileName,
       byteSize: publication.byteSize,
       contentType: "text/plain",
+      origin: "https://web.plakk.example",
       workosUserId: currentUser.id,
     });
     expect(store.insertedValues).toEqual([]);
   });
 
   it("inserts only the completed Snippet and notifies before commit", async () => {
-    const stored = snippet();
+    const titledPublication = { ...publication, title: "A stable title" };
+    const stored = snippet({ title: titledPublication.title });
     const store = publicationDatabase({ inserted: [stored] });
 
-    const result = await runSnippetEffect((rpcs) => rpcs.PublishSnippet(publication), store.db);
+    const result = await runSnippetEffect(
+      (rpcs) => rpcs.PublishSnippet(titledPublication),
+      store.db,
+    );
 
     expect(result).toEqual({
-      ...publication,
+      ...titledPublication,
       createdAt: timestamp.toISOString(),
       updatedAt: timestamp.toISOString(),
     });
     expect(store.insertedValues[0]).toMatchObject({
-      ...publication,
+      ...titledPublication,
       ownerWorkosUserId: currentUser.id,
     });
     expect(store.events).toEqual(["insert", "notify", "commit"]);
+  });
+
+  it("rejects an idempotent replay when its immutable title differs", async () => {
+    const stored = snippet({ title: "Original title" });
+
+    await expect(
+      runSnippetEffect(
+        (rpcs) => rpcs.PublishSnippet({ ...publication, title: "Different title" }),
+        publicationDatabase({ selected: [stored] }).db,
+      ),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
   });
 
   it("returns an identical publication idempotently without another notification", async () => {
@@ -368,42 +387,85 @@ describe("complete Snippet snapshots", () => {
   });
 });
 
-describe("stored snippet download preparation", () => {
-  it("returns only durable metadata and a short-lived download target", async () => {
-    const stored = snippet();
-    const download = { url: "https://download.example/object", headers: [] };
-    const getDownloadTarget = vi.fn(() => Effect.succeed(download));
+describe("stored snippet content download", () => {
+  it("streams bytes through the backend without exposing provider credentials", async () => {
+    const bytes = new TextEncoder().encode("note");
+    const downloadStream = vi.fn(() => Stream.succeed(bytes));
 
     const result = await runSnippetEffect(
-      (rpcs) => rpcs.PrepareSnippetDownload({ id: stored.id }),
-      downloadDatabase([stored]),
-      storageService({ getDownloadTarget }),
+      (rpcs) =>
+        rpcs.DownloadSnippetContent({ id: publication.id }).pipe(
+          Stream.runCollect,
+          Effect.map((chunks) => Uint8Array.from(chunks.flatMap((chunk) => Array.from(chunk)))),
+        ),
+      downloadDatabase([snippet()]),
+      storageService({ downloadStream }),
     );
 
-    expect(result).toEqual({
-      storageProvider: "GOOGLE_DRIVE",
-      fileName: "note.txt",
-      byteSize: 4,
-      download,
-    });
-    expect(getDownloadTarget).toHaveBeenCalledWith({
+    expect(result).toEqual(bytes);
+    expect(downloadStream).toHaveBeenCalledWith({
       storageProvider: "GOOGLE_DRIVE",
       storageObjectId: "drive-object",
+      expectedByteSize: 4,
       workosUserId: currentUser.id,
     });
   });
 
-  it("does not resolve a download target when no uploaded object is available", async () => {
-    const getDownloadTarget = vi.fn(storageService().getDownloadTarget);
+  it("does not access storage when no uploaded object is available", async () => {
+    const downloadStream = vi.fn(storageService().downloadStream);
 
     await expect(
       runSnippetEffect(
-        (rpcs) => rpcs.PrepareSnippetDownload({ id: publication.id }),
+        (rpcs) => rpcs.DownloadSnippetContent({ id: publication.id }).pipe(Stream.runDrain),
         downloadDatabase([]),
-        storageService({ getDownloadTarget }),
+        storageService({ downloadStream }),
       ),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
-    expect(getDownloadTarget).not.toHaveBeenCalled();
+    expect(downloadStream).not.toHaveBeenCalled();
+  });
+
+  it("marks terminal provider rejections as non-retryable", async () => {
+    const downloadStream = () =>
+      Stream.fail(
+        new StorageDownloadRejectedError({
+          storageProvider: "GOOGLE_DRIVE",
+          status: 403,
+          message: "provider rejected download",
+        }),
+      );
+
+    await expect(
+      runSnippetEffect(
+        (rpcs) => rpcs.DownloadSnippetContent({ id: publication.id }).pipe(Stream.runDrain),
+        downloadDatabase([snippet()]),
+        storageService({ downloadStream }),
+      ),
+    ).rejects.toMatchObject({
+      code: "INTERNAL_SERVER_ERROR",
+      retryable: false,
+    });
+  });
+
+  it("marks provider integrity failures as non-retryable", async () => {
+    const downloadStream = () =>
+      Stream.fail(
+        new StorageProviderError({
+          storageProvider: "GOOGLE_DRIVE",
+          message: "Stored object size does not match snippet metadata.",
+          retryable: false,
+        }),
+      );
+
+    await expect(
+      runSnippetEffect(
+        (rpcs) => rpcs.DownloadSnippetContent({ id: publication.id }).pipe(Stream.runDrain),
+        downloadDatabase([snippet()]),
+        storageService({ downloadStream }),
+      ),
+    ).rejects.toMatchObject({
+      code: "INTERNAL_SERVER_ERROR",
+      retryable: false,
+    });
   });
 
   it.each([
@@ -435,13 +497,13 @@ describe("stored snippet download preparation", () => {
       "GOOGLE_DRIVE: provider failed",
     ],
   ] as const)("maps %s to %s", async (storageError, code, message) => {
-    const getDownloadTarget = () => Effect.fail(storageError as StorageDownloadError);
+    const downloadStream = () => Stream.fail(storageError as StorageDownloadError);
 
     await expect(
       runSnippetEffect(
-        (rpcs) => rpcs.PrepareSnippetDownload({ id: publication.id }),
+        (rpcs) => rpcs.DownloadSnippetContent({ id: publication.id }).pipe(Stream.runDrain),
         downloadDatabase([snippet()]),
-        storageService({ getDownloadTarget }),
+        storageService({ downloadStream }),
       ),
     ).rejects.toMatchObject({ code, message });
   });

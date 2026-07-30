@@ -209,7 +209,7 @@ const findSnippet = Effect.fn("DesktopSession.findSnippet")(function* (id: strin
     .withClient(
       Effect.fn("DesktopSession.findAuthorizedSnippet")(function* (client) {
         const current = yield* session.current;
-        const snippet = current.snippets.find((item) => item.snippet.id === id);
+        const snippet = current.snippets.find((item) => item.id === id);
         if (snippet === undefined) {
           return yield* new IpcHandlerError({ cause: null, message: "Snippet was not found." });
         }
@@ -228,7 +228,7 @@ handle(ipcMethods.snippetCopy, (id) =>
       asIpcError,
     );
     const presentation = deriveSnippetPresentation({
-      fileName: snippet.snippet.fileName,
+      fileName: snippet.fileName,
       content: bytes,
     });
     if (presentation.type === "text" || presentation.type === "hyperlink") {
@@ -241,7 +241,7 @@ handle(ipcMethods.snippetCopy, (id) =>
     }
     return yield* writeSnippetToClipboard({
       bytes,
-      fileName: snippet.snippet.fileName,
+      fileName: snippet.fileName,
       contentType: null,
     }).pipe(withIpcMessage("Could not copy this snippet."));
   }),

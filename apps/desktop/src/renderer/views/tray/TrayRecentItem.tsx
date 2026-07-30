@@ -1,4 +1,5 @@
 import { SnippetRow } from "@plakk/ui/components/SnippetRow";
+import { ProductNotice } from "@plakk/ui/components/ProductNotice";
 import { Button } from "@plakk/ui/primitives/button";
 
 import type { SnippetReadModel } from "../../hooks/useSnippets.ts";
@@ -31,13 +32,18 @@ export function TrayRecentItem({
   if (!snippet) {
     if (readError !== null) {
       return (
-        <section className="grid min-h-0 flex-1 place-content-center gap-2 px-6 text-center">
-          <p className="text-xs text-destructive" role="alert">
-            {readError}
-          </p>
-          <Button type="button" variant="outline" size="sm" onClick={onReload}>
-            Try again
-          </Button>
+        <section className="grid min-h-0 flex-1 place-content-center px-6">
+          <ProductNotice
+            tone="danger"
+            title={readError}
+            action={
+              <Button type="button" variant="outline" size="sm" onClick={onReload}>
+                Try again
+              </Button>
+            }
+          >
+            Your saved snippets remain on this device.
+          </ProductNotice>
         </section>
       );
     }

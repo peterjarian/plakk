@@ -14,7 +14,7 @@ export class SnippetAlreadyExistsError extends Schema.TaggedErrorClass<SnippetAl
 /** Persists a preparing local snippet before any remote upload work begins. */
 export const createPreparingSnippet = Effect.fn("ClientQueries.createPreparingSnippet")(function* (
   userId: string,
-  input: PrepareSnippetUploadPayload,
+  input: PrepareSnippetUploadPayload & { readonly title?: string },
   createdAt: string,
 ) {
   const sql = yield* SqlClient.SqlClient;
@@ -43,6 +43,7 @@ export const createPreparingSnippet = Effect.fn("ClientQueries.createPreparingSn
           user_id,
           id,
           file_name,
+          title,
           byte_size,
           storage_provider,
           media_type,
@@ -56,6 +57,7 @@ export const createPreparingSnippet = Effect.fn("ClientQueries.createPreparingSn
           ${userId},
           ${input.id},
           ${input.fileName},
+          ${input.title ?? null},
           ${input.byteSize},
           ${input.storageProvider},
           ${input.mediaType},
@@ -69,6 +71,20 @@ export const createPreparingSnippet = Effect.fn("ClientQueries.createPreparingSn
     }),
   );
 });
+
+/** Stores the immutable title derived from the upload's validated bytes. */
+export const setPreparingSnippetTitle = Effect.fn("ClientQueries.setPreparingSnippetTitle")(
+  function* (userId: string, snippetId: string, title: string) {
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`
+      UPDATE client_snippets
+      SET title = ${title}
+      WHERE user_id = ${userId}
+        AND id = ${snippetId}
+        AND status = 'PREPARING'
+    `;
+  },
+);
 
 /** Marks a preparing upload as actively transferring. */
 export const markSnippetUploading = Effect.fn("ClientQueries.markSnippetUploading")(function* (
@@ -134,6 +150,7 @@ export const markSnippetPublished = Effect.fn("ClientQueries.markSnippetPublishe
     UPDATE client_snippets
     SET
       file_name = ${snippet.fileName},
+      title = ${snippet.title ?? null},
       byte_size = ${snippet.byteSize},
       storage_provider = ${snippet.storageProvider},
       storage_object_id = ${snippet.storageObjectId},

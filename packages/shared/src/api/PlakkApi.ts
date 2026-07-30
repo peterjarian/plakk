@@ -4,7 +4,7 @@ import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 import * as RpcMiddleware from "effect/unstable/rpc/RpcMiddleware";
 
-import { StorageProviderLiteral } from "../index.ts";
+import { SNIPPET_TITLE_MAX_CHARACTERS, StorageProviderLiteral } from "../index.ts";
 import { RpcError } from "./RpcError.ts";
 
 export const AccountBlockedReasonSchema = Schema.Literals(["billing", "storage"] as const);
@@ -50,6 +50,23 @@ export const accountCanSyncWithConnection = (
   connection: StorageProviderStatus | null,
 ): boolean => accountCanSync(account) && connection?.status === "CONNECTED";
 
+export const ClientCapabilitySchema = Schema.Union([
+  Schema.Struct({
+    status: Schema.Literal("OFFLINE"),
+    storageProvider: Schema.Struct({
+      known: Schema.Boolean,
+      value: Schema.NullOr(StorageProviderLiteral),
+    }),
+  }),
+  Schema.Struct({
+    status: Schema.Literal("ONLINE"),
+    account: AccountStatusSchema,
+    connection: Schema.NullOr(StorageProviderStatusSchema),
+  }),
+]);
+
+export type ClientCapability = typeof ClientCapabilitySchema.Type;
+
 export const PreparedStorageUploadSchema = Schema.Struct({
   storageProvider: StorageProviderLiteral,
   storageObjectId: Schema.NullOr(Schema.String),
@@ -72,10 +89,12 @@ export const PreparedStorageUploadSchema = Schema.Struct({
 export type PreparedStorageUpload = typeof PreparedStorageUploadSchema.Type;
 
 export const SnippetIdSchema = Schema.String.check(Schema.isUUID());
+const SnippetTitleSchema = Schema.String.check(Schema.isMaxLength(SNIPPET_TITLE_MAX_CHARACTERS));
 
 export const ApiSnippetSchema = Schema.Struct({
   id: SnippetIdSchema,
   fileName: Schema.String,
+  title: Schema.optionalKey(SnippetTitleSchema),
   byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   storageProvider: StorageProviderLiteral,
   storageObjectId: Schema.String,
@@ -108,6 +127,7 @@ export type PrepareSnippetUploadPayload = typeof PrepareSnippetUploadPayloadSche
 export const PublishSnippetPayloadSchema = Schema.Struct({
   id: SnippetIdSchema,
   fileName: Schema.String,
+  title: Schema.optionalKey(SnippetTitleSchema),
   byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   storageProvider: StorageProviderLiteral,
   storageObjectId: Schema.String,
@@ -115,21 +135,11 @@ export const PublishSnippetPayloadSchema = Schema.Struct({
 
 export type PublishSnippetPayload = typeof PublishSnippetPayloadSchema.Type;
 
-export const PreparedSnippetDownloadSchema = Schema.Struct({
-  storageProvider: StorageProviderLiteral,
-  fileName: Schema.String,
-  byteSize: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-  download: Schema.Struct({
-    url: Schema.String,
-    headers: Schema.Array(Schema.Struct({ name: Schema.String, value: Schema.String })),
-  }),
-});
-
-export type PreparedSnippetDownload = typeof PreparedSnippetDownloadSchema.Type;
-
-export class CurrentUser extends Context.Service<CurrentUser, { readonly id: string }>()(
-  "@plakk/shared/api/PlakkApi/CurrentUser",
-) {}
+/** Authenticated user context scoped to the current RPC request. */
+export class CurrentUser extends Context.Service<
+  CurrentUser,
+  { readonly id: string; readonly requestOrigin?: string }
+>()("@plakk/shared/api/PlakkApi/CurrentUser") {}
 
 /** Authentication is missing or no longer valid and needs user or platform action. */
 export class SessionError extends Schema.TaggedErrorClass<SessionError>()("SessionError", {
@@ -206,10 +216,11 @@ export const SnippetRpcs = RpcGroup.make(
     success: ApiSnippetSchema,
     error: RpcError,
   }),
-  Rpc.make("PrepareSnippetDownload", {
+  Rpc.make("DownloadSnippetContent", {
     payload: { id: SnippetIdSchema },
-    success: PreparedSnippetDownloadSchema,
+    success: Schema.Uint8Array,
     error: RpcError,
+    stream: true,
   }),
   Rpc.make("DeleteSnippet", {
     payload: { id: SnippetIdSchema },

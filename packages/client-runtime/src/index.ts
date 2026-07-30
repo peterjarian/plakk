@@ -1,6 +1,7 @@
 export {
   Client,
   ClientSnapshotSchema,
+  clearClientMetadata,
   clientLayer,
   type ClientCapability,
   type ClientError,

@@ -1,9 +1,5 @@
-import { DropboxIcon } from "@plakk/ui/icons/DropboxIcon";
-import { GoogleDriveIcon } from "@plakk/ui/icons/GoogleDriveIcon";
-import { OneDriveIcon } from "@plakk/ui/icons/OneDriveIcon";
 import { accountCanSyncWithConnection, type AccountStatus } from "@plakk/shared/PlakkApi";
 import type { StorageProvider } from "@plakk/shared";
-import type { ComponentProps } from "react";
 
 import type { LocalState } from "../../ipc/contracts.ts";
 import { useLocalState } from "./useLocalState.tsx";
@@ -84,28 +80,3 @@ export function useLinkedStorageProvider(): StorageProvider | null {
 }
 
 export const openStorageSetup = (url: string) => window.ipc.openExternal(url);
-
-export const storageProviderLabel = (provider: StorageProvider) => {
-  switch (provider) {
-    case "GOOGLE_DRIVE":
-      return "Google Drive";
-    case "ONE_DRIVE":
-      return "OneDrive";
-    case "DROPBOX":
-      return "Dropbox";
-  }
-};
-
-export function StorageProviderIcon({
-  provider,
-  ...props
-}: { readonly provider: StorageProvider } & ComponentProps<"svg">) {
-  switch (provider) {
-    case "GOOGLE_DRIVE":
-      return <GoogleDriveIcon {...props} />;
-    case "ONE_DRIVE":
-      return <OneDriveIcon {...props} />;
-    case "DROPBOX":
-      return <DropboxIcon {...props} />;
-  }
-}

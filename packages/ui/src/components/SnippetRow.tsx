@@ -7,6 +7,7 @@ import * as DateTime from "effect/DateTime";
 import {
   ArrowUpRight,
   Check,
+  CircleAlert,
   Copy,
   Download,
   FileText,
@@ -95,6 +96,7 @@ export type SnippetRowProps = {
   copying?: boolean;
   copyError?: string;
   showActions?: boolean;
+  contentMode?: "mirrored" | "remote";
 };
 
 export function SnippetRow(props: SnippetRowProps) {
@@ -112,6 +114,7 @@ export function SnippetRow(props: SnippetRowProps) {
     copying = false,
     copyError,
     showActions = true,
+    contentMode = "mirrored",
   } = props;
   const { Icon } = presentationMeta[presentation.type];
   const localState = snippet.localState;
@@ -119,9 +122,12 @@ export function SnippetRow(props: SnippetRowProps) {
   const isFailed = localState?.status === "FAILED";
   const isDownloading = snippet.localContentAvailability.status === "DOWNLOADING";
   const needsDownload =
+    contentMode === "mirrored" &&
     snippet.kind === "PUBLISHED" &&
     (snippet.localContentAvailability.status === "NOT_AVAILABLE" ||
       snippet.localContentAvailability.status === "FAILED");
+  const canCopy =
+    contentMode === "mirrored" || presentation.type === "text" || presentation.type === "hyperlink";
   const title = presentation.title;
   const time = formatSnippetDate(snippet.createdAt, now);
   const metadata =
@@ -132,10 +138,12 @@ export function SnippetRow(props: SnippetRowProps) {
     copyError !== undefined
       ? copyError
       : isFailed
-        ? (localState?.errorMessage ?? "Upload failed. Dismiss it and add the content again.")
+        ? `${localState?.errorMessage ?? "Upload failed."} Dismiss it and add the content again.`
         : snippet.localContentAvailability.status === "FAILED"
           ? snippet.localContentAvailability.message
           : metadata;
+  const hasInlineFailure =
+    copyError !== undefined || isFailed || snippet.localContentAvailability.status === "FAILED";
 
   return (
     <li>
@@ -154,7 +162,15 @@ export function SnippetRow(props: SnippetRowProps) {
 
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium">{title}</p>
-          {subtitle && <p className="truncate text-xs text-muted-foreground">{subtitle}</p>}
+          {subtitle &&
+            (hasInlineFailure ? (
+              <p className="flex items-center gap-1 truncate text-xs text-destructive" role="alert">
+                <CircleAlert className="size-3 shrink-0" aria-hidden="true" />
+                <span className="truncate">{subtitle}</span>
+              </p>
+            ) : (
+              <p className="truncate text-xs text-muted-foreground">{subtitle}</p>
+            ))}
         </div>
 
         <div className="flex shrink-0 items-center justify-end">
@@ -203,7 +219,7 @@ export function SnippetRow(props: SnippetRowProps) {
 
           {showActions && snippet.kind === "PUBLISHED" && (
             <div className="invisible flex items-center gap-0.5 group-hover:visible group-focus-within:visible">
-              {!needsDownload && !isDownloading && (
+              {!needsDownload && !isDownloading && canCopy && (
                 <Button
                   type="button"
                   variant="ghost"
@@ -232,6 +248,17 @@ export function SnippetRow(props: SnippetRowProps) {
                   <ArrowUpRight />
                 </Button>
               )}
+              {contentMode === "remote" && onDownload && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Download"
+                  onClick={onDownload}
+                >
+                  <Download />
+                </Button>
+              )}
               <Button
                 type="button"
                 variant="ghost"
@@ -245,11 +272,6 @@ export function SnippetRow(props: SnippetRowProps) {
             </div>
           )}
         </div>
-        {copyError && (
-          <span className="sr-only" role="status">
-            {copyError}
-          </span>
-        )}
       </div>
     </li>
   );

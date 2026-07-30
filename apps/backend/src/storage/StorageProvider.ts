@@ -14,6 +14,7 @@ export class StorageProviderError extends Schema.TaggedErrorClass<StorageProvide
   {
     storageProvider: StorageProviderLiteral,
     message: Schema.String,
+    retryable: Schema.optionalKey(Schema.Boolean),
     cause: Schema.optionalKey(Schema.Defect()),
   },
 ) {}
@@ -22,6 +23,15 @@ export class StorageObjectNotFoundError extends Schema.TaggedErrorClass<StorageO
   "StorageObjectNotFoundError",
   {
     storageProvider: StorageProviderLiteral,
+    message: Schema.String,
+  },
+) {}
+
+export class StorageDownloadRejectedError extends Schema.TaggedErrorClass<StorageDownloadRejectedError>()(
+  "StorageDownloadRejectedError",
+  {
+    storageProvider: StorageProviderLiteral,
+    status: Schema.Int,
     message: Schema.String,
   },
 ) {}
@@ -37,6 +47,7 @@ export type PrepareStorageUploadInput = {
   readonly fileName: string;
   readonly byteSize: number;
   readonly contentType: string | null;
+  readonly origin?: string;
 };
 
 export type DownloadStorageObjectInput = {
@@ -86,7 +97,10 @@ export type StorageProviderOperationError =
 
 export type StorageUploadError = StorageProviderOperationError;
 export type StorageDeletionError = StorageProviderOperationError;
-export type StorageDownloadError = StorageUploadError | StorageObjectNotFoundError;
+export type StorageDownloadError =
+  | StorageUploadError
+  | StorageDownloadRejectedError
+  | StorageObjectNotFoundError;
 
 export type StorageProviderAdapter = {
   readonly storageProvider: PrepareStorageUploadInput["storageProvider"];
@@ -138,6 +152,7 @@ export const readStorageObjectBytes = Effect.fn("readStorageObjectBytes")(functi
     return yield* new StorageProviderError({
       storageProvider: input.storageProvider,
       message: "Stored object size does not match snippet metadata.",
+      retryable: false,
     });
   }
 
@@ -151,6 +166,7 @@ export const readStorageObjectBytes = Effect.fn("readStorageObjectBytes")(functi
           new StorageProviderError({
             storageProvider: input.storageProvider,
             message: "Stored object size does not match snippet metadata.",
+            retryable: false,
           }),
         );
       }
@@ -172,6 +188,7 @@ export const readStorageObjectBytes = Effect.fn("readStorageObjectBytes")(functi
     return yield* new StorageProviderError({
       storageProvider: input.storageProvider,
       message: "Stored object size does not match snippet metadata.",
+      retryable: false,
     });
   }
 
@@ -202,9 +219,9 @@ export class StorageProvider extends Context.Service<
     readonly getLinkedProvider: (
       workosUserId: string,
     ) => Effect.Effect<StorageProviderName | null, StorageCredentialsError>;
-    readonly downloadObject: (
+    readonly downloadStream: (
       input: Omit<DownloadStorageObjectInput, "accessToken"> & { readonly workosUserId: string },
-    ) => Effect.Effect<Uint8Array, StorageDownloadError>;
+    ) => Stream.Stream<Uint8Array, StorageDownloadError>;
     readonly getDownloadUrl: (
       input: Omit<GetStorageObjectUrlInput, "accessToken"> & { readonly workosUserId: string },
     ) => Effect.Effect<string, StorageDownloadError>;

@@ -45,6 +45,12 @@ const makeLayer = (options?: {
         Layer.succeed(
           RpcClient,
           RpcClient.of({
+            BeginStorageProviderLink: ({
+              storageProvider,
+            }: Parameters<RpcClient["Service"]["BeginStorageProviderLink"]>[0]) =>
+              Effect.succeed({
+                url: `https://connect.example/${storageProvider.toLowerCase()}`,
+              }),
             GetAccountStatus: () =>
               Effect.succeed({
                 canSync: true,
@@ -79,6 +85,13 @@ const makeLayer = (options?: {
               Stream.fromEffect(
                 Effect.sync(() => {
                   events.push(`read:${id}`);
+                  return new Uint8Array([1, 2, 3, 4]);
+                }),
+              ),
+            readRemote: (id) =>
+              Stream.fromEffect(
+                Effect.sync(() => {
+                  events.push(`readRemote:${id}`);
                   return new Uint8Array([1, 2, 3, 4]);
                 }),
               ),
@@ -162,6 +175,7 @@ describe("Client", () => {
           externalDestinationUrl: "https://drive.google.com/drive/folders/plakk",
         },
       });
+      expect(yield* client.storage.beginLink("DROPBOX")).toBe("https://connect.example/dropbox");
 
       yield* client.uploads.upload(
         {
@@ -179,6 +193,7 @@ describe("Client", () => {
       yield* client.snippets.dismissFailedUpload(snippetId);
       yield* client.content.download(snippetId);
       yield* client.content.read(snippetId).pipe(Stream.runDrain);
+      yield* client.content.readRemote(snippetId).pipe(Stream.runDrain);
       yield* client.content.freeUp;
 
       const sql = yield* SqlClient.SqlClient;
@@ -226,6 +241,7 @@ describe("Client", () => {
         `dismiss:${snippetId}`,
         `download:${snippetId}`,
         `read:${snippetId}`,
+        `readRemote:${snippetId}`,
         "freeUp",
         `clear:${snippetId}`,
       ]);

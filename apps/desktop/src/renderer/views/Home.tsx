@@ -1,8 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowUpRight, LoaderCircle, Plus, TriangleAlert } from "lucide-react";
 import { AppHeader } from "@plakk/ui/components/AppHeader";
+import { ProductNotice } from "@plakk/ui/components/ProductNotice";
 import { SnippetList } from "@plakk/ui/components/SnippetList";
 import { SnippetRow } from "@plakk/ui/components/SnippetRow";
+import { SnippetComposer } from "@plakk/ui/components/SnippetComposer";
+import {
+  StorageProviderIcon,
+  storageProviderLabel,
+} from "@plakk/ui/components/StorageProviderIcon";
+import { SyncStatusIndicator, type SyncStatus } from "@plakk/ui/components/SyncStatusIndicator";
 import { Button } from "@plakk/ui/primitives/button";
 import { Checkbox } from "@plakk/ui/primitives/checkbox";
 import {
@@ -13,14 +20,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@plakk/ui/primitives/dialog";
-import { SyncStatusIndicator, type SyncStatus } from "../components/SyncStatusIndicator.tsx";
-import { SnippetComposer } from "../components/SnippetComposer.tsx";
 import { signOut, useAuth } from "../hooks/useAuth.ts";
 import { useSnippets } from "../hooks/useSnippets.ts";
 import { useLocalState } from "../hooks/useLocalState.tsx";
 import {
-  StorageProviderIcon,
-  storageProviderLabel,
   openStorageSetup,
   useLinkedStorageProvider,
   useStorageStatus,
@@ -346,37 +349,49 @@ export function Home({ active = true }: { active?: boolean }) {
       <div className="scrollbar-hidden flex min-h-0 flex-1 flex-col overflow-y-auto px-6 pb-4">
         <div className="sticky top-0 z-20 bg-background pt-3 pb-5">
           {shouldWarnForStorageUsage(localState.storageUsageBytes) && (
-            <div className="mb-2 flex items-center gap-2 rounded-md bg-muted px-2.5 py-1.5 text-xs text-muted-foreground">
-              <TriangleAlert className="size-3.5 shrink-0 text-amber-600" aria-hidden="true" />
-              <span className="min-w-0 flex-1">Plakk is using over 30 GB on this device.</span>
-              <Button type="button" variant="ghost" size="xs" onClick={() => navigate("settings")}>
-                Manage storage
-              </Button>
-            </div>
+            <ProductNotice
+              className="mb-2"
+              tone="warning"
+              action={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  onClick={() => navigate("settings")}
+                >
+                  Manage storage
+                </Button>
+              }
+            >
+              Plakk is using over 30 GB on this device.
+            </ProductNotice>
           )}
           {auth.issue !== null && (
-            <div className="mb-2 flex items-center gap-2 rounded-md bg-muted px-2.5 py-1.5 text-xs text-muted-foreground">
-              <TriangleAlert className="size-3.5 shrink-0 text-amber-600" aria-hidden="true" />
-              <span className="min-w-0 flex-1 truncate">{auth.issue.message}</span>
-            </div>
+            <ProductNotice className="mb-2" tone="warning" title="Your session needs attention">
+              {auth.issue.message}
+            </ProductNotice>
           )}
           {accountBlocked &&
             storageStatus.kind !== "loading" &&
             storageStatus.kind !== "offline" &&
             storageStatus.kind !== "failed" && (
-              <div className="mb-2 flex items-center gap-2 rounded-md bg-muted px-2.5 py-1.5 text-xs text-muted-foreground">
-                <TriangleAlert className="size-3.5 shrink-0 text-amber-600" aria-hidden="true" />
-                <span className="min-w-0 flex-1 truncate">{syncPausedMessage}</span>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="xs"
-                  onClick={() => openStorageSetup(syncSetupUrl)}
-                >
-                  Finish on web
-                  <ArrowUpRight />
-                </Button>
-              </div>
+              <ProductNotice
+                className="mb-2"
+                tone="warning"
+                action={
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    onClick={() => openStorageSetup(syncSetupUrl)}
+                  >
+                    Finish on web
+                    <ArrowUpRight />
+                  </Button>
+                }
+              >
+                {syncPausedMessage}
+              </ProductNotice>
             )}
           <SnippetComposer.Root disabled={accountBlocked} onSubmit={addTextSnippet}>
             <SnippetComposer.Input />
@@ -396,28 +411,31 @@ export function Home({ active = true }: { active?: boolean }) {
             <SnippetComposer.Submit />
           </SnippetComposer.Root>
           {ingestionError !== null && (
-            <p className="mt-2 text-xs text-destructive" role="alert">
-              {ingestionError}
-            </p>
+            <ProductNotice className="mt-2" tone="danger" title={ingestionError}>
+              Nothing was added. Try again.
+            </ProductNotice>
           )}
         </div>
 
         {externalActionError !== null && (
-          <p className="mb-3 text-xs text-destructive" role="alert">
-            {externalActionError}
-          </p>
+          <ProductNotice className="mb-3" tone="danger" title={externalActionError}>
+            Try again. If the problem continues, open the destination from your browser.
+          </ProductNotice>
         )}
 
         {snippetReadError !== null && (
-          <div
-            className="mb-3 flex items-center justify-between gap-3 rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive"
-            role="alert"
+          <ProductNotice
+            className="mb-3"
+            tone="danger"
+            title={snippetReadError}
+            action={
+              <Button type="button" variant="ghost" size="xs" onClick={reloadSnippets}>
+                Try again
+              </Button>
+            }
           >
-            <span>{snippetReadError}</span>
-            <Button type="button" variant="ghost" size="xs" onClick={reloadSnippets}>
-              Try again
-            </Button>
-          </div>
+            Your saved snippets remain on this device.
+          </ProductNotice>
         )}
 
         {replicaLoading && snippets.length === 0 ? (

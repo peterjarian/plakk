@@ -1,15 +1,16 @@
-import { StorageProviderLiteral, UserSchema } from "@plakk/shared";
+import { type StorageProvider, UserSchema } from "@plakk/shared";
 import type { PrepareSnippetUploadPayload } from "@plakk/shared/PlakkApi";
 import {
-  AccountStatusSchema,
+  ClientCapabilitySchema,
+  type ClientCapability as SharedClientCapability,
   OfflineError,
   SessionError,
-  StorageProviderStatusSchema,
 } from "@plakk/shared/PlakkApi";
 import {
   Cause,
   Context,
   Effect,
+  Fiber,
   Layer,
   Option,
   Schedule,
@@ -42,28 +43,13 @@ import {
   type UploadSource,
   UploadSourceUnavailableError,
 } from "./snippets/UploadEngine.ts";
-import { runMigrations } from "./sqlite/Migrations.ts";
+import { clientDatabaseLayer, runMigrations } from "./sqlite/Migrations.ts";
 import { clearAccount, getStorageProvider, setStorageProvider } from "./sqlite/queries/account.ts";
 import { clearSnippets } from "./sqlite/queries/snippets.ts";
 
 export type ClientError = ContentMirrorFailure | LocalStorageError | SyncFailure | UploadFailure;
 
-const ClientCapabilitySchema = Schema.Union([
-  Schema.Struct({
-    status: Schema.Literal("OFFLINE"),
-    storageProvider: Schema.Struct({
-      known: Schema.Boolean,
-      value: Schema.NullOr(StorageProviderLiteral),
-    }),
-  }),
-  Schema.Struct({
-    status: Schema.Literal("ONLINE"),
-    account: AccountStatusSchema,
-    connection: Schema.NullOr(StorageProviderStatusSchema),
-  }),
-]);
-
-export type ClientCapability = typeof ClientCapabilitySchema.Type;
+export type ClientCapability = SharedClientCapability;
 
 export const ClientSnapshotSchema = Schema.Struct({
   user: UserSchema,
@@ -89,11 +75,17 @@ export class Client extends Context.Service<
     readonly refresh: Effect.Effect<void, ClientError>;
     /** Removes all snippet records and managed content owned by the current user. */
     readonly clearLocalData: Effect.Effect<void, ClientError>;
+    readonly storage: {
+      /** Starts the provider-owned authorization flow and returns its destination URL. */
+      readonly beginLink: (storageProvider: StorageProvider) => Effect.Effect<string, ClientError>;
+    };
     readonly content: {
       /** Downloads and stores one published snippet on this device. */
       readonly download: (snippetId: string) => Effect.Effect<void, ClientError>;
       /** Streams locally stored content for one snippet. */
       readonly read: (snippetId: string) => Stream.Stream<Uint8Array, ClientError>;
+      /** Streams published content without retaining a device-local copy. */
+      readonly readRemote: (snippetId: string) => Stream.Stream<Uint8Array, ClientError>;
       /** Removes local copies outside the automatically maintained set. */
       readonly freeUp: Effect.Effect<FreeUpSpaceResult, ClientError>;
     };
@@ -118,6 +110,28 @@ export class Client extends Context.Service<
     };
   }
 >()("@plakk/client-runtime/Client") {}
+
+const clearMetadataRows = (userId: string) =>
+  Effect.gen(function* () {
+    yield* clearAccount(userId);
+    yield* clearSnippets(userId);
+  });
+
+/** Opens the client schema if needed and removes one user's persisted metadata. */
+export const clearClientMetadata = Effect.fn("Client.clearClientMetadata")(
+  function* (userId: string) {
+    yield* runMigrations();
+    yield* clearMetadataRows(userId);
+  },
+  Effect.catchTags({
+    SqlError: () =>
+      Effect.fail(
+        new LocalStorageError({
+          message: "Plakk could not remove its local snippet data.",
+        }),
+      ),
+  }),
+);
 
 /** Implements the Client façade using focused runtime modules. */
 export const clientLive = Layer.effect(
@@ -155,7 +169,7 @@ export const clientLive = Layer.effect(
       storageProvider: cachedStorageProvider,
     });
     yield* uploads.initialize;
-    yield* snippets.subscribe().pipe(
+    const contentReconcileFiber = yield* snippets.subscribe().pipe(
       Stream.map((snapshot) =>
         snapshot
           .filter(isPublishedSnippet)
@@ -179,7 +193,7 @@ export const clientLive = Layer.effect(
       ),
       Effect.forkScoped,
     );
-    yield* content.reconcile.pipe(
+    const periodicContentReconcileFiber = yield* content.reconcile.pipe(
       Effect.catchCause((cause) =>
         Effect.logWarning("Periodic local content reconciliation failed", {
           cause: Cause.pretty(cause),
@@ -188,7 +202,7 @@ export const clientLive = Layer.effect(
       Effect.repeat(Schedule.spaced("30 seconds")),
       Effect.forkScoped,
     );
-    yield* sync.run.pipe(Effect.forkScoped);
+    const syncFiber = yield* sync.run.pipe(Effect.forkScoped);
 
     /** Refreshes account capability and retains the provider for offline display. */
     const refresh = Effect.gen(function* () {
@@ -294,7 +308,7 @@ export const clientLive = Layer.effect(
         })),
       );
 
-    yield* sync.subscribe().pipe(
+    const capabilityRefreshFiber = yield* sync.subscribe().pipe(
       Stream.filter((status) => status === "CONNECTED"),
       Stream.runForEach(() =>
         refresh.pipe(
@@ -307,6 +321,48 @@ export const clientLive = Layer.effect(
       ),
       Effect.forkScoped,
     );
+
+    const beginStorageLink = Effect.fn("Client.storage.beginLink")(function* (
+      storageProvider: StorageProvider,
+    ) {
+      return yield* rpc.BeginStorageProviderLink({ storageProvider }).pipe(
+        Effect.map((result) => result.url),
+        Effect.catchTags({
+          SessionError: (error) => Effect.fail(error),
+          OfflineError: (error) => Effect.fail(error),
+          RpcClientError: (error) =>
+            error.reason._tag === "RpcClientDefect"
+              ? Effect.fail(
+                  new InvalidResponseError({
+                    message: "Plakk received an unexpected storage response.",
+                  }),
+                )
+              : Effect.fail(
+                  new OfflineError({
+                    message: "Plakk could not connect. Check your connection and try again.",
+                  }),
+                ),
+          RpcError: (error) =>
+            error.code === "UNAUTHENTICATED"
+              ? Effect.fail(
+                  new SessionError({
+                    message: "Your session expired. Sign in again to continue.",
+                  }),
+                )
+              : error.code === "FORBIDDEN"
+                ? Effect.fail(
+                    new ActionNotAllowedError({
+                      message: "You do not have permission to connect this storage provider.",
+                    }),
+                  )
+                : Effect.fail(
+                    new ServerUnavailableError({
+                      message: "Plakk could not start storage setup. Please try again.",
+                    }),
+                  ),
+        }),
+      );
+    });
 
     /** Runs the complete remote-first snippet deletion procedure. */
     const deleteSnippet = Effect.fn("Client.snippets.delete")(function* (snippetId: string) {
@@ -343,12 +399,17 @@ export const clientLive = Layer.effect(
 
     /** Removes all local snippet state after the platform has revoked commands. */
     const clearLocalData = Effect.gen(function* () {
+      yield* Fiber.interruptAll([
+        contentReconcileFiber,
+        periodicContentReconcileFiber,
+        syncFiber,
+        capabilityRefreshFiber,
+      ]);
       if (contentStore !== undefined) {
         const entries = yield* contentStore.entries;
         yield* contentStore.remove(entries.map((entry) => entry.snippetId));
       }
-      yield* clearAccount(session.user.id);
-      yield* clearSnippets(session.user.id);
+      yield* clearMetadataRows(session.user.id);
       yield* snippets.refresh;
     }).pipe(
       Effect.provideService(SqlClient.SqlClient, sql),
@@ -367,9 +428,11 @@ export const clientLive = Layer.effect(
       subscribe,
       refresh,
       clearLocalData,
+      storage: { beginLink: beginStorageLink },
       content: {
         download: content.download,
         read: content.read,
+        readRemote: content.readRemote,
         freeUp: content.freeUp,
       },
       snippets: {
@@ -396,4 +459,7 @@ const enginesLayer = Layer.mergeAll(ContentMirror.Live, SyncEngine.Live, UploadE
  * omitting it leaves uploads remote-only. This layer owns all focused-module
  * wiring and exposes only the `Client` façade.
  */
-export const clientLayer = clientLive.pipe(Layer.provide(enginesLayer));
+export const clientLayer = clientLive.pipe(
+  Layer.provide(enginesLayer),
+  Layer.provide(clientDatabaseLayer),
+);

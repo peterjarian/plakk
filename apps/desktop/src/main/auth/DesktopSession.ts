@@ -191,34 +191,21 @@ const makeDesktopSession = (sharedClientLayer: SharedClientLayer) =>
 
     const publishClientSnapshot = Effect.fn("DesktopSession.publishClientSnapshot")(function* (
       snapshot: ClientSnapshot,
-      preview: ReturnType<DesktopContentStore["Service"]["forUser"]>["preview"],
     ) {
-      const projected = yield* Effect.forEach(snapshot.snippets, (snippet) =>
-        preview(snippet).pipe(
-          Effect.catchCause((cause) =>
-            Effect.logWarning("Could not read a desktop snippet preview", {
-              snippetId: snippet.id,
-              cause: Cause.pretty(cause),
-            }).pipe(Effect.as(null)),
-          ),
-          Effect.map((localTextPreview) => ({ snippet, localTextPreview })),
-        ),
-      );
       yield* publish({
         user: snapshot.user,
         capability: snapshot.capability,
         syncStatus: snapshot.syncStatus,
         storageUsageBytes: snapshot.storageUsageBytes,
-        snippets: projected,
+        snippets: snapshot.snippets,
       });
     });
 
     const observeClient = Effect.fn("DesktopSession.observeClient")(function* (
       client: Client["Service"],
-      preview: ReturnType<DesktopContentStore["Service"]["forUser"]>["preview"],
     ) {
       yield* client.subscribe().pipe(
-        Stream.runForEach((snapshot) => publishClientSnapshot(snapshot, preview)),
+        Stream.runForEach(publishClientSnapshot),
         Effect.catchCause((cause) =>
           Effect.logError("Desktop client observation stopped", { cause }),
         ),
@@ -233,7 +220,7 @@ const makeDesktopSession = (sharedClientLayer: SharedClientLayer) =>
           CurrentSession,
           CurrentSession.of({ user, accessToken: accessTokenFor(user.id) }),
         ),
-        Layer.succeed(ContentStore, content.store),
+        Layer.succeed(ContentStore, content),
         Layer.succeed(SqlClient.SqlClient, sql),
         Layer.succeed(HttpClient.HttpClient, http),
         Layer.succeed(EffectRpcClient.Protocol, protocol),
@@ -243,7 +230,7 @@ const makeDesktopSession = (sharedClientLayer: SharedClientLayer) =>
         Effect.gen(function* () {
           const context = yield* Layer.build(sharedClientLayer.pipe(Layer.provide(dependencies)));
           const client = Context.get(context, Client);
-          yield* observeClient(client, content.preview);
+          yield* observeClient(client);
           return Option.some({ userId: user.id, client });
         }),
       );

@@ -1,29 +1,13 @@
-import { ContentStore, LocalStorageError, type Snippet } from "@plakk/client-runtime";
-import {
-  decodeSnippetTextPreview,
-  isTextSnippetFileName,
-  SNIPPET_TEXT_PREVIEW_MAX_BYTES,
-} from "@plakk/shared";
+import { ContentStore, LocalStorageError } from "@plakk/client-runtime";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { Context, Effect, FileSystem, Layer, Option, PlatformError, Stream } from "effect";
 
-type UserContent = {
-  readonly store: ContentStore["Service"];
-  /** Reads a bounded, valid UTF-8 preview for renderer presentation. */
-  readonly preview: (snippet: Snippet) => Effect.Effect<string | null, LocalStorageError>;
-};
-
-/**
- * Opens the native filesystem content adapter for one user.
- *
- * The shared client receives the standard `ContentStore`; desktop projection
- * receives only the additional text-preview operation it actually needs.
- */
+/** Opens the native filesystem content adapter for one user. */
 export class DesktopContentStore extends Context.Service<
   DesktopContentStore,
   {
-    readonly forUser: (userId: string) => UserContent;
+    readonly forUser: (userId: string) => ContentStore["Service"];
   }
 >()("plakk/main/snippets/DesktopContentStore") {}
 
@@ -57,15 +41,10 @@ export const makeDesktopContentStoreLayer = (root: string) =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const verified = new Map<string, string>();
-      const textValidity = new Map<
-        string,
-        { readonly fingerprint: string; readonly valid: boolean }
-      >();
 
       const clearCache = (userId: string, snippetId: string) => {
         const path = desktopContentPath(root, userId, snippetId);
         verified.delete(path);
-        textValidity.delete(path);
       };
 
       const hashFile = Effect.fn("DesktopContentStore.hashFile")(function* (path: string) {
@@ -272,102 +251,15 @@ export const makeDesktopContentStoreLayer = (root: string) =>
         return Uint8Array.from(Buffer.concat(chunks));
       });
 
-      const readPrefix = Effect.fn("DesktopContentStore.readPrefix")(function* (
-        userId: string,
-        snippetId: string,
-      ) {
-        return yield* fileSystem
-          .stream(desktopContentPath(root, userId, snippetId), {
-            bytesToRead: SNIPPET_TEXT_PREVIEW_MAX_BYTES,
-          })
-          .pipe(
-            Stream.runCollect,
-            Effect.map((chunks) => Uint8Array.from(Buffer.concat(chunks))),
-            Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(null)),
-            Effect.mapError((cause) =>
-              storageError(cause, "Plakk could not read this snippet preview."),
-            ),
-          );
-      });
-
-      const validateText = Effect.fn("DesktopContentStore.validateText")(function* (
-        userId: string,
-        snippetId: string,
-      ) {
-        const path = desktopContentPath(root, userId, snippetId);
-        const info = yield* fileSystem.stat(path).pipe(
-          Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(null)),
-          Effect.mapError((cause) =>
-            storageError(cause, "Plakk could not inspect this snippet preview."),
-          ),
-        );
-        if (info === null) {
-          textValidity.delete(path);
-          return false;
-        }
-
-        const currentFingerprint = fingerprint(info);
-        const cached = textValidity.get(path);
-        if (cached?.fingerprint === currentFingerprint) return cached.valid;
-
-        const decoder = new TextDecoder("utf-8", { fatal: true });
-        let valid = true;
-        yield* fileSystem.stream(path).pipe(
-          Stream.runForEachWhile((chunk) =>
-            Effect.sync(() => {
-              try {
-                decoder.decode(chunk, { stream: true });
-                return true;
-              } catch {
-                valid = false;
-                return false;
-              }
-            }),
-          ),
-          Effect.mapError((cause) =>
-            storageError(cause, "Plakk could not validate this snippet preview."),
-          ),
-        );
-        if (valid) {
-          try {
-            decoder.decode();
-          } catch {
-            valid = false;
-          }
-        }
-        textValidity.set(path, { fingerprint: currentFingerprint, valid });
-        return valid;
-      });
-
-      /** Opens the shared adapter and desktop preview operation for one user. */
-      const forUser = (userId: string): UserContent => ({
-        store: ContentStore.of({
+      const forUser = (userId: string): ContentStore["Service"] =>
+        ContentStore.of({
           entries: entries(userId),
           write: (snippetId, byteSize, source) => write(userId, snippetId, byteSize, source),
           read: (snippetId) => read(userId, snippetId),
           readRange: (snippetId, offset, byteSize) =>
             readRange(userId, snippetId, offset, byteSize),
           remove: (snippetIds) => remove(userId, snippetIds),
-        }),
-        preview: Effect.fn("DesktopContentStore.preview")(function* (snippet: Snippet) {
-          if (
-            snippet.localContentAvailability.status !== "AVAILABLE" ||
-            !isTextSnippetFileName(snippet.fileName)
-          ) {
-            return null;
-          }
-          const bytes = yield* readPrefix(userId, snippet.id);
-          const expectedSize = Math.min(snippet.byteSize, SNIPPET_TEXT_PREVIEW_MAX_BYTES);
-          if (
-            bytes === null ||
-            bytes.byteLength !== expectedSize ||
-            !(yield* validateText(userId, snippet.id))
-          ) {
-            return null;
-          }
-          return decodeSnippetTextPreview(bytes, snippet.byteSize > bytes.byteLength);
-        }),
-      });
+        });
 
       return DesktopContentStore.of({ forUser });
     }),

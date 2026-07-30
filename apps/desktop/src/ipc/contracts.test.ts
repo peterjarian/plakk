@@ -3,7 +3,7 @@ import { Schema } from "effect";
 
 import {
   AppearancePreferenceSchema,
-  DesktopSnippetSchema,
+  LocalStateSchema,
   StorageFreeUpResultSchema,
   UserConfigPatchSchema,
   UserConfigSchema,
@@ -44,53 +44,28 @@ describe("UserConfigSchema", () => {
   });
 });
 
-describe("DesktopSnippetSchema", () => {
-  it("encodes local state containing an active text upload synchronously", () => {
-    const encode = Schema.encodeUnknownSync(Schema.Array(DesktopSnippetSchema));
+describe("LocalStateSchema snippets", () => {
+  it("transports the canonical shared snippet directly", () => {
+    const encode = Schema.encodeUnknownSync(LocalStateSchema.fields.snippets);
 
     expect(
       encode([
         {
-          snippet: {
-            id: "0d1e2f3a-4567-4890-8abc-def012345678",
-            fileName: "0d1e2f3a-4567-4890-8abc-def012345678.txt",
-            byteSize: 4,
-            storageProvider: "GOOGLE_DRIVE",
-            mediaType: "text/plain",
-            storageObjectId: null,
-            status: "UPLOADING",
-            errorMessage: null,
-            createdAt: "2026-07-16T00:00:00.000Z",
-            updatedAt: "2026-07-16T00:00:00.000Z",
-            localContentAvailability: { status: "AVAILABLE" },
-          },
-          localTextPreview: "text",
+          id: "0d1e2f3a-4567-4890-8abc-def012345678",
+          fileName: "0d1e2f3a-4567-4890-8abc-def012345678.txt",
+          title: "text",
+          byteSize: 4,
+          storageProvider: "GOOGLE_DRIVE",
+          mediaType: "text/plain",
+          storageObjectId: null,
+          status: "UPLOADING",
+          errorMessage: null,
+          createdAt: "2026-07-16T00:00:00.000Z",
+          updatedAt: "2026-07-16T00:00:00.000Z",
+          localContentAvailability: { status: "AVAILABLE" },
         },
       ]),
     ).toHaveLength(1);
-  });
-
-  it("transports the canonical shared snippet without a desktop copy", () => {
-    const decode = Schema.decodeUnknownSync(DesktopSnippetSchema);
-
-    const snippet = decode({
-      snippet: {
-        id: "0d1e2f3a-4567-4890-8abc-def012345678",
-        fileName: "note.txt",
-        byteSize: 4,
-        storageProvider: "GOOGLE_DRIVE",
-        mediaType: "text/plain",
-        storageObjectId: "provider-private-object",
-        status: "PUBLISHED",
-        errorMessage: null,
-        createdAt: "2026-07-16T00:00:00.000Z",
-        updatedAt: "2026-07-16T00:00:00.000Z",
-        localContentAvailability: { status: "AVAILABLE" },
-      },
-      localTextPreview: "text",
-    });
-
-    expect(snippet.snippet.storageObjectId).toBe("provider-private-object");
   });
 });
 

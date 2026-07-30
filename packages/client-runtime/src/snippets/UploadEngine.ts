@@ -5,6 +5,12 @@ import type {
 } from "@plakk/shared/PlakkApi";
 import type { RpcError } from "@plakk/shared/RpcError";
 import {
+  deriveSnippetTitle,
+  isTextSnippetFileName,
+  SNIPPET_TEXT_PREVIEW_MAX_BYTES,
+} from "@plakk/shared";
+import {
+  Cause,
   Context,
   DateTime,
   Duration,
@@ -12,6 +18,7 @@ import {
   FiberSet,
   Layer,
   Option,
+  Result,
   Schema,
   Semaphore,
   Stream,
@@ -34,6 +41,7 @@ import {
   markSnippetPreparing,
   markSnippetUploadFailed,
   markSnippetUploading,
+  setPreparingSnippetTitle,
   SnippetAlreadyExistsError,
 } from "../sqlite/queries/uploads.ts";
 import { ContentStore } from "./ContentMirror.ts";
@@ -41,6 +49,15 @@ import { SnippetStore } from "./SnippetStore.ts";
 
 const CONTENT_COPY_CHUNK_BYTES = 4 * 1024 * 1024;
 const MAX_UPLOAD_RETRIES = 5;
+const UPLOAD_CONTROL_PLANE_TIMEOUT = Duration.minutes(2);
+const UPLOAD_REQUEST_BASE_TIMEOUT_MILLIS = 2 * 60 * 1_000;
+const MIN_UPLOAD_BYTES_PER_SECOND = 128 * 1_024;
+
+/** Gives each storage request a finite deadline scaled to the bytes it sends. */
+const uploadRequestTimeout = (byteSize: number) =>
+  Duration.millis(
+    UPLOAD_REQUEST_BASE_TIMEOUT_MILLIS + Math.ceil(byteSize / MIN_UPLOAD_BYTES_PER_SECOND) * 1_000,
+  );
 
 const NextExpectedRangesSchema = Schema.Struct({
   nextExpectedRanges: Schema.Array(Schema.String),
@@ -95,9 +112,12 @@ type UploadAttemptFailure =
   | Schema.SchemaError
   | SessionError
   | SqlError.SqlError
+  | Cause.TimeoutError
   | UploadRejectedError
   | UploadSourceChangedError
   | UploadSourceUnavailableError;
+
+type TitledUploadInput = PrepareSnippetUploadPayload & { readonly title?: string };
 
 export class UploadEngine extends Context.Service<
   UploadEngine,
@@ -175,6 +195,39 @@ export class UploadEngine extends Context.Service<
           );
         });
 
+      /** Validates the complete text source while retaining only a bounded title preview. */
+      const deriveTitle = Effect.fn("UploadEngine.deriveTitle")(function* <E>(
+        input: PrepareSnippetUploadPayload,
+        source: UploadSource<E>,
+      ) {
+        if (!isTextSnippetFileName(input.fileName)) return undefined;
+
+        const decoder = new TextDecoder("utf-8", { fatal: true });
+        let preview = "";
+        let offset = 0;
+        while (offset < input.byteSize) {
+          const byteSize = Math.min(CONTENT_COPY_CHUNK_BYTES, input.byteSize - offset);
+          const bytes = yield* source.read(offset, byteSize);
+          if (bytes.byteLength !== byteSize) {
+            return yield* new UploadSourceChangedError({
+              expectedByteSize: byteSize,
+              actualByteSize: bytes.byteLength,
+              message: "The selected file changed while it was being uploaded.",
+            });
+          }
+          const decoded = Result.try(() => decoder.decode(bytes, { stream: true }));
+          if (Result.isFailure(decoded)) return undefined;
+          if (preview.length < SNIPPET_TEXT_PREVIEW_MAX_BYTES) {
+            preview += decoded.success.slice(0, SNIPPET_TEXT_PREVIEW_MAX_BYTES - preview.length);
+          }
+          offset += byteSize;
+        }
+        const final = Result.try(() => decoder.decode());
+        if (Result.isFailure(final)) return undefined;
+        if (preview.length < SNIPPET_TEXT_PREVIEW_MAX_BYTES) preview += final.success;
+        return deriveSnippetTitle(preview);
+      });
+
       /** Changes one preparing snippet to its active transfer state. */
       const setUploading = Effect.fn("UploadEngine.setUploading")(
         function* (snippetId: string) {
@@ -208,10 +261,18 @@ export class UploadEngine extends Context.Service<
       /** Transfers and publishes one already-persisted preparing snippet. */
       const transfer = Effect.fn("UploadEngine.transfer")(
         function* (
-          input: PrepareSnippetUploadPayload,
+          input: TitledUploadInput,
           source: UploadSource<LocalStorageError | UploadSourceUnavailableError>,
         ) {
-          const prepared = yield* rpc.PrepareSnippetUpload(input);
+          const prepared = yield* rpc
+            .PrepareSnippetUpload({
+              id: input.id,
+              fileName: input.fileName,
+              byteSize: input.byteSize,
+              storageProvider: input.storageProvider,
+              mediaType: input.mediaType,
+            })
+            .pipe(Effect.timeout(UPLOAD_CONTROL_PLANE_TIMEOUT));
           if (prepared.storageProvider !== input.storageProvider) {
             return yield* new InvalidUploadResponseError({
               message: "The prepared upload uses a different storage provider.",
@@ -246,7 +307,9 @@ export class UploadEngine extends Context.Service<
                 `bytes ${offset}-${offset + byteSize - 1}/${input.byteSize}`,
               );
             }
-            return yield* http.execute(HttpClientRequest.bodyUint8Array(request, bytes));
+            return yield* http
+              .execute(HttpClientRequest.bodyUint8Array(request, bytes))
+              .pipe(Effect.timeout(uploadRequestTimeout(byteSize)));
           });
 
           let storageObjectId = prepared.storageObjectId;
@@ -262,6 +325,7 @@ export class UploadEngine extends Context.Service<
             if (storageObjectId === null) {
               const uploaded = yield* response.json.pipe(
                 Effect.flatMap(Schema.decodeUnknownEffect(UploadedObjectSchema)),
+                Effect.timeout(UPLOAD_CONTROL_PLANE_TIMEOUT),
               );
               storageObjectId = uploaded.id;
             }
@@ -303,6 +367,7 @@ export class UploadEngine extends Context.Service<
               if (response.status === 202) {
                 const body = yield* response.json.pipe(
                   Effect.flatMap(Schema.decodeUnknownEffect(NextExpectedRangesSchema)),
+                  Effect.timeout(UPLOAD_CONTROL_PLANE_TIMEOUT),
                 );
                 const nextRange = body.nextExpectedRanges[0];
                 const next = nextRange === undefined ? null : Number(/^\d+/.exec(nextRange)?.[0]);
@@ -335,6 +400,7 @@ export class UploadEngine extends Context.Service<
               if (storageObjectId === null) {
                 const uploaded = yield* response.json.pipe(
                   Effect.flatMap(Schema.decodeUnknownEffect(UploadedObjectSchema)),
+                  Effect.timeout(UPLOAD_CONTROL_PLANE_TIMEOUT),
                 );
                 storageObjectId = uploaded.id;
               }
@@ -348,13 +414,16 @@ export class UploadEngine extends Context.Service<
             });
           }
 
-          const published = yield* rpc.PublishSnippet({
-            id: input.id,
-            fileName: input.fileName,
-            byteSize: input.byteSize,
-            storageProvider: input.storageProvider,
-            storageObjectId,
-          });
+          const published = yield* rpc
+            .PublishSnippet({
+              id: input.id,
+              fileName: input.fileName,
+              ...(input.title === undefined ? {} : { title: input.title }),
+              byteSize: input.byteSize,
+              storageProvider: input.storageProvider,
+              storageObjectId,
+            })
+            .pipe(Effect.timeout(UPLOAD_CONTROL_PLANE_TIMEOUT));
 
           yield* markSnippetPublished(session.user.id, published);
           yield* snippets.refresh;
@@ -364,7 +433,7 @@ export class UploadEngine extends Context.Service<
 
       /** Starts one deduplicated background upload with typed retry behavior. */
       const launch = Effect.fn("UploadEngine.launch")(function* (
-        input: PrepareSnippetUploadPayload,
+        input: TitledUploadInput,
         source: UploadSource<LocalStorageError | UploadSourceUnavailableError>,
       ) {
         if (activeSnippetIds.has(input.id)) return;
@@ -444,6 +513,7 @@ export class UploadEngine extends Context.Service<
                     : error.code === "INTERNAL_SERVER_ERROR"
                       ? retry("server", error)
                       : Effect.fail(error),
+                TimeoutError: (error) => retry("server", error),
                 UploadRejectedError: (error) =>
                   error.status === 408 || error.status === 429 || error.status >= 500
                     ? retry("server", error)
@@ -535,7 +605,26 @@ export class UploadEngine extends Context.Service<
             };
           }
 
-          yield* launch(input, uploadSource);
+          let title: string | undefined;
+          let sourceReadable = true;
+          yield* deriveTitle(input, uploadSource).pipe(
+            Effect.tap((derivedTitle) =>
+              Effect.sync(() => {
+                title = derivedTitle;
+              }),
+            ),
+            Effect.catch(() => {
+              sourceReadable = false;
+              return setFailed(input.id, "Plakk could not read the selected file.");
+            }),
+          );
+          if (!sourceReadable) return;
+          if (title !== undefined) {
+            yield* setPreparingSnippetTitle(session.user.id, input.id, title);
+            yield* snippets.refresh;
+          }
+          const titledInput: TitledUploadInput = title === undefined ? input : { ...input, title };
+          yield* launch(titledInput, uploadSource);
         },
         Effect.provideService(SqlClient.SqlClient, sql),
         Effect.catchTags({

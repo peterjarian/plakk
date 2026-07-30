@@ -76,9 +76,11 @@ describe("DesktopSession", () => {
               subscribe: () => Stream.make(snapshot),
               refresh: Effect.void,
               clearLocalData: Effect.sync(() => void events.push(`purge:${session.user.id}`)),
+              storage: { beginLink: () => Effect.die("not used") },
               content: {
                 download: () => Effect.void,
                 read: () => Stream.empty,
+                readRemote: () => Stream.empty,
                 freeUp: Effect.succeed({
                   reclaimedBytes: 0,
                   removedCopies: 0,
@@ -145,16 +147,14 @@ describe("DesktopSession", () => {
         Layer.succeed(
           DesktopContentStore,
           DesktopContentStore.of({
-            forUser: () => ({
-              store: ContentStore.of({
+            forUser: () =>
+              ContentStore.of({
                 entries: Effect.succeed([]),
                 write: () => Effect.void,
                 read: () => Stream.empty,
                 readRange: () => Effect.succeed(new Uint8Array()),
                 remove: () => Effect.void,
               }),
-              preview: () => Effect.succeed(null),
-            }),
           }),
         ),
         NodeFileSystem.layer,

@@ -4,8 +4,10 @@ import {
   decodeSnippetText,
   decodeSnippetTextPreview,
   deriveSnippetPresentation,
+  deriveSnippetTitle,
   isValidSnippetText,
   SNIPPET_TEXT_PREVIEW_MAX_BYTES,
+  SNIPPET_TITLE_MAX_CHARACTERS,
 } from "./SnippetPresentation.ts";
 
 const utf8 = (value: string) => new TextEncoder().encode(value);
@@ -50,14 +52,21 @@ describe("snippet presentation", () => {
     ).toEqual({ type: "file", title: "website.pdf" });
   });
 
-  it("uses a presentation-neutral title when text content is unavailable or invalid", () => {
+  it("uses the file name when text content is unavailable or invalid", () => {
     expect(deriveSnippetPresentation({ fileName: "note.txt" })).toEqual({
-      type: "file",
-      title: "Text snippet",
+      type: "text",
+      title: "note.txt",
     });
     expect(
       deriveSnippetPresentation({ fileName: "note.txt", content: new Uint8Array([0xff]) }),
-    ).toEqual({ type: "file", title: "Text snippet" });
+    ).toEqual({ type: "file", title: "note.txt" });
+  });
+
+  it("does not invent a stored title for empty text and bounds derived titles", () => {
+    expect(deriveSnippetTitle(" \n ")).toBeUndefined();
+    expect(deriveSnippetTitle("a".repeat(SNIPPET_TITLE_MAX_CHARACTERS + 20))).toBe(
+      "a".repeat(SNIPPET_TITLE_MAX_CHARACTERS),
+    );
   });
 
   it("decodes only valid UTF-8 for content-derived presentation", () => {

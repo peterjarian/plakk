@@ -1,51 +1,26 @@
-import {
-  deriveSnippetPresentation,
-  isTextSnippetFileName,
-  type LocalContentAvailability,
-  type SnippetPresentation,
-} from "@plakk/shared";
+import { deriveSnippetPresentation, type SnippetPresentation } from "@plakk/shared";
+import type { Snippet } from "@plakk/client-runtime";
+import type { SnippetRowData } from "@plakk/ui/components/SnippetRow";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import type { DesktopSnippet } from "../../ipc/contracts.ts";
 import { useLocalState } from "./useLocalState.tsx";
 
-export type SnippetReadModel = {
+export type SnippetReadModel = SnippetRowData & {
   readonly id: string;
-  readonly fileName: string;
-  readonly byteSize: number;
-  readonly createdAt: string;
-  readonly kind: "LOCAL" | "PUBLISHED";
-  readonly localState: null | {
-    readonly status: "UPLOADING" | "FAILED";
-    readonly errorMessage: string | null;
-  };
-  readonly localContentAvailability: LocalContentAvailability;
-  readonly localTextPreview: string | null;
   readonly presentation: SnippetPresentation;
   readonly thumbnailUrl: string | null;
 };
 
-type SnippetRowReadModel = Omit<
-  SnippetReadModel,
-  "localTextPreview" | "presentation" | "thumbnailUrl"
->;
+type SnippetRowReadModel = SnippetRowData & { readonly id: string };
 
 export const projectSnippetReadModels = (
-  replicaItems: ReadonlyArray<DesktopSnippet>,
+  snippets: ReadonlyArray<Snippet>,
   thumbnailUrls: Readonly<Record<string, string>>,
 ): ReadonlyArray<SnippetReadModel> =>
-  replicaItems.flatMap(({ snippet, localTextPreview }) => {
-    if (
-      snippet.status === "PUBLISHED" &&
-      isTextSnippetFileName(snippet.fileName) &&
-      localTextPreview === null &&
-      snippet.localContentAvailability.status === "DOWNLOADING"
-    ) {
-      return [];
-    }
+  snippets.map((snippet) => {
     const presentation = deriveSnippetPresentation({
       fileName: snippet.fileName,
-      ...(localTextPreview === null ? {} : { content: localTextPreview }),
+      ...(snippet.title === undefined ? {} : { content: snippet.title }),
     });
     const row: SnippetRowReadModel =
       snippet.status === "PUBLISHED"
@@ -70,14 +45,11 @@ export const projectSnippetReadModels = (
             },
             localContentAvailability: snippet.localContentAvailability,
           };
-    return [
-      {
-        ...row,
-        localTextPreview,
-        presentation,
-        thumbnailUrl: thumbnailUrls[row.id] ?? null,
-      },
-    ];
+    return {
+      ...row,
+      presentation,
+      thumbnailUrl: thumbnailUrls[row.id] ?? null,
+    };
   });
 
 export const createImageUrlRegistry = () => {
@@ -113,7 +85,7 @@ export const createImageUrlRegistry = () => {
   };
 };
 
-const useSnippetImageUrls = (snippets: ReadonlyArray<DesktopSnippet>) => {
+const useSnippetImageUrls = (snippets: ReadonlyArray<Snippet>) => {
   const [thumbnailUrls, setThumbnailUrls] = useState<Record<string, string>>({});
   const registryRef = useRef<ReturnType<typeof createImageUrlRegistry> | null>(null);
   if (registryRef.current === null) registryRef.current = createImageUrlRegistry();
@@ -122,11 +94,11 @@ const useSnippetImageUrls = (snippets: ReadonlyArray<DesktopSnippet>) => {
 
   useEffect(() => {
     const images = snippets.filter(
-      ({ snippet }) =>
+      (snippet) =>
         deriveSnippetPresentation({ fileName: snippet.fileName }).type === "image" &&
         snippet.localContentAvailability.status === "AVAILABLE",
     );
-    const visibleIds = new Set(images.map(({ snippet }) => snippet.id));
+    const visibleIds = new Set(images.map((snippet) => snippet.id));
     visibleIdsRef.current = visibleIds;
 
     const registry = registryRef.current;
@@ -140,7 +112,7 @@ const useSnippetImageUrls = (snippets: ReadonlyArray<DesktopSnippet>) => {
       });
     }
 
-    for (const { snippet } of images) {
+    for (const snippet of images) {
       if (registry.has(snippet.id) || loadingIdsRef.current.has(snippet.id)) continue;
       loadingIdsRef.current.add(snippet.id);
       void window.ipc.snippets

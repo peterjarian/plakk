@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vp dev --port 3000",
+    "dev": "vp dev --port 3000 --host",
     "generate-routes": "tsr generate",
     "build": "NODE_ENV=production vp build",
     "preview": "vp preview",
@@ -11,13 +11,20 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
+    "@effect/sql-sqlite-wasm": "4.0.0-beta.92",
+    "@effect/wa-sqlite": "0.2.1",
+    "@plakk/client-runtime": "workspace:*",
+    "@plakk/shared": "workspace:*",
     "@plakk/ui": "workspace:*",
     "@tailwindcss/vite": "^4.1.18",
+    "@tanstack/react-hotkeys": "^0.10.0",
     "@tanstack/react-router": "^1.132.0",
     "@tanstack/react-start": "^1.132.0",
     "@tanstack/router-plugin": "^1.132.0",
     "@workos/authkit-session": "^0.7.1",
     "@workos/authkit-tanstack-react-start": "^0.11.0",
+    "effect": "catalog:",
+    "lucide-react": "^1.23.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "tailwindcss": "^4.1.18"

@@ -1,17 +1,17 @@
 import { useEffect, useState, type DragEvent } from "react";
+import { ProductNotice } from "@plakk/ui/components/ProductNotice";
+import {
+  StorageProviderIcon,
+  storageProviderLabel,
+} from "@plakk/ui/components/StorageProviderIcon";
+import { SyncStatusIndicator, type SyncStatus } from "@plakk/ui/components/SyncStatusIndicator";
 import type { ClipboardContent, TrayDroppedItem } from "../../ipc/contracts.ts";
 import { useAuth } from "../hooks/useAuth.ts";
 import { useSnippets } from "../hooks/useSnippets.ts";
 import { useLocalState } from "../hooks/useLocalState.tsx";
-import {
-  StorageProviderIcon,
-  storageProviderLabel,
-  useLinkedStorageProvider,
-  useStorageStatus,
-} from "../hooks/useStorageStatus.tsx";
+import { useLinkedStorageProvider, useStorageStatus } from "../hooks/useStorageStatus.tsx";
 import { ipcActionErrorMessage } from "../lib/ipcActionErrorMessage.ts";
 import { ingestFileSnippet, ingestTextSnippet } from "../lib/snippetIngestion.ts";
-import { SyncStatusIndicator, type SyncStatus } from "../components/SyncStatusIndicator.tsx";
 import { TrayActions } from "./tray/TrayActions.tsx";
 import { TrayRecentItem } from "./tray/TrayRecentItem.tsx";
 import { TrayShell } from "./tray/TrayShell.tsx";
@@ -224,18 +224,14 @@ export function Tray() {
               storageStatus.kind !== "loading" &&
               storageStatus.kind !== "offline" &&
               storageStatus.kind !== "failed" && (
-                <p
-                  className="px-4 pb-2 text-[11px] text-muted-foreground"
-                  role="status"
-                  aria-live="polite"
-                >
+                <ProductNotice className="mx-4 mb-2" tone="warning">
                   {pausedMessage}
-                </p>
+                </ProductNotice>
               )}
             {error !== null && (
-              <p className="px-4 pb-2 text-[11px] text-destructive" role="alert">
-                {error}
-              </p>
+              <ProductNotice className="mx-4 mb-2" tone="danger" title={error}>
+                Try again. Your existing snippets are unchanged.
+              </ProductNotice>
             )}
             <TrayActions
               copyDisabled={copyDisabled}

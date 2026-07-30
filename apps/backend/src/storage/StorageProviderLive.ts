@@ -5,7 +5,13 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
-import { HttpClient, HttpClientResponse } from "effect/unstable/http";
+import * as Stream from "effect/Stream";
+import {
+  HttpClient,
+  HttpClientRequest,
+  HttpClientResponse,
+  type HttpClientError,
+} from "effect/unstable/http";
 
 import { DropboxStorageProvider } from "./providers/DropboxStorageProvider.ts";
 import { GoogleDriveStorageProvider } from "./providers/GoogleDriveStorageProvider.ts";
@@ -20,10 +26,12 @@ import {
   type PrepareStorageUploadInput,
   StorageCredentialsError,
   type StorageDeletionError,
+  StorageDownloadRejectedError,
   type StorageDownloadTarget,
   type StorageDownloadError,
   StorageNeedsReauthorizationError,
   StorageNotConnectedError,
+  StorageObjectNotFoundError,
   StorageProvider,
   StorageProviderError,
   type StorageProviderAdapter,
@@ -179,24 +187,6 @@ export const StorageProviderLive = Layer.effect(
       return destination.url;
     });
 
-    const downloadObject = Effect.fn("StorageProvider.downloadObject")(function* (
-      input: Omit<DownloadStorageObjectInput, "accessToken"> & {
-        readonly workosUserId: string;
-      },
-    ): Effect.fn.Return<Uint8Array, StorageDownloadError> {
-      const token = yield* getConnectedToken(input);
-      const bytes = yield* storageProviderAdapters[input.storageProvider]
-        .download({ ...input, accessToken: token.accessToken })
-        .pipe(Effect.provideService(HttpClient.HttpClient, httpClient));
-      if (bytes.byteLength !== input.expectedByteSize) {
-        return yield* new StorageProviderError({
-          storageProvider: input.storageProvider,
-          message: "Stored object size does not match snippet metadata.",
-        });
-      }
-      return bytes;
-    });
-
     const getDownloadUrl = Effect.fn("StorageProvider.getDownloadUrl")(function* (
       input: Omit<GetStorageObjectUrlInput, "accessToken"> & { readonly workosUserId: string },
     ): Effect.fn.Return<string, StorageDownloadError> {
@@ -224,6 +214,79 @@ export const StorageProviderLive = Layer.effect(
       return { url, headers: [] };
     });
 
+    const downloadStream = (
+      input: Omit<DownloadStorageObjectInput, "accessToken"> & {
+        readonly workosUserId: string;
+      },
+    ): Stream.Stream<Uint8Array, StorageDownloadError> =>
+      Stream.unwrap(
+        Effect.gen(function* () {
+          const target = yield* getDownloadTarget(input);
+          let request = HttpClientRequest.get(target.url);
+          for (const header of target.headers) {
+            request = HttpClientRequest.setHeader(request, header.name, header.value);
+          }
+          const response = yield* httpClient.execute(request).pipe(
+            Effect.mapError(
+              (cause: HttpClientError.HttpClientError) =>
+                new StorageProviderError({
+                  storageProvider: input.storageProvider,
+                  message: "Could not download the stored object.",
+                  cause,
+                }),
+            ),
+          );
+          if (response.status === 404) {
+            return yield* new StorageObjectNotFoundError({
+              storageProvider: input.storageProvider,
+              message: "Stored object was not found.",
+            });
+          }
+          if (response.status < 200 || response.status >= 300) {
+            return yield* new StorageDownloadRejectedError({
+              storageProvider: input.storageProvider,
+              status: response.status,
+              message: `Stored object download failed: ${response.status}`,
+            });
+          }
+
+          let receivedByteSize = 0;
+          const mismatch = () =>
+            new StorageProviderError({
+              storageProvider: input.storageProvider,
+              message: "Stored object size does not match snippet metadata.",
+              retryable: false,
+            });
+          return response.stream.pipe(
+            Stream.mapEffect((chunk) => {
+              receivedByteSize += chunk.byteLength;
+              return receivedByteSize > input.expectedByteSize
+                ? Effect.fail(mismatch())
+                : Effect.succeed(chunk);
+            }),
+            Stream.mapError((cause) =>
+              Schema.is(StorageProviderError)(cause) ||
+              Schema.is(StorageDownloadRejectedError)(cause)
+                ? cause
+                : new StorageProviderError({
+                    storageProvider: input.storageProvider,
+                    message: "Could not read the stored object.",
+                    cause,
+                  }),
+            ),
+            Stream.concat(
+              Stream.fromEffect(
+                Effect.suspend(() =>
+                  receivedByteSize === input.expectedByteSize
+                    ? Effect.void
+                    : Effect.fail(mismatch()),
+                ),
+              ).pipe(Stream.drain),
+            ),
+          );
+        }),
+      );
+
     const deleteObject = Effect.fn("StorageProvider.deleteObject")(function* (
       input: Omit<DeleteStorageObjectInput, "accessToken"> & { readonly workosUserId: string },
     ): Effect.fn.Return<void, StorageDeletionError> {
@@ -239,7 +302,7 @@ export const StorageProviderLive = Layer.effect(
       getLinkedProvider,
       prepareUpload,
       getDestinationUrl,
-      downloadObject,
+      downloadStream,
       getDownloadUrl,
       getDownloadTarget,
     });

@@ -10,12 +10,24 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AuthDesktopCallbackRouteImport } from './routes/auth/desktop/callback'
+import { Route as ApiAuthSignOutRouteImport } from './routes/api/auth/sign-out'
 import { Route as ApiAuthSignInRouteImport } from './routes/api/auth/sign-in'
 import { Route as ApiAuthCallbackRouteImport } from './routes/api/auth/callback'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthDesktopCallbackRoute = AuthDesktopCallbackRouteImport.update({
+  id: '/auth/desktop/callback',
+  path: '/auth/desktop/callback',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAuthSignOutRoute = ApiAuthSignOutRouteImport.update({
+  id: '/api/auth/sign-out',
+  path: '/api/auth/sign-out',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiAuthSignInRoute = ApiAuthSignInRouteImport.update({
@@ -33,30 +45,54 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/api/auth/callback': typeof ApiAuthCallbackRoute
   '/api/auth/sign-in': typeof ApiAuthSignInRoute
+  '/api/auth/sign-out': typeof ApiAuthSignOutRoute
+  '/auth/desktop/callback': typeof AuthDesktopCallbackRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/api/auth/callback': typeof ApiAuthCallbackRoute
   '/api/auth/sign-in': typeof ApiAuthSignInRoute
+  '/api/auth/sign-out': typeof ApiAuthSignOutRoute
+  '/auth/desktop/callback': typeof AuthDesktopCallbackRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/api/auth/callback': typeof ApiAuthCallbackRoute
   '/api/auth/sign-in': typeof ApiAuthSignInRoute
+  '/api/auth/sign-out': typeof ApiAuthSignOutRoute
+  '/auth/desktop/callback': typeof AuthDesktopCallbackRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/api/auth/callback' | '/api/auth/sign-in'
+  fullPaths:
+    | '/'
+    | '/api/auth/callback'
+    | '/api/auth/sign-in'
+    | '/api/auth/sign-out'
+    | '/auth/desktop/callback'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/api/auth/callback' | '/api/auth/sign-in'
-  id: '__root__' | '/' | '/api/auth/callback' | '/api/auth/sign-in'
+  to:
+    | '/'
+    | '/api/auth/callback'
+    | '/api/auth/sign-in'
+    | '/api/auth/sign-out'
+    | '/auth/desktop/callback'
+  id:
+    | '__root__'
+    | '/'
+    | '/api/auth/callback'
+    | '/api/auth/sign-in'
+    | '/api/auth/sign-out'
+    | '/auth/desktop/callback'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ApiAuthCallbackRoute: typeof ApiAuthCallbackRoute
   ApiAuthSignInRoute: typeof ApiAuthSignInRoute
+  ApiAuthSignOutRoute: typeof ApiAuthSignOutRoute
+  AuthDesktopCallbackRoute: typeof AuthDesktopCallbackRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -66,6 +102,20 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/auth/desktop/callback': {
+      id: '/auth/desktop/callback'
+      path: '/auth/desktop/callback'
+      fullPath: '/auth/desktop/callback'
+      preLoaderRoute: typeof AuthDesktopCallbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/auth/sign-out': {
+      id: '/api/auth/sign-out'
+      path: '/api/auth/sign-out'
+      fullPath: '/api/auth/sign-out'
+      preLoaderRoute: typeof ApiAuthSignOutRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/auth/sign-in': {
@@ -89,6 +139,8 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ApiAuthCallbackRoute: ApiAuthCallbackRoute,
   ApiAuthSignInRoute: ApiAuthSignInRoute,
+  ApiAuthSignOutRoute: ApiAuthSignOutRoute,
+  AuthDesktopCallbackRoute: AuthDesktopCallbackRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

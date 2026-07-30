@@ -1,14 +1,17 @@
 import { Effect, Layer } from "effect";
 import * as Migrator from "effect/unstable/sql/Migrator";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { LocalStorageError } from "../models/ClientError.ts";
 import Initial from "./migrations/001_initial.ts";
 import Account from "./migrations/002_account.ts";
+import SnippetTitle from "./migrations/003_snippet_title.ts";
 
 const migrate = Migrator.make({});
 const loader = Migrator.fromRecord({
   "1_initial": Initial,
   "2_account": Account,
+  "3_snippet_title": SnippetTitle,
 });
 
 /**
@@ -36,3 +39,13 @@ export const runMigrations = Effect.fn("Client.runMigrations")(function* () {
 
 /** Runs pending client database migrations as part of SQLite startup. */
 export const clientMigrationsLayer = Layer.effectDiscard(runMigrations());
+
+/** Provides the same SQL client only after its client-runtime schema is ready. */
+export const clientDatabaseLayer = Layer.effect(
+  SqlClient.SqlClient,
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* runMigrations();
+    return sql;
+  }),
+);

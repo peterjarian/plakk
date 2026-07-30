@@ -32,7 +32,10 @@ export const AuthMiddlewareLive = Layer.effect(
             if (typeof payload.sub !== "string") {
               throw new TypeError("WorkOS access token is missing its subject.");
             }
-            return { id: payload.sub };
+            return {
+              id: payload.sub,
+              ...(headers.origin === undefined ? {} : { requestOrigin: headers.origin }),
+            };
           },
           catch: () =>
             new RpcError({

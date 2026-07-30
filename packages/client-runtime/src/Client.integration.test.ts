@@ -9,12 +9,17 @@ import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { CurrentSession } from "./CurrentSession.ts";
+import { clearClientMetadata } from "./Client.ts";
 import { LocalStorageError } from "./models/ClientError.ts";
 import { RpcClient } from "./RpcClient.ts";
-import { ContentMirror, ContentStore } from "./snippets/ContentMirror.ts";
+import {
+  ContentMirror,
+  ContentStore,
+  DownloadedContentMismatchError,
+} from "./snippets/ContentMirror.ts";
 import { SnippetStore } from "./snippets/SnippetStore.ts";
 import { SyncEngine } from "./snippets/SyncEngine.ts";
-import { UploadEngine } from "./snippets/UploadEngine.ts";
+import { UploadEngine, UploadSourceUnavailableError } from "./snippets/UploadEngine.ts";
 import { clientMigrationsLayer, runMigrations } from "./sqlite/Migrations.ts";
 import { listSnippets } from "./sqlite/queries/snippets.ts";
 
@@ -43,17 +48,16 @@ type RpcOverrides = Partial<Record<keyof RpcClient["Service"], unknown>>;
 type SnapshotInput = Parameters<RpcClient["Service"]["GetSnippetSnapshot"]>[0];
 type PrepareUploadInput = Parameters<RpcClient["Service"]["PrepareSnippetUpload"]>[0];
 type PublishInput = Parameters<RpcClient["Service"]["PublishSnippet"]>[0];
-type PrepareDownloadInput = Parameters<RpcClient["Service"]["PrepareSnippetDownload"]>[0];
 
 const makeRpc = (overrides: RpcOverrides = {}): RpcClient["Service"] =>
   RpcClient.of({
     BeginStorageProviderLink: () => Effect.die("not used"),
     DeleteSnippet: () => Effect.void,
+    DownloadSnippetContent: () => Stream.die("not used"),
     GetAccountStatus: () => Effect.die("not used"),
     GetSnippetSnapshot: () => Effect.succeed([]),
     GetStorageProviderStatus: () => Effect.die("not used"),
     Ping: () => Effect.die("not used"),
-    PrepareSnippetDownload: () => Effect.die("not used"),
     PrepareSnippetUpload: () => Effect.die("not used"),
     PublishSnippet: () => Effect.die("not used"),
     UnlinkStorageProvider: () => Effect.die("not used"),
@@ -70,6 +74,7 @@ const makeLayer = (
     }),
   options?: {
     readonly contentRemoveError?: LocalStorageError;
+    readonly httpDelayMilliseconds?: number;
     readonly localContent?: Map<string, Uint8Array> | false;
   },
 ) => {
@@ -78,7 +83,9 @@ const makeLayer = (
   const httpLayer = Layer.succeed(
     HttpClient.HttpClient,
     HttpClient.make((request) =>
-      Effect.succeed(HttpClientResponse.fromWeb(request, response(request))),
+      Effect.sleep(options?.httpDelayMilliseconds ?? 0).pipe(
+        Effect.andThen(Effect.sync(() => HttpClientResponse.fromWeb(request, response(request)))),
+      ),
     ),
   );
   const contentLayer =
@@ -156,6 +163,13 @@ const makeLayer = (
 };
 
 describe("shared client integration", () => {
+  it.effect("can initialize and clear browser metadata without starting the client", () =>
+    Effect.gen(function* () {
+      yield* clearClientMetadata(user.id);
+      expect(yield* listSnippets(user.id)).toEqual([]);
+    }).pipe(Effect.provide(SqliteClient.layer({ filename: ":memory:" }))),
+  );
+
   it.effect("reports backend snippet-sync connection state", () => {
     const layer = makeLayer(
       makeRpc({
@@ -171,10 +185,55 @@ describe("shared client integration", () => {
       const syncFiber = yield* sync.run.pipe(Effect.forkChild);
 
       expect(Array.from(yield* Fiber.join(statusesFiber))).toEqual([
-        "RECONNECTING",
+        "STARTING",
         "CONNECTED",
         "RECONNECTING",
       ]);
+      yield* Fiber.interrupt(syncFiber);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("settles startup state when the initial snippet sync fails", () => {
+    const layer = makeLayer(
+      makeRpc({
+        GetSnippetSnapshot: () =>
+          Effect.fail(new OfflineError({ message: "Could not reach the backend." })),
+      }),
+    );
+
+    return Effect.gen(function* () {
+      const sync = yield* SyncEngine;
+      const statusesFiber = yield* sync
+        .subscribe()
+        .pipe(Stream.take(2), Stream.runCollect, Effect.forkChild);
+      const syncFiber = yield* sync.run.pipe(Effect.forkChild);
+
+      expect(Array.from(yield* Fiber.join(statusesFiber))).toEqual(["STARTING", "RECONNECTING"]);
+      yield* Fiber.interrupt(syncFiber);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("surfaces backend authentication rejection in sync state", () => {
+    const layer = makeLayer(
+      makeRpc({
+        GetSnippetSnapshot: () =>
+          Effect.fail(
+            new RpcError({
+              code: "UNAUTHENTICATED",
+              message: "The access token expired.",
+            }),
+          ),
+      }),
+    );
+
+    return Effect.gen(function* () {
+      const sync = yield* SyncEngine;
+      const statusesFiber = yield* sync
+        .subscribe()
+        .pipe(Stream.take(2), Stream.runCollect, Effect.forkChild);
+      const syncFiber = yield* sync.run.pipe(Effect.forkChild);
+
+      expect(Array.from(yield* Fiber.join(statusesFiber))).toEqual(["STARTING", "SESSION_ERROR"]);
       yield* Fiber.interrupt(syncFiber);
     }).pipe(Effect.provide(layer));
   });
@@ -197,6 +256,7 @@ describe("shared client integration", () => {
       expect(migrations).toEqual([
         { migration_id: 1, name: "initial" },
         { migration_id: 2, name: "account" },
+        { migration_id: 3, name: "snippet_title" },
       ]);
     }).pipe(Effect.provide(layer));
   });
@@ -276,7 +336,8 @@ describe("shared client integration", () => {
     Effect.gen(function* () {
       const prepareStarted = yield* Deferred.make<void>();
       const releasePrepare = yield* Deferred.make<void>();
-      const uploaded = { ...published, id: localId, fileName: "note.txt" };
+      const uploaded = { ...published, id: localId, fileName: "note.txt", title: "note" };
+      let publishInput: PublishInput | undefined;
       const layer = makeLayer(
         makeRpc({
           PrepareSnippetUpload: (_input: PrepareUploadInput) => {
@@ -295,7 +356,10 @@ describe("shared client integration", () => {
               }),
             );
           },
-          PublishSnippet: (_input: PublishInput) => Effect.succeed(uploaded),
+          PublishSnippet: (input: PublishInput) => {
+            publishInput = input;
+            return Effect.succeed(uploaded);
+          },
         }),
       );
 
@@ -319,6 +383,7 @@ describe("shared client integration", () => {
         const pending = (yield* listSnippets(user.id)).find((snippet) => snippet.id === localId);
         expect(pending).toMatchObject({
           id: localId,
+          title: "note",
           status: "UPLOADING",
           storageObjectId: null,
           localContentAvailability: { status: "AVAILABLE" },
@@ -337,9 +402,11 @@ describe("shared client integration", () => {
         const complete = (yield* listSnippets(user.id)).find((snippet) => snippet.id === localId);
         expect(complete).toMatchObject({
           id: localId,
+          title: "note",
           status: "PUBLISHED",
           storageObjectId: "drive-object",
         });
+        expect(publishInput).toMatchObject({ id: localId, title: "note" });
       }).pipe(Effect.provide(layer));
     }),
   );
@@ -406,6 +473,86 @@ describe("shared client integration", () => {
       }).pipe(Effect.provide(layer));
     }),
   );
+
+  it.effect("keeps a failed row when title inspection cannot read the web source", () => {
+    const layer = makeLayer(makeRpc(), undefined, { localContent: false });
+
+    return Effect.gen(function* () {
+      yield* (yield* UploadEngine).upload(
+        {
+          id: localId,
+          fileName: "unavailable.txt",
+          byteSize: 4,
+          storageProvider: "GOOGLE_DRIVE",
+          mediaType: "text/plain",
+        },
+        {
+          read: () =>
+            Effect.fail(
+              new UploadSourceUnavailableError({
+                message: "The browser file is no longer readable.",
+              }),
+            ),
+        },
+      );
+
+      expect((yield* listSnippets(user.id))[0]).toMatchObject({
+        id: localId,
+        status: "FAILED",
+        errorMessage: "Plakk could not read the selected file.",
+      });
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("does not derive a title unless the complete text source is valid UTF-8", () => {
+    const bytes = new Uint8Array(64 * 1024 + 1).fill(0x61);
+    bytes[bytes.byteLength - 1] = 0xff;
+    let publishInput: PublishInput | undefined;
+    const layer = makeLayer(
+      makeRpc({
+        PrepareSnippetUpload: () =>
+          Effect.succeed({
+            storageProvider: "GOOGLE_DRIVE",
+            storageObjectId: null,
+            upload: {
+              method: "PUT",
+              url: "https://upload.example",
+              headers: [],
+              strategy: { type: "single_request" },
+            },
+            expiresAt: null,
+          }),
+        PublishSnippet: (input: PublishInput) => {
+          publishInput = input;
+          return Effect.succeed({
+            ...published,
+            id: localId,
+            fileName: "invalid-tail.txt",
+            byteSize: bytes.byteLength,
+          });
+        },
+      }),
+      undefined,
+      { localContent: false },
+    );
+
+    return Effect.gen(function* () {
+      yield* (yield* UploadEngine).upload(
+        {
+          id: localId,
+          fileName: "invalid-tail.txt",
+          byteSize: bytes.byteLength,
+          storageProvider: "GOOGLE_DRIVE",
+          mediaType: "text/plain",
+        },
+        {
+          read: (offset, byteSize) => Effect.succeed(bytes.slice(offset, offset + byteSize)),
+        },
+      );
+
+      expect(publishInput).not.toHaveProperty("title");
+    }).pipe(Effect.provide(layer));
+  });
 
   it.effect("removes managed content with a deleted snippet", () => {
     const stored = new Map([[publishedId, new Uint8Array([1, 2, 3, 4])]]);
@@ -588,6 +735,108 @@ describe("shared client integration", () => {
     }).pipe(Effect.provide(TestClock.layer())),
   );
 
+  it.effect("times out stalled transfer attempts and exhausts the retry budget", () =>
+    Effect.gen(function* () {
+      const firstAttempt = yield* Deferred.make<void>();
+      let attempts = 0;
+      const layer = makeLayer(
+        makeRpc({
+          PrepareSnippetUpload: () => {
+            attempts += 1;
+            return Deferred.succeed(firstAttempt, undefined).pipe(Effect.andThen(Effect.never));
+          },
+        }),
+      );
+
+      yield* Effect.gen(function* () {
+        const bytes = new TextEncoder().encode("note");
+        yield* (yield* UploadEngine).upload(
+          {
+            id: localId,
+            fileName: "stalled-note.txt",
+            byteSize: bytes.byteLength,
+            storageProvider: "GOOGLE_DRIVE",
+            mediaType: "text/plain",
+          },
+          {
+            read: (offset, byteSize) => Effect.succeed(bytes.slice(offset, offset + byteSize)),
+          },
+        );
+
+        const failedSnapshot = yield* (yield* SnippetStore).subscribe().pipe(
+          Stream.filter((snapshot) =>
+            snapshot.some((snippet) => snippet.id === localId && snippet.status === "FAILED"),
+          ),
+          Stream.runHead,
+          Effect.forkChild,
+        );
+        yield* Deferred.await(firstAttempt);
+        yield* TestClock.adjust("13 minutes");
+        yield* Fiber.join(failedSnapshot);
+
+        expect(attempts).toBe(6);
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("allows a healthy transfer to exceed two minutes overall", () =>
+    Effect.gen(function* () {
+      const uploaded = { ...published, id: localId, fileName: "large-note.txt" };
+      const layer = makeLayer(
+        makeRpc({
+          PrepareSnippetUpload: () =>
+            Effect.sleep("90 seconds").pipe(
+              Effect.as({
+                storageProvider: "GOOGLE_DRIVE",
+                storageObjectId: null,
+                upload: {
+                  method: "PUT",
+                  url: "https://upload.example",
+                  headers: [],
+                  strategy: { type: "single_request" },
+                },
+                expiresAt: null,
+              }),
+            ),
+          PublishSnippet: () => Effect.succeed(uploaded),
+        }),
+        undefined,
+        { httpDelayMilliseconds: 90_000 },
+      );
+
+      yield* Effect.gen(function* () {
+        const bytes = new TextEncoder().encode("note");
+        yield* (yield* UploadEngine).upload(
+          {
+            id: localId,
+            fileName: "large-note.txt",
+            byteSize: bytes.byteLength,
+            storageProvider: "GOOGLE_DRIVE",
+            mediaType: "text/plain",
+          },
+          {
+            read: (offset, byteSize) => Effect.succeed(bytes.slice(offset, offset + byteSize)),
+          },
+        );
+
+        const publishedSnapshot = yield* (yield* SnippetStore).subscribe().pipe(
+          Stream.filter((snapshot) =>
+            snapshot.some((snippet) => snippet.id === localId && snippet.status === "PUBLISHED"),
+          ),
+          Stream.runHead,
+          Effect.forkChild,
+        );
+        yield* TestClock.adjust("3 minutes");
+        yield* Fiber.join(publishedSnapshot);
+
+        expect((yield* listSnippets(user.id))[0]).toMatchObject({
+          id: localId,
+          status: "PUBLISHED",
+        });
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.provide(TestClock.layer())),
+  );
+
   it.effect("marks an interrupted native upload as failed without discarding its content", () => {
     const bytes = new TextEncoder().encode("note");
     const stored = new Map([[localId, bytes]]);
@@ -698,8 +947,8 @@ describe("shared client integration", () => {
     const layer = makeLayer(
       makeRpc({
         GetSnippetSnapshot: () => Effect.succeed([published]),
-        PrepareSnippetDownload: () =>
-          Effect.fail(
+        DownloadSnippetContent: () =>
+          Stream.fail(
             new OfflineError({
               message: "The test client is offline.",
             }),
@@ -718,6 +967,105 @@ describe("shared client integration", () => {
     }).pipe(Effect.provide(layer));
   });
 
+  it.effect("persists a terminal provider rejection for manual recovery", () => {
+    const layer = makeLayer(
+      makeRpc({
+        GetSnippetSnapshot: () => Effect.succeed([published]),
+        DownloadSnippetContent: () =>
+          Stream.fail(
+            new RpcError({
+              code: "INTERNAL_SERVER_ERROR",
+              message: "provider rejected download",
+              retryable: false,
+            }),
+          ),
+      }),
+    );
+
+    return Effect.gen(function* () {
+      yield* (yield* SyncEngine).pull;
+      yield* (yield* ContentMirror).download(publishedId).pipe(Effect.flip);
+
+      expect((yield* listSnippets(user.id))[0]).toMatchObject({
+        id: publishedId,
+        localContentAvailability: { status: "FAILED" },
+      });
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("streams remote content without requiring a local content store", () => {
+    const bytes = new TextEncoder().encode("note");
+    const layer = makeLayer(
+      makeRpc({
+        GetSnippetSnapshot: () => Effect.succeed([published]),
+        DownloadSnippetContent: () => Stream.succeed(bytes),
+      }),
+      undefined,
+      { localContent: false },
+    );
+
+    return Effect.gen(function* () {
+      yield* (yield* SyncEngine).pull;
+      const content = yield* (yield* ContentMirror).readRemote(publishedId).pipe(
+        Stream.runCollect,
+        Effect.map((chunks) => Uint8Array.from(chunks.flatMap((chunk) => Array.from(chunk)))),
+      );
+      expect(content).toEqual(bytes);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("rejects remote content that does not match the published byte size", () => {
+    const layer = makeLayer(
+      makeRpc({
+        GetSnippetSnapshot: () => Effect.succeed([published]),
+        DownloadSnippetContent: () => Stream.succeed(new Uint8Array([1, 2, 3])),
+      }),
+      undefined,
+      { localContent: false },
+    );
+
+    return Effect.gen(function* () {
+      yield* (yield* SyncEngine).pull;
+      const error = yield* (yield* ContentMirror)
+        .readRemote(publishedId)
+        .pipe(Stream.runDrain, Effect.flip);
+      expect(error).toEqual(
+        new DownloadedContentMismatchError({
+          snippetId: publishedId,
+          expectedByteSize: published.byteSize,
+          actualByteSize: 3,
+          message: "The downloaded content size does not match the snippet.",
+        }),
+      );
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("stops a remote stream that exceeds the published byte size", () => {
+    const layer = makeLayer(
+      makeRpc({
+        GetSnippetSnapshot: () => Effect.succeed([published]),
+        DownloadSnippetContent: () => Stream.succeed(new Uint8Array([1, 2, 3, 4, 5])),
+      }),
+      undefined,
+      { localContent: false },
+    );
+
+    return Effect.gen(function* () {
+      yield* (yield* SyncEngine).pull;
+      const error = yield* (yield* ContentMirror)
+        .readRemote(publishedId)
+        .pipe(Stream.runDrain, Effect.flip);
+      expect(error).toEqual(
+        new DownloadedContentMismatchError({
+          snippetId: publishedId,
+          expectedByteSize: published.byteSize,
+          actualByteSize: 5,
+          message: "The downloaded content size does not match the snippet.",
+        }),
+      );
+    }).pipe(Effect.provide(layer));
+  });
+
   it.effect("keeps the newest twenty eligible snippets available locally", () => {
     const snippets = Array.from(
       { length: 21 },
@@ -731,23 +1079,11 @@ describe("shared client integration", () => {
         updatedAt: `2026-07-20T20:00:${String(index).padStart(2, "0")}.000Z`,
       }),
     );
-    const byId = new Map(snippets.map((snippet) => [snippet.id, snippet]));
     const layer = makeLayer(
       makeRpc({
         GetSnippetSnapshot: () => Effect.succeed(snippets),
-        PrepareSnippetDownload: ({ id }: PrepareDownloadInput) => {
-          const snippet = byId.get(id);
-          return snippet === undefined
-            ? Effect.die("missing test snippet")
-            : Effect.succeed({
-                storageProvider: snippet.storageProvider,
-                fileName: snippet.fileName,
-                byteSize: snippet.byteSize,
-                download: { url: `https://download.example/${id}`, headers: [] },
-              });
-        },
+        DownloadSnippetContent: () => Stream.succeed(new Uint8Array([1])),
       }),
-      () => new Response(new Uint8Array([1]), { status: 200 }),
     );
 
     return Effect.gen(function* () {

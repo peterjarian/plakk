@@ -12,7 +12,7 @@ import {
   AuthService,
   AuthServiceError,
   AuthSessionExpiredError,
-  deriveDesktopAuthCallbackUrl,
+  desktopAuthCallbackUrl,
   parseTrustedAuthCallbackUrl,
   type AuthSession,
   type AuthServiceFailure,
@@ -28,9 +28,9 @@ export const AuthServiceLive = Layer.effect(
     const clientConfig = yield* Effect.cached(
       Effect.gen(function* () {
         const clientId = yield* Config.nonEmptyString("WORKOS_CLIENT_ID");
-        const configuredCallbackUrl = yield* Config.url("WORKOS_REDIRECT_URI");
-        const callbackUrl = deriveDesktopAuthCallbackUrl(configuredCallbackUrl, app.isPackaged);
-        return { callbackUrl, clientId, workos: createWorkOS({ clientId }) };
+        const redirectUrl = yield* Config.url("WORKOS_REDIRECT_URI");
+        const callbackUrl = desktopAuthCallbackUrl(app.isPackaged);
+        return { callbackUrl, clientId, redirectUrl, workos: createWorkOS({ clientId }) };
       }),
     );
 
@@ -193,14 +193,14 @@ export const AuthServiceLive = Layer.effect(
           });
         }
 
-        const { callbackUrl, clientId, workos } = yield* clientConfig;
+        const { clientId, redirectUrl, workos } = yield* clientConfig;
         const now = yield* Clock.currentTimeMillis;
         const request = yield* Effect.tryPromise({
           try: () =>
             workos.userManagement.getAuthorizationUrlWithPKCE({
               clientId,
               provider: "authkit",
-              redirectUri: callbackUrl.href,
+              redirectUri: redirectUrl.href,
             }),
           catch: (cause) =>
             new AuthServiceError({ cause, message: "Could not start desktop sign-in." }),

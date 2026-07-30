@@ -28,6 +28,7 @@ export const decodeSnippetText = (content: string | Uint8Array | undefined): str
 };
 
 export const SNIPPET_TEXT_PREVIEW_MAX_BYTES = 64 * 1024;
+export const SNIPPET_TITLE_MAX_CHARACTERS = 512;
 
 export const isValidSnippetText = (content: Uint8Array): boolean => {
   const decoder = new TextDecoder("utf-8", { fatal: true });
@@ -57,6 +58,14 @@ export const decodeSnippetTextPreview = (
   }
 };
 
+export const deriveSnippetTitle = (content: string): string | undefined => {
+  const text = content.trim();
+  if (text.length === 0) return undefined;
+  const candidate = isHttpUrl(text) ? text : (text.split(/\r?\n/, 1)[0]?.trim() ?? "");
+  const title = candidate.slice(0, SNIPPET_TITLE_MAX_CHARACTERS).trimEnd();
+  return title.length === 0 ? undefined : title;
+};
+
 export const deriveSnippetPresentation = (input: {
   readonly fileName: string;
   readonly content?: string | Uint8Array;
@@ -68,13 +77,13 @@ export const deriveSnippetPresentation = (input: {
     return { type: "file", title: input.fileName };
   }
 
-  const text = decodeSnippetText(input.content)?.trim();
-  if (text === undefined || text === null) {
-    return { type: "file", title: "Text snippet" };
+  if (input.content === undefined) return { type: "text", title: input.fileName };
+  const text = decodeSnippetText(input.content);
+  if (text === null) return { type: "file", title: input.fileName };
+  const title = deriveSnippetTitle(text);
+  if (title === undefined) return { type: "text", title: input.fileName };
+  if (isHttpUrl(text.trim()) && title === text.trim()) {
+    return { type: "hyperlink", title, url: title };
   }
-  if (text !== undefined && text !== null && isHttpUrl(text)) {
-    return { type: "hyperlink", title: text, url: text };
-  }
-  const title = text?.split(/\r?\n/, 1)[0]?.trim() || "Text snippet";
   return { type: "text", title };
 };

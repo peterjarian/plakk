@@ -33,7 +33,7 @@ export function SyncStatusIndicator({ status }: { readonly status: SyncStatus })
       <TooltipTrigger
         render={
           <span
-            className="no-drag inline-flex size-4 items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            className="inline-flex size-4 items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
             role="status"
             aria-label={label}
             tabIndex={0}

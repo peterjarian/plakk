@@ -95,6 +95,8 @@ describe("SnippetRow", () => {
     );
 
     expect(markup).toContain("Upload failed.");
+    expect(markup).toContain("Dismiss it and add the content again.");
+    expect(markup).toContain('role="alert"');
     expect(markup).toContain('aria-label="Dismiss failed upload"');
     expect(markup).toContain('data-persistent-action="dismiss"');
     expect(markup).not.toContain('aria-label="Retry upload"');
@@ -157,6 +159,7 @@ describe("SnippetRow", () => {
 
     expect(markup).toContain("Text snippet");
     expect(markup).toContain("Couldn’t download this text. Try again.");
+    expect(markup).toContain('role="alert"');
     expect(markup).not.toContain("Loading text");
     expect(markup).toContain('aria-label="Retry download"');
     expect(markup).toContain('data-persistent-action="download"');

@@ -37,19 +37,22 @@ const RpcRoutes = RpcServer.layerHttp({
   Layer.provide(InfrastructureLive),
 );
 
-const HealthRoute = HttpRouter.add(
-  "GET",
-  "/health",
-  Effect.succeed(HttpServerResponse.text("ok")),
-).pipe(HttpRouter.serve);
+const HealthRoute = HttpRouter.add("GET", "/health", Effect.succeed(HttpServerResponse.text("ok")));
+
+const webOrigin = Effect.runSync(
+  Config.url("PLAKK_WEB_ORIGIN").pipe(
+    Config.withDefault(new URL("http://localhost:3000")),
+    Effect.orDie,
+  ),
+).origin;
 
 const BackendRoutes = Layer.mergeAll(
   HealthRoute,
   RpcRoutes,
   HttpRouter.cors({
-    allowedOrigins: ["plakk-app://renderer"],
+    allowedOrigins: ["plakk-app://renderer", webOrigin],
     allowedMethods: ["GET", "POST", "OPTIONS"],
-    allowedHeaders: ["authorization", "content-type"],
+    allowedHeaders: ["authorization", "b3", "content-type", "traceparent"],
     maxAge: 86_400,
   }),
 );

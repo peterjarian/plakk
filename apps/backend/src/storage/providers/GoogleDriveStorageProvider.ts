@@ -1,3 +1,4 @@
+import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -154,6 +155,10 @@ export const GoogleDriveStorageProvider = {
     input: PrepareStorageUploadInput,
   ): Effect.fn.Return<PreparedStorageUpload, StorageProviderError, HttpClient.HttpClient> {
     const contentType = input.contentType ?? "application/octet-stream";
+    const webOrigin = (yield* Config.url("PLAKK_WEB_ORIGIN").pipe(
+      Config.withDefault(new URL("http://localhost:3000")),
+      Effect.orDie,
+    )).origin;
     const folder = yield* getPlakkFolder(input.accessToken);
     const body = yield* Schema.encodeEffect(GoogleDriveUploadMetadata)({
       name: input.fileName,
@@ -164,12 +169,15 @@ export const GoogleDriveStorageProvider = {
         providerError(input, "Google Drive upload session request was invalid.", cause),
       ),
     );
-    const request = HttpClientRequest.post(GOOGLE_DRIVE_RESUMABLE_UPLOAD_URL).pipe(
+    let request = HttpClientRequest.post(GOOGLE_DRIVE_RESUMABLE_UPLOAD_URL).pipe(
       HttpClientRequest.bearerToken(input.accessToken),
       HttpClientRequest.setHeader("X-Upload-Content-Length", String(input.byteSize)),
       HttpClientRequest.setHeader("X-Upload-Content-Type", contentType),
       HttpClientRequest.bodyText(body, "application/json; charset=UTF-8"),
     );
+    if (input.origin === webOrigin) {
+      request = HttpClientRequest.setHeader(request, "Origin", webOrigin);
+    }
     const response = yield* HttpClient.execute(request).pipe(
       Effect.mapError((cause) =>
         providerError(input, "Google Drive upload session request failed.", cause),
