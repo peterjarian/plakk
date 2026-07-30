@@ -1,7 +1,8 @@
 import { Effect, Layer } from "effect";
-import { describe, expect, it, vi } from "vite-plus/test";
+import * as ConfigProvider from "effect/ConfigProvider";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-const workos = vi.hoisted(() => ({ create: vi.fn() }));
+const workos = vi.hoisted(() => ({ authorize: vi.fn(), create: vi.fn() }));
 
 vi.mock("@workos-inc/node", () => ({ createWorkOS: workos.create }));
 vi.mock("electron", () => ({
@@ -12,7 +13,7 @@ vi.mock("electron", () => ({
 import {
   accessTokenNeedsRefresh,
   authRefreshFailureExpiresSession,
-  deriveDesktopAuthCallbackUrl,
+  desktopAuthCallbackUrl,
   parseTrustedAuthCallbackUrl,
   AuthService,
 } from "./AuthService.ts";
@@ -25,14 +26,15 @@ function accessToken(claims: unknown): string {
   return `header.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.signature`;
 }
 
-describe("desktop auth callback matching", () => {
-  it("derives the packaged and development protocols without changing the callback address", () => {
-    const configuredUrl = new URL("plakk://auth/callback");
+beforeEach(() => {
+  workos.authorize.mockReset();
+  workos.create.mockReset();
+});
 
-    expect(deriveDesktopAuthCallbackUrl(configuredUrl, true).href).toBe("plakk://auth/callback");
-    expect(deriveDesktopAuthCallbackUrl(configuredUrl, false).href).toBe(
-      "plakk-dev://auth/callback",
-    );
+describe("desktop auth callback matching", () => {
+  it("uses separate packaged and development protocols at the desktop callback address", () => {
+    expect(desktopAuthCallbackUrl(true).href).toBe("plakk://auth/callback");
+    expect(desktopAuthCallbackUrl(false).href).toBe("plakk-dev://auth/callback");
   });
 
   it("accepts only the configured protocol, host, and path", () => {
@@ -103,6 +105,65 @@ describe("desktop access token refresh", () => {
 });
 
 describe("desktop auth service configuration", () => {
+  it("uses the web handoff for WorkOS while retaining the private desktop callback", async () => {
+    let storedPkce: unknown = null;
+    workos.authorize.mockResolvedValue({
+      codeVerifier: "code-verifier",
+      state: "auth-state",
+      url: "https://api.workos.com/user_management/authorize",
+    });
+    workos.create.mockReturnValue({
+      userManagement: { getAuthorizationUrlWithPKCE: workos.authorize },
+    });
+
+    const storeLayer = Layer.succeed(
+      AuthStore,
+      AuthStore.of({
+        clear: Effect.void,
+        get: () => Effect.succeed(null),
+        isEncryptionAvailable: Effect.succeed(true),
+        set: (key, value) =>
+          Effect.sync(() => {
+            if (key === "pkce") storedPkce = value;
+          }),
+      }),
+    );
+
+    const result = await Effect.runPromise(
+      AuthService.use((auth) =>
+        Effect.all({
+          authorizationUrl: auth.startSignIn(),
+          callbackUrl: auth.callbackUrl,
+        }),
+      ).pipe(
+        Effect.provide(AuthServiceLive.pipe(Layer.provide(storeLayer))),
+        Effect.provideService(
+          ConfigProvider.ConfigProvider,
+          ConfigProvider.fromEnv({
+            env: {
+              WORKOS_CLIENT_ID: "client_desktop",
+              WORKOS_REDIRECT_URI: "https://app.plakk.io/auth/desktop/callback",
+            },
+          }),
+        ),
+      ),
+    );
+
+    expect(result).toEqual({
+      authorizationUrl: "https://api.workos.com/user_management/authorize",
+      callbackUrl: "plakk-dev://auth/callback",
+    });
+    expect(workos.authorize).toHaveBeenCalledWith({
+      clientId: "client_desktop",
+      provider: "authkit",
+      redirectUri: "https://app.plakk.io/auth/desktop/callback",
+    });
+    expect(storedPkce).toMatchObject({
+      codeVerifier: "code-verifier",
+      state: "auth-state",
+    });
+  });
+
   it("ignores non-callback arguments without loading WorkOS configuration", async () => {
     const storeLayer = Layer.succeed(
       AuthStore,

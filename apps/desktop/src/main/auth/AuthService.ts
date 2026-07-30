@@ -37,9 +37,9 @@ export function authRefreshFailureExpiresSession(cause: unknown): boolean {
   return status === 400 || status === 401;
 }
 
-export function deriveDesktopAuthCallbackUrl(configuredUrl: URL, isPackaged: boolean): URL {
+export function desktopAuthCallbackUrl(isPackaged: boolean): URL {
   const protocol = isPackaged ? "plakk:" : "plakk-dev:";
-  return new URL(`${protocol}${configuredUrl.href.slice(configuredUrl.protocol.length)}`);
+  return new URL(`${protocol}//auth/callback`);
 }
 
 export function parseTrustedAuthCallbackUrl(rawUrl: string, callbackUrl: URL): URL | null {
