@@ -3,7 +3,7 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:net";
-import { dirname, resolve } from "node:path";
+import { delimiter, dirname, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseEnv } from "node:util";
@@ -389,7 +389,13 @@ function spawnProcess(input: {
   const child = spawn(input.command, input.args, {
     cwd: input.cwd,
     detached,
-    env: { ...process.env, ...input.environment },
+    env: {
+      ...process.env,
+      PATH: [resolve(input.cwd, "node_modules/.bin"), process.env.PATH]
+        .filter((value) => value !== undefined && value.length > 0)
+        .join(delimiter),
+      ...input.environment,
+    },
     stdio: "inherit",
   });
   const exit = new Promise<ProcessExit>((resolveExit) => {
@@ -594,6 +600,7 @@ async function runDevelopment(): Promise<void> {
       signal.then((name) => ({ type: "signal" as const, name })),
       backend.exit.then((exit) => ({ type: "exit" as const, managed: backend, exit })),
       web.exit.then((exit) => ({ type: "exit" as const, managed: web, exit })),
+      desktop.exit.then((exit) => ({ type: "exit" as const, managed: desktop, exit })),
     ]);
     if (outcome.type === "exit") throw new Error(formatExit(outcome.managed, outcome.exit));
   } finally {
