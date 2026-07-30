@@ -385,8 +385,10 @@ function spawnProcess(input: {
   readonly cwd: string;
   readonly environment?: Readonly<Record<string, string>>;
 }): ManagedProcess {
+  const detached = process.platform !== "win32";
   const child = spawn(input.command, input.args, {
     cwd: input.cwd,
+    detached,
     env: { ...process.env, ...input.environment },
     stdio: "inherit",
   });
@@ -405,6 +407,23 @@ function spawnProcess(input: {
     });
   });
   return { name: input.name, child, exit };
+}
+
+function signalProcess(managed: ManagedProcess, signal: NodeJS.Signals): void {
+  if (managed.child.exitCode !== null) return;
+  if (process.platform === "win32" || managed.child.pid === undefined) {
+    managed.child.kill(signal);
+    return;
+  }
+
+  try {
+    process.kill(-managed.child.pid, signal);
+  } catch (cause) {
+    if (typeof cause === "object" && cause !== null && "code" in cause && cause.code === "ESRCH") {
+      return;
+    }
+    throw cause;
+  }
 }
 
 async function waitForHttp(input: {
@@ -444,9 +463,7 @@ function formatExit(managed: ManagedProcess, exit: ProcessExit): string {
 
 async function stopProcesses(processes: ReadonlyArray<ManagedProcess>): Promise<void> {
   for (const managed of processes) {
-    if (managed.child.exitCode === null && !managed.child.killed) {
-      managed.child.kill("SIGTERM");
-    }
+    signalProcess(managed, "SIGTERM");
   }
 
   const allExited = Promise.all(processes.map((managed) => managed.exit));
@@ -457,7 +474,7 @@ async function stopProcesses(processes: ReadonlyArray<ManagedProcess>): Promise<
   if (completed) return;
 
   for (const managed of processes) {
-    if (managed.child.exitCode === null) managed.child.kill("SIGKILL");
+    signalProcess(managed, "SIGKILL");
   }
   await Promise.all(processes.map((managed) => managed.exit));
 }
@@ -515,16 +532,16 @@ async function runDevelopment(): Promise<void> {
   try {
     const backend = spawnProcess({
       name: "backend",
-      command: "pnpm",
-      args: ["--filter", "@plakk/backend", "run", "dev"],
-      cwd: repoRoot,
+      command: process.execPath,
+      args: ["--experimental-strip-types", "--watch", "src/main.ts"],
+      cwd: resolve(repoRoot, "apps/backend"),
       environment: applicationEnvironments.backend,
     });
     const web = spawnProcess({
       name: "web",
-      command: "pnpm",
-      args: ["--filter", "@plakk/web", "run", "dev"],
-      cwd: repoRoot,
+      command: "vp",
+      args: ["dev", "--port", String(WEB_PORT), "--host", LOOPBACK_HOST],
+      cwd: resolve(repoRoot, "apps/web"),
       environment: applicationEnvironments.web,
     });
     processes.push(backend, web);
@@ -553,9 +570,9 @@ async function runDevelopment(): Promise<void> {
 
     const desktop = spawnProcess({
       name: "desktop",
-      command: "pnpm",
-      args: ["--filter", "@plakk/desktop", "run", "dev"],
-      cwd: repoRoot,
+      command: process.execPath,
+      args: ["scripts/with-electron-native.mjs", "node", "scripts/dev-electron.mjs"],
+      cwd: resolve(repoRoot, "apps/desktop"),
       environment: applicationEnvironments.desktop,
     });
     processes.push(desktop);
