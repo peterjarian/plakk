@@ -29,7 +29,7 @@ export type SyncFailure =
   | SnippetConflictError
   | SnippetNotFoundError;
 
-export const SyncStatusSchema = Schema.Literals(["CONNECTED", "RECONNECTING"] as const);
+export const SyncStatusSchema = Schema.Literals(["STARTING", "CONNECTED", "RECONNECTING"] as const);
 export type SyncStatus = typeof SyncStatusSchema.Type;
 
 export class SyncEngine extends Context.Service<
@@ -53,7 +53,7 @@ export class SyncEngine extends Context.Service<
       const sql = yield* SqlClient.SqlClient;
       const snippets = yield* SnippetStore;
       const content = Option.getOrUndefined(yield* Effect.serviceOption(ContentStore));
-      const status = yield* SubscriptionRef.make<SyncStatus>("RECONNECTING");
+      const status = yield* SubscriptionRef.make<SyncStatus>("STARTING");
 
       /** Converts a backend-declared failure into a safe runtime error. */
       const failRpc = (error: RpcError): Effect.Effect<never, SyncFailure> => {
@@ -139,8 +139,11 @@ export class SyncEngine extends Context.Service<
           yield* pull.pipe(
             Effect.tap(() => SubscriptionRef.set(status, "CONNECTED")),
             Effect.catchCause((cause) =>
-              Effect.logWarning("Initial snippet sync failed", {
-                cause: Cause.pretty(cause),
+              Effect.gen(function* () {
+                yield* SubscriptionRef.set(status, "RECONNECTING");
+                yield* Effect.logWarning("Initial snippet sync failed", {
+                  cause: Cause.pretty(cause),
+                });
               }),
             ),
           );

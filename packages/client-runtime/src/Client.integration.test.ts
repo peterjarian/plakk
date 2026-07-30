@@ -182,10 +182,30 @@ describe("shared client integration", () => {
       const syncFiber = yield* sync.run.pipe(Effect.forkChild);
 
       expect(Array.from(yield* Fiber.join(statusesFiber))).toEqual([
-        "RECONNECTING",
+        "STARTING",
         "CONNECTED",
         "RECONNECTING",
       ]);
+      yield* Fiber.interrupt(syncFiber);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("settles startup state when the initial snippet sync fails", () => {
+    const layer = makeLayer(
+      makeRpc({
+        GetSnippetSnapshot: () =>
+          Effect.fail(new OfflineError({ message: "Could not reach the backend." })),
+      }),
+    );
+
+    return Effect.gen(function* () {
+      const sync = yield* SyncEngine;
+      const statusesFiber = yield* sync
+        .subscribe()
+        .pipe(Stream.take(2), Stream.runCollect, Effect.forkChild);
+      const syncFiber = yield* sync.run.pipe(Effect.forkChild);
+
+      expect(Array.from(yield* Fiber.join(statusesFiber))).toEqual(["STARTING", "RECONNECTING"]);
       yield* Fiber.interrupt(syncFiber);
     }).pipe(Effect.provide(layer));
   });

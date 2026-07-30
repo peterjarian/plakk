@@ -166,7 +166,7 @@ export function useSnippets(state: {
   );
 
   return {
-    isLoading: state.loading,
+    isLoading: state.loading || (items.length === 0 && state.snapshot?.syncStatus === "STARTING"),
     items,
   };
 }

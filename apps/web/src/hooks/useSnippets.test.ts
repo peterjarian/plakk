@@ -1,7 +1,9 @@
-import type { Snippet } from "@plakk/client-runtime";
+import type { ClientSnapshot, Snippet } from "@plakk/client-runtime";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { createImageUrlRegistry, projectSnippetReadModels } from "./useSnippets.ts";
+import { createImageUrlRegistry, projectSnippetReadModels, useSnippets } from "./useSnippets.ts";
 
 const snippet = (input: Partial<Snippet> = {}): Snippet =>
   ({
@@ -18,6 +20,41 @@ const snippet = (input: Partial<Snippet> = {}): Snippet =>
     localContentAvailability: { status: "NOT_AVAILABLE" },
     ...input,
   }) as Snippet;
+
+const clientSnapshot = (
+  syncStatus: ClientSnapshot["syncStatus"],
+  snippets: ReadonlyArray<Snippet> = [],
+): ClientSnapshot => ({
+  user: {
+    id: "user-1",
+    firstName: "Test",
+    lastName: "User",
+    email: "test@example.com",
+    createdAt: "2026-07-20T18:00:00.000Z",
+    updatedAt: "2026-07-20T18:00:00.000Z",
+  },
+  capability: {
+    status: "OFFLINE",
+    storageProvider: { known: false, value: null },
+  },
+  syncStatus,
+  storageUsageBytes: 0,
+  snippets,
+});
+
+const projectHook = (snapshot: ClientSnapshot) => {
+  let result: ReturnType<typeof useSnippets> | undefined;
+  function Harness() {
+    result = useSnippets({
+      loading: false,
+      snapshot,
+      run: vi.fn() as never,
+    });
+    return null;
+  }
+  renderToStaticMarkup(createElement(Harness));
+  return result!;
+};
 
 describe("snippet read-model projection", () => {
   it("returns the same stable read model used by the desktop", () => {
@@ -53,6 +90,14 @@ describe("snippet read-model projection", () => {
     const [item] = projectSnippetReadModels([source], {});
 
     expect(item?.presentation).toEqual({ type: "file", title: "archive.zip" });
+  });
+});
+
+describe("snippet loading projection", () => {
+  it("keeps an empty list loading until the initial remote sync settles", () => {
+    expect(projectHook(clientSnapshot("STARTING")).isLoading).toBe(true);
+    expect(projectHook(clientSnapshot("CONNECTED")).isLoading).toBe(false);
+    expect(projectHook(clientSnapshot("STARTING", [snippet()])).isLoading).toBe(false);
   });
 });
 
