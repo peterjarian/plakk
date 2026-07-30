@@ -103,6 +103,7 @@ describe("local state views", () => {
         canSync: true,
         storageProvider: "GOOGLE_DRIVE",
         blockedReasons: [],
+        billing: { status: "SUBSCRIBED", cancelAtPeriodEnd: false },
       },
       connection: {
         storageProvider: "GOOGLE_DRIVE",

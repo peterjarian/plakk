@@ -26,6 +26,12 @@ import {
 } from "./clipboard.ts";
 import { UserConfigStore } from "./UserConfigStore.ts";
 import { createAppearanceController } from "./appearance.ts";
+import {
+  desktopBillingCallbackUrl,
+  makeBillingReturnCoordinator,
+  parseTrustedBillingCallbackUrl,
+  refreshBillingUntilSubscribed,
+} from "./BillingCallback.ts";
 import { runEffect, runtime } from "./runtime.ts";
 import { NativeFileSources } from "./snippets/NativeFileSources.ts";
 import { createTrayWindowController } from "./tray/window.ts";
@@ -67,6 +73,24 @@ handle(ipcMethods.openExternal, (url) =>
         try: () => shell.openExternal(url),
         catch: (cause) => new IpcHandlerError({ cause, message: "Could not open this link." }),
       }),
+);
+
+handle(ipcMethods.billingOpen, () =>
+  Effect.gen(function* () {
+    yield* Effect.try({
+      try: () => registerPrivateCallbackProtocol(desktopBillingCallbackUrl(app.isPackaged)),
+      catch: (cause) =>
+        new IpcHandlerError({ cause, message: "Could not register the billing return to Plakk." }),
+    });
+    const url = yield* DesktopSession.use((session) =>
+      session.withClient((client) => client.billing.open("DESKTOP")),
+    ).pipe(asIpcError);
+    yield* Effect.tryPromise({
+      try: () => shell.openExternal(url),
+      catch: (cause) => new IpcHandlerError({ cause, message: "Could not open Polar billing." }),
+    });
+    yield* Effect.sync(() => billingReturns.request());
+  }),
 );
 
 const getLocalState = DesktopSession.use((session) => session.current);
@@ -312,7 +336,7 @@ handle(ipcMethods.authSignIn, () =>
       "Desktop auth is not configured.",
     );
     yield* Effect.try({
-      try: () => registerAuthCallbackProtocol(callbackUrl),
+      try: () => registerPrivateCallbackProtocol(new URL(callbackUrl)),
       catch: (cause) =>
         new IpcHandlerError({ cause, message: "Could not register desktop sign-in." }),
     });
@@ -379,6 +403,7 @@ let appearanceController: ReturnType<
   typeof createAppearanceController<BrowserWindow["webContents"]>
 >;
 let isQuitting = false;
+const billingReturns = makeBillingReturnCoordinator();
 
 app.setName(app.isPackaged ? "Plakk" : "Plakk (Dev)");
 
@@ -505,7 +530,13 @@ const createWindow = (view?: RendererView): void => {
   mainWindow.once("closed", () => {
     mainWindow = undefined;
   });
-  mainWindow.on("focus", () => runtime.runFork(DesktopSession.use((session) => session.refresh)));
+  mainWindow.on("focus", () => {
+    if (billingReturns.hasPendingReturn()) {
+      refreshBillingAfterReturn();
+    } else {
+      runtime.runFork(DesktopSession.use((session) => session.refresh));
+    }
+  });
 
   guardExternalWindows(mainWindow);
 
@@ -522,11 +553,38 @@ function revealMainWindow() {
   mainWindow?.focus();
 }
 
-function registerAuthCallbackProtocol(callbackUrl: string): void {
-  const redirectUrl = new URL(callbackUrl);
+function refreshBillingAfterReturn(): void {
+  if (!billingReturns.start()) return;
+  void runEffect(
+    DesktopSession.use((session) =>
+      refreshBillingUntilSubscribed({
+        refresh: session.withClient((client) => client.billing.refresh),
+        isSubscribed: session.current.pipe(
+          Effect.map(
+            (state) =>
+              state.capability.status === "ONLINE" &&
+              state.capability.account.billing.status === "SUBSCRIBED",
+          ),
+        ),
+      }),
+    ).pipe(
+      Effect.tap((subscribed) =>
+        subscribed
+          ? Effect.void
+          : Effect.logInfo("Billing status did not update during the return refresh window"),
+      ),
+      Effect.ensuring(
+        Effect.sync(() => {
+          if (billingReturns.finish()) queueMicrotask(refreshBillingAfterReturn);
+        }),
+      ),
+    ),
+  );
+}
 
+function registerPrivateCallbackProtocol(redirectUrl: URL): void {
   if (["http:", "https:", "file:"].includes(redirectUrl.protocol)) {
-    throw new Error("Desktop auth callback URL must use a private app scheme.");
+    throw new Error("Desktop callback URL must use a private app scheme.");
   }
 
   const scheme = redirectUrl.protocol.slice(0, -1);
@@ -536,7 +594,7 @@ function registerAuthCallbackProtocol(callbackUrl: string): void {
       : app.setAsDefaultProtocolClient(scheme);
 
   if (!registered) {
-    throw new Error("Could not register the desktop auth callback URL.");
+    throw new Error("Could not register the desktop callback URL.");
   }
 }
 
@@ -592,7 +650,7 @@ const projectClipboardContent = Effect.fn("NativeFileSources.projectClipboardCon
   return content;
 });
 
-async function handleAuthUrls(values: readonly string[]): Promise<boolean> {
+async function handleOpenUrls(values: readonly string[]): Promise<boolean> {
   for (const rawUrl of values) {
     pendingOpenUrls.add(rawUrl);
   }
@@ -602,6 +660,16 @@ async function handleAuthUrls(values: readonly string[]): Promise<boolean> {
 
   for (const rawUrl of pendingOpenUrls) {
     pendingOpenUrls.delete(rawUrl);
+
+    if (
+      parseTrustedBillingCallbackUrl(rawUrl, desktopBillingCallbackUrl(app.isPackaged)) !== null
+    ) {
+      handled = true;
+      billingReturns.request();
+      revealMainWindow();
+      refreshBillingAfterReturn();
+      continue;
+    }
 
     const result = await runEffect(
       Effect.result(
@@ -645,7 +713,7 @@ function pasteIntoFocusedWindow(): void {
 
 app.on("open-url", (event, rawUrl) => {
   event.preventDefault();
-  void handleAuthUrls([rawUrl]);
+  void handleOpenUrls([rawUrl]);
 });
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
@@ -654,7 +722,7 @@ if (!hasSingleInstanceLock) {
   app.quit();
 } else {
   app.on("second-instance", (_event, argv) => {
-    void handleAuthUrls(argv).then((handled) => {
+    void handleOpenUrls(argv).then((handled) => {
       if (!handled) revealMainWindow();
     });
   });
@@ -750,7 +818,7 @@ if (!hasSingleInstanceLock) {
     if (Result.isFailure(initialSession)) {
       broadcastAuthError("Plakk could not finish reconciling the local account.");
     }
-    void handleAuthUrls(process.argv);
+    void handleOpenUrls(process.argv);
 
     app.on("activate", () => {
       createWindow();

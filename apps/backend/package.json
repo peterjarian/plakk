@@ -25,9 +25,11 @@
     "@opentelemetry/semantic-conventions": "^1.40.0",
     "@plakk/db": "workspace:*",
     "@plakk/shared": "workspace:*",
+    "@polar-sh/sdk": "1.0.0-alpha.16",
     "@workos-inc/node": "^10.7.0",
     "dotenv": "^17.4.2",
     "effect": "catalog:",
+    "ioredis": "5.7.0",
     "jose": "^6.2.3"
   },
   "devDependencies": {

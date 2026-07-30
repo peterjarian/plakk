@@ -25,6 +25,7 @@ import * as Effect from "effect/Effect";
 import * as Schedule from "effect/Schedule";
 import * as Stream from "effect/Stream";
 
+import { Billing } from "../billing/Billing.ts";
 import { type StorageDownloadError, StorageProvider } from "../storage/StorageProvider.ts";
 
 const SNIPPET_INVALIDATION_CHANNEL = "plakk_snippet_invalidations";
@@ -268,6 +269,20 @@ const snippetInvalidationRpcStream = <E>(changes: Stream.Stream<SnippetInvalidat
     ),
   );
 
+const requireBillingAccess = Effect.fn("rpc.requireBillingAccess")(function* () {
+  const currentUser = yield* CurrentUser;
+  const billing = yield* Billing;
+  yield* billing.requireAccess(currentUser).pipe(
+    Effect.mapError(
+      (error) =>
+        new RpcError({
+          code: error._tag === "PaymentRequiredError" ? "FORBIDDEN" : "INTERNAL_SERVER_ERROR",
+          message: error.message,
+        }),
+    ),
+  );
+});
+
 export const SnippetRpcsLive = Effect.gen(function* () {
   const postgresNotifications = yield* PostgresNotifications;
   const notifications = yield* reconnectSnippetNotifications(() =>
@@ -278,6 +293,7 @@ export const SnippetRpcsLive = Effect.gen(function* () {
     PrepareSnippetUpload: Effect.fn("rpc.PrepareSnippetUpload")(function* (input) {
       const storage = yield* StorageProvider;
       const currentUser = yield* CurrentUser;
+      yield* requireBillingAccess();
       return yield* prepareSnippetUpload(storage, currentUser, input).pipe(
         Effect.annotateSpans({ id: input.id }),
       );
@@ -285,6 +301,7 @@ export const SnippetRpcsLive = Effect.gen(function* () {
     PublishSnippet: Effect.fn("rpc.PublishSnippet")(function* (input) {
       const drizzle = yield* Drizzle;
       const currentUser = yield* CurrentUser;
+      yield* requireBillingAccess();
       return yield* publishSnippet(drizzle, currentUser.id, input).pipe(
         Effect.annotateSpans({ id: input.id }),
       );

@@ -29,6 +29,7 @@ import {
   storageProviderLabel,
 } from "@plakk/ui/components/StorageProviderIcon";
 import { Settings as SettingsUI } from "@plakk/ui/components/settings";
+import { billingPresentation } from "@plakk/ui/lib/billingPresentation";
 import { getInitials } from "@plakk/ui/lib/getInitials";
 import { useAuth } from "../hooks/useAuth.ts";
 import { setAppearancePreference, useAppearance } from "../hooks/useAppearance.ts";
@@ -82,6 +83,8 @@ export function Settings() {
       : localState.storageUsageBytes;
   const [appearanceError, setAppearanceError] = useState<string | null>(null);
   const [savingAppearance, setSavingAppearance] = useState(false);
+  const [billingError, setBillingError] = useState<string | null>(null);
+  const [openingBilling, setOpeningBilling] = useState(false);
   const user = auth.user;
 
   useEffect(() => {
@@ -122,6 +125,22 @@ export function Settings() {
 
   const fallback = user.email || user.id;
   const name = [user.firstName, user.lastName].filter(Boolean).join(" ") || fallback;
+  const billing =
+    localState.capability.status === "ONLINE" ? localState.capability.account.billing : null;
+  const billingCopy = billingPresentation(billing);
+
+  function openBilling() {
+    if (openingBilling) return;
+    setOpeningBilling(true);
+    setBillingError(null);
+    void window.ipc.billing.open().then(
+      () => setOpeningBilling(false),
+      (cause) => {
+        setOpeningBilling(false);
+        setBillingError(ipcActionErrorMessage(cause, "Could not open billing."));
+      },
+    );
+  }
 
   return (
     <main className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
@@ -161,21 +180,22 @@ export function Settings() {
                   <SettingsUI.RowIcon>
                     <CreditCard className="size-4 text-muted-foreground" aria-hidden="true" />
                   </SettingsUI.RowIcon>
-                  <SettingsUI.RowText
-                    title="Billing"
-                    description="Manage your plan and payment details."
-                  />
+                  <SettingsUI.RowText title="Billing" description={billingCopy.description} />
                 </SettingsUI.RowMain>
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
-                  onClick={() => void window.ipc.openExternal("https://app.plakk.io/billing")}
+                  disabled={openingBilling || billing === null}
+                  onClick={openBilling}
                 >
-                  Manage
+                  {openingBilling ? "Opening…" : billingCopy.action}
                   <ArrowUpRight />
                 </Button>
               </SettingsUI.Row>
+              {billingError === null ? null : (
+                <div className="px-4 pb-3 text-sm text-destructive">{billingError}</div>
+              )}
 
               {storageStatus.kind === "loading" ||
               storageStatus.kind === "failed" ||
@@ -257,7 +277,7 @@ export function Settings() {
                         storageStatus.canSync
                           ? "Syncing snippets to this storage provider."
                           : storageStatus.account.blockedReasons.includes("billing")
-                            ? "Sync paused until billing is resolved."
+                            ? billingCopy.description
                             : "Sync is currently paused."
                       }
                     />

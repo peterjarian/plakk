@@ -1,5 +1,6 @@
 import {
   AccountRpcs,
+  BillingRpcs,
   CurrentUser,
   HealthRpcs,
   PlakkApi,
@@ -8,6 +9,7 @@ import {
 import { RpcError } from "@plakk/shared/RpcError";
 import * as Effect from "effect/Effect";
 
+import { Billing } from "../billing/Billing.ts";
 import { StorageProvider } from "../storage/StorageProvider.ts";
 import { SnippetRpcsLive } from "./SnippetRpcsLive.ts";
 import { StorageRpcsLive } from "./StorageRpcsLive.ts";
@@ -19,7 +21,17 @@ const HealthRpcsLive = HealthRpcs.of({
 const AccountRpcsLive = AccountRpcs.of({
   GetAccountStatus: Effect.fn("rpc.GetAccountStatus")(function* () {
     const currentUser = yield* CurrentUser;
+    const billing = yield* Billing;
     const storage = yield* StorageProvider;
+    const billingStatus = yield* billing.status(currentUser).pipe(
+      Effect.mapError(
+        (error) =>
+          new RpcError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: error.message,
+          }),
+      ),
+    );
     const storageProvider = yield* storage.getLinkedProvider(currentUser.id).pipe(
       Effect.mapError(
         (error) =>
@@ -30,15 +42,50 @@ const AccountRpcsLive = AccountRpcs.of({
       ),
     );
     const accountStatus: AccountStatus = {
-      canSync: true,
+      canSync: billingStatus.status !== "PAYMENT_REQUIRED",
       storageProvider,
-      blockedReasons: [],
+      blockedReasons: billingStatus.status === "PAYMENT_REQUIRED" ? ["billing"] : [],
+      billing: billingStatus,
     };
     yield* Effect.logInfo("Returning account status", {
       storageProvider,
+      billingStatus: billingStatus.status,
       workosUserId: currentUser.id,
     });
     return accountStatus;
+  }),
+});
+
+const BillingRpcsLive = BillingRpcs.of({
+  OpenBilling: Effect.fn("rpc.OpenBilling")(function* ({ returnTarget }) {
+    const currentUser = yield* CurrentUser;
+    const billing = yield* Billing;
+    const url = yield* billing.open(currentUser, returnTarget).pipe(
+      Effect.mapError(
+        (error) =>
+          new RpcError({
+            code:
+              error._tag === "BillingIdentityError" || error._tag === "PaymentRequiredError"
+                ? "FORBIDDEN"
+                : "INTERNAL_SERVER_ERROR",
+            message: error.message,
+          }),
+      ),
+    );
+    return { url };
+  }),
+  RefreshBilling: Effect.fn("rpc.RefreshBilling")(function* () {
+    const currentUser = yield* CurrentUser;
+    const billing = yield* Billing;
+    yield* billing.invalidateCustomerAccessSnapshot(currentUser).pipe(
+      Effect.mapError(
+        (error) =>
+          new RpcError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: error.message,
+          }),
+      ),
+    );
   }),
 });
 
@@ -48,6 +95,7 @@ export const PlakkApiLive = PlakkApi.toLayer(
     return PlakkApi.of({
       ...HealthRpcsLive,
       ...AccountRpcsLive,
+      ...BillingRpcsLive,
       ...StorageRpcsLive,
       ...snippetRpcs,
     });

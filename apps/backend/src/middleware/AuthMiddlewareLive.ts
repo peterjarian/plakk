@@ -4,7 +4,17 @@ import { WorkOS } from "@workos-inc/node";
 import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 import { jwtVerify } from "jose";
+
+const CurrentUserClaimsSchema = Schema.Struct({
+  sub: Schema.String,
+  email: Schema.optionalKey(Schema.String),
+  name: Schema.optionalKey(Schema.String),
+  first_name: Schema.optionalKey(Schema.String),
+  last_name: Schema.optionalKey(Schema.String),
+  plakk_free_until: Schema.optionalKey(Schema.DateTimeUtcFromString),
+});
 
 export const AuthMiddlewareLive = Layer.effect(
   AuthMiddleware,
@@ -26,16 +36,10 @@ export const AuthMiddlewareLive = Layer.effect(
           });
         }
 
-        const currentUser = yield* Effect.tryPromise({
+        const rawPayload = yield* Effect.tryPromise({
           try: async () => {
             const { payload } = await jwtVerify(accessToken, jwks);
-            if (typeof payload.sub !== "string") {
-              throw new TypeError("WorkOS access token is missing its subject.");
-            }
-            return {
-              id: payload.sub,
-              ...(headers.origin === undefined ? {} : { requestOrigin: headers.origin }),
-            };
+            return payload;
           },
           catch: () =>
             new RpcError({
@@ -43,6 +47,26 @@ export const AuthMiddlewareLive = Layer.effect(
               message: "Sign in to continue.",
             }),
         });
+        const payload = yield* Schema.decodeUnknownEffect(CurrentUserClaimsSchema)(rawPayload).pipe(
+          Effect.mapError(
+            () =>
+              new RpcError({
+                code: "UNAUTHENTICATED",
+                message: "Sign in to continue.",
+              }),
+          ),
+        );
+        const name =
+          payload.name ?? [payload.first_name, payload.last_name].filter(Boolean).join(" ");
+        const currentUser = {
+          id: payload.sub,
+          ...(payload.email === undefined ? {} : { email: payload.email }),
+          ...(name === "" ? {} : { name }),
+          ...(payload.plakk_free_until === undefined
+            ? {}
+            : { freeUntil: payload.plakk_free_until }),
+          ...(headers.origin === undefined ? {} : { requestOrigin: headers.origin }),
+        };
         return yield* Effect.provideService(effect, CurrentUser, currentUser);
       }),
     );

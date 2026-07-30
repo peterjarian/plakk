@@ -1,5 +1,5 @@
 import { type StorageProvider, UserSchema } from "@plakk/shared";
-import type { PrepareSnippetUploadPayload } from "@plakk/shared/PlakkApi";
+import type { BillingReturnTarget, PrepareSnippetUploadPayload } from "@plakk/shared/PlakkApi";
 import {
   ClientCapabilitySchema,
   type ClientCapability as SharedClientCapability,
@@ -51,6 +51,41 @@ export type ClientError = ContentMirrorFailure | LocalStorageError | SyncFailure
 
 export type ClientCapability = SharedClientCapability;
 
+type BillingRpcFailure = Effect.Error<ReturnType<RpcClient["Service"]["OpenBilling"]>>;
+
+const failBillingRpc = (
+  error: BillingRpcFailure,
+  unavailableMessage: string,
+): Effect.Effect<never, ClientError> => {
+  switch (error._tag) {
+    case "SessionError":
+    case "OfflineError":
+      return Effect.fail(error);
+    case "RpcClientError":
+      return error.reason._tag === "RpcClientDefect"
+        ? Effect.fail(
+            new InvalidResponseError({
+              message: "Plakk received an unexpected billing response.",
+            }),
+          )
+        : Effect.fail(
+            new OfflineError({
+              message: "Plakk could not connect. Check your connection and try again.",
+            }),
+          );
+    case "RpcError":
+      return error.code === "UNAUTHENTICATED"
+        ? Effect.fail(
+            new SessionError({
+              message: "Your session expired. Sign in again to continue.",
+            }),
+          )
+        : error.code === "FORBIDDEN"
+          ? Effect.fail(new ActionNotAllowedError({ message: error.message }))
+          : Effect.fail(new ServerUnavailableError({ message: unavailableMessage }));
+  }
+};
+
 export const ClientSnapshotSchema = Schema.Struct({
   user: UserSchema,
   capability: ClientCapabilitySchema,
@@ -75,6 +110,12 @@ export class Client extends Context.Service<
     readonly refresh: Effect.Effect<void, ClientError>;
     /** Removes all snippet records and managed content owned by the current user. */
     readonly clearLocalData: Effect.Effect<void, ClientError>;
+    readonly billing: {
+      /** Opens either Polar Checkout or the authenticated customer portal. */
+      readonly open: (returnTarget: BillingReturnTarget) => Effect.Effect<string, ClientError>;
+      /** Invalidates cached billing state before refreshing account capability. */
+      readonly refresh: Effect.Effect<void, ClientError>;
+    };
     readonly storage: {
       /** Starts the provider-owned authorization flow and returns its destination URL. */
       readonly beginLink: (storageProvider: StorageProvider) => Effect.Effect<string, ClientError>;
@@ -364,6 +405,25 @@ export const clientLive = Layer.effect(
       );
     });
 
+    const openBilling = Effect.fn("Client.billing.open")(function* (
+      returnTarget: BillingReturnTarget,
+    ) {
+      return yield* rpc.OpenBilling({ returnTarget }).pipe(
+        Effect.map((result) => result.url),
+        Effect.catch((error) =>
+          failBillingRpc(error, "Plakk could not open billing. Please try again."),
+        ),
+      );
+    });
+
+    const refreshBilling = rpc.RefreshBilling(undefined).pipe(
+      Effect.catch((error) =>
+        failBillingRpc(error, "Plakk could not refresh billing. Please try again."),
+      ),
+      Effect.andThen(refresh),
+      Effect.withSpan("Client.billing.refresh"),
+    );
+
     /** Runs the complete remote-first snippet deletion procedure. */
     const deleteSnippet = Effect.fn("Client.snippets.delete")(function* (snippetId: string) {
       yield* sync.delete(snippetId);
@@ -428,6 +488,7 @@ export const clientLive = Layer.effect(
       subscribe,
       refresh,
       clearLocalData,
+      billing: { open: openBilling, refresh: refreshBilling },
       storage: { beginLink: beginStorageLink },
       content: {
         download: content.download,

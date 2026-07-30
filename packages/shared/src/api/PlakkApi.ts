@@ -1,4 +1,5 @@
 import * as Context from "effect/Context";
+import type * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
@@ -11,10 +12,31 @@ export const AccountBlockedReasonSchema = Schema.Literals(["billing", "storage"]
 
 export type AccountBlockedReason = typeof AccountBlockedReasonSchema.Type;
 
+export const BillingStatusSchema = Schema.Union([
+  Schema.Struct({
+    status: Schema.Literal("FREE_PERIOD"),
+    freeUntil: Schema.DateTimeUtcFromString,
+  }),
+  Schema.Struct({
+    status: Schema.Literal("SUBSCRIBED"),
+    cancelAtPeriodEnd: Schema.Boolean,
+  }),
+  Schema.Struct({
+    status: Schema.Literal("PAYMENT_REQUIRED"),
+  }),
+]);
+
+export type BillingStatus = typeof BillingStatusSchema.Type;
+
+export const BillingReturnTargetSchema = Schema.Literals(["WEB", "DESKTOP"] as const);
+
+export type BillingReturnTarget = typeof BillingReturnTargetSchema.Type;
+
 export const AccountStatusSchema = Schema.Struct({
   canSync: Schema.Boolean,
   storageProvider: Schema.NullOr(StorageProviderLiteral),
   blockedReasons: Schema.Array(AccountBlockedReasonSchema),
+  billing: BillingStatusSchema,
 });
 
 export type AccountStatus = typeof AccountStatusSchema.Type;
@@ -138,7 +160,13 @@ export type PublishSnippetPayload = typeof PublishSnippetPayloadSchema.Type;
 /** Authenticated user context scoped to the current RPC request. */
 export class CurrentUser extends Context.Service<
   CurrentUser,
-  { readonly id: string; readonly requestOrigin?: string }
+  {
+    readonly id: string;
+    readonly email?: string | null;
+    readonly name?: string;
+    readonly freeUntil?: DateTime.Utc;
+    readonly requestOrigin?: string;
+  }
 >()("@plakk/shared/api/PlakkApi/CurrentUser") {}
 
 /** Authentication is missing or no longer valid and needs user or platform action. */
@@ -174,6 +202,18 @@ export const HealthRpcs = RpcGroup.make(
 export const AccountRpcs = RpcGroup.make(
   Rpc.make("GetAccountStatus", {
     success: AccountStatusSchema,
+    error: RpcError,
+  }),
+);
+
+export const BillingRpcs = RpcGroup.make(
+  Rpc.make("OpenBilling", {
+    payload: { returnTarget: BillingReturnTargetSchema },
+    success: Schema.Struct({ url: Schema.String }),
+    error: RpcError,
+  }),
+  Rpc.make("RefreshBilling", {
+    success: Schema.Void,
     error: RpcError,
   }),
 );
@@ -229,6 +269,8 @@ export const SnippetRpcs = RpcGroup.make(
   }),
 );
 
-const ProtectedRpcs = AccountRpcs.merge(StorageRpcs, SnippetRpcs).middleware(AuthMiddleware);
+const ProtectedRpcs = AccountRpcs.merge(BillingRpcs, StorageRpcs, SnippetRpcs).middleware(
+  AuthMiddleware,
+);
 
 export const PlakkApi = HealthRpcs.merge(ProtectedRpcs).middleware(InternalServerErrorMiddleware);

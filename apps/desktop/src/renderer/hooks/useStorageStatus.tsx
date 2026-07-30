@@ -10,7 +10,12 @@ export type StorageStatus =
   | { readonly kind: "loading"; readonly canSync: false }
   | { readonly kind: "offline"; readonly canSync: false }
   | { readonly kind: "failed"; readonly canSync: false }
-  | { readonly kind: "unlinked"; readonly canSync: false; readonly actionUrl: string }
+  | {
+      readonly kind: "unlinked";
+      readonly canSync: false;
+      readonly actionUrl: string;
+      readonly account: AccountStatus;
+    }
   | {
       readonly kind: "needs-reauthorization";
       readonly canSync: false;
@@ -39,7 +44,7 @@ export const storageStatusFromLocalState = (
 
   const account = localState.capability.account;
   if (account.storageProvider === null) {
-    return { kind: "unlinked", canSync: false, actionUrl: storageSetupUrl };
+    return { kind: "unlinked", canSync: false, actionUrl: storageSetupUrl, account };
   }
   const connection = localState.capability.connection;
   if (connection === null || connection.storageProvider !== account.storageProvider) {
@@ -63,7 +68,7 @@ export const storageStatusFromLocalState = (
       provider: account.storageProvider,
     };
   }
-  return { kind: "unlinked", canSync: false, actionUrl: storageSetupUrl };
+  return { kind: "unlinked", canSync: false, actionUrl: storageSetupUrl, account };
 };
 
 export function useStorageStatus(): StorageStatus {

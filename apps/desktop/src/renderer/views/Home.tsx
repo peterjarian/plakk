@@ -66,6 +66,8 @@ export function Home({ active = true }: { active?: boolean }) {
     reload: reloadSnippets,
   } = useSnippets();
   const accountBlocked = !storageStatus.canSync;
+  const billingBlocked =
+    "account" in storageStatus && storageStatus.account.blockedReasons.includes("billing");
   const syncStatus: SyncStatus =
     storageStatus.kind === "loading"
       ? "CHECKING"
@@ -80,9 +82,8 @@ export function Home({ active = true }: { active?: boolean }) {
   const syncPausedMessage =
     storageStatus.kind === "failed" || storageStatus.kind === "offline"
       ? "Offline — cached snippets stay available."
-      : storageStatus.kind === "connected" &&
-          storageStatus.account.blockedReasons.includes("billing")
-        ? "Sync paused. Finish billing to add snippets."
+      : billingBlocked
+        ? "Your free access has ended. Subscribe to continue using Plakk."
         : storageStatus.kind === "connected"
           ? "Sync is currently paused."
           : storageStatus.kind === "needs-reauthorization"
@@ -227,6 +228,15 @@ export function Home({ active = true }: { active?: boolean }) {
     return window.ipc
       .openExternal(url)
       .catch(() => setExternalActionError("Plakk couldn’t open this link."));
+  }
+
+  function openBilling() {
+    setExternalActionError(null);
+    void window.ipc.billing
+      .open()
+      .catch((cause) =>
+        setExternalActionError(ipcActionErrorMessage(cause, "Could not open billing.")),
+      );
   }
 
   async function confirmExternalLink() {
@@ -383,9 +393,11 @@ export function Home({ active = true }: { active?: boolean }) {
                     type="button"
                     variant="ghost"
                     size="xs"
-                    onClick={() => openStorageSetup(syncSetupUrl)}
+                    onClick={() =>
+                      billingBlocked ? openBilling() : openStorageSetup(syncSetupUrl)
+                    }
                   >
-                    Finish on web
+                    {billingBlocked ? "Subscribe" : "Finish on web"}
                     <ArrowUpRight />
                   </Button>
                 }
