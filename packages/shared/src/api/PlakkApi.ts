@@ -212,6 +212,10 @@ export const BillingRpcs = RpcGroup.make(
     success: Schema.Struct({ url: Schema.String }),
     error: RpcError,
   }),
+  Rpc.make("RefreshBilling", {
+    success: Schema.Void,
+    error: RpcError,
+  }),
 );
 
 export const StorageRpcs = RpcGroup.make(

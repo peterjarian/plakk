@@ -87,6 +87,7 @@ const billingService = Billing.of({
       freeUntil: DateTime.makeUnsafe("2099-01-01T00:00:00.000Z"),
     }),
   open: () => Effect.succeed("https://checkout.example"),
+  invalidateCustomerAccessSnapshot: () => Effect.void,
   requireAccess: () => Effect.void,
 });
 
@@ -329,6 +330,7 @@ describe("completed Snippet publication", () => {
         Billing.of({
           status: () => Effect.succeed({ status: "PAYMENT_REQUIRED" }),
           open: () => Effect.succeed("https://checkout.example"),
+          invalidateCustomerAccessSnapshot: () => Effect.void,
           requireAccess: () =>
             Effect.fail(
               new PaymentRequiredError({
@@ -342,6 +344,34 @@ describe("completed Snippet publication", () => {
       message: "Your free access has ended. Subscribe to continue using Plakk.",
     });
     expect(prepareUpload).not.toHaveBeenCalled();
+  });
+
+  it("rejects publishing an uploaded snippet when billing requires payment", async () => {
+    const store = publicationDatabase();
+
+    await expect(
+      runSnippetEffect(
+        (rpcs) => rpcs.PublishSnippet(publication),
+        store.db,
+        storageService(),
+        currentUser,
+        Billing.of({
+          status: () => Effect.succeed({ status: "PAYMENT_REQUIRED" }),
+          open: () => Effect.succeed("https://checkout.example"),
+          invalidateCustomerAccessSnapshot: () => Effect.void,
+          requireAccess: () =>
+            Effect.fail(
+              new PaymentRequiredError({
+                message: "Your free access has ended. Subscribe to continue using Plakk.",
+              }),
+            ),
+        }),
+      ),
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "Your free access has ended. Subscribe to continue using Plakk.",
+    });
+    expect(store.insertedValues).toEqual([]);
   });
 
   it("inserts only the completed Snippet and notifies before commit", async () => {

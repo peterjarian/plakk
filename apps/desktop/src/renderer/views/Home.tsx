@@ -67,7 +67,7 @@ export function Home({ active = true }: { active?: boolean }) {
   } = useSnippets();
   const accountBlocked = !storageStatus.canSync;
   const billingBlocked =
-    storageStatus.kind === "connected" && storageStatus.account.blockedReasons.includes("billing");
+    "account" in storageStatus && storageStatus.account.blockedReasons.includes("billing");
   const syncStatus: SyncStatus =
     storageStatus.kind === "loading"
       ? "CHECKING"
@@ -82,8 +82,7 @@ export function Home({ active = true }: { active?: boolean }) {
   const syncPausedMessage =
     storageStatus.kind === "failed" || storageStatus.kind === "offline"
       ? "Offline — cached snippets stay available."
-      : storageStatus.kind === "connected" &&
-          storageStatus.account.blockedReasons.includes("billing")
+      : billingBlocked
         ? "Your free access has ended. Subscribe to continue using Plakk."
         : storageStatus.kind === "connected"
           ? "Sync is currently paused."

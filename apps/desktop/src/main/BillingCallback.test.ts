@@ -4,6 +4,7 @@ import * as Ref from "effect/Ref";
 
 import {
   desktopBillingCallbackUrl,
+  makeBillingReturnCoordinator,
   parseTrustedBillingCallbackUrl,
   refreshBillingUntilSubscribed,
 } from "./BillingCallback.ts";
@@ -29,6 +30,19 @@ describe("desktop billing callback", () => {
       ),
     ).toBeNull();
     expect(parseTrustedBillingCallbackUrl("not a url", callbackUrl)).toBeNull();
+  });
+
+  it("queues a second return while the current refresh is active", () => {
+    const returns = makeBillingReturnCoordinator();
+
+    returns.request();
+    expect(returns.start()).toBe(true);
+    returns.request();
+    expect(returns.start()).toBe(false);
+    expect(returns.finish()).toBe(true);
+    expect(returns.start()).toBe(true);
+    expect(returns.finish()).toBe(false);
+    expect(returns.hasPendingReturn()).toBe(false);
   });
 
   it("refreshes until Polar reports the subscription", async () => {

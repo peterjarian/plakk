@@ -22,6 +22,43 @@ export function parseTrustedBillingCallbackUrl(rawUrl: string, callbackUrl: URL)
     : null;
 }
 
+export interface BillingReturnCoordinator {
+  readonly hasPendingReturn: () => boolean;
+  readonly request: () => void;
+  readonly start: () => boolean;
+  readonly finish: () => boolean;
+}
+
+export const makeBillingReturnCoordinator = (): BillingReturnCoordinator => {
+  let state: "IDLE" | "PENDING" | "REFRESHING" = "IDLE";
+  let queued = false;
+
+  return {
+    hasPendingReturn: () => state !== "IDLE",
+    request: () => {
+      if (state === "REFRESHING") {
+        queued = true;
+      } else {
+        state = "PENDING";
+      }
+    },
+    start: () => {
+      if (state !== "PENDING") return false;
+      state = "REFRESHING";
+      return true;
+    },
+    finish: () => {
+      if (queued) {
+        queued = false;
+        state = "PENDING";
+        return true;
+      }
+      state = "IDLE";
+      return false;
+    },
+  };
+};
+
 export const refreshBillingUntilSubscribed = Effect.fn("BillingCallback.refreshUntilSubscribed")(
   function* <E>(options: {
     readonly refresh: Effect.Effect<void, E>;

@@ -74,6 +74,19 @@ const BillingRpcsLive = BillingRpcs.of({
     );
     return { url };
   }),
+  RefreshBilling: Effect.fn("rpc.RefreshBilling")(function* () {
+    const currentUser = yield* CurrentUser;
+    const billing = yield* Billing;
+    yield* billing.invalidateCustomerAccessSnapshot(currentUser).pipe(
+      Effect.mapError(
+        (error) =>
+          new RpcError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: error.message,
+          }),
+      ),
+    );
+  }),
 });
 
 export const PlakkApiLive = PlakkApi.toLayer(

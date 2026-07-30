@@ -56,6 +56,7 @@ const makeRpc = (overrides: RpcOverrides = {}): RpcClient["Service"] =>
     DownloadSnippetContent: () => Stream.die("not used"),
     GetAccountStatus: () => Effect.die("not used"),
     OpenBilling: () => Effect.die("not used"),
+    RefreshBilling: () => Effect.die("not used"),
     GetSnippetSnapshot: () => Effect.succeed([]),
     GetStorageProviderStatus: () => Effect.die("not used"),
     Ping: () => Effect.die("not used"),

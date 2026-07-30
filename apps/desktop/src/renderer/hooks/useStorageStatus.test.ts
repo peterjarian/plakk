@@ -66,7 +66,7 @@ describe("storage status from the local state", () => {
           account: {
             canSync: false,
             storageProvider: null,
-            blockedReasons: ["storage"],
+            blockedReasons: ["billing"],
             billing: { status: "PAYMENT_REQUIRED" },
           },
           connection: null,
@@ -74,6 +74,13 @@ describe("storage status from the local state", () => {
       }),
     );
 
-    expect(status).toMatchObject({ kind: "unlinked", canSync: false });
+    expect(status).toMatchObject({
+      kind: "unlinked",
+      canSync: false,
+      account: {
+        blockedReasons: ["billing"],
+        billing: { status: "PAYMENT_REQUIRED" },
+      },
+    });
   });
 });

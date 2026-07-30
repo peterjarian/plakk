@@ -52,6 +52,10 @@ const makeLayer = (options?: {
                 url: `https://connect.example/${storageProvider.toLowerCase()}`,
               }),
             OpenBilling: () => Effect.succeed({ url: "https://checkout.example" }),
+            RefreshBilling: () =>
+              Effect.sync(() => {
+                events.push("refreshBilling");
+              }),
             GetAccountStatus: () =>
               Effect.succeed({
                 canSync: true,
@@ -186,6 +190,7 @@ describe("Client", () => {
       });
       expect(yield* client.storage.beginLink("DROPBOX")).toBe("https://connect.example/dropbox");
       expect(yield* client.billing.open("DESKTOP")).toBe("https://checkout.example");
+      yield* client.billing.refresh;
 
       yield* client.uploads.upload(
         {
@@ -246,6 +251,7 @@ describe("Client", () => {
       expect(events).toEqual([
         "initialize",
         "sync",
+        "refreshBilling",
         "upload",
         `delete:${snippetId}`,
         `dismiss:${snippetId}`,

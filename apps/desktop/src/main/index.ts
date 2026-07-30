@@ -28,6 +28,7 @@ import { UserConfigStore } from "./UserConfigStore.ts";
 import { createAppearanceController } from "./appearance.ts";
 import {
   desktopBillingCallbackUrl,
+  makeBillingReturnCoordinator,
   parseTrustedBillingCallbackUrl,
   refreshBillingUntilSubscribed,
 } from "./BillingCallback.ts";
@@ -88,9 +89,7 @@ handle(ipcMethods.billingOpen, () =>
       try: () => shell.openExternal(url),
       catch: (cause) => new IpcHandlerError({ cause, message: "Could not open Polar billing." }),
     });
-    yield* Effect.sync(() => {
-      if (billingReturnState === "IDLE") billingReturnState = "PENDING";
-    });
+    yield* Effect.sync(() => billingReturns.request());
   }),
 );
 
@@ -404,8 +403,7 @@ let appearanceController: ReturnType<
   typeof createAppearanceController<BrowserWindow["webContents"]>
 >;
 let isQuitting = false;
-type BillingReturnState = "IDLE" | "PENDING" | "REFRESHING";
-let billingReturnState: BillingReturnState = "IDLE";
+const billingReturns = makeBillingReturnCoordinator();
 
 app.setName(app.isPackaged ? "Plakk" : "Plakk (Dev)");
 
@@ -533,7 +531,7 @@ const createWindow = (view?: RendererView): void => {
     mainWindow = undefined;
   });
   mainWindow.on("focus", () => {
-    if (billingReturnState !== "IDLE") {
+    if (billingReturns.hasPendingReturn()) {
       refreshBillingAfterReturn();
     } else {
       runtime.runFork(DesktopSession.use((session) => session.refresh));
@@ -556,12 +554,11 @@ function revealMainWindow() {
 }
 
 function refreshBillingAfterReturn(): void {
-  if (billingReturnState !== "PENDING") return;
-  billingReturnState = "REFRESHING";
+  if (!billingReturns.start()) return;
   void runEffect(
     DesktopSession.use((session) =>
       refreshBillingUntilSubscribed({
-        refresh: session.refresh,
+        refresh: session.withClient((client) => client.billing.refresh),
         isSubscribed: session.current.pipe(
           Effect.map(
             (state) =>
@@ -578,7 +575,7 @@ function refreshBillingAfterReturn(): void {
       ),
       Effect.ensuring(
         Effect.sync(() => {
-          billingReturnState = "IDLE";
+          if (billingReturns.finish()) queueMicrotask(refreshBillingAfterReturn);
         }),
       ),
     ),
@@ -668,7 +665,7 @@ async function handleOpenUrls(values: readonly string[]): Promise<boolean> {
       parseTrustedBillingCallbackUrl(rawUrl, desktopBillingCallbackUrl(app.isPackaged)) !== null
     ) {
       handled = true;
-      if (billingReturnState === "IDLE") billingReturnState = "PENDING";
+      billingReturns.request();
       revealMainWindow();
       refreshBillingAfterReturn();
       continue;
