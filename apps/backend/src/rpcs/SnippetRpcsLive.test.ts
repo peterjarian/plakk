@@ -332,14 +332,14 @@ describe("completed Snippet publication", () => {
           requireAccess: () =>
             Effect.fail(
               new PaymentRequiredError({
-                message: "Subscribe to continue syncing snippets.",
+                message: "Your free access has ended. Subscribe to continue using Plakk.",
               }),
             ),
         }),
       ),
     ).rejects.toMatchObject({
       code: "FORBIDDEN",
-      message: "Subscribe to continue syncing snippets.",
+      message: "Your free access has ended. Subscribe to continue using Plakk.",
     });
     expect(prepareUpload).not.toHaveBeenCalled();
   });

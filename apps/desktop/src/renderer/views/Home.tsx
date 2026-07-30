@@ -84,7 +84,7 @@ export function Home({ active = true }: { active?: boolean }) {
       ? "Offline — cached snippets stay available."
       : storageStatus.kind === "connected" &&
           storageStatus.account.blockedReasons.includes("billing")
-        ? "Sync paused. Finish billing to add snippets."
+        ? "Your free access has ended. Subscribe to continue using Plakk."
         : storageStatus.kind === "connected"
           ? "Sync is currently paused."
           : storageStatus.kind === "needs-reauthorization"

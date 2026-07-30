@@ -25,7 +25,7 @@ export const billingPresentation = (billing: BillingStatus | null): BillingPrese
     case "PAYMENT_REQUIRED":
       return {
         action: "Subscribe",
-        description: "Subscribe to continue syncing snippets.",
+        description: "Your free access has ended. Subscribe to continue using Plakk.",
       };
     default:
       return {

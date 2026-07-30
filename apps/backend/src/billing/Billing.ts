@@ -312,7 +312,7 @@ export class Billing extends Context.Service<
         const current = yield* status(user);
         if (current.status === "PAYMENT_REQUIRED") {
           return yield* new PaymentRequiredError({
-            message: "Subscribe to continue syncing snippets.",
+            message: "Your free access has ended. Subscribe to continue using Plakk.",
           });
         }
       });
