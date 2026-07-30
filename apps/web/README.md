@@ -13,15 +13,16 @@ pnpm --filter @plakk/web typecheck
 
 ## Environment
 
-WorkOS browser authentication requires:
+The canonical local-development inputs live in the repository root
+[`/.env.example`](../../.env.example). Copy it to `.env.local` and start the complete stack with:
 
 ```bash
-WORKOS_API_KEY=sk_...
-WORKOS_CLIENT_ID=client_...
-WORKOS_REDIRECT_URI=http://localhost:3000/api/auth/callback
-WORKOS_COOKIE_PASSWORD=32+ chars
-VITE_PLAKK_RPC_URL=http://localhost:3100/api/rpc
+vp run dev
 ```
+
+The development runner gives the web process its WorkOS credentials and derives
+`WORKOS_REDIRECT_URI` and `VITE_PLAKK_RPC_URL` from the current device's Tailscale MagicDNS name.
+Those generated values should not be stored in an environment file.
 
 ## Backend ownership
 
@@ -39,7 +40,7 @@ browser completion page, then forwards the unchanged callback query to `plakk://
 production or `plakk-dev://auth/callback` during local development. The desktop app remains
 responsible for PKCE validation and exchanging the authorization code.
 
-Set the desktop app's `WORKOS_REDIRECT_URI` to
-`http://localhost:3000/auth/desktop/callback` locally and
-`https://app.plakk.io/auth/desktop/callback` in production. The exact URL must also be registered as
-an allowed redirect URI for the WorkOS application.
+During local development, `vp run dev` sets the desktop app's `WORKOS_REDIRECT_URI` to the Tailnet
+web origin plus `/auth/desktop/callback`. In production it is
+`https://app.plakk.io/auth/desktop/callback`. The exact URL must also be registered as an allowed
+redirect URI for the WorkOS application.
