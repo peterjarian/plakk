@@ -16,6 +16,11 @@ const CUSTOMER_STATE_TTL = Duration.minutes(5);
 const CHECKOUT_PENDING_TTL = Duration.minutes(30);
 const CHECKOUT_REFRESH_THROTTLE_TTL = Duration.seconds(30);
 
+const CheckoutProductIdsSchema = Config.Array(Schema.Trim.check(Schema.isNonEmpty())).pipe(
+  Schema.check(Schema.isMinLength(2)),
+  Schema.check(Schema.isUnique()),
+);
+
 export class PolarBillingError extends Schema.TaggedErrorClass<PolarBillingError>()(
   "PolarBillingError",
   {
@@ -53,6 +58,12 @@ const PolarCustomerStateSchema = Schema.Struct({
     Schema.Struct({
       product_id: Schema.String,
       cancel_at_period_end: Schema.Boolean,
+    }),
+  ),
+  granted_benefits: Schema.Array(
+    Schema.Struct({
+      benefit_id: Schema.String,
+      benefit_type: Schema.String,
     }),
   ),
 });
@@ -97,7 +108,7 @@ export class PolarBilling extends Context.Service<
       readonly externalCustomerId: string;
       readonly email: string;
       readonly name?: string;
-      readonly productId: string;
+      readonly productIds: ReadonlyArray<string>;
       readonly successUrl: string;
       readonly returnUrl: string;
     }) => Effect.Effect<string, PolarBillingError>;
@@ -137,7 +148,7 @@ export const makePolarBilling = (polar: Polar): PolarBilling["Service"] =>
       Effect.tryPromise({
         try: () =>
           polar.checkouts.create({
-            products: [input.productId],
+            products: [...input.productIds],
             external_customer_id: input.externalCustomerId,
             customer_email: input.email,
             ...(input.name === undefined ? {} : { customer_name: input.name }),
@@ -177,7 +188,8 @@ export class Billing extends Context.Service<
     Effect.gen(function* () {
       const polar = yield* PolarBilling;
       const persistence = yield* Persistence.Persistence;
-      const productId = yield* Config.nonEmptyString("POLAR_PRODUCT_ID");
+      const accessBenefitId = yield* Config.nonEmptyString("POLAR_ACCESS_BENEFIT_ID");
+      const productIds = yield* Config.schema(CheckoutProductIdsSchema, "POLAR_PRODUCT_IDS");
       const environment = yield* Config.literals(["sandbox", "production"], "POLAR_ENVIRONMENT");
       const webOrigin = (yield* Config.url("PLAKK_WEB_ORIGIN")).origin;
 
@@ -245,17 +257,20 @@ export class Billing extends Context.Service<
         if (result === undefined) return freePeriod ?? { status: "PAYMENT_REQUIRED" as const };
         if (result._tag === "Found") {
           const state = yield* Schema.decodeUnknownEffect(PolarCustomerStateSchema)(result.state);
-          const subscriptions = state.active_subscriptions.filter(
-            (subscription) => subscription.product_id === productId,
+          const hasAccess = state.granted_benefits.some(
+            (benefit) =>
+              benefit.benefit_type === "feature_flag" && benefit.benefit_id === accessBenefitId,
           );
-          if (subscriptions.length > 0) {
+          if (hasAccess) {
             yield* pendingStore.remove(pendingRequest(user.id));
             yield* refreshStore.remove(refreshRequest(user.id));
             return {
               status: "SUBSCRIBED" as const,
-              cancelAtPeriodEnd: subscriptions.every(
-                (subscription) => subscription.cancel_at_period_end,
-              ),
+              cancelAtPeriodEnd:
+                state.active_subscriptions.length > 0 &&
+                state.active_subscriptions.every(
+                  (subscription) => subscription.cancel_at_period_end,
+                ),
             };
           }
         }
@@ -281,7 +296,7 @@ export class Billing extends Context.Service<
           externalCustomerId: user.id,
           email: user.email,
           ...(user.name === undefined ? {} : { name: user.name }),
-          productId,
+          productIds,
           successUrl: `${webOrigin}/?billing=success`,
           returnUrl: webOrigin,
         });

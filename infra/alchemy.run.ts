@@ -32,8 +32,9 @@ export default Alchemy.Stack(
     const workosApiKey = yield* Config.redacted("WORKOS_API_KEY");
     const workosClientId = yield* Config.string("WORKOS_CLIENT_ID");
     const polarAccessToken = yield* Config.redacted("POLAR_ACCESS_TOKEN");
+    const polarAccessBenefitId = yield* Config.string("POLAR_ACCESS_BENEFIT_ID");
     const polarEnvironment = yield* Config.string("POLAR_ENVIRONMENT");
-    const polarProductId = yield* Config.string("POLAR_PRODUCT_ID");
+    const polarProductIds = yield* Config.string("POLAR_PRODUCT_IDS");
     const redisUrl = yield* Config.redacted("REDIS_URL");
     const repository = yield* Config.string("RAILWAY_REPOSITORY").pipe(
       Config.withDefault("peterjarian/plakk"),
@@ -95,8 +96,9 @@ export default Alchemy.Stack(
         PLAKK_BACKEND_HOST: "0.0.0.0",
         PLAKK_WEB_ORIGIN: "https://app.plakk.io",
         POLAR_ACCESS_TOKEN: polarAccessToken,
+        POLAR_ACCESS_BENEFIT_ID: polarAccessBenefitId,
         POLAR_ENVIRONMENT: polarEnvironment,
-        POLAR_PRODUCT_ID: polarProductId,
+        POLAR_PRODUCT_IDS: polarProductIds,
         REDIS_URL: redisUrl,
         WORKOS_API_KEY: workosApiKey,
         WORKOS_CLIENT_ID: workosClientId,

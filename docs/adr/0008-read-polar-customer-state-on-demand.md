@@ -11,6 +11,10 @@ requests periodically bypass the cached value until Polar reports the subscripti
 the checkout tab cannot strand a successful payment. Checkout success also returns to Plakk and
 therefore triggers the same refresh path.
 
+Paid access is granted by one Polar Feature Flag benefit attached to every eligible product.
+Authorization checks that benefit grant rather than product IDs, keeping entitlement policy
+independent of the monthly and yearly products offered at checkout.
+
 The tradeoff is bounded staleness of up to five minutes for changes made outside Plakk. This is
 accepted in exchange for avoiding a second durable billing model and the distributed-system
 failure modes needed to synchronize it. Plakk's card-free Free Period remains separate from
