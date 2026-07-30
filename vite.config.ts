@@ -60,7 +60,7 @@ export default defineConfig({
     cache: true,
     tasks: {
       dev: {
-        command: "vp run --parallel --filter './apps/*' dev",
+        command: "node --experimental-strip-types scripts/dev.ts",
         cache: false,
       },
     },

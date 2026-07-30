@@ -3,6 +3,7 @@ packages:
   - infra
   - oxlint-plugin-plakk
   - packages/*
+  - scripts
 
 catalog:
   "@effect/language-service": 0.87.1

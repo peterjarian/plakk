@@ -430,6 +430,18 @@ importers:
         specifier: 'catalog:'
         version: 0.2.6(@opentelemetry/api@1.9.1)(@types/node@26.1.2)(happy-dom@20.11.1)(jiti@2.7.0)(typescript@7.0.2)(vite@8.1.0(@types/node@26.1.2)(jiti@2.7.0)(yaml@2.9.0))(yaml@2.9.0)
 
+  scripts:
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.13.2
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+      vite-plus:
+        specifier: 'catalog:'
+        version: 0.2.6(@opentelemetry/api@1.9.1)(@types/node@24.13.2)(happy-dom@20.11.1)(jiti@2.7.0)(typescript@7.0.2)(vite@8.1.0(@types/node@24.13.2)(jiti@2.7.0)(yaml@2.9.0))(yaml@2.9.0)
+
 packages:
 
   '@alcalzone/ansi-tokenize@0.2.5':
