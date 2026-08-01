@@ -50,7 +50,11 @@ describe("development options", () => {
     const options = parseDevelopmentOptions([]);
     expect(options).toEqual({ headless: false });
     expect(
-      resolveDesktopDevelopmentLaunch(options, { WORKOS_CLIENT_ID: "client_desktop" }),
+      resolveDesktopDevelopmentLaunch(
+        options,
+        { WORKOS_CLIENT_ID: "client_desktop" },
+        "/repo/apps/desktop/.electron-runtime/headless-user-data",
+      ),
     ).toEqual({
       args: ["scripts/with-electron-native.mjs", "node", "scripts/dev-electron.mjs"],
       environment: { WORKOS_CLIENT_ID: "client_desktop" },
@@ -61,7 +65,11 @@ describe("development options", () => {
     const options = parseDevelopmentOptions(["--headless"]);
     expect(options).toEqual({ headless: true });
     expect(
-      resolveDesktopDevelopmentLaunch(options, { WORKOS_CLIENT_ID: "client_desktop" }),
+      resolveDesktopDevelopmentLaunch(
+        options,
+        { WORKOS_CLIENT_ID: "client_desktop" },
+        "/repo/apps/desktop/.electron-runtime/headless-user-data",
+      ),
     ).toEqual({
       args: [
         "scripts/with-electron-native.mjs",
@@ -71,7 +79,28 @@ describe("development options", () => {
         "--headless",
         "--disable-gpu",
       ],
-      environment: { PLAKK_HEADLESS: "1", WORKOS_CLIENT_ID: "client_desktop" },
+      environment: {
+        PLAKK_DESKTOP_USER_DATA_PATH: "/repo/apps/desktop/.electron-runtime/headless-user-data",
+        PLAKK_HEADLESS: "1",
+        WORKOS_CLIENT_ID: "client_desktop",
+      },
+    });
+  });
+
+  it("preserves an explicitly configured headless desktop profile", () => {
+    expect(
+      resolveDesktopDevelopmentLaunch(
+        { headless: true },
+        {
+          PLAKK_DESKTOP_USER_DATA_PATH: "/developer/profile",
+          WORKOS_CLIENT_ID: "client_desktop",
+        },
+        "/repo/apps/desktop/.electron-runtime/headless-user-data",
+      ).environment,
+    ).toEqual({
+      PLAKK_DESKTOP_USER_DATA_PATH: "/developer/profile",
+      PLAKK_HEADLESS: "1",
+      WORKOS_CLIENT_ID: "client_desktop",
     });
   });
 

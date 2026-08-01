@@ -26,7 +26,9 @@ once to stop the processes it started.
 
 For a non-visual development session, use `vp run dev --headless`. It still starts the Electron
 desktop main process and its local runtime, but it does not create the main window, toolbar widget,
-application menu, or any other visual desktop surface.
+application menu, or any other visual desktop surface. Headless mode uses a profile inside that
+worktree's ignored `apps/desktop/.electron-runtime` directory, unless
+`PLAKK_DESKTOP_USER_DATA_PATH` explicitly selects another profile.
 
 ### Prerequisites
 

@@ -86,6 +86,7 @@ export function parseDevelopmentOptions(args: ReadonlyArray<string>): Developmen
 export function resolveDesktopDevelopmentLaunch(
   options: DevelopmentOptions,
   environment: Readonly<Record<string, string>>,
+  defaultHeadlessUserDataPath: string,
 ): DesktopDevelopmentLaunch {
   return {
     args: [
@@ -96,7 +97,13 @@ export function resolveDesktopDevelopmentLaunch(
     ],
     environment: {
       ...environment,
-      ...(options.headless ? { PLAKK_HEADLESS: "1" } : {}),
+      ...(options.headless
+        ? {
+            PLAKK_DESKTOP_USER_DATA_PATH:
+              environment.PLAKK_DESKTOP_USER_DATA_PATH ?? defaultHeadlessUserDataPath,
+            PLAKK_HEADLESS: "1",
+          }
+        : {}),
     },
   };
 }
@@ -633,7 +640,11 @@ async function runDevelopment(options: DevelopmentOptions): Promise<void> {
     );
     if (!tailnetReady) return;
 
-    const desktopLaunch = resolveDesktopDevelopmentLaunch(options, applicationEnvironments.desktop);
+    const desktopLaunch = resolveDesktopDevelopmentLaunch(
+      options,
+      applicationEnvironments.desktop,
+      resolve(repoRoot, "apps/desktop/.electron-runtime/headless-user-data"),
+    );
     const desktop = spawnProcess({
       name: "desktop",
       command: process.execPath,
