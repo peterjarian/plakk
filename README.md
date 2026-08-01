@@ -9,20 +9,24 @@ Plakk uses one command to start the local product stack:
 
 ```bash
 pnpm install
-cp .env.example .env.local
+cp apps/backend/.env.example apps/backend/.env
+cp apps/web/.env.example apps/web/.env
+cp apps/desktop/.env.example apps/desktop/.env
+cp packages/db/.env.example packages/db/.env
 vp run dev
 ```
 
-Fill in the four required values in `.env.local` before starting:
-
-- `DATABASE_URL`
-- `WORKOS_API_KEY`
-- `WORKOS_CLIENT_ID`
-- `WORKOS_COOKIE_PASSWORD` (at least 32 characters)
+Fill in each app's `.env` before starting. The backend owns database, WorkOS server, Polar, and
+Redis configuration. The web app owns its WorkOS session configuration. The desktop app owns its
+WorkOS public client configuration. `WORKOS_COOKIE_PASSWORD` must contain at least 32 characters.
 
 The runner validates those inputs, checks that Tailscale is connected, configures the required
 Tailscale Serve routes, and starts the backend, web app, and Electron desktop app. Press `Ctrl+C`
 once to stop the processes it started.
+
+For a non-visual development session, use `vp run dev --headless`. It still starts the Electron
+desktop main process and its local runtime, but it does not create the main window, toolbar widget,
+application menu, or any other visual desktop surface.
 
 ### Prerequisites
 
@@ -37,7 +41,7 @@ Register these WorkOS redirect paths for the development device's MagicDNS hostn
 
 ```text
 https://<device>.<tailnet>.ts.net/api/auth/callback
-https://<device>.<tailnet>.ts.net/auth/desktop/callback
+https://<device>.<tailnet>.ts.net/api/auth/desktop/callback
 ```
 
 The first callback belongs to browser authentication. The second hands desktop authentication back
@@ -45,32 +49,27 @@ to the Electron app.
 
 ## Environment ownership
 
-Local development has one canonical input file at the repository root. The runner loads values in
-this order:
+Each app owns its own development environment. The runner loads values for that app in this order:
 
 1. the invoking shell
-2. `.env.local`
-3. `.env`
-4. legacy app-local `.env` files, as a compatibility fallback
+2. `apps/<app>/.env.local`
+3. `apps/<app>/.env`
 
-Use `.env.local` for normal development. Legacy app-local files are intentionally undocumented and
-may be removed after existing workstations have migrated.
+An app cannot borrow a missing value from another app's file. Database tooling separately reads
+`packages/db/.env.local` and `packages/db/.env`.
 
-The root file contains only values a developer or external provider owns. `vp run dev` derives and
-injects all machine-specific topology:
+App files contain only values a developer or external provider owns. `vp run dev` derives and
+injects all machine-specific topology into the relevant process:
 
-| Variable                       | Consumer                | Owner               |
-| ------------------------------ | ----------------------- | ------------------- |
-| `DATABASE_URL`                 | backend, database tools | developer           |
-| `WORKOS_API_KEY`               | backend, web            | WorkOS/developer    |
-| `WORKOS_CLIENT_ID`             | backend, web, desktop   | WorkOS/developer    |
-| `WORKOS_COOKIE_PASSWORD`       | web                     | developer           |
-| `PLAKK_DESKTOP_USER_DATA_PATH` | desktop                 | developer, optional |
-| `PORT`, `PLAKK_BACKEND_HOST`   | backend                 | dev runner          |
-| `PLAKK_WEB_ORIGIN`             | backend                 | dev runner          |
-| `VITE_PLAKK_RPC_URL`           | web                     | dev runner          |
-| `PLAKK_RPC_URL`                | desktop                 | dev runner          |
-| `WORKOS_REDIRECT_URI`          | web, desktop            | dev runner          |
+| File                | Human-owned configuration                         |
+| ------------------- | ------------------------------------------------- |
+| `apps/backend/.env` | database, WorkOS server, Polar, Redis             |
+| `apps/web/.env`     | WorkOS server, public client, and cookie password |
+| `apps/desktop/.env` | WorkOS public client and optional user-data path  |
+| `packages/db/.env`  | database commands                                 |
+
+`PORT`, `PLAKK_BACKEND_HOST`, `PLAKK_WEB_ORIGIN`, `VITE_PLAKK_RPC_URL`, `PLAKK_RPC_URL`, and
+`WORKOS_REDIRECT_URI` remain owned by the dev runner.
 
 Generated values do not belong in `.env.example`: they depend on the current device and are printed
 as the development topology whenever the runner starts. The runner will reuse matching persistent
@@ -94,5 +93,5 @@ pnpm db:push
 pnpm db:studio
 ```
 
-Database commands read `DATABASE_URL` from the shell, root `.env.local`, or root `.env`, in that
-order.
+Database commands read `DATABASE_URL` from the shell, `packages/db/.env.local`, or
+`packages/db/.env`, in that order.

@@ -37,6 +37,7 @@ import { NativeFileSources } from "./snippets/NativeFileSources.ts";
 import { createTrayWindowController } from "./tray/window.ts";
 
 const linuxDesktopName = process.env.PLAKK_LINUX_DESKTOP_NAME;
+const createVisualSurfaces = process.env.PLAKK_HEADLESS !== "1";
 if (process.platform === "linux" && linuxDesktopName !== undefined) {
   app.setDesktopName(linuxDesktopName);
 }
@@ -483,6 +484,7 @@ function isSameRendererNavigation(current: string, next: string) {
 }
 
 const createWindow = (view?: RendererView): void => {
+  if (!createVisualSurfaces) return;
   if (mainWindow !== undefined && !mainWindow.isDestroyed()) {
     if (view === "home" || view === "settings") {
       const currentView = new URL(mainWindow.webContents.getURL()).searchParams.get("view");
@@ -758,58 +760,64 @@ if (!hasSingleInstanceLock) {
         ),
       ),
     );
-    Menu.setApplicationMenu(
-      Menu.buildFromTemplate([
-        {
-          label: app.name,
-          submenu: [
-            { label: "Settings", accelerator: "CommandOrControl+,", click: openSettingsView },
-            { type: "separator" },
-            { role: "quit" },
-          ],
-        },
-        { role: "fileMenu" },
-        {
-          label: "Edit",
-          submenu: [
-            { role: "undo" },
-            { role: "redo" },
-            { type: "separator" },
-            { role: "cut" },
-            { role: "copy" },
-            { label: "Paste", accelerator: "CommandOrControl+V", click: pasteIntoFocusedWindow },
-            { role: "selectAll" },
-          ],
-        },
-        {
-          label: "View",
-          submenu: [{ role: "toggleDevTools" }],
-        },
-        { role: "windowMenu" },
-      ]),
-    );
+    if (createVisualSurfaces) {
+      Menu.setApplicationMenu(
+        Menu.buildFromTemplate([
+          {
+            label: app.name,
+            submenu: [
+              { label: "Settings", accelerator: "CommandOrControl+,", click: openSettingsView },
+              { type: "separator" },
+              { role: "quit" },
+            ],
+          },
+          { role: "fileMenu" },
+          {
+            label: "Edit",
+            submenu: [
+              { role: "undo" },
+              { role: "redo" },
+              { type: "separator" },
+              { role: "cut" },
+              { role: "copy" },
+              { label: "Paste", accelerator: "CommandOrControl+V", click: pasteIntoFocusedWindow },
+              { role: "selectAll" },
+            ],
+          },
+          {
+            label: "View",
+            submenu: [{ role: "toggleDevTools" }],
+          },
+          { role: "windowMenu" },
+        ]),
+      );
 
-    trayWindowController = createTrayWindowController({
-      getBackgroundColor: appearanceController.getBackgroundColor,
-      guardExternalWindows,
-      loadTrayRenderer: (window) => loadRenderer(window, "tray"),
-      onAccountRefreshRequested: () =>
-        runtime.runFork(DesktopSession.use((session) => session.refresh)),
-      onRendererLoaded: () => runtime.runFork(DesktopSession.use((session) => session.refresh)),
-      onDropFiles: ({ files }) => {
-        void runEffect(Effect.forEach(files, projectNativeFile, { concurrency: "unbounded" })).then(
-          (files) => broadcastTrayDroppedItem({ type: "files", files }),
-        );
-      },
-      onDropText: ({ text }) => {
-        if (text.trim()) broadcastTrayDroppedItem({ type: "text", text });
-      },
-      preloadPath: join(__dirname, "../preload/index.cjs"),
-    });
-    trayWindowController.setEnabled(
-      Result.isSuccess(initialUserConfig) ? initialUserConfig.success.toolbarWidgetEnabled : false,
-    );
-    createWindow();
+      trayWindowController = createTrayWindowController({
+        getBackgroundColor: appearanceController.getBackgroundColor,
+        guardExternalWindows,
+        loadTrayRenderer: (window) => loadRenderer(window, "tray"),
+        onAccountRefreshRequested: () =>
+          runtime.runFork(DesktopSession.use((session) => session.refresh)),
+        onRendererLoaded: () => runtime.runFork(DesktopSession.use((session) => session.refresh)),
+        onDropFiles: ({ files }) => {
+          void runEffect(
+            Effect.forEach(files, projectNativeFile, { concurrency: "unbounded" }),
+          ).then((files) => broadcastTrayDroppedItem({ type: "files", files }));
+        },
+        onDropText: ({ text }) => {
+          if (text.trim()) broadcastTrayDroppedItem({ type: "text", text });
+        },
+        preloadPath: join(__dirname, "../preload/index.cjs"),
+      });
+      trayWindowController.setEnabled(
+        Result.isSuccess(initialUserConfig)
+          ? initialUserConfig.success.toolbarWidgetEnabled
+          : false,
+      );
+      createWindow();
+    } else {
+      process.stdout.write("Plakk desktop main process is running without visual surfaces.\n");
+    }
     runtime.runFork(
       DesktopSession.use((session) =>
         session.current.pipe(Effect.tap((value) => Effect.sync(() => broadcastLocalState(value)))),

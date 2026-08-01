@@ -17,29 +17,27 @@ const LOOPBACK_HOST = "127.0.0.1";
 type JsonRecord = Record<string, unknown>;
 type EnvironmentSource = Readonly<Record<string, string | undefined>>;
 
-const DEVELOPER_ENVIRONMENT_KEYS = [
-  "DATABASE_URL",
-  "POLAR_ACCESS_BENEFIT_ID",
-  "POLAR_ACCESS_TOKEN",
-  "POLAR_ENVIRONMENT",
-  "POLAR_PRODUCT_IDS",
-  "REDIS_URL",
-  "WORKOS_API_KEY",
-  "WORKOS_CLIENT_ID",
-  "WORKOS_COOKIE_PASSWORD",
-] as const;
+const REQUIRED_ENVIRONMENT_KEYS = {
+  backend: [
+    "DATABASE_URL",
+    "POLAR_ACCESS_BENEFIT_ID",
+    "POLAR_ACCESS_TOKEN",
+    "POLAR_ENVIRONMENT",
+    "POLAR_PRODUCT_IDS",
+    "REDIS_URL",
+    "WORKOS_API_KEY",
+    "WORKOS_CLIENT_ID",
+  ],
+  desktop: ["WORKOS_CLIENT_ID"],
+  web: ["WORKOS_API_KEY", "WORKOS_CLIENT_ID", "WORKOS_COOKIE_PASSWORD"],
+} as const;
 
-export interface DeveloperEnvironment {
-  readonly DATABASE_URL: string;
-  readonly POLAR_ACCESS_BENEFIT_ID: string;
-  readonly POLAR_ACCESS_TOKEN: string;
-  readonly POLAR_ENVIRONMENT: string;
-  readonly POLAR_PRODUCT_IDS: string;
-  readonly REDIS_URL: string;
-  readonly WORKOS_API_KEY: string;
-  readonly WORKOS_CLIENT_ID: string;
-  readonly WORKOS_COOKIE_PASSWORD: string;
-  readonly PLAKK_DESKTOP_USER_DATA_PATH?: string;
+type ApplicationName = keyof typeof REQUIRED_ENVIRONMENT_KEYS;
+
+export interface ApplicationEnvironmentSources {
+  readonly backend: ReadonlyArray<EnvironmentSource>;
+  readonly desktop: ReadonlyArray<EnvironmentSource>;
+  readonly web: ReadonlyArray<EnvironmentSource>;
 }
 
 export interface ApplicationEnvironments {
@@ -61,76 +59,96 @@ export interface DevelopmentTopology {
   readonly desktopEnvironment: Readonly<Record<string, string>>;
 }
 
+export interface DevelopmentOptions {
+  readonly headless: boolean;
+}
+
+export interface DesktopDevelopmentLaunch {
+  readonly args: ReadonlyArray<string>;
+  readonly environment: Readonly<Record<string, string>>;
+}
+
 export type ServeRouteState =
   | { readonly type: "ready" }
   | { readonly type: "missing" }
   | { readonly type: "conflict"; readonly proxy: string | null };
 
-export function resolveDeveloperEnvironment(
-  sources: ReadonlyArray<EnvironmentSource>,
-): DeveloperEnvironment {
-  const read = (key: string): string | undefined => {
-    for (const source of sources) {
-      const value = source[key];
-      if (value !== undefined && value.trim().length > 0) return value;
-    }
-    return undefined;
-  };
-
-  const missing = DEVELOPER_ENVIRONMENT_KEYS.filter((key) => read(key) === undefined);
-  if (missing.length > 0) {
+export function parseDevelopmentOptions(args: ReadonlyArray<string>): DevelopmentOptions {
+  const unsupported = args.filter((argument) => argument !== "--headless");
+  if (unsupported.length > 0) {
     throw new Error(
-      `Missing developer environment variables: ${missing.join(", ")}. Copy .env.example to .env.local and fill in the required values.`,
+      `Unsupported development option${unsupported.length === 1 ? "" : "s"}: ${unsupported.join(", ")}.`,
     );
   }
+  return { headless: args.includes("--headless") };
+}
 
-  const cookiePassword = read("WORKOS_COOKIE_PASSWORD")!;
-  if (cookiePassword.length < 32) {
-    throw new Error("WORKOS_COOKIE_PASSWORD must contain at least 32 characters.");
-  }
-  const desktopUserDataPath = read("PLAKK_DESKTOP_USER_DATA_PATH");
-
+export function resolveDesktopDevelopmentLaunch(
+  options: DevelopmentOptions,
+  environment: Readonly<Record<string, string>>,
+): DesktopDevelopmentLaunch {
   return {
-    DATABASE_URL: read("DATABASE_URL")!,
-    POLAR_ACCESS_BENEFIT_ID: read("POLAR_ACCESS_BENEFIT_ID")!,
-    POLAR_ACCESS_TOKEN: read("POLAR_ACCESS_TOKEN")!,
-    POLAR_ENVIRONMENT: read("POLAR_ENVIRONMENT")!,
-    POLAR_PRODUCT_IDS: read("POLAR_PRODUCT_IDS")!,
-    REDIS_URL: read("REDIS_URL")!,
-    WORKOS_API_KEY: read("WORKOS_API_KEY")!,
-    WORKOS_CLIENT_ID: read("WORKOS_CLIENT_ID")!,
-    WORKOS_COOKIE_PASSWORD: cookiePassword,
-    ...(desktopUserDataPath ? { PLAKK_DESKTOP_USER_DATA_PATH: desktopUserDataPath } : {}),
+    args: [
+      "scripts/with-electron-native.mjs",
+      "node",
+      "scripts/dev-electron.mjs",
+      ...(options.headless ? ["--", "--headless", "--disable-gpu"] : []),
+    ],
+    environment: {
+      ...environment,
+      ...(options.headless ? { PLAKK_HEADLESS: "1" } : {}),
+    },
   };
 }
 
+const readEnvironmentValue = (
+  sources: ReadonlyArray<EnvironmentSource>,
+  key: string,
+): string | undefined => {
+  for (const source of sources) {
+    const value = source[key];
+    if (value !== undefined && value.trim().length > 0) return value;
+  }
+  return undefined;
+};
+
+const resolveRequiredEnvironment = (
+  application: ApplicationName,
+  sources: ReadonlyArray<EnvironmentSource>,
+): Record<string, string> => {
+  const requiredKeys = REQUIRED_ENVIRONMENT_KEYS[application];
+  const missing = requiredKeys.filter((key) => readEnvironmentValue(sources, key) === undefined);
+  if (missing.length > 0) {
+    throw new Error(
+      `Missing apps/${application} environment variables: ${missing.join(", ")}. Copy apps/${application}/.env.example to apps/${application}/.env and fill in the required values.`,
+    );
+  }
+  return Object.fromEntries(requiredKeys.map((key) => [key, readEnvironmentValue(sources, key)!]));
+};
+
 export function resolveApplicationEnvironments(
-  developer: DeveloperEnvironment,
+  sources: ApplicationEnvironmentSources,
   topology: DevelopmentTopology,
 ): ApplicationEnvironments {
+  const backend = resolveRequiredEnvironment("backend", sources.backend);
+  const desktop = resolveRequiredEnvironment("desktop", sources.desktop);
+  const web = resolveRequiredEnvironment("web", sources.web);
+  if (web.WORKOS_COOKIE_PASSWORD!.length < 32) {
+    throw new Error("WORKOS_COOKIE_PASSWORD must contain at least 32 characters.");
+  }
+  const desktopUserDataPath = readEnvironmentValue(sources.desktop, "PLAKK_DESKTOP_USER_DATA_PATH");
   return {
     web: {
-      WORKOS_API_KEY: developer.WORKOS_API_KEY,
-      WORKOS_CLIENT_ID: developer.WORKOS_CLIENT_ID,
-      WORKOS_COOKIE_PASSWORD: developer.WORKOS_COOKIE_PASSWORD,
+      ...web,
       ...topology.webEnvironment,
     },
     backend: {
-      DATABASE_URL: developer.DATABASE_URL,
-      POLAR_ACCESS_BENEFIT_ID: developer.POLAR_ACCESS_BENEFIT_ID,
-      POLAR_ACCESS_TOKEN: developer.POLAR_ACCESS_TOKEN,
-      POLAR_ENVIRONMENT: developer.POLAR_ENVIRONMENT,
-      POLAR_PRODUCT_IDS: developer.POLAR_PRODUCT_IDS,
-      REDIS_URL: developer.REDIS_URL,
-      WORKOS_API_KEY: developer.WORKOS_API_KEY,
-      WORKOS_CLIENT_ID: developer.WORKOS_CLIENT_ID,
+      ...backend,
       ...topology.backendEnvironment,
     },
     desktop: {
-      WORKOS_CLIENT_ID: developer.WORKOS_CLIENT_ID,
-      ...(developer.PLAKK_DESKTOP_USER_DATA_PATH
-        ? { PLAKK_DESKTOP_USER_DATA_PATH: developer.PLAKK_DESKTOP_USER_DATA_PATH }
-        : {}),
+      ...desktop,
+      ...(desktopUserDataPath ? { PLAKK_DESKTOP_USER_DATA_PATH: desktopUserDataPath } : {}),
       ...topology.desktopEnvironment,
     },
   };
@@ -212,7 +230,7 @@ export function resolveDevelopmentTopology(dnsName: string): DevelopmentTopology
     },
     desktopEnvironment: {
       PLAKK_RPC_URL: rpcUrl,
-      WORKOS_REDIRECT_URI: new URL("/auth/desktop/callback", webOrigin).toString(),
+      WORKOS_REDIRECT_URI: new URL("/api/auth/desktop/callback", webOrigin).toString(),
     },
   };
 }
@@ -306,35 +324,17 @@ function readEnvironmentFile(path: string): EnvironmentSource {
   return existsSync(path) ? parseEnv(readFileSync(path, "utf8")) : {};
 }
 
-function loadDeveloperEnvironment(repoRoot: string): DeveloperEnvironment {
-  const rootEnvironment = readEnvironmentFile(resolve(repoRoot, ".env"));
-  const localEnvironment = readEnvironmentFile(resolve(repoRoot, ".env.local"));
-  const legacyEnvironments = [
-    readEnvironmentFile(resolve(repoRoot, "apps/web/.env")),
-    readEnvironmentFile(resolve(repoRoot, "apps/backend/.env")),
-    readEnvironmentFile(resolve(repoRoot, "apps/desktop/.env")),
-    readEnvironmentFile(resolve(repoRoot, "packages/db/.env")),
+function loadApplicationEnvironmentSources(repoRoot: string): ApplicationEnvironmentSources {
+  const sourcesFor = (application: ApplicationName): ReadonlyArray<EnvironmentSource> => [
+    process.env,
+    readEnvironmentFile(resolve(repoRoot, `apps/${application}/.env.local`)),
+    readEnvironmentFile(resolve(repoRoot, `apps/${application}/.env`)),
   ];
-  const canonicalSources = [process.env, localEnvironment, rootEnvironment];
-  const usesLegacyEnvironment = DEVELOPER_ENVIRONMENT_KEYS.some(
-    (key) =>
-      canonicalSources.every((source) => {
-        const value = source[key];
-        return value === undefined || value.trim().length === 0;
-      }) &&
-      legacyEnvironments.some((source) => {
-        const value = source[key];
-        return value !== undefined && value.trim().length > 0;
-      }),
-  );
-
-  if (usesLegacyEnvironment) {
-    process.stdout.write(
-      "ⓘ Using values from legacy app-local .env files. Move them to root .env.local.\n",
-    );
-  }
-
-  return resolveDeveloperEnvironment([...canonicalSources, ...legacyEnvironments]);
+  return {
+    backend: sourcesFor("backend"),
+    desktop: sourcesFor("desktop"),
+    web: sourcesFor("web"),
+  };
 }
 
 async function readServeStatus(): Promise<string> {
@@ -542,14 +542,14 @@ async function stopProcesses(processes: ReadonlyArray<ManagedProcess>): Promise<
   await Promise.all(processes.map((managed) => managed.exit));
 }
 
-async function runDevelopment(): Promise<void> {
+async function runDevelopment(options: DevelopmentOptions): Promise<void> {
   const scriptDir = dirname(fileURLToPath(import.meta.url));
   const repoRoot = resolve(scriptDir, "..");
-  const developerEnvironment = loadDeveloperEnvironment(repoRoot);
+  const environmentSources = loadApplicationEnvironmentSources(repoRoot);
   const tailscaleStatus = await commandOutput(tailscaleCommand(), ["status", "--json"]);
   const identity = parseTailscaleIdentity(tailscaleStatus);
   const topology = resolveDevelopmentTopology(identity.dnsName);
-  const applicationEnvironments = resolveApplicationEnvironments(developerEnvironment, topology);
+  const applicationEnvironments = resolveApplicationEnvironments(environmentSources, topology);
 
   process.stdout.write(
     [
@@ -633,12 +633,13 @@ async function runDevelopment(): Promise<void> {
     );
     if (!tailnetReady) return;
 
+    const desktopLaunch = resolveDesktopDevelopmentLaunch(options, applicationEnvironments.desktop);
     const desktop = spawnProcess({
       name: "desktop",
       command: process.execPath,
-      args: ["scripts/with-electron-native.mjs", "node", "scripts/dev-electron.mjs"],
+      args: desktopLaunch.args,
       cwd: resolve(repoRoot, "apps/desktop"),
-      environment: applicationEnvironments.desktop,
+      environment: desktopLaunch.environment,
     });
     processes.push(desktop);
 
@@ -648,7 +649,7 @@ async function runDevelopment(): Promise<void> {
         "✓ backend ready",
         "✓ web ready",
         "✓ Tailnet HTTPS ready",
-        "✓ desktop started",
+        `✓ desktop started${options.headless ? " without visual surfaces" : ""}`,
         "",
         "Development is ready. Press Ctrl+C to stop.",
         "",
@@ -669,7 +670,7 @@ async function runDevelopment(): Promise<void> {
 
 async function main(): Promise<void> {
   try {
-    await runDevelopment();
+    await runDevelopment(parseDevelopmentOptions(process.argv.slice(2)));
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : String(cause);
     process.stderr.write(`\nPlakk development failed: ${message}\n`);
