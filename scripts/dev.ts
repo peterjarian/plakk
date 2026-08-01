@@ -83,28 +83,16 @@ export function parseDevelopmentOptions(args: ReadonlyArray<string>): Developmen
   return { headless: args.includes("--headless") };
 }
 
+export function shouldStartDesktop(options: DevelopmentOptions): boolean {
+  return !options.headless;
+}
+
 export function resolveDesktopDevelopmentLaunch(
-  options: DevelopmentOptions,
   environment: Readonly<Record<string, string>>,
-  defaultHeadlessUserDataPath: string,
 ): DesktopDevelopmentLaunch {
   return {
-    args: [
-      "scripts/with-electron-native.mjs",
-      "node",
-      "scripts/dev-electron.mjs",
-      ...(options.headless ? ["--", "--headless", "--disable-gpu"] : []),
-    ],
-    environment: {
-      ...environment,
-      ...(options.headless
-        ? {
-            PLAKK_DESKTOP_USER_DATA_PATH:
-              environment.PLAKK_DESKTOP_USER_DATA_PATH ?? defaultHeadlessUserDataPath,
-            PLAKK_HEADLESS: "1",
-          }
-        : {}),
-    },
+    args: ["scripts/with-electron-native.mjs", "node", "scripts/dev-electron.mjs"],
+    environment,
   };
 }
 
@@ -640,19 +628,20 @@ async function runDevelopment(options: DevelopmentOptions): Promise<void> {
     );
     if (!tailnetReady) return;
 
-    const desktopLaunch = resolveDesktopDevelopmentLaunch(
-      options,
-      applicationEnvironments.desktop,
-      resolve(repoRoot, "apps/desktop/.electron-runtime/headless-user-data"),
-    );
-    const desktop = spawnProcess({
-      name: "desktop",
-      command: process.execPath,
-      args: desktopLaunch.args,
-      cwd: resolve(repoRoot, "apps/desktop"),
-      environment: desktopLaunch.environment,
-    });
-    processes.push(desktop);
+    const desktop = shouldStartDesktop(options)
+      ? (() => {
+          const desktopLaunch = resolveDesktopDevelopmentLaunch(applicationEnvironments.desktop);
+          const managed = spawnProcess({
+            name: "desktop",
+            command: process.execPath,
+            args: desktopLaunch.args,
+            cwd: resolve(repoRoot, "apps/desktop"),
+            environment: desktopLaunch.environment,
+          });
+          processes.push(managed);
+          return managed;
+        })()
+      : undefined;
 
     process.stdout.write(
       [
@@ -660,7 +649,9 @@ async function runDevelopment(options: DevelopmentOptions): Promise<void> {
         "✓ backend ready",
         "✓ web ready",
         "✓ Tailnet HTTPS ready",
-        `✓ desktop started${options.headless ? " without visual surfaces" : ""}`,
+        options.headless
+          ? "⚠ desktop skipped because --headless was provided"
+          : "✓ desktop started",
         "",
         "Development is ready. Press Ctrl+C to stop.",
         "",
@@ -671,7 +662,9 @@ async function runDevelopment(options: DevelopmentOptions): Promise<void> {
       signal.then((name) => ({ type: "signal" as const, name })),
       backend.exit.then((exit) => ({ type: "exit" as const, managed: backend, exit })),
       web.exit.then((exit) => ({ type: "exit" as const, managed: web, exit })),
-      desktop.exit.then((exit) => ({ type: "exit" as const, managed: desktop, exit })),
+      ...(desktop
+        ? [desktop.exit.then((exit) => ({ type: "exit" as const, managed: desktop, exit }))]
+        : []),
     ]);
     if (outcome.type === "exit") throw new Error(formatExit(outcome.managed, outcome.exit));
   } finally {

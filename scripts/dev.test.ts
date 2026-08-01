@@ -8,6 +8,7 @@ import {
   resolveApplicationEnvironments,
   resolveDesktopDevelopmentLaunch,
   resolveDevelopmentTopology,
+  shouldStartDesktop,
   waitForReadinessOrSignal,
 } from "./dev.ts";
 
@@ -49,59 +50,17 @@ describe("development options", () => {
   it("keeps the normal desktop launch visual", () => {
     const options = parseDevelopmentOptions([]);
     expect(options).toEqual({ headless: false });
-    expect(
-      resolveDesktopDevelopmentLaunch(
-        options,
-        { WORKOS_CLIENT_ID: "client_desktop" },
-        "/repo/apps/desktop/.electron-runtime/headless-user-data",
-      ),
-    ).toEqual({
+    expect(shouldStartDesktop(options)).toBe(true);
+    expect(resolveDesktopDevelopmentLaunch({ WORKOS_CLIENT_ID: "client_desktop" })).toEqual({
       args: ["scripts/with-electron-native.mjs", "node", "scripts/dev-electron.mjs"],
       environment: { WORKOS_CLIENT_ID: "client_desktop" },
     });
   });
 
-  it("starts Electron headlessly and disables desktop visual surfaces", () => {
+  it("does not start Electron in headless mode", () => {
     const options = parseDevelopmentOptions(["--headless"]);
     expect(options).toEqual({ headless: true });
-    expect(
-      resolveDesktopDevelopmentLaunch(
-        options,
-        { WORKOS_CLIENT_ID: "client_desktop" },
-        "/repo/apps/desktop/.electron-runtime/headless-user-data",
-      ),
-    ).toEqual({
-      args: [
-        "scripts/with-electron-native.mjs",
-        "node",
-        "scripts/dev-electron.mjs",
-        "--",
-        "--headless",
-        "--disable-gpu",
-      ],
-      environment: {
-        PLAKK_DESKTOP_USER_DATA_PATH: "/repo/apps/desktop/.electron-runtime/headless-user-data",
-        PLAKK_HEADLESS: "1",
-        WORKOS_CLIENT_ID: "client_desktop",
-      },
-    });
-  });
-
-  it("preserves an explicitly configured headless desktop profile", () => {
-    expect(
-      resolveDesktopDevelopmentLaunch(
-        { headless: true },
-        {
-          PLAKK_DESKTOP_USER_DATA_PATH: "/developer/profile",
-          WORKOS_CLIENT_ID: "client_desktop",
-        },
-        "/repo/apps/desktop/.electron-runtime/headless-user-data",
-      ).environment,
-    ).toEqual({
-      PLAKK_DESKTOP_USER_DATA_PATH: "/developer/profile",
-      PLAKK_HEADLESS: "1",
-      WORKOS_CLIENT_ID: "client_desktop",
-    });
+    expect(shouldStartDesktop(options)).toBe(false);
   });
 
   it("rejects unknown runner options", () => {
